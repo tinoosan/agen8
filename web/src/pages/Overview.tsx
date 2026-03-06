@@ -42,47 +42,31 @@ export default function Overview() {
   const queryClient = useQueryClient()
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', padding: '36px 40px' }}>
+    <div style={{ height: '100%', overflowY: 'auto', padding: '40px 44px' }}>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12,
-        marginBottom: 32,
+        marginBottom: 36,
       }}>
         <div>
           <h1 style={{
-            margin: 0, fontSize: 24, fontWeight: 700,
+            margin: 0, fontSize: 26, fontWeight: 700,
             letterSpacing: '-0.04em', color: 'var(--text-1)',
             lineHeight: 1.1,
           }}>
             Teams
           </h1>
           {teams.length > 0 && (
-            <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 3 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
               {teams.length} team{teams.length !== 1 ? 's' : ''} running
             </div>
           )}
         </div>
         <div style={{ flex: 1 }} />
         <button
+          className="btn-outline"
           onClick={() => queryClient.invalidateQueries({ queryKey: ['project.listTeams'] })}
-          style={{
-            background: 'none', border: '1px solid var(--border)',
-            borderRadius: 'var(--r-md)',
-            cursor: 'pointer', color: 'var(--text-3)',
-            padding: '6px 10px',
-            display: 'flex', alignItems: 'center', gap: 6,
-            fontSize: 12,
-            transition: 'border-color 0.1s, color 0.1s',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.borderColor = 'var(--border-strong)'
-            e.currentTarget.style.color = 'var(--text-2)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.borderColor = 'var(--border)'
-            e.currentTarget.style.color = 'var(--text-3)'
-          }}
-          title="Refresh"
+          title="Refresh teams list"
         >
           <RefreshCw size={13} />
           Refresh
@@ -91,7 +75,13 @@ export default function Overview() {
 
       {/* Loading */}
       {isLoading && (
-        <div style={{ color: 'var(--text-3)', fontSize: 13 }}>Loading…</div>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          {[1, 2, 3].map(i => (
+            <div key={i} className="skeleton" style={{
+              width: 300, height: 180, borderRadius: 'var(--r-xl)',
+            }} />
+          ))}
+        </div>
       )}
 
       {/* Empty state */}
@@ -99,31 +89,29 @@ export default function Overview() {
         <div style={{
           display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
-          height: 360, gap: 20, textAlign: 'center',
+          height: 400, gap: 24, textAlign: 'center',
         }}>
           <div style={{
-            width: 64, height: 64, borderRadius: 18,
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border)',
+            width: 72, height: 72, borderRadius: 20,
+            background: 'var(--accent-dim)',
+            border: '1px solid rgba(139,123,248,0.2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <Zap size={28} color="var(--text-3)" />
+            <Zap size={32} color="var(--accent)" fill="var(--accent)" strokeWidth={0} />
           </div>
           <div>
-            <div style={{ fontWeight: 600, fontSize: 16, color: 'var(--text-1)', marginBottom: 8, letterSpacing: '-0.02em' }}>
+            <div style={{ fontWeight: 600, fontSize: 18, color: 'var(--text-1)', marginBottom: 8, letterSpacing: '-0.02em' }}>
               No teams running
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.6 }}>
-              Start a team from your terminal:
+            <div style={{ fontSize: 14, color: 'var(--text-3)', lineHeight: 1.6 }}>
+              Start a team from your terminal
             </div>
-            <code style={{
-              display: 'inline-block', marginTop: 10,
-              fontFamily: '"SF Mono", "Fira Code", ui-monospace, monospace',
-              fontSize: 13, color: 'var(--text-2)',
+            <code className="mono" style={{
+              display: 'inline-block', marginTop: 14,
+              fontSize: 13, color: 'var(--accent)',
               background: 'var(--bg-elevated)',
               border: '1px solid var(--border)',
-              padding: '6px 14px', borderRadius: 'var(--r-md)',
-              letterSpacing: '0.01em',
+              padding: '8px 18px', borderRadius: 'var(--r-md)',
             }}>
               agen8 team start &lt;profile&gt;
             </code>
@@ -135,7 +123,7 @@ export default function Overview() {
       {teams.length > 0 && (
         <div style={{ position: 'relative' }}>
           <div style={{
-            display: 'flex', flexWrap: 'wrap', gap: 16,
+            display: 'flex', flexWrap: 'wrap', gap: 18,
           }}>
             {teams.map(team => (
               <div

@@ -4,7 +4,7 @@ import { rpcCall } from '../lib/rpc'
 import { useQueryClient } from '@tanstack/react-query'
 import PulseDot from './PulseDot'
 import type { ProjectTeamSummary } from '../lib/types'
-import { Trash2, ArrowRight } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 
 interface TeamCardProps {
   team: ProjectTeamSummary
@@ -23,6 +23,14 @@ const statusLabel: Record<string, string> = {
   pending: 'Starting',
   failed: 'Failed',
   done: 'Done',
+}
+
+const statusLabelColor: Record<string, string> = {
+  active: 'var(--green)',
+  idle: 'var(--text-3)',
+  pending: 'var(--amber)',
+  failed: 'var(--red)',
+  done: 'var(--blue)',
 }
 
 export default function TeamCard({ team }: TeamCardProps) {
@@ -51,77 +59,47 @@ export default function TeamCard({ team }: TeamCardProps) {
   return (
     <div
       onClick={() => setFocusedTeamId(team.teamId)}
-      className="animate-fade-up"
+      className="card-interactive animate-fade-up"
       style={{
-        background: 'var(--bg-panel)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--r-xl)',
-        padding: '16px 18px',
-        cursor: 'pointer',
+        padding: '18px 20px',
         display: 'flex', flexDirection: 'column', gap: 14,
-        minWidth: 270, maxWidth: 340, flex: '1 1 270px',
+        minWidth: 280, maxWidth: 360, flex: '1 1 280px',
         position: 'relative',
-        transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-      }}
-      onMouseEnter={e => {
-        const el = e.currentTarget as HTMLElement
-        el.style.borderColor = 'var(--border-strong)'
-        el.style.boxShadow = '0 4px 24px rgba(0,0,0,0.4)'
-        el.style.transform = 'translateY(-1px)'
-      }}
-      onMouseLeave={e => {
-        const el = e.currentTarget as HTMLElement
-        el.style.borderColor = 'var(--border)'
-        el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)'
-        el.style.transform = ''
+        overflow: 'hidden',
       }}
     >
       {/* Active accent line */}
       {isActive && (
         <div style={{
-          position: 'absolute', top: 0, left: 16, right: 16, height: 2,
+          position: 'absolute', top: 0, left: 20, right: 20, height: 2,
           background: 'linear-gradient(90deg, var(--accent), var(--green))',
           borderRadius: '0 0 2px 2px',
-          opacity: 0.7,
+          opacity: 0.8,
         }} />
       )}
 
       {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <PulseDot status={cardStatus} size={8} />
         <span style={{
           fontWeight: 600, fontSize: 14,
           flex: 1,
           letterSpacing: '-0.02em',
           color: 'var(--text-1)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
+        }} className="truncate">
           {team.profileId ?? team.teamId.slice(0, 12)}
         </span>
         <span style={{
-          fontSize: 11, color: 'var(--text-3)',
+          fontSize: 11,
+          color: statusLabelColor[cardStatus] ?? 'var(--text-3)',
           fontWeight: 500,
         }}>
           {statusLabel[cardStatus]}
         </span>
         <button
           onClick={handleDelete}
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            padding: 4, borderRadius: 'var(--r-sm)',
-            color: 'var(--text-3)',
-            display: 'flex', alignItems: 'center',
-            transition: 'color 0.1s, background 0.1s',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.color = 'var(--red)'
-            e.currentTarget.style.background = 'var(--red-dim)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.color = 'var(--text-3)'
-            e.currentTarget.style.background = 'transparent'
-          }}
+          className="btn-ghost-danger"
+          aria-label="Delete team"
         >
           <Trash2 size={12} />
         </button>
@@ -129,37 +107,36 @@ export default function TeamCard({ team }: TeamCardProps) {
 
       {/* Primary role activity */}
       {data?.roles?.[0] && (
-        <div style={{
+        <div className="truncate" style={{
           fontSize: 12, color: 'var(--text-2)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          lineHeight: 1.4,
+          lineHeight: 1.5,
         }}>
-          <span style={{ color: 'var(--text-3)', marginRight: 6 }}>{data.roles[0].role}</span>
+          <span style={{ color: 'var(--text-3)', marginRight: 6, fontWeight: 500 }}>{data.roles[0].role}</span>
           {data.roles[0].info || (isActive ? 'working…' : 'idle')}
         </div>
       )}
 
       {/* Role pills */}
-      {roleSummary.length > 0 && (
+      {roleSummary.length > 1 && (
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-          {roleSummary.map(role => {
+          {roleSummary.slice(1).map(role => {
             const isRoleActive = !!role.info && !role.info.toLowerCase().includes('idle')
             return (
               <div
                 key={role.role}
-                title={`${role.role}: ${role.info}`}
+                title={`${role.role}: ${role.info || 'idle'}`}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '3px 8px',
+                  padding: '2px 8px',
                   borderRadius: 999,
                   border: '1px solid var(--border)',
                   background: isRoleActive ? 'var(--bg-active)' : 'transparent',
-                  fontSize: 11, color: 'var(--text-2)',
-                  transition: 'background 0.1s',
+                  fontSize: 11, color: isRoleActive ? 'var(--text-2)' : 'var(--text-3)',
+                  transition: 'background 0.15s',
                 }}
               >
                 <PulseDot status={isRoleActive ? 'active' : 'idle'} size={5} />
-                <span>{role.role}</span>
+                <span className="truncate" style={{ maxWidth: 80 }}>{role.role}</span>
               </div>
             )
           })}
@@ -169,43 +146,17 @@ export default function TeamCard({ team }: TeamCardProps) {
       {/* Footer */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        paddingTop: 10,
+        paddingTop: 12,
         borderTop: '1px solid var(--border)',
         marginTop: 'auto',
       }}>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-3)' }}>
+        <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
           {taskCount !== null && (
             <span>{taskCount} task{taskCount !== 1 ? 's' : ''}</span>
           )}
-          {costStr && (
-            <span style={{ color: 'var(--text-3)' }}>{costStr}</span>
-          )}
+          {costStr && <span>{costStr}</span>}
+          {!data && <div className="skeleton" style={{ width: 60, height: 12 }} />}
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); setFocusedTeamId(team.teamId) }}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 5,
-            fontSize: 12, fontWeight: 500,
-            padding: '5px 10px', borderRadius: 'var(--r-md)',
-            border: '1px solid var(--border)',
-            background: 'var(--bg-surface)',
-            cursor: 'pointer', color: 'var(--text-2)',
-            transition: 'border-color 0.1s, color 0.1s, background 0.1s',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.borderColor = 'var(--border-strong)'
-            e.currentTarget.style.color = 'var(--text-1)'
-            e.currentTarget.style.background = 'var(--bg-elevated)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.borderColor = 'var(--border)'
-            e.currentTarget.style.color = 'var(--text-2)'
-            e.currentTarget.style.background = 'var(--bg-surface)'
-          }}
-        >
-          Open
-          <ArrowRight size={11} />
-        </button>
       </div>
     </div>
   )

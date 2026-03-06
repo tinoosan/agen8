@@ -18,11 +18,15 @@ export default function RoleRow({ role }: RoleRowProps) {
   const status = inferStatus(role.info)
 
   return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 9,
-      padding: '7px 0',
-      borderBottom: '1px solid var(--border)',
-    }}>
+    <div
+      className="row-hover"
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 9,
+        padding: '6px 4px',
+        marginBottom: 1,
+      }}
+      title={role.info || undefined}
+    >
       <div style={{ paddingTop: 4, flexShrink: 0 }}>
         <PulseDot status={status} size={7} />
       </div>
@@ -36,9 +40,8 @@ export default function RoleRow({ role }: RoleRowProps) {
           {role.role}
         </div>
         {role.info && (
-          <div style={{
+          <div className="truncate" style={{
             fontSize: 11, color: 'var(--text-3)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {role.info}
           </div>

@@ -44,19 +44,13 @@ export default function ArtifactsSlideOver({ teamId }: ArtifactsSlideOverProps) 
 
   return (
     <div
-      className="animate-slide-in-right"
-      style={{
-        position: 'absolute', inset: 0, zIndex: 50,
-        display: 'flex', justifyContent: 'flex-end',
-        background: 'rgba(0,0,0,0.45)',
-        backdropFilter: 'blur(3px)',
-      }}
+      className="slide-over-backdrop animate-slide-in-right"
       onClick={() => setArtifactsOpen(false)}
     >
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: 360, height: '100%',
+          width: 380, height: '100%',
           background: 'var(--bg-panel)',
           borderLeft: '1px solid var(--border)',
           display: 'flex', flexDirection: 'column',
@@ -68,43 +62,45 @@ export default function ArtifactsSlideOver({ teamId }: ArtifactsSlideOverProps) 
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '14px 16px',
           borderBottom: '1px solid var(--border)',
+          flexShrink: 0,
         }}>
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
               Files
             </span>
             {artifacts.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-3)' }}>
-                {artifacts.length} artifact{artifacts.length !== 1 ? 's' : ''}
+              <span style={{
+                fontSize: 11, color: 'var(--text-3)',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                borderRadius: 999, padding: '0 6px',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {artifacts.length}
               </span>
             )}
           </div>
-          <button
-            onClick={() => setArtifactsOpen(false)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--text-3)', padding: 5, borderRadius: 'var(--r-md)',
-              display: 'flex', alignItems: 'center',
-              transition: 'color 0.1s, background 0.1s',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.color = 'var(--text-1)'
-              e.currentTarget.style.background = 'var(--bg-hover)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = 'var(--text-3)'
-              e.currentTarget.style.background = 'transparent'
-            }}
-          >
+          <button className="btn-ghost" onClick={() => setArtifactsOpen(false)} aria-label="Close">
             <X size={16} />
           </button>
         </div>
 
         {/* Artifact list */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
-          {artifacts.length === 0 ? (
-            <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-              No files yet
+          {query.isLoading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 12 }}>
+              {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ width: '100%', height: 36, borderRadius: 'var(--r-md)' }} />)}
+            </div>
+          ) : artifacts.length === 0 ? (
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              padding: '40px 20px', textAlign: 'center', gap: 8,
+            }}>
+              <File size={24} style={{ color: 'var(--text-3)' }} />
+              <div style={{ color: 'var(--text-3)', fontSize: 13 }}>No files yet</div>
+              <div style={{ color: 'var(--text-3)', fontSize: 11, lineHeight: 1.5 }}>
+                Files will appear here as agents generate them
+              </div>
             </div>
           ) : (
             artifacts.map((a, i) => {
@@ -113,30 +109,27 @@ export default function ArtifactsSlideOver({ teamId }: ArtifactsSlideOverProps) 
               return (
                 <div
                   key={a.artifactId ?? i}
+                  className="row-hover"
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '9px 10px', borderRadius: 'var(--r-md)',
+                    padding: '9px 10px',
                     cursor: 'default',
-                    transition: 'background 0.1s',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   <div style={{ color: 'var(--text-3)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
                     {getFileIcon(path)}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
+                    <div className="truncate" style={{
                       fontSize: 12, color: 'var(--text-1)', fontWeight: 500,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       letterSpacing: '-0.01em',
                     }}>
                       {path}
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>
-                      {a.role && <span style={{ marginRight: 6 }}>{a.role}</span>}
-                      {formatBytes(a.sizeBytes)}
-                      {ext && <span style={{ marginLeft: 6, fontWeight: 500, color: 'var(--accent)', opacity: 0.7 }}>{ext}</span>}
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1, display: 'flex', gap: 6 }}>
+                      {a.role && <span>{a.role}</span>}
+                      <span>{formatBytes(a.sizeBytes)}</span>
+                      {ext && <span style={{ fontWeight: 500, color: 'var(--accent)', opacity: 0.7 }}>{ext}</span>}
                     </div>
                   </div>
                 </div>
