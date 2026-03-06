@@ -1,0 +1,7 @@
+codeExecOnly: true
+allowedTools:
+  - pipe
+  - shell_exec
+  - http_fetch
+  - browser
+  - trace_run

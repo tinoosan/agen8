@@ -182,7 +182,7 @@ func withTestRepoDefaults(t *testing.T, root string) {
 	if err := os.MkdirAll(filepath.Dir(profilePath), 0o755); err != nil {
 		t.Fatalf("mkdir profiles: %v", err)
 	}
-	if err := os.WriteFile(profilePath, []byte("id: general\ndescription: x\nprompts:\n  system_prompt: hello\n"), 0o644); err != nil {
+	if err := os.WriteFile(profilePath, []byte("id: general\ndescription: x\nprompts:\n  systemPrompt: hello\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
 

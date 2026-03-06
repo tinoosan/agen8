@@ -1,0 +1,15 @@
+name: reviewer
+description: Dedicated review runtime for team-level batch callback reviews.
+prompts:
+  systemFragments:
+    - path: ../prompts/reviewer.md
+codeExecOnly: true
+allowedTools:
+  - pipe
+  - task_review
+  - task_create
+  - fs_list
+  - fs_read
+  - fs_search
+skills:
+  - reviewing

@@ -3,90 +3,40 @@ description: Software development team that ships products end-to-end — scopin
 team:
   model: moonshotai/kimi-k2.5
   reviewer:
+    roleRef: ../base/roles/reviewer.yaml
     enabled: true
-    name: reviewer
-    description: Dedicated review runtime for team-level batch callback reviews.
-    prompts:
-      system_prompt: |
-        You are the dedicated reviewer for this team.
-
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
-    code_exec_only: true
-    allowed_tools:
-      - pipe
-      - task_review
-      - task_create
-      - fs_list
-      - fs_read
-      - fs_search
-    skills:
-      - reviewing
   roles:
-    - name: product-manager
-      coordinator: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
-        - task_create
-        - task_review
+    - roleRef: ../base/roles/coordinator-base.yaml
+      name: product-manager
       description: Owns the product roadmap, scopes features, delegates engineering work, and drives releases.
       prompts:
-        system_prompt_path: product-manager-prompt.md
+        systemPromptPath: product-manager-prompt.md
       skills:
         - project-management
         - reporting
-      heartbeat:
-        enabled: false
-        jobs:
-          - name: coordinator-check-in
-            interval: 10m
-            goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
-          - name: coordinator-daily-brief
-            interval: 24h
-            goal: "Produce a consolidated sprint progress brief from completed role outputs."
-    - name: backend-engineer
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - shell_exec
-        - http_fetch
-        - browser
-        - trace_run
+    - roleRef: ../base/roles/worker-code.yaml
+      name: backend-engineer
       description: Designs APIs, data models, and server-side logic.
       prompts:
-        system_prompt_path: backend-engineer-prompt.md
+        systemPromptPath: backend-engineer-prompt.md
       skills:
         - coding
         - planning
         - data-engineering
-
-    - name: frontend-engineer
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - shell_exec
-        - http_fetch
-        - browser
-        - trace_run
+    - roleRef: ../base/roles/worker-code.yaml
+      name: frontend-engineer
       description: Builds user interfaces, client-side logic, and user-facing features.
       prompts:
-        system_prompt_path: frontend-engineer-prompt.md
+        systemPromptPath: frontend-engineer-prompt.md
       skills:
         - coding
         - planning
-
-    - name: qa-engineer
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/worker-code.yaml
+      name: qa-engineer
+      description: Writes tests, finds bugs, validates features against acceptance criteria. Reviews delegated work and provides quality feedback.
+      prompts:
+        systemPromptPath: qa-engineer-prompt.md
+      allowedTools:
         - pipe
         - shell_exec
         - http_fetch
@@ -94,41 +44,24 @@ team:
         - trace_run
         - task_review
         - task_create
-      description: Writes tests, finds bugs, validates features against acceptance criteria. Reviews delegated work and provides quality feedback.
-      prompts:
-        system_prompt_path: qa-engineer-prompt.md
       skills:
         - coding
         - planning
         - automation
-
-    - name: devops-engineer
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - shell_exec
-        - http_fetch
-        - browser
-        - trace_run
+    - roleRef: ../base/roles/worker-code.yaml
+      name: devops-engineer
       description: Manages infrastructure, CI/CD pipelines, deployments, and monitoring.
       prompts:
-        system_prompt_path: devops-engineer-prompt.md
+        systemPromptPath: devops-engineer-prompt.md
       skills:
         - coding
         - automation
         - planning
-
-    - name: ux-researcher
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: ux-researcher
       description: Researches user needs, evaluates usability, and informs product decisions with evidence.
       prompts:
-        system_prompt_path: ux-researcher-prompt.md
+        systemPromptPath: ux-researcher-prompt.md
       skills:
         - planning
         - hybrid-web

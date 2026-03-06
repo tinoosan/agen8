@@ -3,122 +3,75 @@ description: Content production team that researches, writes, optimizes, and dis
 team:
   model: moonshotai/kimi-k2.5
   reviewer:
+    roleRef: ../base/roles/reviewer.yaml
     enabled: true
-    name: reviewer
-    description: Dedicated review runtime for team-level batch callback reviews.
-    prompts:
-      system_prompt: |
-        You are the dedicated reviewer for this team.
-
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
-    code_exec_only: true
-    allowed_tools:
-      - pipe
-      - task_review
-      - task_create
-      - fs_list
-      - fs_read
-      - fs_search
-    skills:
-      - reviewing
   roles:
-    - name: editor-in-chief
-      coordinator: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
-        - task_create
-        - task_review
+    - roleRef: ../base/roles/coordinator-base.yaml
+      name: editor-in-chief
       description: Owns the editorial calendar, assigns stories, reviews quality, and drives publishing cadence.
       prompts:
-        system_prompt_path: editor-in-chief-prompt.md
+        systemPromptPath: editor-in-chief-prompt.md
       skills:
         - project-management
         - reporting
       heartbeat:
-        - name: coordinator-check-in
-          interval: 10m
-          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
-        - name: coordinator-daily-brief
-          interval: 24h
-          goal: "Produce a consolidated content pipeline brief from completed role outputs."
-
+        jobs:
+          - name: coordinator-check-in
+            interval: 10m
+            goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+          - name: coordinator-daily-brief
+            interval: 24h
+            goal: "Produce a consolidated content pipeline brief from completed role outputs."
     - name: writer
       model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - http_fetch
       description: Produces long-form articles, blog posts, newsletters, and copy.
       prompts:
-        system_prompt_path: writer-prompt.md
+        systemPromptPath: writer-prompt.md
       skills:
         - planning
         - reporting
-
-    - name: researcher
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: researcher
       description: Investigates topics, gathers data, and produces fact-checked source briefs for writers.
       prompts:
-        system_prompt_path: researcher-prompt.md
+        systemPromptPath: researcher-prompt.md
       skills:
         - planning
         - hybrid-web
         - market-monitoring
-
-    - name: distribution-strategist
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: distribution-strategist
       description: Plans and executes content distribution across channels for maximum reach.
       prompts:
-        system_prompt_path: distribution-strategist-prompt.md
+        systemPromptPath: distribution-strategist-prompt.md
       skills:
         - planning
         - automation
         - market-monitoring
-
-    - name: seo-specialist
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/worker-web.yaml
+      name: seo-specialist
+      description: Optimizes content for search engines — keyword research, on-page SEO, and performance tracking. Reviews delegated work and provides quality feedback.
+      prompts:
+        systemPromptPath: seo-specialist-prompt.md
+      allowedTools:
         - pipe
         - http_fetch
         - browser
         - task_review
         - task_create
-      description: Optimizes content for search engines — keyword research, on-page SEO, and performance tracking. Reviews delegated work and provides quality feedback.
-      prompts:
-        system_prompt_path: seo-specialist-prompt.md
       skills:
         - planning
         - hybrid-web
         - automation
-
-    - name: social-media-manager
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: social-media-manager
       description: Creates social content, plans posting schedules, and tracks engagement metrics.
       prompts:
-        system_prompt_path: social-media-manager-prompt.md
+        systemPromptPath: social-media-manager-prompt.md
       skills:
         - planning
         - automation

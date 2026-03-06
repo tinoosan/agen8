@@ -3,34 +3,16 @@ description: Research-focused profile for public markets analysis and monitoring
 team:
   model: moonshotai/kimi-k2.5
   reviewer:
+    roleRef: ../base/roles/reviewer.yaml
     enabled: true
-    name: reviewer
-    description: Dedicated review runtime for team-level batch callback reviews.
-    prompts:
-      system_prompt: |
-        You are the dedicated reviewer for this team.
-
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
-    code_exec_only: true
-    allowed_tools:
-      - pipe
-      - task_review
-      - task_create
-      - fs_list
-      - fs_read
-      - fs_search
-    skills:
-      - reviewing
   roles:
     - name: Stock Analyst
       coordinator: true
-      allow_subagents: true
+      allowSubagents: true
       model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      subagentModel: moonshotai/kimi-k2.5
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - http_fetch
         - browser
@@ -38,7 +20,7 @@ team:
         - task_review
       description: Research-focused profile for public markets analysis and monitoring.
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
       skills:
         - financial-analysis
         - market-monitoring

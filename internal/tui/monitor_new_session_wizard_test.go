@@ -244,7 +244,7 @@ func TestWizard_SelectProfileFromWizard(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(profilesDir, "profile.yaml"), []byte(
-		"id: general\nname: General Agent\ndescription: General purpose\nmodel: gpt-5\nprompts:\n  system_prompt: hi\n",
+		"id: general\nname: General Agent\ndescription: General purpose\nmodel: gpt-5\nprompts:\n  systemPrompt: hi\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}

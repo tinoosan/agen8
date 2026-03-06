@@ -3,34 +3,16 @@ description: Software engineering profile focused on building, debugging, testin
 team:
   model: moonshotai/kimi-k2.5
   reviewer:
+    roleRef: ../base/roles/reviewer.yaml
     enabled: true
-    name: reviewer
-    description: Dedicated review runtime for team-level batch callback reviews.
-    prompts:
-      system_prompt: |
-        You are the dedicated reviewer for this team.
-
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
-    code_exec_only: true
-    allowed_tools:
-      - pipe
-      - task_review
-      - task_create
-      - fs_list
-      - fs_read
-      - fs_search
-    skills:
-      - reviewing
   roles:
     - name: Software Developer
       coordinator: true
-      allow_subagents: true
+      allowSubagents: true
       model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      subagentModel: moonshotai/kimi-k2.5
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - shell_exec
         - http_fetch
@@ -40,7 +22,7 @@ team:
         - trace_run
       description: Software engineering profile focused on building, debugging, testing, and documentation.
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
       skills:
         - coding
         - reporting

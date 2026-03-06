@@ -15,10 +15,10 @@ type Profile struct {
 	Name                    string          `yaml:"name,omitempty"` // Display name for standalone profiles; used as synthetic role name when set
 	Description             string          `yaml:"description"`
 	Model                   string          `yaml:"model,omitempty"`
-	SubagentModel           string          `yaml:"subagent_model,omitempty"`
-	CodeExecOnly            bool            `yaml:"code_exec_only,omitempty"`
-	CodeExecRequiredImports []string        `yaml:"code_exec_required_imports,omitempty"`
-	AllowedTools            []string        `yaml:"allowed_tools,omitempty"`
+	SubagentModel           string          `yaml:"subagentModel,omitempty"`
+	CodeExecOnly            bool            `yaml:"codeExecOnly,omitempty"`
+	CodeExecRequiredImports []string        `yaml:"codeExecRequiredImports,omitempty"`
+	AllowedTools            []string        `yaml:"allowedTools,omitempty"`
 	Prompts                 PromptConfig    `yaml:"prompts,omitempty"`
 	Skills                  []string        `yaml:"skills,omitempty"`
 	Heartbeat               HeartbeatConfig `yaml:"heartbeat,omitempty"`
@@ -57,9 +57,32 @@ func (c *HeartbeatConfig) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
+// PromptFragment represents a single composable prompt fragment — either an inline
+// string or a path to a file (relative to the profile directory).
+type PromptFragment struct {
+	Path   string `yaml:"path,omitempty"`
+	Inline string `yaml:"inline,omitempty"`
+}
+
 type PromptConfig struct {
-	SystemPrompt     string `yaml:"system_prompt,omitempty"`
-	SystemPromptPath string `yaml:"system_prompt_path,omitempty"`
+	SystemPrompt     string           `yaml:"systemPrompt,omitempty"`
+	SystemPromptPath string           `yaml:"systemPromptPath,omitempty"`
+	SystemFragments  []PromptFragment `yaml:"systemFragments,omitempty"`
+}
+
+// EffectiveFragments normalizes legacy systemPrompt / systemPromptPath into a
+// []PromptFragment list. If systemFragments is already set, returns it directly.
+func (pc PromptConfig) EffectiveFragments() []PromptFragment {
+	if len(pc.SystemFragments) > 0 {
+		return pc.SystemFragments
+	}
+	if s := strings.TrimSpace(pc.SystemPrompt); s != "" {
+		return []PromptFragment{{Inline: s}}
+	}
+	if s := strings.TrimSpace(pc.SystemPromptPath); s != "" {
+		return []PromptFragment{{Path: s}}
+	}
+	return nil
 }
 
 type HeartbeatJob struct {
@@ -70,7 +93,7 @@ type HeartbeatJob struct {
 
 // RolesForSession returns the roles to use when starting a session.
 // For team profiles, returns Team.Roles. For standalone profiles (no team block),
-// returns a synthetic single role "agent" with coordinator=true and allow_subagents=true.
+// returns a synthetic single role "agent" with coordinator=true and allowSubagents=true.
 func (p *Profile) RolesForSession() ([]RoleConfig, error) {
 	if p == nil {
 		return nil, fmt.Errorf("profile is nil")
@@ -137,30 +160,32 @@ type TeamConfig struct {
 }
 
 type ReviewerConfig struct {
+	RoleRef                 string          `yaml:"roleRef,omitempty"`
 	Enabled                 bool            `yaml:"enabled,omitempty"`
 	Name                    string          `yaml:"name,omitempty"`
 	Description             string          `yaml:"description,omitempty"`
 	Prompts                 PromptConfig    `yaml:"prompts,omitempty"`
 	Skills                  []string        `yaml:"skills,omitempty"`
-	CodeExecOnly            *bool           `yaml:"code_exec_only,omitempty"`
-	CodeExecRequiredImports []string        `yaml:"code_exec_required_imports,omitempty"`
-	AllowedTools            []string        `yaml:"allowed_tools,omitempty"`
+	CodeExecOnly            *bool           `yaml:"codeExecOnly,omitempty"`
+	CodeExecRequiredImports []string        `yaml:"codeExecRequiredImports,omitempty"`
+	AllowedTools            []string        `yaml:"allowedTools,omitempty"`
 	Model                   string          `yaml:"model,omitempty"`
 	Heartbeat               HeartbeatConfig `yaml:"heartbeat,omitempty"`
 }
 
 type RoleConfig struct {
+	RoleRef                 string          `yaml:"roleRef,omitempty"`
 	Name                    string          `yaml:"name"`
 	Description             string          `yaml:"description"`
 	Prompts                 PromptConfig    `yaml:"prompts,omitempty"`
 	Skills                  []string        `yaml:"skills,omitempty"`
-	CodeExecOnly            *bool           `yaml:"code_exec_only,omitempty"`
-	CodeExecRequiredImports []string        `yaml:"code_exec_required_imports,omitempty"`
-	AllowedTools            []string        `yaml:"allowed_tools,omitempty"`
+	CodeExecOnly            *bool           `yaml:"codeExecOnly,omitempty"`
+	CodeExecRequiredImports []string        `yaml:"codeExecRequiredImports,omitempty"`
+	AllowedTools            []string        `yaml:"allowedTools,omitempty"`
 	Model                   string          `yaml:"model,omitempty"`
-	SubagentModel           string          `yaml:"subagent_model,omitempty"`
+	SubagentModel           string          `yaml:"subagentModel,omitempty"`
 	Coordinator             bool            `yaml:"coordinator,omitempty"`
-	AllowSubagents          bool            `yaml:"allow_subagents,omitempty"`
+	AllowSubagents          bool            `yaml:"allowSubagents,omitempty"`
 	Heartbeat               HeartbeatConfig `yaml:"heartbeat,omitempty"`
 }
 
@@ -235,7 +260,7 @@ func Load(path string) (*Profile, error) {
 	}
 
 	// Default prompt.md if present and no prompts explicitly configured.
-	if strings.TrimSpace(p.Prompts.SystemPrompt) == "" && strings.TrimSpace(p.Prompts.SystemPromptPath) == "" {
+	if strings.TrimSpace(p.Prompts.SystemPrompt) == "" && strings.TrimSpace(p.Prompts.SystemPromptPath) == "" && len(p.Prompts.SystemFragments) == 0 {
 		if _, err := os.Stat(filepath.Join(profileDir, "prompt.md")); err == nil {
 			p.Prompts.SystemPromptPath = "prompt.md"
 		}
@@ -258,6 +283,7 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 	p.AllowedTools = normalizeStringList(p.AllowedTools)
 	p.Prompts.SystemPrompt = strings.TrimSpace(p.Prompts.SystemPrompt)
 	p.Prompts.SystemPromptPath = strings.TrimSpace(p.Prompts.SystemPromptPath)
+	normalizeFragments(p.Prompts.SystemFragments)
 	p.Skills = normalizeStringList(p.Skills)
 
 	for i := range p.Heartbeat.Jobs {
@@ -266,12 +292,24 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 	}
 	if p.Team != nil {
 		p.Team.Model = strings.TrimSpace(p.Team.Model)
+		// Resolve role refs before normalization/validation.
+		if p.Team.Reviewer != nil {
+			if err := resolveReviewerRef(profileDir, p.Team.Reviewer); err != nil {
+				return Profile{}, err
+			}
+		}
+		for i := range p.Team.Roles {
+			if err := resolveRoleRef(profileDir, &p.Team.Roles[i]); err != nil {
+				return Profile{}, err
+			}
+		}
 		if p.Team.Reviewer != nil {
 			r := p.Team.Reviewer
 			r.Name = strings.TrimSpace(r.Name)
 			r.Description = strings.TrimSpace(r.Description)
 			r.Prompts.SystemPrompt = strings.TrimSpace(r.Prompts.SystemPrompt)
 			r.Prompts.SystemPromptPath = strings.TrimSpace(r.Prompts.SystemPromptPath)
+			normalizeFragments(r.Prompts.SystemFragments)
 			r.Model = strings.TrimSpace(r.Model)
 			r.CodeExecRequiredImports = normalizeStringList(r.CodeExecRequiredImports)
 			r.AllowedTools = normalizeStringList(r.AllowedTools)
@@ -287,6 +325,7 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 			r.Description = strings.TrimSpace(r.Description)
 			r.Prompts.SystemPrompt = strings.TrimSpace(r.Prompts.SystemPrompt)
 			r.Prompts.SystemPromptPath = strings.TrimSpace(r.Prompts.SystemPromptPath)
+			normalizeFragments(r.Prompts.SystemFragments)
 			r.Model = strings.TrimSpace(r.Model)
 			r.SubagentModel = strings.TrimSpace(r.SubagentModel)
 			r.CodeExecRequiredImports = normalizeStringList(r.CodeExecRequiredImports)
@@ -312,10 +351,7 @@ func (p Profile) Validate(profileDir string) error {
 	if strings.TrimSpace(p.Description) == "" {
 		return fmt.Errorf("profile %s: description is required", p.ID)
 	}
-	if p.Team == nil && strings.TrimSpace(p.Prompts.SystemPrompt) == "" && strings.TrimSpace(p.Prompts.SystemPromptPath) == "" {
-		return fmt.Errorf("profile %s: prompts.system_prompt or prompts.system_prompt_path is required", p.ID)
-	}
-	if err := validatePromptPath(profileDir, p.Prompts.SystemPromptPath, fmt.Sprintf("profile %s", p.ID)); err != nil {
+	if err := validatePromptConfig(profileDir, p.Prompts, fmt.Sprintf("profile %s", p.ID), p.Team == nil); err != nil {
 		return err
 	}
 	for _, hb := range p.Heartbeat.Jobs {
@@ -343,10 +379,7 @@ func (p Profile) Validate(profileDir string) error {
 			if role.Description == "" {
 				return fmt.Errorf("%s (%s): description is required", ref, role.Name)
 			}
-			if role.Prompts.SystemPrompt == "" && role.Prompts.SystemPromptPath == "" {
-				return fmt.Errorf("%s (%s): prompts.system_prompt or prompts.system_prompt_path is required", ref, role.Name)
-			}
-			if err := validatePromptPath(profileDir, role.Prompts.SystemPromptPath, fmt.Sprintf("%s (%s)", ref, role.Name)); err != nil {
+			if err := validatePromptConfig(profileDir, role.Prompts, fmt.Sprintf("%s (%s)", ref, role.Name), true); err != nil {
 				return err
 			}
 			for _, hb := range role.Heartbeat.Jobs {
@@ -380,10 +413,7 @@ func (p Profile) Validate(profileDir string) error {
 			if strings.TrimSpace(p.Team.Reviewer.Description) == "" {
 				return fmt.Errorf("profile %s: team.reviewer.description is required when reviewer is enabled", p.ID)
 			}
-			if strings.TrimSpace(p.Team.Reviewer.Prompts.SystemPrompt) == "" && strings.TrimSpace(p.Team.Reviewer.Prompts.SystemPromptPath) == "" {
-				return fmt.Errorf("profile %s: team.reviewer.prompts.system_prompt or system_prompt_path is required when reviewer is enabled", p.ID)
-			}
-			if err := validatePromptPath(profileDir, p.Team.Reviewer.Prompts.SystemPromptPath, fmt.Sprintf("profile %s reviewer", p.ID)); err != nil {
+			if err := validatePromptConfig(profileDir, p.Team.Reviewer.Prompts, fmt.Sprintf("profile %s reviewer", p.ID), true); err != nil {
 				return err
 			}
 		}
@@ -391,16 +421,49 @@ func (p Profile) Validate(profileDir string) error {
 	return nil
 }
 
+// validatePromptConfig validates that a PromptConfig is correctly configured.
+// requirePrompt controls whether at least one prompt source is required.
+func validatePromptConfig(profileDir string, pc PromptConfig, scope string, requirePrompt bool) error {
+	hasLegacy := strings.TrimSpace(pc.SystemPrompt) != "" || strings.TrimSpace(pc.SystemPromptPath) != ""
+	hasFragments := len(pc.SystemFragments) > 0
+	if hasLegacy && hasFragments {
+		return fmt.Errorf("%s: cannot mix systemPrompt/systemPromptPath with systemFragments", scope)
+	}
+	if requirePrompt && !hasLegacy && !hasFragments {
+		return fmt.Errorf("%s: prompts.systemPrompt, prompts.systemPromptPath, or prompts.systemFragments is required", scope)
+	}
+	if err := validatePromptPath(profileDir, pc.SystemPromptPath, scope); err != nil {
+		return err
+	}
+	for i, frag := range pc.SystemFragments {
+		frag.Path = strings.TrimSpace(frag.Path)
+		frag.Inline = strings.TrimSpace(frag.Inline)
+		if frag.Path == "" && frag.Inline == "" {
+			return fmt.Errorf("%s: systemFragments[%d] must have path or inline", scope, i)
+		}
+		if frag.Path != "" && frag.Inline != "" {
+			return fmt.Errorf("%s: systemFragments[%d] must have path or inline, not both", scope, i)
+		}
+		if frag.Path != "" {
+			if err := validateFragmentPath(profileDir, frag.Path, fmt.Sprintf("%s systemFragments[%d]", scope, i)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validatePromptPath validates a legacy systemPromptPath (no .. traversal allowed).
 func validatePromptPath(profileDir, promptPath, scope string) error {
 	promptPath = strings.TrimSpace(promptPath)
 	if promptPath == "" {
 		return nil
 	}
 	if strings.Contains(promptPath, string(filepath.Separator)+string(filepath.Separator)) {
-		return fmt.Errorf("%s: prompts.system_prompt_path is invalid", scope)
+		return fmt.Errorf("%s: prompts.systemPromptPath is invalid", scope)
 	}
 	if strings.Contains(promptPath, "..") {
-		return fmt.Errorf("%s: prompts.system_prompt_path must be relative to profile dir", scope)
+		return fmt.Errorf("%s: prompts.systemPromptPath must be relative to profile dir", scope)
 	}
 	if strings.TrimSpace(profileDir) != "" {
 		pth := filepath.Join(profileDir, promptPath)
@@ -409,6 +472,210 @@ func validatePromptPath(profileDir, promptPath, scope string) error {
 		}
 	}
 	return nil
+}
+
+// validateFragmentPath validates a fragment path. Unlike legacy systemPromptPath,
+// relative traversal with ".." is allowed for composable prompts.
+func validateFragmentPath(profileDir, fragPath, scope string) error {
+	fragPath = strings.TrimSpace(fragPath)
+	if fragPath == "" {
+		return nil
+	}
+	if filepath.IsAbs(fragPath) {
+		return fmt.Errorf("%s: fragment path must be relative", scope)
+	}
+	if strings.TrimSpace(profileDir) != "" {
+		pth := filepath.Join(profileDir, fragPath)
+		if _, err := os.Stat(pth); err != nil {
+			return fmt.Errorf("%s: fragment file not found: %s", scope, fragPath)
+		}
+	}
+	return nil
+}
+
+// resolveRoleRef loads a base role YAML from roleRef and shallow-merges inline
+// fields on top. Inline fields override base values. coordinator and allowSubagents
+// are always inherited from the base (the profile can override them).
+func resolveRoleRef(profileDir string, r *RoleConfig) error {
+	ref := strings.TrimSpace(r.RoleRef)
+	if ref == "" {
+		return nil
+	}
+	refPath := ref
+	if !filepath.IsAbs(refPath) && strings.TrimSpace(profileDir) != "" {
+		refPath = filepath.Join(profileDir, refPath)
+	}
+	raw, err := os.ReadFile(refPath)
+	if err != nil {
+		return fmt.Errorf("resolve roleRef %s: %w", ref, err)
+	}
+	var base RoleConfig
+	if err := yaml.Unmarshal(raw, &base); err != nil {
+		return fmt.Errorf("parse roleRef %s: %w", ref, err)
+	}
+	// Resolve base prompt paths relative to the ref file's directory.
+	baseDir := filepath.Dir(refPath)
+	base.Prompts = resolvePromptPaths(base.Prompts, baseDir, profileDir)
+	// Shallow merge: inline fields override base.
+	mergeRoleConfig(&base, r)
+	*r = base
+	r.RoleRef = ref // preserve original ref
+	return nil
+}
+
+// resolveReviewerRef loads a base reviewer/role YAML from roleRef and shallow-merges.
+func resolveReviewerRef(profileDir string, r *ReviewerConfig) error {
+	ref := strings.TrimSpace(r.RoleRef)
+	if ref == "" {
+		return nil
+	}
+	refPath := ref
+	if !filepath.IsAbs(refPath) && strings.TrimSpace(profileDir) != "" {
+		refPath = filepath.Join(profileDir, refPath)
+	}
+	raw, err := os.ReadFile(refPath)
+	if err != nil {
+		return fmt.Errorf("resolve reviewer roleRef %s: %w", ref, err)
+	}
+	var base ReviewerConfig
+	if err := yaml.Unmarshal(raw, &base); err != nil {
+		return fmt.Errorf("parse reviewer roleRef %s: %w", ref, err)
+	}
+	baseDir := filepath.Dir(refPath)
+	base.Prompts = resolvePromptPaths(base.Prompts, baseDir, profileDir)
+	mergeReviewerConfig(&base, r)
+	*r = base
+	r.RoleRef = ref
+	return nil
+}
+
+// resolvePromptPaths rewrites prompt paths from a base role's directory to be
+// relative to the profile directory.
+func resolvePromptPaths(pc PromptConfig, baseDir, profileDir string) PromptConfig {
+	if strings.TrimSpace(profileDir) == "" || strings.TrimSpace(baseDir) == "" {
+		return pc
+	}
+	if p := strings.TrimSpace(pc.SystemPromptPath); p != "" && !filepath.IsAbs(p) {
+		absPath := filepath.Join(baseDir, p)
+		if rel, err := filepath.Rel(profileDir, absPath); err == nil {
+			pc.SystemPromptPath = rel
+		}
+	}
+	for i, f := range pc.SystemFragments {
+		if p := strings.TrimSpace(f.Path); p != "" && !filepath.IsAbs(p) {
+			absPath := filepath.Join(baseDir, p)
+			if rel, err := filepath.Rel(profileDir, absPath); err == nil {
+				pc.SystemFragments[i].Path = rel
+			}
+		}
+	}
+	return pc
+}
+
+// mergeRoleConfig applies inline overrides from src onto base (shallow merge).
+func mergeRoleConfig(base, src *RoleConfig) {
+	if s := strings.TrimSpace(src.Name); s != "" {
+		base.Name = s
+	}
+	if s := strings.TrimSpace(src.Description); s != "" {
+		base.Description = s
+	}
+	if src.Prompts.SystemPrompt != "" || src.Prompts.SystemPromptPath != "" || len(src.Prompts.SystemFragments) > 0 {
+		base.Prompts = src.Prompts
+	}
+	if len(src.Skills) > 0 {
+		base.Skills = src.Skills
+	}
+	if src.CodeExecOnly != nil {
+		base.CodeExecOnly = src.CodeExecOnly
+	}
+	if len(src.CodeExecRequiredImports) > 0 {
+		base.CodeExecRequiredImports = src.CodeExecRequiredImports
+	}
+	if len(src.AllowedTools) > 0 {
+		base.AllowedTools = src.AllowedTools
+	}
+	if s := strings.TrimSpace(src.Model); s != "" {
+		base.Model = s
+	}
+	if s := strings.TrimSpace(src.SubagentModel); s != "" {
+		base.SubagentModel = s
+	}
+	// coordinator and allowSubagents: inline overrides apply (base defaults carry through)
+	if src.Coordinator {
+		base.Coordinator = true
+	}
+	if src.AllowSubagents {
+		base.AllowSubagents = true
+	}
+	if len(src.Heartbeat.Jobs) > 0 || src.Heartbeat.Enabled != nil {
+		base.Heartbeat = src.Heartbeat
+	}
+}
+
+// mergeReviewerConfig applies inline overrides from src onto base.
+func mergeReviewerConfig(base, src *ReviewerConfig) {
+	if src.Enabled {
+		base.Enabled = true
+	}
+	if s := strings.TrimSpace(src.Name); s != "" {
+		base.Name = s
+	}
+	if s := strings.TrimSpace(src.Description); s != "" {
+		base.Description = s
+	}
+	if src.Prompts.SystemPrompt != "" || src.Prompts.SystemPromptPath != "" || len(src.Prompts.SystemFragments) > 0 {
+		base.Prompts = src.Prompts
+	}
+	if len(src.Skills) > 0 {
+		base.Skills = src.Skills
+	}
+	if src.CodeExecOnly != nil {
+		base.CodeExecOnly = src.CodeExecOnly
+	}
+	if len(src.CodeExecRequiredImports) > 0 {
+		base.CodeExecRequiredImports = src.CodeExecRequiredImports
+	}
+	if len(src.AllowedTools) > 0 {
+		base.AllowedTools = src.AllowedTools
+	}
+	if s := strings.TrimSpace(src.Model); s != "" {
+		base.Model = s
+	}
+	if len(src.Heartbeat.Jobs) > 0 || src.Heartbeat.Enabled != nil {
+		base.Heartbeat = src.Heartbeat
+	}
+}
+
+func normalizeFragments(frags []PromptFragment) {
+	for i := range frags {
+		frags[i].Path = strings.TrimSpace(frags[i].Path)
+		frags[i].Inline = strings.TrimSpace(frags[i].Inline)
+	}
+}
+
+// ResolveFragments resolves a PromptConfig's effective fragments into a concatenated
+// prompt string. File-based fragments are read relative to profileDir.
+func ResolveFragments(profileDir string, pc PromptConfig) (string, error) {
+	frags := pc.EffectiveFragments()
+	if len(frags) == 0 {
+		return "", nil
+	}
+	parts := make([]string, 0, len(frags))
+	for _, f := range frags {
+		if f.Inline != "" {
+			parts = append(parts, strings.TrimSpace(f.Inline))
+			continue
+		}
+		if f.Path != "" && strings.TrimSpace(profileDir) != "" {
+			raw, err := os.ReadFile(filepath.Join(profileDir, f.Path))
+			if err != nil {
+				return "", fmt.Errorf("read fragment %s: %w", f.Path, err)
+			}
+			parts = append(parts, strings.TrimSpace(string(raw)))
+		}
+	}
+	return strings.Join(parts, "\n\n"), nil
 }
 
 func normalizeStringList(in []string) []string {

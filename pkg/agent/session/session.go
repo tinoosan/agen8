@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -459,16 +457,9 @@ func (s *Session) setProfile(p *profile.Profile, dir string) error {
 	if p == nil {
 		return fmt.Errorf("profile is nil")
 	}
-	promptText := ""
-	switch {
-	case strings.TrimSpace(p.Prompts.SystemPrompt) != "":
-		promptText = strings.TrimSpace(p.Prompts.SystemPrompt)
-	case strings.TrimSpace(p.Prompts.SystemPromptPath) != "" && strings.TrimSpace(dir) != "":
-		raw, err := os.ReadFile(filepath.Join(dir, p.Prompts.SystemPromptPath))
-		if err != nil {
-			return fmt.Errorf("read profile prompt: %w", err)
-		}
-		promptText = strings.TrimSpace(string(raw))
+	promptText, err := profile.ResolveFragments(dir, p.Prompts)
+	if err != nil {
+		return fmt.Errorf("resolve profile prompts: %w", err)
 	}
 	s.activeProfile = p
 	s.activeProfileDir = strings.TrimSpace(dir)
