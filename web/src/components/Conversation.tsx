@@ -4,9 +4,8 @@ import { useConversation } from '../hooks/useConversation'
 import { useTaskHistory } from '../hooks/useTaskHistory'
 import { useThinkingEvents } from '../hooks/useThinkingEvents'
 import { useArtifactFiles } from '../hooks/useArtifactFiles'
-import { useTeamStatus } from '../hooks/useTeamStatus'
 import { rpcCall } from '../lib/rpc'
-import { ArrowUp, ChevronRight, Paperclip, Sparkles, X, Zap, Loader } from 'lucide-react'
+import { ArrowUp, ChevronRight, Paperclip, Sparkles, X, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ActivityEvent, ArtifactGetResult, ArtifactNode, EventRecord, Item, Task, UserMessageContent, AgentMessageContent } from '../lib/types'
@@ -34,34 +33,6 @@ interface ChatTurn {
   role?: string
   texts: string[]
   live?: boolean
-}
-
-/* ── Status Bar (feedback mechanism) ─────────────── */
-function StatusBar({ teamId }: { teamId: string }) {
-  const statusQuery = useTeamStatus(teamId)
-  const roles = statusQuery.data?.roles ?? []
-  const activeRoles = roles.filter(r => {
-    const info = (r.info ?? '').toLowerCase()
-    return info && !info.includes('idle') && !info.includes('waiting')
-  })
-
-  if (activeRoles.length === 0) return null
-
-  return (
-    <div className="status-bar">
-      <div className="status-bar-shimmer" style={{ position: 'absolute', top: 0, left: 0, right: 0 }} />
-      <Loader size={12} style={{ animation: 'spin 1.2s linear infinite', flexShrink: 0, color: 'var(--accent)' }} />
-      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-        {activeRoles.map((r, i) => (
-          <span key={r.role}>
-            {i > 0 && <span style={{ color: 'var(--text-3)', margin: '0 6px' }}>&middot;</span>}
-            <span style={{ color: 'var(--accent)', fontWeight: 500 }}>{r.role}</span>
-            <span style={{ color: 'var(--text-3)', marginLeft: 4 }}>{r.info}</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  )
 }
 
 /* ── Agent Bubble ────────────────────────────────── */
@@ -254,14 +225,40 @@ function ThoughtBubble({ entry }: { entry: ChatEntry }) {
               borderLeft: `2px solid ${entry.live ? 'var(--amber)' : 'var(--border)'}`,
               color: 'var(--text-2)',
               fontSize: 12.5,
-              fontStyle: 'italic',
-              whiteSpace: 'pre-wrap',
               overflowWrap: 'break-word',
               lineHeight: 1.6,
               transition: 'border-color 0.3s',
             }}
           >
-            {entry.text}
+            <div className="md-prose" style={{ fontStyle: 'italic' }}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  code({ children, className, ...props }) {
+                    const isBlock = className?.startsWith('language-')
+                    if (isBlock) {
+                      return (
+                        <pre style={{
+                          background: 'var(--bg-app)', border: '1px solid var(--border)',
+                          borderRadius: 8, padding: '10px 14px', overflow: 'auto',
+                          fontSize: 12, margin: '6px 0', fontStyle: 'normal',
+                        }}>
+                          <code className="mono" {...props}>{children}</code>
+                        </pre>
+                      )
+                    }
+                    return (
+                      <code className="mono" style={{
+                        background: 'var(--bg-surface)', padding: '1px 5px',
+                        borderRadius: 4, fontSize: '0.88em', fontStyle: 'normal',
+                      }} {...props}>{children}</code>
+                    )
+                  },
+                }}
+              >
+                {entry.text}
+              </ReactMarkdown>
+            </div>
             {entry.live && <span className="streaming-cursor" />}
           </div>
         )}
@@ -581,8 +578,8 @@ export default function Conversation({ threadId, teamId, coordinatorRole, coordi
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '28px 32px 12px' }}>
         {!threadId ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-3)', fontSize: 13 }}>
-            <Loader size={16} style={{ animation: 'spin 1.2s linear infinite', marginRight: 8 }} />
-            Connecting\u2026
+            <span className="spinner spinner-sm" style={{ marginRight: 8 }} />
+            Connecting&hellip;
           </div>
         ) : turns.length === 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 14, textAlign: 'center' }}>
@@ -610,9 +607,6 @@ export default function Conversation({ threadId, teamId, coordinatorRole, coordi
         )}
         <div ref={bottomRef} />
       </div>
-
-      {/* Status bar — feedback for active work */}
-      <StatusBar teamId={teamId} />
 
       {/* Error bar */}
       {sendError && (

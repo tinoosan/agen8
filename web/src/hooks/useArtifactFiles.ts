@@ -14,7 +14,7 @@ export function useArtifactFiles(threadId: string | null, teamId: string | null)
         threadId: threadId ?? undefined,
         teamId: teamId ?? undefined,
       })
-      return (res.nodes ?? []).filter((node) => node.kind === 'file')
+      return (res.nodes ?? []).filter((node) => node.kind === 'file' && (node.vpath ?? '').startsWith('/workspace/'))
     },
     enabled: !!threadId && !!teamId,
     refetchInterval: 5000,
