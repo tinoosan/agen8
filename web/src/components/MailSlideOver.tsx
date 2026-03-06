@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useStore } from '../lib/store'
 import { useMail } from '../hooks/useMail'
 import { X, ArrowUpRight, Inbox, Send } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { MailMessage } from '../lib/types'
 
 interface MailSlideOverProps {
@@ -141,7 +143,7 @@ export default function MailSlideOver({ teamId }: MailSlideOverProps) {
         </div>
 
         {/* Message list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 8px' }}>
           {inbox.length > 0 && (
             <>
               <SectionLabel icon={<Inbox size={10} />} label="Inbox" count={inbox.length} />
@@ -180,33 +182,54 @@ export default function MailSlideOver({ teamId }: MailSlideOverProps) {
         {/* Selected message detail */}
         {selected && (
           <div style={{
-            padding: 16,
+            flex: '0 0 55%',
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
             borderTop: '1px solid var(--border)',
             background: 'var(--bg-surface)',
           }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', marginBottom: 6, letterSpacing: '-0.01em' }}>
-              {selected.task?.goal ?? selected.subject ?? selected.summary ?? selected.kind}
+            {/* Detail header */}
+            <div style={{
+              padding: '12px 16px 8px',
+              borderBottom: '1px solid var(--border)',
+              flexShrink: 0,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '-0.01em' }}>
+                {selected.task?.goal ?? selected.subject ?? selected.summary ?? selected.kind}
+              </div>
             </div>
-            {selected.summary && (
-              <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8, lineHeight: 1.5 }}>
-                {selected.summary}
-              </div>
-            )}
-            {selected.bodyPreview && selected.bodyPreview !== selected.summary && (
-              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8, lineHeight: 1.5 }}>
-                {selected.bodyPreview}
-              </div>
-            )}
-            {(selected.task?.error ?? selected.error) && (
-              <div style={{
-                fontSize: 11, color: 'var(--red)', marginBottom: 8,
-                background: 'var(--red-dim)', border: '1px solid rgba(239,68,68,0.2)',
-                padding: '6px 10px', borderRadius: 'var(--r-md)',
-              }}>
-                {selected.task?.error ?? selected.error}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+
+            {/* Scrollable body */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 16px' }}>
+              {selected.summary && (
+                <div className="md-prose" style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8, lineHeight: 1.6 }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.summary}</ReactMarkdown>
+                </div>
+              )}
+              {selected.bodyPreview && selected.bodyPreview !== selected.summary && (
+                <div className="md-prose" style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8, lineHeight: 1.6 }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.bodyPreview}</ReactMarkdown>
+                </div>
+              )}
+              {(selected.task?.error ?? selected.error) && (
+                <div style={{
+                  fontSize: 11, color: 'var(--red)', marginBottom: 8,
+                  background: 'var(--red-dim)', border: '1px solid rgba(239,68,68,0.2)',
+                  padding: '6px 10px', borderRadius: 'var(--r-md)',
+                }}>
+                  {selected.task?.error ?? selected.error}
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div style={{
+              padding: '10px 16px',
+              borderTop: '1px solid var(--border)',
+              display: 'flex', gap: 8,
+              flexShrink: 0,
+            }}>
               {selected.canClaim && selected.taskId && (
                 <button
                   onClick={() => claim(selected.taskId!)}

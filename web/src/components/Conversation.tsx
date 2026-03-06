@@ -1,122 +1,287 @@
 import { useRef, useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useConversation } from '../hooks/useConversation'
-import { rpcCall } from '../lib/rpc'
-import { ArrowUp, Zap } from 'lucide-react'
+import { rpcCall, isConnected } from '../lib/rpc'
+import { ArrowUp, ChevronRight, Zap } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
-  getItemText,
   type Item,
   type UserMessageContent,
   type AgentMessageContent,
   type ToolExecutionContent,
+  type ReasoningContent,
 } from '../lib/types'
 
 interface ConversationProps {
   threadId: string | null
 }
 
-function ToolChip({ item }: { item: Item }) {
-  const tc = item.content as ToolExecutionContent | undefined
-  if (!tc) return null
-  const isOk = tc.ok !== false
-  const isPending = tc.ok === undefined
+// ──────────────────────────────────────────────
+// ThinkingBlock — collapsible reasoning display
+// ──────────────────────────────────────────────
+function ThinkingBlock({ item }: { item: Item }) {
+  const [open, setOpen] = useState(false)
+  const content = item.content as ReasoningContent | undefined
+  const text = content?.summary ?? ''
+  const isStreaming = item.status === 'started' || item.status === 'streaming'
+  const step = content?.step
 
   return (
-    <div
-      className="animate-fade-in"
-      style={{
-        margin: '3px 0 3px 48px',
-        display: 'inline-flex', alignItems: 'center', gap: 7,
-        padding: '4px 10px',
-        borderRadius: 'var(--r-md)',
-        background: isPending ? 'var(--bg-elevated)' : isOk ? 'rgba(34,197,94,0.06)' : 'var(--red-dim)',
-        border: `1px solid ${isPending ? 'var(--border)' : isOk ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.2)'}`,
-        fontSize: 11.5,
-      }}
-    >
-      <span style={{ color: 'var(--text-3)' }} className="mono">›</span>
-      <span style={{ fontWeight: 500, color: 'var(--text-2)', fontFamily: 'inherit' }} className="mono">
-        {tc.toolName}
-      </span>
-      {tc.ok !== undefined && (
-        <span style={{
-          fontSize: 10, fontWeight: 600,
-          color: tc.ok ? 'var(--green)' : 'var(--red)',
-          letterSpacing: '0.04em',
+    <div className="animate-fade-in" style={{ margin: '2px 0 2px 48px' }}>
+      <button
+        onClick={() => !isStreaming && setOpen((o) => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'none', border: 'none',
+          cursor: isStreaming ? 'default' : 'pointer',
+          color: 'var(--text-3)', fontSize: 11.5, padding: '3px 0',
+        }}
+      >
+        {isStreaming ? (
+          <span style={{ color: 'var(--amber)', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span
+              className="streaming-cursor"
+              style={{ width: 6, height: 6, background: 'var(--amber)', borderRadius: '50%', display: 'inline-block' }}
+            />
+            thinking…
+          </span>
+        ) : (
+          <>
+            <ChevronRight
+              size={11}
+              style={{
+                transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform 0.15s',
+                color: 'var(--text-3)',
+              }}
+            />
+            <span>thought{step != null ? ` ${step}` : ''}</span>
+          </>
+        )}
+      </button>
+      {open && text && (
+        <div style={{
+          marginTop: 4, padding: '8px 12px',
+          borderLeft: '2px solid var(--border)',
+          fontSize: 12, color: 'var(--text-3)',
+          fontStyle: 'italic', whiteSpace: 'pre-wrap',
+          lineHeight: 1.6, wordBreak: 'break-word',
+          maxHeight: 240, overflowY: 'auto',
         }}>
-          {tc.ok ? 'OK' : 'ERR'}
-        </span>
-      )}
-      {isPending && (
-        <span style={{ color: 'var(--text-3)', fontSize: 10 }} className="streaming-cursor">▋</span>
-      )}
-    </div>
-  )
-}
-
-function ReasoningBlock({ item }: { item: Item }) {
-  const text = getItemText(item)
-  if (!text) return null
-  return (
-    <div
-      className="animate-fade-in"
-      style={{
-        margin: '3px 0 3px 48px',
-        padding: '8px 12px',
-        fontSize: 12,
-        color: 'var(--text-3)',
-        fontStyle: 'italic',
-        borderLeft: '2px solid var(--border)',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        lineHeight: 1.6,
-      }}
-    >
-      {text}
-    </div>
-  )
-}
-
-function MessageBubble({ item }: { item: Item }) {
-  const isUser = item.type === 'user_message'
-  const text = getItemText(item)
-  const isStreaming =
-    item.status === 'streaming' ||
-    (item.type === 'agent_message' && (item.content as AgentMessageContent)?.isPartial)
-
-  if (item.type === 'tool_execution') return <ToolChip item={item} />
-  if (item.type === 'reasoning') return <ReasoningBlock item={item} />
-  if (!text) return null
-
-  return (
-    <div
-      className="animate-fade-in"
-      style={{
-        display: 'flex',
-        justifyContent: isUser ? 'flex-end' : 'flex-start',
-        alignItems: 'flex-start',
-        gap: 10,
-        marginBottom: 16,
-      }}
-    >
-      {!isUser && (
-        <div
-          style={{
-            width: 30, height: 30,
-            borderRadius: 8,
-            background: 'linear-gradient(135deg, var(--accent-dim), rgba(99,102,241,0.2))',
-            border: '1px solid rgba(139,123,248,0.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-            marginTop: 1,
-          }}
-        >
-          <Zap size={13} color="var(--accent)" fill="var(--accent)" strokeWidth={0} />
+          {text}
         </div>
       )}
+    </div>
+  )
+}
 
+// ──────────────────────────────────────────────
+// ToolCall — expandable tool execution chip
+// ──────────────────────────────────────────────
+function ToolCall({ item }: { item: Item }) {
+  const [open, setOpen] = useState(false)
+  const tc = item.content as ToolExecutionContent | undefined
+  if (!tc) return null
+
+  const isPending = item.status === 'started' || item.status === 'streaming' || tc.ok === undefined
+  const isOk = tc.ok !== false
+  const hasDetail = tc.input != null || tc.output != null
+
+  function prettyJson(val: unknown): string {
+    if (typeof val === 'string') return val
+    try { return JSON.stringify(val, null, 2) } catch { return String(val) }
+  }
+
+  return (
+    <div className="animate-fade-in" style={{ margin: '2px 0 2px 48px' }}>
+      <button
+        onClick={() => hasDetail && setOpen((o) => !o)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 7,
+          background: isPending ? 'var(--bg-elevated)' : isOk ? 'rgba(34,197,94,0.06)' : 'var(--red-dim)',
+          border: `1px solid ${isPending ? 'var(--border)' : isOk ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
+          borderRadius: 8, padding: '5px 10px',
+          cursor: hasDetail ? 'pointer' : 'default',
+          textAlign: 'left',
+        }}
+      >
+        {isPending ? (
+          <span style={{ fontSize: 11, color: 'var(--amber)' }}>◌</span>
+        ) : (
+          <span style={{ fontSize: 11, color: isOk ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+            {isOk ? '✓' : '✗'}
+          </span>
+        )}
+        <span className="mono" style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 500 }}>
+          {tc.toolName}
+        </span>
+        {hasDetail && (
+          <ChevronRight
+            size={10}
+            style={{
+              color: 'var(--text-3)',
+              transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 0.15s',
+            }}
+          />
+        )}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 4, paddingLeft: 12, borderLeft: '2px solid var(--border)' }}>
+          {tc.input != null && (
+            <>
+              <div style={{
+                fontSize: 9, color: 'var(--text-3)', fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 3,
+              }}>
+                Input
+              </div>
+              <pre className="mono" style={{
+                fontSize: 11, color: 'var(--text-2)', background: 'var(--bg-elevated)',
+                border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px',
+                overflow: 'auto', maxHeight: 200, margin: '0 0 6px',
+              }}>
+                {prettyJson(tc.input)}
+              </pre>
+            </>
+          )}
+          {tc.output != null && (
+            <>
+              <div style={{
+                fontSize: 9, color: 'var(--text-3)', fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 3,
+              }}>
+                Output
+              </div>
+              <pre className="mono" style={{
+                fontSize: 11, color: 'var(--text-2)', background: 'var(--bg-elevated)',
+                border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px',
+                overflow: 'auto', maxHeight: 200, margin: 0,
+              }}>
+                {prettyJson(tc.output)}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────
+// AgentBubble — markdown-rendered agent message
+// ──────────────────────────────────────────────
+function AgentBubble({ item }: { item: Item }) {
+  const content = item.content as AgentMessageContent | undefined
+  const text = content?.text ?? ''
+  const isStreaming =
+    item.status === 'streaming' || (item.status === 'started') || content?.isPartial === true
+
+  return (
+    <div
+      className="animate-fade-in"
+      style={{
+        display: 'flex', justifyContent: 'flex-start',
+        alignItems: 'flex-start', gap: 10, marginBottom: 16,
+      }}
+    >
+      <div style={{
+        width: 30, height: 30, borderRadius: 8,
+        background: 'linear-gradient(135deg, var(--accent-dim), rgba(99,102,241,0.2))',
+        border: '1px solid rgba(139,123,248,0.2)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, marginTop: 1,
+      }}>
+        <Zap size={13} color="var(--accent)" fill="var(--accent)" strokeWidth={0} />
+      </div>
       <div style={{ maxWidth: '78%', minWidth: 0 }}>
-        {isUser ? (
+        <div style={{
+          padding: '10px 14px',
+          borderRadius: '4px 14px 14px 14px',
+          background: 'var(--bg-elevated)',
+          border: '1px solid var(--border)',
+          color: 'var(--text-1)',
+          fontSize: 13.5,
+          overflowWrap: 'break-word',
+        }}>
+          <div className="md-prose">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                code({ children, className, ...props }) {
+                  const isBlock = className?.startsWith('language-')
+                  if (isBlock) {
+                    return (
+                      <pre style={{
+                        background: 'var(--bg-app)', border: '1px solid var(--border)',
+                        borderRadius: 8, padding: '10px 14px', overflow: 'auto',
+                        fontSize: 12, margin: '6px 0',
+                      }}>
+                        <code className="mono" {...props}>{children}</code>
+                      </pre>
+                    )
+                  }
+                  return (
+                    <code
+                      className="mono"
+                      style={{
+                        background: 'var(--bg-surface)', padding: '1px 5px',
+                        borderRadius: 4, fontSize: '0.88em',
+                      }}
+                      {...props}
+                    >
+                      {children}
+                    </code>
+                  )
+                },
+                a({ children, href }) {
+                  return (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+                    >
+                      {children}
+                    </a>
+                  )
+                },
+              }}
+            >
+              {text}
+            </ReactMarkdown>
+          </div>
+          {isStreaming && <span className="streaming-cursor" />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────
+// MessageBubble — dispatcher
+// ──────────────────────────────────────────────
+function MessageBubble({ item }: { item: Item }) {
+  if (item.type === 'tool_execution') return <ToolCall item={item} />
+  if (item.type === 'reasoning') return <ThinkingBlock item={item} />
+
+  if (item.type === 'agent_message') return <AgentBubble item={item} />
+
+  if (item.type === 'user_message') {
+    const content = item.content as UserMessageContent | undefined
+    const text = content?.text ?? ''
+    if (!text) return null
+    return (
+      <div
+        className="animate-fade-in"
+        style={{
+          display: 'flex', justifyContent: 'flex-end',
+          alignItems: 'flex-start', gap: 10, marginBottom: 16,
+        }}
+      >
+        <div style={{ maxWidth: '78%', minWidth: 0 }}>
           <div style={{
             padding: '10px 15px',
             borderRadius: '14px 14px 4px 14px',
@@ -130,36 +295,36 @@ function MessageBubble({ item }: { item: Item }) {
           }}>
             {text}
           </div>
-        ) : (
-          <div style={{
-            padding: '10px 14px',
-            borderRadius: '4px 14px 14px 14px',
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-1)',
-            fontSize: 13.5,
-            lineHeight: 1.65,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}>
-            {text}
-            {isStreaming && <span className="streaming-cursor" />}
-          </div>
-        )}
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
+
+  return null
 }
 
+// ──────────────────────────────────────────────
+// Main Conversation component
+// ──────────────────────────────────────────────
 export default function Conversation({ threadId }: ConversationProps) {
-  const query = useConversation(threadId)
+  const { query, registerTurnId } = useConversation(threadId)
   const items = query.data ?? []
   const queryClient = useQueryClient()
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [sseOk, setSseOk] = useState(false)
 
+  // Poll SSE connection status every 1.5s
+  useEffect(() => {
+    setSseOk(isConnected())
+    const t = setInterval(() => setSseOk(isConnected()), 1500)
+    return () => clearInterval(t)
+  }, [])
+
+  // Scroll to bottom when new items arrive
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [items.length])
@@ -176,12 +341,16 @@ export default function Conversation({ threadId }: ConversationProps) {
     const text = input.trim()
     if (!text || !threadId || sending) return
     setSending(true)
+    setSendError(null)
     setInput('')
     try {
       const result = await rpcCall<{ turn: { id: string } }>('turn.create', {
         threadId,
         input: { text },
       })
+      // Pre-register this turnId so item.started notifications are accepted
+      // immediately — before SSE delivers items for this turn.
+      registerTurnId(result.turn.id)
       const syntheticItem: Item = {
         id: `optimistic-${Date.now()}`,
         turnId: result.turn.id,
@@ -193,7 +362,8 @@ export default function Conversation({ threadId }: ConversationProps) {
         ...(prev ?? []),
         syntheticItem,
       ])
-    } catch {
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Failed to send message')
       setInput(text)
     } finally {
       setSending(false)
@@ -205,14 +375,7 @@ export default function Conversation({ threadId }: ConversationProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Message list */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          padding: '28px 32px 12px',
-        }}
-      >
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '28px 32px 12px' }}>
         {!threadId ? (
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -249,11 +412,26 @@ export default function Conversation({ threadId }: ConversationProps) {
         <div ref={bottomRef} />
       </div>
 
+      {/* Error banner */}
+      {sendError && (
+        <div style={{
+          padding: '8px 20px', fontSize: 12, color: 'var(--red)',
+          background: 'var(--red-dim)', borderTop: '1px solid rgba(239,68,68,0.15)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          flexShrink: 0,
+        }}>
+          <span>{sendError}</span>
+          <button
+            onClick={() => setSendError(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 16, lineHeight: 1, padding: '0 0 0 8px' }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Input area */}
-      <div style={{
-        padding: '10px 20px 16px',
-        borderTop: '1px solid var(--border)',
-      }}>
+      <div style={{ padding: '10px 20px 16px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{
           display: 'flex', alignItems: 'flex-end', gap: 8,
           background: 'var(--bg-elevated)',
@@ -288,6 +466,16 @@ export default function Conversation({ threadId }: ConversationProps) {
               maxHeight: 140,
               overflowY: 'auto',
               padding: 0,
+            }}
+          />
+          {/* SSE connection status dot */}
+          <div
+            title={sseOk ? 'Connected' : 'Reconnecting…'}
+            style={{
+              width: 7, height: 7, borderRadius: '50%', flexShrink: 0, alignSelf: 'center',
+              background: sseOk ? 'var(--green)' : 'var(--text-3)',
+              boxShadow: sseOk ? '0 0 6px var(--green)' : 'none',
+              transition: 'background 0.3s, box-shadow 0.3s',
             }}
           />
           <button

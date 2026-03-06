@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useActivity } from '../hooks/useActivity'
 import type { ActivityEvent } from '../lib/types'
 import { ChevronDown, ChevronRight } from 'lucide-react'
@@ -81,6 +81,12 @@ export default function ActivityFeed({ teamId }: ActivityFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const events = query.data ?? []
   const recent = events.slice(-50)
+
+  // Auto-scroll to latest event
+  useEffect(() => {
+    const el = containerRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [recent.length])
 
   return (
     <div
