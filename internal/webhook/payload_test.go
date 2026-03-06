@@ -2,6 +2,8 @@ package webhook
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8/pkg/types"
@@ -70,5 +72,21 @@ func TestBuildTeamTask_InvalidRole(t *testing.T) {
 	}
 	if !errors.Is(err, errInvalidRole) {
 		t.Errorf("err = %v, want errInvalidRole", err)
+	}
+}
+
+func TestBuildTeamTask_DefaultsToCoordinatorRoleWhenOmitted(t *testing.T) {
+	run := types.Run{SessionID: "s1", RunID: "r1"}
+	payload := []byte(`{"goal":"triage inbound request"}`)
+	roleSet := map[string]struct{}{"ceo": {}, "cto": {}}
+	task, err := BuildTeamTask(payload, "team-1", "ceo", run, roleSet)
+	if err != nil {
+		t.Fatalf("BuildTeamTask: %v", err)
+	}
+	if got := strings.TrimSpace(task.AssignedRole); got != "ceo" {
+		t.Fatalf("AssignedRole=%q want ceo", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(task.Metadata["routingDefault"])); got != "coordinator_role" {
+		t.Fatalf("routingDefault metadata=%q want coordinator_role", got)
 	}
 }

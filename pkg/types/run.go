@@ -79,6 +79,10 @@ type RunRuntimeConfig struct {
 	// Role is the team role name for team runs (for example: "ceo", "researcher").
 	Role string `json:"role,omitempty"`
 
+	// WorkerClass distinguishes long-lived role workers from short-lived spawned workers.
+	// Allowed values: "persistent", "ephemeral".
+	WorkerClass string `json:"workerClass,omitempty"`
+
 	// Context budgets applied by the PromptUpdater per step.
 	MaxTraceBytes  int `json:"maxTraceBytes,omitempty"`
 	MaxMemoryBytes int `json:"maxMemoryBytes,omitempty"`

@@ -10,7 +10,10 @@ type Manifest struct {
 	CoordinatorRole string       `json:"coordinatorRole"`
 	CoordinatorRun  string       `json:"coordinatorRunId"`
 	Roles           []RoleRecord `json:"roles"`
-	CreatedAt       string       `json:"createdAt"`
+	// DesiredReplicasByRole optionally configures persistent worker pool size by role.
+	// Missing entries mean "manual management" for that role.
+	DesiredReplicasByRole map[string]int `json:"desiredReplicasByRole,omitempty"`
+	CreatedAt             string         `json:"createdAt"`
 }
 
 // ModelChange represents a pending, applied, or failed team model change.

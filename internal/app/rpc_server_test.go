@@ -1748,6 +1748,155 @@ func TestRPCServer_TaskListAndCreate_RunScopedOverrides(t *testing.T) {
 	}
 }
 
+func TestRPCServer_TaskCreate_TeamDefaultsToRoleFromRunRuntime(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("team goal")
+	sess.TeamID = "team-1"
+	sess.Mode = "multi-agent"
+	run := types.NewRun("coord", 8*1024, sess.SessionID)
+	run.Runtime = &types.RunRuntimeConfig{
+		TeamID: "team-1",
+		Role:   "coordinator",
+	}
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	createReq, _ := protocol.NewRequest("1", protocol.MethodTaskCreate, protocol.TaskCreateParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   "team-1",
+		Goal:     "delegate",
+	})
+	createResp := rpcRoundTrip(t, srv, createReq)
+	if createResp.Error != nil {
+		t.Fatalf("task.create error: %+v", createResp.Error)
+	}
+	var createRes protocol.TaskCreateResult
+	_ = json.Unmarshal(createResp.Result, &createRes)
+	if got := strings.TrimSpace(createRes.Task.AssignedToType); got != "role" {
+		t.Fatalf("assignedToType=%q want role", got)
+	}
+	if got := strings.TrimSpace(createRes.Task.AssignedTo); got != "coordinator" {
+		t.Fatalf("assignedTo=%q want coordinator", got)
+	}
+	if got := strings.TrimSpace(createRes.Task.AssignedRole); got != "coordinator" {
+		t.Fatalf("assignedRole=%q want coordinator", got)
+	}
+}
+
+func TestRPCServer_TaskCreate_TeamMissingRoleRequiresExplicitAssignee(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("team goal")
+	sess.TeamID = "team-1"
+	sess.Mode = "multi-agent"
+	run := types.NewRun("coord", 8*1024, sess.SessionID)
+	run.Runtime = &types.RunRuntimeConfig{
+		TeamID: "team-1",
+	}
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	createReq, _ := protocol.NewRequest("1", protocol.MethodTaskCreate, protocol.TaskCreateParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   "team-1",
+		Goal:     "delegate",
+	})
+	createResp := rpcRoundTrip(t, srv, createReq)
+	if createResp.Error == nil {
+		t.Fatalf("expected validation error when team role cannot be derived")
+	}
+	if createResp.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("error code=%d want %d", createResp.Error.Code, protocol.CodeInvalidParams)
+	}
+}
+
+func TestRPCServer_TaskCreate_TeamMissingRoleLegacyFallbackOptIn(t *testing.T) {
+	t.Setenv("AGEN8_LEGACY_TEAM_FALLBACK", "true")
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("team goal")
+	sess.TeamID = "team-1"
+	sess.Mode = "multi-agent"
+	run := types.NewRun("coord", 8*1024, sess.SessionID)
+	run.Runtime = &types.RunRuntimeConfig{
+		TeamID: "team-1",
+	}
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	createReq, _ := protocol.NewRequest("1", protocol.MethodTaskCreate, protocol.TaskCreateParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   "team-1",
+		Goal:     "delegate",
+	})
+	createResp := rpcRoundTrip(t, srv, createReq)
+	if createResp.Error != nil {
+		t.Fatalf("task.create error: %+v", createResp.Error)
+	}
+	var createRes protocol.TaskCreateResult
+	_ = json.Unmarshal(createResp.Result, &createRes)
+	if got := strings.TrimSpace(createRes.Task.AssignedToType); got != "team" {
+		t.Fatalf("assignedToType=%q want team", got)
+	}
+	if got := strings.TrimSpace(createRes.Task.AssignedTo); got != "team-1" {
+		t.Fatalf("assignedTo=%q want team-1", got)
+	}
+}
+
+func TestRPCServer_TaskCreate_TeamExplicitTeamRouteStillAllowed(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("team goal")
+	sess.TeamID = "team-1"
+	sess.Mode = "multi-agent"
+	run := types.NewRun("coord", 8*1024, sess.SessionID)
+	run.Runtime = &types.RunRuntimeConfig{
+		TeamID: "team-1",
+	}
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	createReq, _ := protocol.NewRequest("1", protocol.MethodTaskCreate, protocol.TaskCreateParams{
+		ThreadID:       protocol.ThreadID(run.SessionID),
+		TeamID:         "team-1",
+		Goal:           "broadcast team work",
+		AssignedToType: "team",
+	})
+	createResp := rpcRoundTrip(t, srv, createReq)
+	if createResp.Error != nil {
+		t.Fatalf("task.create error: %+v", createResp.Error)
+	}
+	var createRes protocol.TaskCreateResult
+	_ = json.Unmarshal(createResp.Result, &createRes)
+	if got := strings.TrimSpace(createRes.Task.AssignedToType); got != "team" {
+		t.Fatalf("assignedToType=%q want team", got)
+	}
+	if got := strings.TrimSpace(createRes.Task.AssignedTo); got != "team-1" {
+		t.Fatalf("assignedTo=%q want team-1", got)
+	}
+}
+
 func TestRPCServer_ControlSetModel(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
@@ -2425,6 +2574,9 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	}
 	if strings.TrimSpace(firstRun.Runtime.Role) == "" {
 		t.Fatalf("expected run runtime role to be set")
+	}
+	if got := strings.TrimSpace(firstRun.Runtime.WorkerClass); got != "persistent" {
+		t.Fatalf("run runtime workerClass=%q want persistent", got)
 	}
 }
 
@@ -3364,7 +3516,7 @@ func TestRPCServer_TeamManifestPlanModelEndpoints(t *testing.T) {
 	if err := os.MkdirAll(teamDir, 0o755); err != nil {
 		t.Fatalf("mkdir team dir: %v", err)
 	}
-	manifest := `{"teamId":"team-1","profileId":"startup","teamModel":"openai/gpt-5-mini","coordinatorRole":"ceo","coordinatorRunId":"run-1","roles":[{"roleName":"ceo","runId":"run-1","sessionId":"sess-1"}],"createdAt":"2026-01-01T00:00:00Z"}`
+	manifest := `{"teamId":"team-1","profileId":"startup","teamModel":"openai/gpt-5-mini","coordinatorRole":"ceo","coordinatorRunId":"run-1","roles":[{"roleName":"ceo","runId":"run-1","sessionId":"sess-1"}],"desiredReplicasByRole":{"ceo":2,"":4,"qa":0},"createdAt":"2026-01-01T00:00:00Z"}`
 	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -3404,6 +3556,15 @@ func TestRPCServer_TeamManifestPlanModelEndpoints(t *testing.T) {
 	_ = json.Unmarshal(respManifest.Result, &manifestRes)
 	if strings.TrimSpace(manifestRes.ReviewerRole) != "ceo" {
 		t.Fatalf("reviewerRole=%q want ceo", manifestRes.ReviewerRole)
+	}
+	if got := manifestRes.DesiredReplicasByRole["ceo"]; got != 2 {
+		t.Fatalf("desiredReplicasByRole.ceo=%d want 2", got)
+	}
+	if _, exists := manifestRes.DesiredReplicasByRole[""]; exists {
+		t.Fatalf("desiredReplicasByRole should not include empty role key")
+	}
+	if _, exists := manifestRes.DesiredReplicasByRole["qa"]; exists {
+		t.Fatalf("desiredReplicasByRole should not include non-positive entries")
 	}
 
 	reqPlan, _ := protocol.NewRequest("3", protocol.MethodPlanGet, protocol.PlanGetParams{

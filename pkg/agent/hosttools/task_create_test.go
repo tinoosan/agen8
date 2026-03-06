@@ -164,6 +164,62 @@ func TestTaskCreateTool_CoordinatorMustSpecifyAssignedRole(t *testing.T) {
 	}
 }
 
+func TestTaskCreateTool_CoordinatorSelfAssignRequiresOverrideInMultiRoleTeam(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-1",
+		RunID:           "run-1",
+		TeamID:          "team-1",
+		RoleName:        "coordinator",
+		IsCoordinator:   true,
+		CoordinatorRole: "coordinator",
+		ValidRoles:      []string{"coordinator", "researcher"},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"goal":         "Do it myself",
+		"taskId":       "task-coord-self-no-override",
+		"assignedRole": "coordinator",
+	})
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected coordinator self-assign guard error")
+	}
+}
+
+func TestTaskCreateTool_CoordinatorSelfAssignAllowsExplicitOverride(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-1",
+		RunID:           "run-1",
+		TeamID:          "team-1",
+		RoleName:        "coordinator",
+		IsCoordinator:   true,
+		CoordinatorRole: "coordinator",
+		ValidRoles:      []string{"coordinator", "researcher"},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"goal":             "Do it myself",
+		"taskId":           "task-coord-self-override",
+		"assignedRole":     "coordinator",
+		"allowSelfAssign":  true,
+		"selfAssignReason": "Requires coordinator-only context",
+	})
+	if _, err := tool.Execute(context.Background(), raw); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	task, ok := store.tasks["task-coord-self-override"]
+	if !ok {
+		t.Fatalf("expected self-assigned coordinator task to be created")
+	}
+	if got := strings.TrimSpace(fmt.Sprint(task.Metadata["allowSelfAssign"])); got != "true" {
+		t.Fatalf("allowSelfAssign metadata=%q want true", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(task.Metadata["selfAssignReason"])); got == "" {
+		t.Fatalf("selfAssignReason metadata should be captured")
+	}
+}
+
 func TestTaskCreateTool_WorkerCannotAssignOtherWorker(t *testing.T) {
 	store := newFakeTaskStore()
 	tool := &TaskCreateTool{
@@ -491,6 +547,31 @@ func TestTaskCreateTool_AliasAssignedRole_TeamMode(t *testing.T) {
 	}
 	if task.AssignedRole != "researcher" {
 		t.Fatalf("expected assignedRole researcher, got %q", task.AssignedRole)
+	}
+}
+
+func TestTaskCreateTool_AliasSelfAssignFields_TeamMode(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-1",
+		RunID:           "run-1",
+		TeamID:          "team-1",
+		RoleName:        "coordinator",
+		IsCoordinator:   true,
+		CoordinatorRole: "coordinator",
+		ValidRoles:      []string{"coordinator", "researcher"},
+	}
+	raw := json.RawMessage(`{"goal":"self route","task_id":"task-self-alias","assigned_role":"coordinator","allow_self_assign":true,"self_assign_reason":"needs coordinator"}`)
+	if _, err := tool.Execute(context.Background(), raw); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	task, ok := store.tasks["task-self-alias"]
+	if !ok {
+		t.Fatalf("expected task created with self-assign aliases")
+	}
+	if got := strings.TrimSpace(fmt.Sprint(task.Metadata["allowSelfAssign"])); got != "true" {
+		t.Fatalf("allowSelfAssign metadata=%q want true", got)
 	}
 }
 

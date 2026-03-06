@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +18,8 @@ import (
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
 )
+
+var warnLegacyTeamFallbackOnce sync.Once
 
 type sessionRunBatchReader interface {
 	ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error)
@@ -743,6 +748,37 @@ func normalizeAssignedToType(s string) string {
 	}
 }
 
+func legacyTeamFallbackEnabled() bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("AGEN8_LEGACY_TEAM_FALLBACK")))
+	enabled := raw == "1" || raw == "true" || raw == "yes" || raw == "on"
+	if enabled {
+		warnLegacyTeamFallbackOnce.Do(func() {
+			log.Printf("rpc: AGEN8_LEGACY_TEAM_FALLBACK is enabled; implicit team fallback remains active and should be removed after compatibility window")
+		})
+	}
+	return enabled
+}
+
+func (s *RPCServer) deriveDefaultTeamRole(ctx context.Context, scope artifactScope) string {
+	runID := strings.TrimSpace(scope.runID)
+	if runID != "" && s.session != nil {
+		if run, err := s.session.LoadRun(ctx, runID); err == nil && run.Runtime != nil {
+			if role := strings.TrimSpace(run.Runtime.Role); role != "" {
+				return role
+			}
+		}
+	}
+	teamID := strings.TrimSpace(scope.teamID)
+	if teamID == "" || runID == "" {
+		return ""
+	}
+	_, roleByRun := s.loadTeamManifestRunRoles(ctx, teamID)
+	if len(roleByRun) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(roleByRun[runID])
+}
+
 func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams) (protocol.TaskCreateResult, error) {
 	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
 	if err != nil {
@@ -754,17 +790,31 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	}
 	now := time.Now().UTC()
 	taskID := "task-" + uuid.NewString()
+	rawAssignedToType := strings.TrimSpace(p.AssignedToType)
 	assignedToType := normalizeAssignedToType(p.AssignedToType)
+	if rawAssignedToType != "" && assignedToType == "" {
+		return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType must be one of: role, agent, team"}
+	}
 	assignedTo := strings.TrimSpace(p.AssignedTo)
 	assignedRole := strings.TrimSpace(p.AssignedRole)
+	teamScope := strings.TrimSpace(scope.teamID) != ""
 	if assignedToType == "" {
-		if scope.teamID != "" {
+		if teamScope {
 			if assignedRole != "" {
 				assignedToType = "role"
 				assignedTo = assignedRole
-			} else {
+			} else if derivedRole := s.deriveDefaultTeamRole(ctx, scope); derivedRole != "" {
+				assignedRole = derivedRole
+				assignedToType = "role"
+				assignedTo = derivedRole
+			} else if legacyTeamFallbackEnabled() {
 				assignedToType = "team"
 				assignedTo = scope.teamID
+			} else {
+				return protocol.TaskCreateResult{}, &protocol.ProtocolError{
+					Code:    protocol.CodeInvalidParams,
+					Message: "team task routing requires explicit assignee (assignedRole or assignedToType+assignedTo)",
+				}
 			}
 		} else {
 			assignedToType = "agent"
@@ -774,12 +824,27 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	if assignedTo == "" {
 		switch assignedToType {
 		case "team":
+			if !teamScope {
+				return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType=team requires team scope"}
+			}
 			assignedTo = scope.teamID
 		case "role":
+			if assignedRole == "" && teamScope {
+				assignedRole = s.deriveDefaultTeamRole(ctx, scope)
+			}
 			assignedTo = assignedRole
+			if strings.TrimSpace(assignedTo) == "" {
+				return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType=role requires assignedRole or assignedTo"}
+			}
 		case "agent":
 			assignedTo = scope.runID
+			if strings.TrimSpace(assignedTo) == "" {
+				return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType=agent requires assignedTo or run scope"}
+			}
 		}
+	}
+	if assignedToType == "role" && assignedRole == "" {
+		assignedRole = strings.TrimSpace(assignedTo)
 	}
 	taskRunID := strings.TrimSpace(scope.runID)
 	if taskRunID == "" && strings.EqualFold(assignedToType, "agent") {

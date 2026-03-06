@@ -120,10 +120,11 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "no model resolved for role " + roleName}
 		}
 		run.Runtime = &types.RunRuntimeConfig{
-			Profile: strings.TrimSpace(prof.ID),
-			Model:   roleModel,
-			TeamID:  strings.TrimSpace(teamID),
-			Role:    roleName,
+			Profile:     strings.TrimSpace(prof.ID),
+			Model:       roleModel,
+			TeamID:      strings.TrimSpace(teamID),
+			Role:        roleName,
+			WorkerClass: "persistent",
 		}
 		if err := srv.session.SaveRun(ctx, run); err != nil {
 			return protocol.SessionStartResult{}, err
@@ -164,10 +165,11 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 		}
 		reviewerName := strings.TrimSpace(reviewerCfg.EffectiveName())
 		reviewerRun.Runtime = &types.RunRuntimeConfig{
-			Profile: strings.TrimSpace(prof.ID),
-			Model:   reviewerModel,
-			TeamID:  strings.TrimSpace(teamID),
-			Role:    reviewerName,
+			Profile:     strings.TrimSpace(prof.ID),
+			Model:       reviewerModel,
+			TeamID:      strings.TrimSpace(teamID),
+			Role:        reviewerName,
+			WorkerClass: "persistent",
 		}
 		if err := srv.session.SaveRun(ctx, reviewerRun); err != nil {
 			return protocol.SessionStartResult{}, err

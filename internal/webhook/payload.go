@@ -89,8 +89,10 @@ func BuildTeamTask(payload []byte, teamID, coordinatorRole string, run types.Run
 		}
 	}
 	assignedRole := strings.TrimSpace(p.AssignedRole)
+	defaultedToCoordinator := false
 	if assignedRole == "" {
 		assignedRole = coordinatorRole
+		defaultedToCoordinator = true
 	}
 	if len(validRoles) != 0 {
 		if _, ok := validRoles[assignedRole]; !ok {
@@ -119,5 +121,8 @@ func BuildTeamTask(payload []byte, teamID, coordinatorRole string, run types.Run
 		task.Metadata = map[string]any{}
 	}
 	task.Metadata["source"] = "webhook"
+	if defaultedToCoordinator {
+		task.Metadata["routingDefault"] = "coordinator_role"
+	}
 	return task, nil
 }

@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8/pkg/types"
 )
+
+var warnLegacyTeamFallbackOnce sync.Once
 
 const routingVersion = 1
 
@@ -80,9 +85,11 @@ func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task ty
 				task.AssignedTo = task.AssignedRole
 			} else if task.AssignedTo != "" {
 				task.AssignedToType = "agent"
-			} else {
+			} else if legacyTeamFallbackEnabled() {
 				task.AssignedToType = "team"
 				task.AssignedTo = task.TeamID
+			} else {
+				return task, fmt.Errorf("routing.violation: team task %s missing assignee route", task.TaskID)
 			}
 		}
 		switch task.AssignedToType {
@@ -125,6 +132,17 @@ func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task ty
 	task.Metadata["routingRecipients"] = []string{task.AssignedToType + ":" + task.AssignedTo}
 	task.Metadata["routingScopes"] = routingScopes(task)
 	return task, nil
+}
+
+func legacyTeamFallbackEnabled() bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("AGEN8_LEGACY_TEAM_FALLBACK")))
+	enabled := raw == "1" || raw == "true" || raw == "yes" || raw == "on"
+	if enabled {
+		warnLegacyTeamFallbackOnce.Do(func() {
+			log.Printf("task routing: AGEN8_LEGACY_TEAM_FALLBACK is enabled; implicit team fallback remains active and should be removed after compatibility window")
+		})
+	}
+	return enabled
 }
 
 func routingReasonCode(callback bool, teamID, assigneeType string) string {

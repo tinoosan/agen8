@@ -134,6 +134,9 @@ func TestBuildCoordinatorTeamRules_IncludesNoSelfReviewGuidance(t *testing.T) {
 	if !strings.Contains(rules, `NEVER use spawnWorker=True`) {
 		t.Fatalf("expected coordinator spawnWorker prohibition for multi-role team, got: %s", rules)
 	}
+	if !strings.Contains(rules, "allowSelfAssign=true") {
+		t.Fatalf("expected coordinator self-assign override guidance, got: %s", rules)
+	}
 }
 
 func TestBuildCoordinatorTeamRules_SingleAgentAllowsSpawnWorker(t *testing.T) {

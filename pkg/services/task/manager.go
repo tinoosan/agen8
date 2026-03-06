@@ -25,6 +25,7 @@ type activeTaskCanceler interface {
 type Manager struct {
 	store        state.TaskStore
 	messageStore state.MessageStore
+	scheduler    messageScheduler
 	runLoader    RunLoader
 	oracle       *RoutingOracle
 	events       taskEventAppender
@@ -37,6 +38,23 @@ type taskEventAppender interface {
 
 type batchCloseStore interface {
 	CloseBatchAndHandoffAtomic(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (handoffTaskID string, approved, retried, escalated int, err error)
+}
+
+// messageScheduler is an internal extension seam for message-claim policy.
+// Default behavior delegates to the message store's atomic claim implementation.
+type messageScheduler interface {
+	ClaimNextMessage(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error)
+}
+
+type messageStoreScheduler struct {
+	store state.MessageStore
+}
+
+func (s messageStoreScheduler) ClaimNextMessage(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+	if s.store == nil {
+		return types.AgentMessage{}, fmt.Errorf("message store is not configured")
+	}
+	return s.store.ClaimNextMessage(ctx, filter, ttl, consumerID)
 }
 
 type taskWakeFilter struct {
@@ -55,6 +73,7 @@ func NewManager(store state.TaskStore, runLoader RunLoader) *Manager {
 	return &Manager{
 		store:        store,
 		messageStore: messageStore,
+		scheduler:    messageStoreScheduler{store: messageStore},
 		runLoader:    runLoader,
 		watchers:     wake.NewSignalHub[taskWakeFilter](),
 	}
@@ -76,6 +95,20 @@ func (m *Manager) SetEventsStore(store taskEventAppender) {
 
 func (m *Manager) SetMessageStore(store state.MessageStore) {
 	m.messageStore = store
+	m.scheduler = messageStoreScheduler{store: store}
+}
+
+// SetMessageScheduler overrides the default message-claim behavior.
+// Passing nil restores delegation to the configured message store.
+func (m *Manager) SetMessageScheduler(scheduler messageScheduler) {
+	if m == nil {
+		return
+	}
+	if scheduler == nil {
+		m.scheduler = messageStoreScheduler{store: m.messageStore}
+		return
+	}
+	m.scheduler = scheduler
 }
 
 // SubscribeWake returns a channel that receives best-effort wake signals when matching
@@ -322,6 +355,14 @@ func (m *Manager) CreateTask(ctx context.Context, task types.Task) error {
 		"assignedTo":   strings.TrimSpace(task.AssignedTo),
 		"teamId":       strings.TrimSpace(task.TeamID),
 	})
+	if metadataBool(task.Metadata, "allowSelfAssign") {
+		m.emitRoutingEvent(ctx, task, "team.coordinator.self_assign.allowed", "Coordinator self-assignment override accepted", map[string]string{
+			"taskId":           strings.TrimSpace(task.TaskID),
+			"role":             strings.TrimSpace(task.AssignedRole),
+			"createdBy":        strings.TrimSpace(task.CreatedBy),
+			"selfAssignReason": strings.TrimSpace(metadataString(task.Metadata, "selfAssignReason")),
+		})
+	}
 	m.notifyWake(task)
 	return nil
 }
@@ -631,6 +672,11 @@ func (m *Manager) ClaimTask(ctx context.Context, taskID string, ttl time.Duratio
 	} else {
 		msg, err = m.claimBackingMessageForTask(ctx, task, ttl)
 		if err != nil {
+			if errors.Is(err, state.ErrTaskMissingMessage) {
+				m.emitRoutingEvent(ctx, task, "task.message.missing", "Task claim blocked: backing message envelope missing", map[string]string{
+					"taskId": strings.TrimSpace(task.TaskID),
+				})
+			}
 			return err
 		}
 	}
@@ -671,6 +717,11 @@ func (m *Manager) ensureTaskHasBackingMessage(ctx context.Context, task types.Ta
 		return types.AgentMessage{}, err
 	}
 	if len(msgs) == 0 {
+		m.emitRoutingEvent(ctx, task, "task.message.missing", "Task missing backing inbox message envelope", map[string]string{
+			"taskId":       strings.TrimSpace(task.TaskID),
+			"assignedType": strings.TrimSpace(task.AssignedToType),
+			"assignedTo":   strings.TrimSpace(task.AssignedTo),
+		})
 		return types.AgentMessage{}, state.ErrTaskMissingMessage
 	}
 	return msgs[0], nil
@@ -699,7 +750,11 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 		Channel:        types.MessageChannelInbox,
 		Kinds:          []string{types.MessageKindTask, types.MessageKindUserInput},
 	}
-	msg, err := m.messageStore.ClaimNextMessage(ctx, filter, ttl, consumerID)
+	scheduler := m.scheduler
+	if scheduler == nil {
+		scheduler = messageStoreScheduler{store: m.messageStore}
+	}
+	msg, err := scheduler.ClaimNextMessage(ctx, filter, ttl, consumerID)
 	if err == nil {
 		return msg, nil
 	}
@@ -708,7 +763,7 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	if errors.Is(err, state.ErrMessageNotFound) && strings.TrimSpace(task.TeamID) != "" {
 		relaxed := filter
 		relaxed.ThreadID = ""
-		msg, err = m.messageStore.ClaimNextMessage(ctx, relaxed, ttl, consumerID)
+		msg, err = scheduler.ClaimNextMessage(ctx, relaxed, ttl, consumerID)
 		if err == nil {
 			return msg, nil
 		}
@@ -728,6 +783,11 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 		return types.AgentMessage{}, lerr
 	}
 	if len(msgs) == 0 {
+		m.emitRoutingEvent(ctx, task, "task.message.missing", "Task claim blocked: no message candidates found", map[string]string{
+			"taskId":       strings.TrimSpace(task.TaskID),
+			"assignedType": strings.TrimSpace(task.AssignedToType),
+			"assignedTo":   strings.TrimSpace(task.AssignedTo),
+		})
 		return types.AgentMessage{}, state.ErrTaskMissingMessage
 	}
 	claimedByOther := false
@@ -803,10 +863,14 @@ func (m *Manager) PublishMessage(ctx context.Context, msg types.AgentMessage) (t
 }
 
 func (m *Manager) ClaimNextMessage(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
-	if m == nil || m.messageStore == nil {
+	if m == nil {
 		return types.AgentMessage{}, fmt.Errorf("message store is not configured")
 	}
-	return m.messageStore.ClaimNextMessage(ctx, filter, ttl, consumerID)
+	scheduler := m.scheduler
+	if scheduler == nil {
+		scheduler = messageStoreScheduler{store: m.messageStore}
+	}
+	return scheduler.ClaimNextMessage(ctx, filter, ttl, consumerID)
 }
 
 func (m *Manager) AckMessage(ctx context.Context, messageID string, result state.MessageAckResult) error {

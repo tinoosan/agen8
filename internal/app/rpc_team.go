@@ -265,16 +265,35 @@ func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManif
 		}
 	}
 	return protocol.TeamGetManifestResult{
-		TeamID:          strings.TrimSpace(manifest.TeamID),
-		ProfileID:       strings.TrimSpace(manifest.ProfileID),
-		TeamModel:       strings.TrimSpace(manifest.TeamModel),
-		ModelChange:     modelChange,
-		CoordinatorRole: strings.TrimSpace(manifest.CoordinatorRole),
-		ReviewerRole:    s.resolveManifestReviewerRole(manifest.ProfileID, manifest.CoordinatorRole),
-		CoordinatorRun:  strings.TrimSpace(manifest.CoordinatorRun),
-		Roles:           roles,
-		CreatedAt:       strings.TrimSpace(manifest.CreatedAt),
+		TeamID:                strings.TrimSpace(manifest.TeamID),
+		ProfileID:             strings.TrimSpace(manifest.ProfileID),
+		TeamModel:             strings.TrimSpace(manifest.TeamModel),
+		ModelChange:           modelChange,
+		CoordinatorRole:       strings.TrimSpace(manifest.CoordinatorRole),
+		ReviewerRole:          s.resolveManifestReviewerRole(manifest.ProfileID, manifest.CoordinatorRole),
+		CoordinatorRun:        strings.TrimSpace(manifest.CoordinatorRun),
+		Roles:                 roles,
+		DesiredReplicasByRole: cloneDesiredReplicas(manifest.DesiredReplicasByRole),
+		CreatedAt:             strings.TrimSpace(manifest.CreatedAt),
 	}, nil
+}
+
+func cloneDesiredReplicas(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(in))
+	for role, replicas := range in {
+		role = strings.TrimSpace(role)
+		if role == "" || replicas <= 0 {
+			continue
+		}
+		out[role] = replicas
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s *RPCServer) resolveManifestReviewerRole(profileID, coordinatorRole string) string {

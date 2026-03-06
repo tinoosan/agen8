@@ -20,6 +20,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/profile"
 	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	pkgtask "github.com/tinoosan/agen8/pkg/services/task"
+	"github.com/tinoosan/agen8/pkg/services/team"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -1458,4 +1459,247 @@ func TestRuntimeSupervisor_LifecycleOrdering(t *testing.T) {
 			t.Fatalf("expected stale exit to leave newer handle intact")
 		}
 	})
+}
+
+func TestRuntimeSupervisor_SyncOnce_ScalesRolePoolUpToDesiredReplicas(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	taskSvc := pkgtask.NewManager(ts, nil)
+	store := team.NewFileManifestStore(cfg)
+
+	sess, run, err := implstore.CreateSession(cfg, "scale up", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.TeamID = "team-scale-up"
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	run.Runtime = &types.RunRuntimeConfig{
+		TeamID:      "team-scale-up",
+		Role:        "researcher",
+		WorkerClass: "persistent",
+		Model:       "openai/gpt-5-mini",
+		Profile:     "general",
+	}
+	if err := sessionSvc.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun template: %v", err)
+	}
+	manifest := team.Manifest{
+		TeamID:          "team-scale-up",
+		ProfileID:       "general",
+		CoordinatorRole: "coordinator",
+		CoordinatorRun:  run.RunID,
+		Roles: []team.RoleRecord{
+			{RoleName: "researcher", RunID: run.RunID, SessionID: sess.SessionID},
+		},
+		DesiredReplicasByRole: map[string]int{"researcher": 2},
+		CreatedAt:             time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := store.Save(context.Background(), manifest); err != nil {
+		t.Fatalf("Save manifest: %v", err)
+	}
+
+	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+		Cfg:            cfg,
+		TaskService:    taskSvc,
+		SessionService: sessionSvc,
+	})
+	supervisor.spawnOverride = func(_ context.Context, sess types.Session, runID string) (*managedRuntime, error) {
+		done := make(chan struct{})
+		close(done)
+		return &managedRuntime{
+			runID:     runID,
+			sessionID: sess.SessionID,
+			cancel:    func() {},
+			done:      done,
+		}, nil
+	}
+
+	if err := supervisor.syncOnce(context.Background()); err != nil {
+		t.Fatalf("syncOnce: %v", err)
+	}
+
+	runs, err := sessionSvc.ListRunsByStatus(context.Background(), []string{types.RunStatusRunning, types.RunStatusPaused})
+	if err != nil {
+		t.Fatalf("ListRunsByStatus: %v", err)
+	}
+	persistentResearchers := 0
+	for _, candidate := range runs {
+		if candidate.Runtime == nil {
+			continue
+		}
+		if strings.TrimSpace(candidate.Runtime.TeamID) != "team-scale-up" {
+			continue
+		}
+		if strings.TrimSpace(candidate.Runtime.Role) != "researcher" {
+			continue
+		}
+		if strings.TrimSpace(candidate.Runtime.WorkerClass) != "persistent" {
+			continue
+		}
+		persistentResearchers++
+	}
+	if persistentResearchers != 2 {
+		t.Fatalf("persistent researcher workers=%d want 2", persistentResearchers)
+	}
+	loadedManifest, err := store.Load(context.Background(), "team-scale-up")
+	if err != nil {
+		t.Fatalf("Load manifest: %v", err)
+	}
+	if loadedManifest == nil {
+		t.Fatalf("manifest unexpectedly missing")
+	}
+	roleBindings := 0
+	for _, role := range loadedManifest.Roles {
+		if strings.EqualFold(strings.TrimSpace(role.RoleName), "researcher") {
+			roleBindings++
+		}
+	}
+	if roleBindings != 2 {
+		t.Fatalf("manifest researcher bindings=%d want 2", roleBindings)
+	}
+}
+
+func TestRuntimeSupervisor_SyncOnce_ScalesRolePoolDownDeterministically(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	taskSvc := pkgtask.NewManager(ts, nil)
+	store := team.NewFileManifestStore(cfg)
+
+	sess, oldest, err := implstore.CreateSession(cfg, "scale down", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.TeamID = "team-scale-down"
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	middle := types.NewRun("scale down middle", 8*1024, sess.SessionID)
+	newest := types.NewRun("scale down newest", 8*1024, sess.SessionID)
+	oldest.Runtime = &types.RunRuntimeConfig{
+		TeamID:      "team-scale-down",
+		Role:        "researcher",
+		WorkerClass: "persistent",
+		Model:       "openai/gpt-5-mini",
+		Profile:     "general",
+	}
+	middle.Runtime = &types.RunRuntimeConfig{
+		TeamID:      "team-scale-down",
+		Role:        "researcher",
+		WorkerClass: "persistent",
+		Model:       "openai/gpt-5-mini",
+		Profile:     "general",
+	}
+	newest.Runtime = &types.RunRuntimeConfig{
+		TeamID:      "team-scale-down",
+		Role:        "researcher",
+		WorkerClass: "persistent",
+		Model:       "openai/gpt-5-mini",
+		Profile:     "general",
+	}
+	base := time.Now().UTC().Add(-10 * time.Minute)
+	oldest.StartedAt = &base
+	midAt := base.Add(1 * time.Minute)
+	middle.StartedAt = &midAt
+	newAt := base.Add(2 * time.Minute)
+	newest.StartedAt = &newAt
+	if err := sessionSvc.SaveRun(context.Background(), oldest); err != nil {
+		t.Fatalf("SaveRun oldest: %v", err)
+	}
+	if err := sessionSvc.SaveRun(context.Background(), middle); err != nil {
+		t.Fatalf("SaveRun middle: %v", err)
+	}
+	if _, err := sessionSvc.AddRunToSession(context.Background(), sess.SessionID, middle.RunID); err != nil {
+		t.Fatalf("AddRunToSession middle: %v", err)
+	}
+	if err := sessionSvc.SaveRun(context.Background(), newest); err != nil {
+		t.Fatalf("SaveRun newest: %v", err)
+	}
+	if _, err := sessionSvc.AddRunToSession(context.Background(), sess.SessionID, newest.RunID); err != nil {
+		t.Fatalf("AddRunToSession newest: %v", err)
+	}
+	manifest := team.Manifest{
+		TeamID:          "team-scale-down",
+		ProfileID:       "general",
+		CoordinatorRole: "coordinator",
+		CoordinatorRun:  oldest.RunID,
+		Roles: []team.RoleRecord{
+			{RoleName: "researcher", RunID: oldest.RunID, SessionID: sess.SessionID},
+			{RoleName: "researcher", RunID: middle.RunID, SessionID: sess.SessionID},
+			{RoleName: "researcher", RunID: newest.RunID, SessionID: sess.SessionID},
+		},
+		DesiredReplicasByRole: map[string]int{"researcher": 1},
+		CreatedAt:             time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := store.Save(context.Background(), manifest); err != nil {
+		t.Fatalf("Save manifest: %v", err)
+	}
+
+	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+		Cfg:            cfg,
+		TaskService:    taskSvc,
+		SessionService: sessionSvc,
+	})
+	supervisor.spawnOverride = func(_ context.Context, sess types.Session, runID string) (*managedRuntime, error) {
+		done := make(chan struct{})
+		close(done)
+		return &managedRuntime{
+			runID:     runID,
+			sessionID: sess.SessionID,
+			cancel:    func() {},
+			done:      done,
+		}, nil
+	}
+
+	if err := supervisor.syncOnce(context.Background()); err != nil {
+		t.Fatalf("syncOnce: %v", err)
+	}
+
+	kept, err := sessionSvc.LoadRun(context.Background(), oldest.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun oldest: %v", err)
+	}
+	if strings.TrimSpace(kept.Status) != types.RunStatusRunning {
+		t.Fatalf("oldest run status=%q want %q", kept.Status, types.RunStatusRunning)
+	}
+	stoppedMiddle, err := sessionSvc.LoadRun(context.Background(), middle.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun middle: %v", err)
+	}
+	if strings.TrimSpace(stoppedMiddle.Status) == types.RunStatusRunning {
+		t.Fatalf("middle run should be drained from active pool, status=%q", stoppedMiddle.Status)
+	}
+	stoppedNewest, err := sessionSvc.LoadRun(context.Background(), newest.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun newest: %v", err)
+	}
+	if strings.TrimSpace(stoppedNewest.Status) == types.RunStatusRunning {
+		t.Fatalf("newest run should be drained from active pool, status=%q", stoppedNewest.Status)
+	}
+
+	loadedManifest, err := store.Load(context.Background(), "team-scale-down")
+	if err != nil {
+		t.Fatalf("Load manifest: %v", err)
+	}
+	if loadedManifest == nil {
+		t.Fatalf("manifest unexpectedly missing")
+	}
+	researcherRuns := []string{}
+	for _, role := range loadedManifest.Roles {
+		if strings.EqualFold(strings.TrimSpace(role.RoleName), "researcher") {
+			researcherRuns = append(researcherRuns, strings.TrimSpace(role.RunID))
+		}
+	}
+	if len(researcherRuns) != 1 || researcherRuns[0] != oldest.RunID {
+		t.Fatalf("remaining researcher role bindings=%v want [%s]", researcherRuns, oldest.RunID)
+	}
 }

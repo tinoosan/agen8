@@ -56,7 +56,7 @@ func (t *TaskCreateTool) assignedRoleDescription() string {
 
 func (t *TaskCreateTool) teamModeDescription() string {
 	if t != nil && t.IsCoordinator {
-		return "[TASKS] Create a new pending task in SQLite. In team mode, coordinators must delegate by creating tasks with an explicit assignedRole for each task. This is DB-routed (no /inbox file writes)."
+		return "[TASKS] Create a new pending task in SQLite. In team mode, coordinators must delegate by creating tasks with an explicit assignedRole for each task. In multi-role teams, assigning to your own coordinator role requires allowSelfAssign=true with selfAssignReason. This is DB-routed (no /inbox file writes)."
 	}
 	return "[TASKS] Create a new pending task in SQLite. In team mode, delegate work by creating tasks and assigning them to roles via assignedRole. Omit assignedRole to assign to your own role. This is DB-routed (no /inbox file writes)."
 }
@@ -97,6 +97,14 @@ func (t *TaskCreateTool) definitionTeamOnly() llmtypes.Tool {
 					"assignedRole": map[string]any{
 						"type":        "string",
 						"description": t.assignedRoleDescription(),
+					},
+					"allowSelfAssign": map[string]any{
+						"type":        "boolean",
+						"description": "Coordinator-only override. Required when assigning normal work to your own coordinator role in a multi-role team.",
+					},
+					"selfAssignReason": map[string]any{
+						"type":        "string",
+						"description": "Required when allowSelfAssign=true for coordinator self-assignment; explain why this should not be delegated.",
 					},
 				},
 				"required":             []any{"goal"},
@@ -143,6 +151,14 @@ func (t *TaskCreateTool) definitionWithSpawnWorker() llmtypes.Tool {
 						"type":        "string",
 						"description": t.assignedRoleDescription(),
 					},
+					"allowSelfAssign": map[string]any{
+						"type":        "boolean",
+						"description": "Coordinator-only override. Required when assigning normal work to your own coordinator role in a multi-role team.",
+					},
+					"selfAssignReason": map[string]any{
+						"type":        "string",
+						"description": "Required when allowSelfAssign=true for coordinator self-assignment; explain why this should not be delegated.",
+					},
 					"spawnWorker": map[string]any{
 						"type":        "boolean",
 						"description": "Set to true when breaking down a large task into smaller tasks (one per subtask), e.g. research, comparative analysis, audits, parallelizable work, or when the user or goal requests subagents (required when the goal requests subagents). In the goal, ask the worker to write outputs under /workspace. After spawning, do not poll or repeatedly check; callbacks will be provided when workers finish. Do not sleep or wait.",
@@ -165,13 +181,15 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	}
 
 	var payload struct {
-		Goal         string         `json:"goal"`
-		Priority     *int           `json:"priority"`
-		TaskID       string         `json:"taskId"`
-		Inputs       map[string]any `json:"inputs"`
-		Metadata     map[string]any `json:"metadata"`
-		AssignedRole string         `json:"assignedRole"`
-		SpawnWorker  bool           `json:"spawnWorker"`
+		Goal             string         `json:"goal"`
+		Priority         *int           `json:"priority"`
+		TaskID           string         `json:"taskId"`
+		Inputs           map[string]any `json:"inputs"`
+		Metadata         map[string]any `json:"metadata"`
+		AssignedRole     string         `json:"assignedRole"`
+		AllowSelfAssign  bool           `json:"allowSelfAssign"`
+		SelfAssignReason string         `json:"selfAssignReason"`
+		SpawnWorker      bool           `json:"spawnWorker"`
 	}
 	if err := json.Unmarshal(normalizedArgs, &payload); err != nil {
 		return types.HostOpRequest{}, err
@@ -236,6 +254,24 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		task.AssignedToType = "role"
 		task.AssignedTo = assignedRole
 		task.CreatedBy = roleName
+		if t.IsCoordinator && !payload.SpawnWorker {
+			coordinatorRole := strings.TrimSpace(t.CoordinatorRole)
+			if coordinatorRole == "" {
+				coordinatorRole = roleName
+			}
+			multiRole := hasNonCoordinatorRole(t.ValidRoles, coordinatorRole)
+			if multiRole && strings.EqualFold(strings.TrimSpace(assignedRole), coordinatorRole) {
+				if !payload.AllowSelfAssign {
+					return types.HostOpRequest{}, fmt.Errorf("task_create.allowSelfAssign=true and task_create.selfAssignReason are required for coordinator self-assignment in multi-role teams")
+				}
+				reason := strings.TrimSpace(payload.SelfAssignReason)
+				if reason == "" {
+					return types.HostOpRequest{}, fmt.Errorf("task_create.selfAssignReason is required when allowSelfAssign=true for coordinator self-assignment")
+				}
+				task.Metadata["allowSelfAssign"] = true
+				task.Metadata["selfAssignReason"] = reason
+			}
+		}
 		if parentTaskID != "" && assignedRole != roleName {
 			task.Metadata["batchMode"] = true
 			task.Metadata["batchParentTaskId"] = parentTaskID
@@ -323,19 +359,23 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 }
 
 var taskCreateCanonicalKeys = []string{
+	"allowSelfAssign",
 	"assignedRole",
 	"goal",
 	"inputs",
 	"metadata",
 	"priority",
+	"selfAssignReason",
 	"spawnWorker",
 	"taskId",
 }
 
 var taskCreateAliasToCanonical = map[string]string{
-	"assigned_role": "assignedRole",
-	"spawn_worker":  "spawnWorker",
-	"task_id":       "taskId",
+	"allow_self_assign":  "allowSelfAssign",
+	"assigned_role":      "assignedRole",
+	"self_assign_reason": "selfAssignReason",
+	"spawn_worker":       "spawnWorker",
+	"task_id":            "taskId",
 }
 
 func normalizeTaskCreateArgs(args json.RawMessage) (json.RawMessage, error) {
@@ -413,6 +453,25 @@ func rawJSONEqual(a, b json.RawMessage) bool {
 		return false
 	}
 	return reflect.DeepEqual(left, right)
+}
+
+func hasNonCoordinatorRole(validRoles []string, coordinatorRole string) bool {
+	coordinatorRole = strings.TrimSpace(coordinatorRole)
+	seen := map[string]struct{}{}
+	for _, role := range validRoles {
+		role = strings.TrimSpace(role)
+		if role == "" {
+			continue
+		}
+		if _, ok := seen[role]; ok {
+			continue
+		}
+		seen[role] = struct{}{}
+		if !strings.EqualFold(role, coordinatorRole) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *TaskCreateTool) validateAssignedRole(assignedRole string) error {

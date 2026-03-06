@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -386,7 +387,10 @@ func (s *runtimeSupervisor) subagentAwaitingReviewTimeout() time.Duration {
 	if s == nil {
 		return defaultSubagentAwaitingReviewTimeout
 	}
-	raw := strings.TrimSpace(os.Getenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT"))
+	raw := strings.TrimSpace(os.Getenv("AGEN8_EPHEMERAL_IDLE_TIMEOUT"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT"))
+	}
 	if raw == "" {
 		return defaultSubagentAwaitingReviewTimeout
 	}
@@ -475,6 +479,283 @@ func (s *runtimeSupervisor) Run(ctx context.Context) {
 			s.maybeRepairRoutingDrift(ctx)
 		}
 	}
+}
+
+func (s *runtimeSupervisor) runWithPollingFallback(ctx context.Context) {
+	t := time.NewTicker(1 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.stopAll()
+			return
+		case <-t.C:
+			if err := s.syncOnce(ctx); err != nil {
+				log.Printf("daemon: runtime supervisor sync failed: %v", err)
+			}
+		}
+	}
+}
+
+func (s *runtimeSupervisor) stopAll() {
+	s.stopAllHandles()
+}
+
+func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
+	if s == nil || s.sessionService == nil {
+		return nil
+	}
+	runs, err := s.sessionService.ListRunsByStatus(ctx, []string{types.RunStatusRunning, types.RunStatusPaused})
+	if err != nil {
+		return err
+	}
+	teamIDs := map[string]struct{}{}
+	for _, run := range runs {
+		sess, lerr := s.loadSessionWithTimeout(ctx, strings.TrimSpace(run.SessionID))
+		if lerr != nil {
+			log.Printf("daemon: load session for run %s: %v", run.RunID, lerr)
+			continue
+		}
+		teamID := strings.TrimSpace(sess.TeamID)
+		if teamID != "" {
+			teamIDs[teamID] = struct{}{}
+		}
+		if teamID != "" && run.Runtime != nil && strings.TrimSpace(run.Runtime.Role) == "" {
+			if _, roleByRun := loadTeamManifestRunRolesFromStore(ctx, team.NewFileManifestStore(s.cfg), teamID); len(roleByRun) != 0 {
+				if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
+					run.Runtime.Role = role
+					_ = s.sessionService.SaveRun(ctx, run)
+				}
+			}
+		}
+		if err := s.handleSpawn(ctx, supervisorCmd{
+			kind:      cmdSpawn,
+			runID:     strings.TrimSpace(run.RunID),
+			sessionID: strings.TrimSpace(run.SessionID),
+			sess:      &sess,
+		}); err != nil {
+			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
+		}
+	}
+	for teamID := range teamIDs {
+		if err := s.reconcileTeamRoleReplicas(ctx, teamID); err != nil {
+			log.Printf("daemon: role replica reconcile failed for team %s: %v", teamID, err)
+		}
+	}
+	s.maybeRepairRoutingDrift(ctx)
+	return nil
+}
+
+func workerClassForRun(run types.Run) string {
+	if run.Runtime != nil {
+		switch strings.ToLower(strings.TrimSpace(run.Runtime.WorkerClass)) {
+		case "persistent":
+			return "persistent"
+		case "ephemeral":
+			return "ephemeral"
+		}
+	}
+	if strings.TrimSpace(run.ParentRunID) != "" {
+		return "ephemeral"
+	}
+	return "persistent"
+}
+
+func stableRunLess(a, b types.Run) bool {
+	at := time.Time{}
+	if a.StartedAt != nil {
+		at = a.StartedAt.UTC()
+	}
+	bt := time.Time{}
+	if b.StartedAt != nil {
+		bt = b.StartedAt.UTC()
+	}
+	if !at.Equal(bt) {
+		return at.Before(bt)
+	}
+	return strings.TrimSpace(a.RunID) < strings.TrimSpace(b.RunID)
+}
+
+func (s *runtimeSupervisor) reconcileTeamRoleReplicas(ctx context.Context, teamID string) error {
+	if s == nil || s.sessionService == nil {
+		return nil
+	}
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return nil
+	}
+	store := team.NewFileManifestStore(s.cfg)
+	manifest, err := store.Load(ctx, teamID)
+	if err != nil || manifest == nil {
+		return err
+	}
+	desired := cloneDesiredReplicas(manifest.DesiredReplicasByRole)
+	if len(desired) == 0 {
+		return nil
+	}
+	runs, err := s.sessionService.ListRunsByStatus(ctx, []string{types.RunStatusRunning, types.RunStatusPaused})
+	if err != nil {
+		return err
+	}
+	roleRuns := map[string][]types.Run{}
+	for _, run := range runs {
+		if strings.TrimSpace(run.ParentRunID) != "" {
+			continue
+		}
+		if run.Runtime == nil || strings.TrimSpace(run.Runtime.TeamID) != teamID {
+			continue
+		}
+		if workerClassForRun(run) != "persistent" {
+			continue
+		}
+		role := strings.TrimSpace(run.Runtime.Role)
+		if role == "" {
+			continue
+		}
+		roleRuns[role] = append(roleRuns[role], run)
+	}
+
+	manifestChanged := false
+	for role, target := range desired {
+		role = strings.TrimSpace(role)
+		if role == "" || target <= 0 {
+			continue
+		}
+		current := roleRuns[role]
+		sort.SliceStable(current, func(i, j int) bool { return stableRunLess(current[i], current[j]) })
+		if len(current) < target {
+			needed := target - len(current)
+			for i := 0; i < needed; i++ {
+				newRun, newSessionID, spawnErr := s.spawnPersistentReplica(ctx, teamID, role, manifest)
+				if spawnErr != nil {
+					return spawnErr
+				}
+				manifest.Roles = append(manifest.Roles, team.RoleRecord{
+					RoleName:  role,
+					RunID:     strings.TrimSpace(newRun.RunID),
+					SessionID: strings.TrimSpace(newSessionID),
+				})
+				manifestChanged = true
+				current = append(current, newRun)
+				roleRuns[role] = current
+				if sess, lerr := s.loadSessionWithTimeout(ctx, newSessionID); lerr == nil {
+					if err := s.handleSpawn(ctx, supervisorCmd{
+						kind:      cmdSpawn,
+						runID:     strings.TrimSpace(newRun.RunID),
+						sessionID: strings.TrimSpace(newSessionID),
+						sess:      &sess,
+					}); err != nil {
+						log.Printf("daemon: start scaled replica %s: %v", newRun.RunID, err)
+					}
+				}
+			}
+			continue
+		}
+		if len(current) <= target {
+			continue
+		}
+		extras := current[target:]
+		for i := len(extras) - 1; i >= 0; i-- {
+			runID := strings.TrimSpace(extras[i].RunID)
+			if runID == "" {
+				continue
+			}
+			if err := s.stopRun(ctx, runID); err != nil {
+				return err
+			}
+			manifest.Roles = removeManifestRoleRun(manifest.Roles, runID)
+			if strings.EqualFold(strings.TrimSpace(manifest.CoordinatorRole), role) && strings.EqualFold(strings.TrimSpace(manifest.CoordinatorRun), runID) {
+				manifest.CoordinatorRun = ""
+			}
+			manifestChanged = true
+		}
+		kept := current[:target]
+		if strings.EqualFold(strings.TrimSpace(manifest.CoordinatorRole), role) && strings.TrimSpace(manifest.CoordinatorRun) == "" && len(kept) > 0 {
+			sort.SliceStable(kept, func(i, j int) bool { return stableRunLess(kept[i], kept[j]) })
+			manifest.CoordinatorRun = strings.TrimSpace(kept[0].RunID)
+		}
+	}
+	if !manifestChanged {
+		return nil
+	}
+	return store.Save(ctx, *manifest)
+}
+
+func removeManifestRoleRun(roles []team.RoleRecord, runID string) []team.RoleRecord {
+	runID = strings.TrimSpace(runID)
+	if runID == "" || len(roles) == 0 {
+		return roles
+	}
+	out := make([]team.RoleRecord, 0, len(roles))
+	for _, role := range roles {
+		if strings.EqualFold(strings.TrimSpace(role.RunID), runID) {
+			continue
+		}
+		out = append(out, role)
+	}
+	return out
+}
+
+func (s *runtimeSupervisor) spawnPersistentReplica(ctx context.Context, teamID, roleName string, manifest *team.Manifest) (types.Run, string, error) {
+	teamID = strings.TrimSpace(teamID)
+	roleName = strings.TrimSpace(roleName)
+	if teamID == "" || roleName == "" {
+		return types.Run{}, "", fmt.Errorf("teamID and roleName are required")
+	}
+	var templateRun types.Run
+	templateSessionID := ""
+	if manifest != nil {
+		for _, role := range manifest.Roles {
+			if !strings.EqualFold(strings.TrimSpace(role.RoleName), roleName) {
+				continue
+			}
+			runID := strings.TrimSpace(role.RunID)
+			if runID == "" {
+				continue
+			}
+			run, err := s.sessionService.LoadRun(ctx, runID)
+			if err != nil {
+				continue
+			}
+			templateRun = run
+			templateSessionID = strings.TrimSpace(role.SessionID)
+			break
+		}
+	}
+	if strings.TrimSpace(templateRun.RunID) == "" {
+		return types.Run{}, "", fmt.Errorf("no template run found for team=%s role=%s", teamID, roleName)
+	}
+	if templateSessionID == "" {
+		templateSessionID = strings.TrimSpace(templateRun.SessionID)
+	}
+	if templateSessionID == "" {
+		return types.Run{}, "", fmt.Errorf("template session is missing for role %s", roleName)
+	}
+	goal := strings.TrimSpace(templateRun.Goal)
+	if goal == "" {
+		goal = roleName + " worker"
+	}
+	maxContext := templateRun.MaxBytesForContext
+	if maxContext <= 0 {
+		maxContext = 8 * 1024
+	}
+	run := types.NewRun(goal, maxContext, templateSessionID)
+	if templateRun.Runtime != nil {
+		cfg := *templateRun.Runtime
+		run.Runtime = &cfg
+	} else {
+		run.Runtime = &types.RunRuntimeConfig{}
+	}
+	run.Runtime.TeamID = teamID
+	run.Runtime.Role = roleName
+	run.Runtime.WorkerClass = "persistent"
+	if err := s.sessionService.SaveRun(ctx, run); err != nil {
+		return types.Run{}, "", err
+	}
+	if _, err := s.sessionService.AddRunToSession(ctx, templateSessionID, run.RunID); err != nil {
+		return types.Run{}, "", err
+	}
+	return run, templateSessionID, nil
 }
 
 func (s *runtimeSupervisor) maybeRepairRoutingDrift(ctx context.Context) {
@@ -1589,6 +1870,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	if run.Runtime == nil {
 		run.Runtime = &types.RunRuntimeConfig{}
 	}
+	if strings.TrimSpace(run.ParentRunID) != "" {
+		run.Runtime.WorkerClass = "ephemeral"
+	} else if strings.TrimSpace(run.Runtime.WorkerClass) == "" {
+		run.Runtime.WorkerClass = "persistent"
+	}
 	run.Runtime.Profile = strings.TrimSpace(role.prof.ID)
 	run.Runtime.TeamID = role.teamID
 	run.Runtime.Role = role.roleName
@@ -2279,6 +2565,7 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 			DataDir:        s.cfg.DataDir,
 			Model:          subagentModel,
 			Role:           fmt.Sprintf("Subagent-%d", spawnIndex),
+			WorkerClass:    "ephemeral",
 			LifecycleState: "spawn_requested",
 			LeaseID:        "lease-" + childRun.RunID,
 		}

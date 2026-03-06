@@ -45,7 +45,7 @@ type RepeatedInvalidToolCallError struct {
 func (e *RepeatedInvalidToolCallError) Error() string {
 	msg := fmt.Sprintf("agent repeated invalid tool call: tool=%s count=%d reason=%s", fallbackLabel(e.ToolName), e.Count, strings.TrimSpace(e.LastError))
 	if e.Coordinator {
-		msg += " hint=coordinator task_create calls must include assignedRole"
+		msg += " hint=coordinator task_create calls must include assignedRole; coordinator self-assignment in multi-role teams requires allowSelfAssign=true and selfAssignReason"
 	}
 	return msg
 }
@@ -264,7 +264,10 @@ func shouldEmitCoordinatorHint(toolName, detail string) bool {
 		return false
 	}
 	detail = strings.ToLower(strings.TrimSpace(detail))
-	return strings.Contains(detail, "assignedrole") && strings.Contains(detail, "coordinator")
+	if !strings.Contains(detail, "coordinator") {
+		return false
+	}
+	return strings.Contains(detail, "assignedrole") || strings.Contains(detail, "allowselfassign") || strings.Contains(detail, "selfassignreason")
 }
 
 func fallbackReason(current, fallback string) string {

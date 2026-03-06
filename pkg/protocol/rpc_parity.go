@@ -276,15 +276,16 @@ type TeamManifestRole struct {
 }
 
 type TeamGetManifestResult struct {
-	TeamID          string                   `json:"teamId"`
-	ProfileID       string                   `json:"profileId"`
-	TeamModel       string                   `json:"teamModel,omitempty"`
-	ModelChange     *TeamManifestModelChange `json:"modelChange,omitempty"`
-	CoordinatorRole string                   `json:"coordinatorRole"`
-	ReviewerRole    string                   `json:"reviewerRole,omitempty"`
-	CoordinatorRun  string                   `json:"coordinatorRunId"`
-	Roles           []TeamManifestRole       `json:"roles"`
-	CreatedAt       string                   `json:"createdAt"`
+	TeamID                string                   `json:"teamId"`
+	ProfileID             string                   `json:"profileId"`
+	TeamModel             string                   `json:"teamModel,omitempty"`
+	ModelChange           *TeamManifestModelChange `json:"modelChange,omitempty"`
+	CoordinatorRole       string                   `json:"coordinatorRole"`
+	ReviewerRole          string                   `json:"reviewerRole,omitempty"`
+	CoordinatorRun        string                   `json:"coordinatorRunId"`
+	Roles                 []TeamManifestRole       `json:"roles"`
+	DesiredReplicasByRole map[string]int           `json:"desiredReplicasByRole,omitempty"`
+	CreatedAt             string                   `json:"createdAt"`
 }
 
 type PlanGetParams struct {
