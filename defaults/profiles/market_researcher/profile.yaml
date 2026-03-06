@@ -1,7 +1,7 @@
 id: market_researcher
 description: Focused profile for macro and sector market research.
 team:
-  model: openai/gpt-5.1-codex-mini
+  model: moonshotai/kimi-k2.5
   reviewer:
     enabled: true
     name: reviewer
@@ -26,8 +26,8 @@ team:
     - name: Market Researcher
       coordinator: true
       allow_subagents: true
-      model: openai/gpt-5.1-codex-mini
-      subagent_model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
+      subagent_model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
