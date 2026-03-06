@@ -48,6 +48,12 @@ func registerSessionHandlers(s *RPCServer, reg methodRegistry) error {
 			return addBoundHandler[protocol.ItemListParams, protocol.ItemListResult](reg, protocol.MethodItemList, false, s.itemList)
 		},
 		func() error {
+			return addBoundHandler[protocol.MessageListParams, protocol.MessageListResult](reg, protocol.MethodMessageList, false, s.messageList)
+		},
+		func() error {
+			return addBoundHandler[protocol.MessageGetParams, protocol.MessageGetResult](reg, protocol.MethodMessageGet, false, s.messageGet)
+		},
+		func() error {
 			return addBoundHandler[protocol.TaskListParams, protocol.TaskListResult](reg, protocol.MethodTaskList, false, s.taskList)
 		},
 		func() error {

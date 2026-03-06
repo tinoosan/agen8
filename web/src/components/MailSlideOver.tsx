@@ -2,14 +2,17 @@ import { useState } from 'react'
 import { useStore } from '../lib/store'
 import { useMail } from '../hooks/useMail'
 import { X, ArrowUpRight } from 'lucide-react'
-import type { Task } from '../lib/types'
+import type { MailMessage } from '../lib/types'
 
 interface MailSlideOverProps {
   teamId: string
 }
 
-function TaskRow({ task, onSelect, selected }: { task: Task; onSelect: () => void; selected: boolean }) {
-  const isCrossTeam = task.assignedToType === 'team' || (task.teamId && task.assignedTo && task.teamId !== task.assignedTo)
+function MailRow({ message, onSelect, selected }: { message: MailMessage; onSelect: () => void; selected: boolean }) {
+  const task = message.task
+  const isCrossTeam = task?.assignedToType === 'team' || (task?.teamId && task?.assignedTo && task.teamId !== task.assignedTo)
+  const displayStatus = task?.status ?? message.status
+  const label = task?.goal ?? message.subject ?? message.summary ?? message.bodyPreview ?? message.kind
 
   return (
     <div
@@ -22,15 +25,15 @@ function TaskRow({ task, onSelect, selected }: { task: Task; onSelect: () => voi
     >
       <span style={{
         fontSize: 8, width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-        background: task.status === 'pending' ? '#f59e0b' : task.status === 'failed' ? '#ef4444' : task.status === 'done' ? '#22c55e' : '#71717a',
+        background: displayStatus === 'pending' ? '#f59e0b' : displayStatus === 'failed' ? '#ef4444' : displayStatus === 'succeeded' || displayStatus === 'acked' ? '#22c55e' : '#71717a',
       }} />
       <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {task.goal}
+        {label}
       </span>
       {isCrossTeam && (
         <ArrowUpRight size={10} style={{ opacity: 0.5, flexShrink: 0 }} />
       )}
-      {task.assignedRole && (
+      {task?.assignedRole && (
         <span style={{ fontSize: 10, opacity: 0.45, flexShrink: 0 }}>
           {task.assignedRole}
         </span>
@@ -42,7 +45,7 @@ function TaskRow({ task, onSelect, selected }: { task: Task; onSelect: () => voi
 export default function MailSlideOver({ teamId }: MailSlideOverProps) {
   const { setMailOpen } = useStore()
   const { inbox, outbox, claim, complete } = useMail(teamId)
-  const [selected, setSelected] = useState<Task | null>(null)
+  const [selected, setSelected] = useState<MailMessage | null>(null)
 
   return (
     <div
@@ -81,8 +84,8 @@ export default function MailSlideOver({ teamId }: MailSlideOverProps) {
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.35, padding: '0 12px 6px' }}>
                 Inbox ({inbox.length})
               </div>
-              {inbox.map(t => (
-                <TaskRow key={t.id} task={t} onSelect={() => setSelected(t)} selected={selected?.id === t.id} />
+              {inbox.map(message => (
+                <MailRow key={message.messageId} message={message} onSelect={() => setSelected(message)} selected={selected?.messageId === message.messageId} />
               ))}
             </>
           )}
@@ -92,45 +95,53 @@ export default function MailSlideOver({ teamId }: MailSlideOverProps) {
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.35, padding: '12px 12px 6px' }}>
                 Outbox ({outbox.length})
               </div>
-              {outbox.map(t => (
-                <TaskRow key={t.id} task={t} onSelect={() => setSelected(t)} selected={selected?.id === t.id} />
+              {outbox.map(message => (
+                <MailRow key={message.messageId} message={message} onSelect={() => setSelected(message)} selected={selected?.messageId === message.messageId} />
               ))}
             </>
           )}
 
           {inbox.length === 0 && outbox.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', opacity: 0.3, fontSize: 13 }}>No tasks</div>
+            <div style={{ padding: 24, textAlign: 'center', opacity: 0.3, fontSize: 13 }}>No messages</div>
           )}
         </div>
 
-        {/* Task detail */}
+        {/* Message detail */}
         {selected && (
           <div style={{
             padding: 16, borderTop: '1px solid light-dark(rgba(0,0,0,0.08), rgba(255,255,255,0.08))',
           }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{selected.goal}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              {selected.task?.goal ?? selected.subject ?? selected.summary ?? selected.kind}
+            </div>
             {selected.summary && (
               <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 8 }}>{selected.summary}</div>
             )}
-            {selected.error && (
-              <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 8 }}>{selected.error}</div>
+            {selected.bodyPreview && selected.bodyPreview !== selected.summary && (
+              <div style={{ fontSize: 12, opacity: 0.55, marginBottom: 8 }}>{selected.bodyPreview}</div>
+            )}
+            {(selected.task?.error ?? selected.error) && (
+              <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 8 }}>{selected.task?.error ?? selected.error}</div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
-              {selected.status === 'pending' && (
+              {selected.canClaim && selected.taskId && (
                 <button
-                  onClick={() => claim(selected.id)}
+                  onClick={() => claim(selected.taskId!)}
                   style={{ fontSize: 12, padding: '5px 12px', borderRadius: 8, border: '1px solid currentColor', background: 'none', cursor: 'pointer', color: 'inherit' }}
                 >
                   Claim
                 </button>
               )}
-              {(selected.status === 'claimed' || selected.status === 'active') && (
+              {selected.canComplete && selected.taskId && (
                 <button
-                  onClick={() => complete({ taskId: selected.id })}
+                  onClick={() => complete({ taskId: selected.taskId! })}
                   style={{ fontSize: 12, padding: '5px 12px', borderRadius: 8, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer' }}
                 >
                   Complete
                 </button>
+              )}
+              {(selected.readOnly || !selected.taskId) && (
+                <span style={{ fontSize: 11, opacity: 0.45, alignSelf: 'center' }}>Read-only message</span>
               )}
             </div>
           </div>

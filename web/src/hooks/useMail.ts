@@ -1,29 +1,37 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
-import type { Task } from '../lib/types'
+import type { MailMessage } from '../lib/types'
 
-interface TaskListParams {
+interface MessageListParams {
   teamId?: string
-  status?: string
+  view?: 'inbox' | 'outbox'
   limit?: number
 }
 
-interface TaskListResult {
-  tasks: Task[]
+interface MessageListResult {
+  messages: MailMessage[]
 }
 
 export function useMail(teamId: string | null) {
   const queryClient = useQueryClient()
-  const key = ['task.list', teamId]
+  const key = ['message.list', teamId]
 
-  const query = useQuery<Task[]>({
+  const query = useQuery<MailMessage[]>({
     queryKey: key,
     queryFn: async () => {
-      const res = await rpcCall<TaskListResult>('task.list', {
-        teamId: teamId ?? undefined,
-        limit: 100,
-      } satisfies TaskListParams)
-      return res.tasks ?? []
+      const [inboxRes, outboxRes] = await Promise.all([
+        rpcCall<MessageListResult>('message.list', {
+          teamId: teamId ?? undefined,
+          view: 'inbox',
+          limit: 100,
+        } satisfies MessageListParams),
+        rpcCall<MessageListResult>('message.list', {
+          teamId: teamId ?? undefined,
+          view: 'outbox',
+          limit: 100,
+        } satisfies MessageListParams),
+      ])
+      return [...(inboxRes.messages ?? []), ...(outboxRes.messages ?? [])]
     },
     enabled: !!teamId,
     refetchInterval: 3000,
@@ -42,8 +50,9 @@ export function useMail(teamId: string | null) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
   })
 
-  const inbox = query.data?.filter(t => t.status === 'pending' || t.status === 'claimed') ?? []
-  const outbox = query.data?.filter(t => t.status === 'done' || t.status === 'failed') ?? []
+  const messages = query.data ?? []
+  const inbox = messages.filter(m => !isOutboxMessage(m))
+  const outbox = messages.filter(m => isOutboxMessage(m))
   const badgeCount = inbox.length
 
   return {
@@ -54,4 +63,12 @@ export function useMail(teamId: string | null) {
     claim: claimMutation.mutate,
     complete: completeMutation.mutate,
   }
+}
+
+function isOutboxMessage(message: MailMessage): boolean {
+  const taskStatus = message.taskStatus ?? message.task?.status
+  if (taskStatus) {
+    return taskStatus === 'review_pending' || taskStatus === 'succeeded' || taskStatus === 'failed' || taskStatus === 'canceled'
+  }
+  return message.channel === 'outbox' || message.status === 'acked' || message.status === 'deadletter'
 }

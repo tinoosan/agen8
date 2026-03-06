@@ -7,6 +7,8 @@ const (
 	MethodTurnCreate             = "turn.create"
 	MethodTurnCancel             = "turn.cancel"
 	MethodItemList               = "item.list"
+	MethodMessageList            = "message.list"
+	MethodMessageGet             = "message.get"
 	MethodTaskList               = "task.list"
 	MethodTaskClaim              = "task.claim"
 	MethodTaskCreate             = "task.create"

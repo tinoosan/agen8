@@ -61,19 +61,28 @@ type sessionSyncedMsg struct {
 
 type taskEntry struct {
 	ID              string
+	MessageID       string
 	RunID           string
 	Role            string
 	Goal            string
 	Status          string
+	MessageStatus   string
+	Kind            string
+	Channel         string
 	DisplayStatus   string
 	Source          string
 	Summary         string
+	Subject         string
+	BodyPreview     string
 	Error           string
 	InputTokens     int
 	OutputTokens    int
 	TotalTokens     int
 	CostUSD         float64
 	Artifacts       int
+	ReadOnly        bool
+	CanClaim        bool
+	CanComplete     bool
 	CreatedAt       time.Time
 	CompletedAt     time.Time
 	BatchMode       bool
@@ -104,14 +113,14 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			return dataLoadedMsg{preserve: true, connected: true, err: fmt.Errorf("%w: missing run/team scope", rpcscope.ErrScopeUnavailable)}
 		}
 
-		var inboxRes protocol.TaskListResult
+		var inboxRes protocol.MessageListResult
 		scopeMode := "run"
 		runID := strings.TrimSpace(scope.RunID)
 		if strings.TrimSpace(scope.TeamID) != "" {
 			scopeMode = "team"
 			runID = ""
 		}
-		if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
+		if err := client.Call(ctx, protocol.MethodMessageList, protocol.MessageListParams{
 			ThreadID: protocol.ThreadID(scope.ThreadID),
 			Scope:    scopeMode,
 			TeamID:   strings.TrimSpace(scope.TeamID),
@@ -126,8 +135,8 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			return dataLoadedMsg{err: err}
 		}
 
-		var outboxRes protocol.TaskListResult
-		if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
+		var outboxRes protocol.MessageListResult
+		if err := client.Call(ctx, protocol.MethodMessageList, protocol.MessageListParams{
 			ThreadID: protocol.ThreadID(scope.ThreadID),
 			Scope:    scopeMode,
 			TeamID:   strings.TrimSpace(scope.TeamID),
@@ -142,8 +151,8 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			return dataLoadedMsg{err: err}
 		}
 
-		inbox := filterTasks(inboxRes.Tasks, true)
-		outbox := filterTasks(outboxRes.Tasks, false)
+		inbox := filterMessages(inboxRes.Messages, true)
+		outbox := filterMessages(outboxRes.Messages, false)
 
 		var current *taskEntry
 		for i := range inbox {
@@ -162,26 +171,17 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 	}
 }
 
-func filterTasks(tasks []protocol.Task, isInbox bool) []taskEntry {
-	flat := make([]taskEntry, 0, len(tasks))
-	for _, t := range tasks {
-		status := strings.TrimSpace(t.Status)
-		if isInbox {
-			if status != string(types.TaskStatusPending) &&
-				status != string(types.TaskStatusActive) &&
-				status != string(types.TaskStatusReviewPending) {
-				continue
-			}
-		} else {
-			if status != string(types.TaskStatusReviewPending) &&
-				status != string(types.TaskStatusSucceeded) &&
-				status != string(types.TaskStatusFailed) &&
-				status != string(types.TaskStatusCanceled) {
-				continue
-			}
-		}
-		entry := taskEntryFromProtocol(t)
+func filterMessages(messages []protocol.MailMessage, isInbox bool) []taskEntry {
+	flat := make([]taskEntry, 0, len(messages))
+	for _, msg := range messages {
+		entry := taskEntryFromMessage(msg)
 		if entry.ID == "" {
+			continue
+		}
+		if isInbox && !matchesInbox(entry) {
+			continue
+		}
+		if !isInbox && !matchesOutbox(entry) {
 			continue
 		}
 		flat = append(flat, entry)
@@ -189,22 +189,55 @@ func filterTasks(tasks []protocol.Task, isInbox bool) []taskEntry {
 	return buildTaskProjection(flat)
 }
 
-func taskEntryFromProtocol(t protocol.Task) taskEntry {
+func taskEntryFromMessage(msg protocol.MailMessage) taskEntry {
+	t := msg.Task
+	if t == nil {
+		status := strings.TrimSpace(msg.Status)
+		return taskEntry{
+			ID:            strings.TrimSpace(msg.MessageID),
+			MessageID:     strings.TrimSpace(msg.MessageID),
+			RunID:         strings.TrimSpace(string(msg.RunID)),
+			Goal:          firstNonEmpty(strings.TrimSpace(msg.Subject), strings.TrimSpace(msg.Summary), strings.TrimSpace(msg.BodyPreview)),
+			Status:        status,
+			MessageStatus: status,
+			Kind:          strings.TrimSpace(msg.Kind),
+			Channel:       strings.TrimSpace(msg.Channel),
+			DisplayStatus: status,
+			Summary:       strings.TrimSpace(msg.Summary),
+			Subject:       strings.TrimSpace(msg.Subject),
+			BodyPreview:   strings.TrimSpace(msg.BodyPreview),
+			Error:         strings.TrimSpace(msg.Error),
+			ReadOnly:      msg.ReadOnly,
+			CanClaim:      msg.CanClaim,
+			CanComplete:   msg.CanComplete,
+			CreatedAt:     msg.CreatedAt,
+			CompletedAt:   derefTime(msg.ProcessedAt),
+		}
+	}
 	return taskEntry{
 		ID:              strings.TrimSpace(t.ID),
+		MessageID:       strings.TrimSpace(msg.MessageID),
 		RunID:           strings.TrimSpace(string(t.RunID)),
 		Role:            firstNonEmpty(strings.TrimSpace(t.AssignedRole), strings.TrimSpace(t.RoleSnapshot)),
 		Goal:            strings.TrimSpace(t.Goal),
 		Status:          strings.TrimSpace(t.Status),
+		MessageStatus:   strings.TrimSpace(msg.Status),
+		Kind:            strings.TrimSpace(msg.Kind),
+		Channel:         strings.TrimSpace(msg.Channel),
 		DisplayStatus:   strings.TrimSpace(t.Status),
 		Source:          strings.TrimSpace(t.Source),
 		Summary:         strings.TrimSpace(t.Summary),
-		Error:           strings.TrimSpace(t.Error),
+		Subject:         strings.TrimSpace(msg.Subject),
+		BodyPreview:     strings.TrimSpace(msg.BodyPreview),
+		Error:           firstNonEmpty(strings.TrimSpace(t.Error), strings.TrimSpace(msg.Error)),
 		InputTokens:     t.InputTokens,
 		OutputTokens:    t.OutputTokens,
 		TotalTokens:     t.TotalTokens,
 		CostUSD:         t.CostUSD,
 		Artifacts:       len(t.Artifacts),
+		ReadOnly:        msg.ReadOnly,
+		CanClaim:        msg.CanClaim,
+		CanComplete:     msg.CanComplete,
 		CreatedAt:       t.CreatedAt,
 		CompletedAt:     t.CompletedAt,
 		BatchMode:       t.BatchMode,
@@ -213,6 +246,42 @@ func taskEntryFromProtocol(t protocol.Task) taskEntry {
 		BatchParentID:   strings.TrimSpace(t.BatchParentTaskID),
 		BatchWaveID:     strings.TrimSpace(t.BatchWaveID),
 		BatchIncludedIn: strings.TrimSpace(t.BatchIncludedIn),
+	}
+}
+
+func derefTime(ts *time.Time) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.UTC()
+}
+
+func matchesInbox(entry taskEntry) bool {
+	if entry.ReadOnly {
+		switch entry.MessageStatus {
+		case types.MessageStatusPending, types.MessageStatusClaimed, types.MessageStatusNacked:
+			return true
+		default:
+			return false
+		}
+	}
+	switch entry.Status {
+	case string(types.TaskStatusPending), string(types.TaskStatusActive), string(types.TaskStatusReviewPending):
+		return true
+	default:
+		return false
+	}
+}
+
+func matchesOutbox(entry taskEntry) bool {
+	if entry.ReadOnly {
+		return entry.Channel == types.MessageChannelOutbox || entry.MessageStatus == types.MessageStatusAcked || entry.MessageStatus == types.MessageStatusDeadletter
+	}
+	switch entry.Status {
+	case string(types.TaskStatusReviewPending), string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled):
+		return true
+	default:
+		return false
 	}
 }
 
