@@ -16,8 +16,9 @@ var (
 )
 
 var sessionsCmd = &cobra.Command{
-	Use:   "sessions",
-	Short: "List and manage sessions",
+	Use:    "sessions",
+	Short:  "List and manage sessions",
+	Hidden: true,
 }
 
 var sessionsListCmd = &cobra.Command{
@@ -192,5 +193,4 @@ func init() {
 	sessionsCmd.AddCommand(sessionsResumeCmd)
 	sessionsCmd.AddCommand(sessionsStopCmd)
 	sessionsCmd.AddCommand(sessionsDeleteCmd)
-	rootCmd.AddCommand(sessionsCmd)
 }

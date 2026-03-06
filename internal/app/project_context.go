@@ -21,12 +21,12 @@ const (
 	ProjectConfigVersion  = 1
 )
 
-// ProjectConfig stores per-project defaults.
+// ProjectConfig stores per-project runtime settings.
 type ProjectConfig struct {
 	ProjectID          string
-	DefaultProfile     string
-	DefaultMode        string // single-agent|multi-agent
-	DefaultTeamProfile string
+	DefaultProfile     string // legacy read-compat only; new writes omit this field
+	DefaultMode        string // legacy read-compat only; new writes omit this field
+	DefaultTeamProfile string // legacy read-compat only; new writes omit this field
 	RPCEndpoint        string
 	DataDirOverride    string
 	ObsidianVaultPath  string
@@ -86,16 +86,29 @@ type projectConfigFileProject struct {
 	Version            int    `toml:"version"`
 }
 
+type projectConfigWriteFile struct {
+	Project projectConfigWriteProject `toml:"project"`
+}
+
+type projectConfigWriteProject struct {
+	ID                string `toml:"id"`
+	RPCEndpoint       string `toml:"rpc_endpoint"`
+	DataDirOverride   string `toml:"data_dir_override"`
+	ObsidianVaultPath string `toml:"obsidian_vault_path"`
+	ObsidianEnabled   *bool  `toml:"obsidian_enabled"`
+	CreatedAt         string `toml:"created_at"`
+	Version           int    `toml:"version"`
+}
+
 func defaultProjectConfig(baseDir string) ProjectConfig {
 	projectID := strings.TrimSpace(filepath.Base(baseDir))
 	if projectID == "" || projectID == "." || projectID == string(filepath.Separator) {
 		projectID = "agen8-project"
 	}
 	return ProjectConfig{
-		ProjectID:   projectID,
-		DefaultMode: "single-agent",
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
-		Version:     ProjectConfigVersion,
+		ProjectID: projectID,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Version:   ProjectConfigVersion,
 	}
 }
 
@@ -122,12 +135,12 @@ func normalizeProjectConfig(cfg ProjectConfig, baseDir string) ProjectConfig {
 	}
 	mode := strings.ToLower(strings.TrimSpace(out.DefaultMode))
 	switch mode {
-	case "team", "multi-agent":
+	case "team":
 		out.DefaultMode = "multi-agent"
-	case "standalone", "single-agent":
+	case "standalone":
 		out.DefaultMode = "single-agent"
 	default:
-		out.DefaultMode = "single-agent"
+		out.DefaultMode = strings.TrimSpace(mode)
 	}
 	return out
 }
@@ -348,22 +361,19 @@ func writeProjectConfig(path string, cfg ProjectConfig) error {
 	}
 	defer f.Close()
 
-	if _, err := f.WriteString("# Agen8 project defaults\n"); err != nil {
+	if _, err := f.WriteString("# Agen8 project settings\n"); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	enc := toml.NewEncoder(f)
-	if err := enc.Encode(projectConfigFile{
-		Project: projectConfigFileProject{
-			ID:                 cfg.ProjectID,
-			DefaultProfile:     cfg.DefaultProfile,
-			DefaultMode:        cfg.DefaultMode,
-			DefaultTeamProfile: cfg.DefaultTeamProfile,
-			RPCEndpoint:        cfg.RPCEndpoint,
-			DataDirOverride:    cfg.DataDirOverride,
-			ObsidianVaultPath:  cfg.ObsidianVaultPath,
-			ObsidianEnabled:    projectBoolPtr(cfg.ObsidianEnabled),
-			CreatedAt:          cfg.CreatedAt,
-			Version:            cfg.Version,
+	if err := enc.Encode(projectConfigWriteFile{
+		Project: projectConfigWriteProject{
+			ID:                cfg.ProjectID,
+			RPCEndpoint:       cfg.RPCEndpoint,
+			DataDirOverride:   cfg.DataDirOverride,
+			ObsidianVaultPath: cfg.ObsidianVaultPath,
+			ObsidianEnabled:   projectBoolPtr(cfg.ObsidianEnabled),
+			CreatedAt:         cfg.CreatedAt,
+			Version:           cfg.Version,
 		},
 	}); err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)

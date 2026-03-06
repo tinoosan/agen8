@@ -36,19 +36,19 @@ var runRootEntrypointFn = runSmartEntrypoint
 
 var rootCmd = &cobra.Command{
 	Use:   "agen8",
-	Short: "Agen8 control shell",
+	Short: "Agen8 project runtime for teams and tasks",
 	Long: strings.TrimSpace(`
-Agen8 is a local, agentic runtime built around a virtual filesystem (VFS).
+Agen8 runs a local agent runtime for your project.
 
-Running "agen8" opens the monitor client in detached control mode.
-Start the daemon with "agen8 daemon" and use /new, /sessions, or /agents
-from the monitor to attach context.
+Core workflow:
+  1. Start the runtime with "agen8 daemon start"
+  2. Bind the current project with "agen8 project init"
+  3. Inspect available team definitions with "agen8 team list"
+  4. Start work with a team using "agen8 team start <profile-ref>"
+  5. Operate the live system with "agen8 monitor"
 
-Protocol mode:
-  - Daemon uses --protocol-stdio by default.
-  - Use --protocol-stdio=false to disable JSON-RPC over stdin/stdout.
-  - Protocol mode is also auto-enabled when both stdin and stdout are non-TTY (piped).
-  - Monitor/daemon control-plane uses --rpc-endpoint (default 127.0.0.1:7777).
+Focused views remain available under "agen8 view ...", and raw runtime
+visibility is available with "agen8 logs".
 
 Each executed task can:
   - read/write run-scoped artifacts in /workspace
@@ -128,6 +128,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
 	profileRef = strings.TrimSpace(os.Getenv("AGEN8_PROFILE"))
 	rootCmd.PersistentFlags().StringVar(&profileRef, "profile", profileRef, "agent profile id or path (env AGEN8_PROFILE)")
+	_ = rootCmd.PersistentFlags().MarkHidden("profile")
 	authProvider = authpkg.NormalizeProvider(strings.TrimSpace(os.Getenv(authpkg.EnvAuthProvider)))
 	rootCmd.PersistentFlags().StringVar(&authProvider, "auth-provider", authProvider, "authentication provider (api_key or chatgpt_account; env AGEN8_AUTH_PROVIDER)")
 	webhookAddr = strings.TrimSpace(os.Getenv("AGEN8_WEBHOOK_ADDR"))

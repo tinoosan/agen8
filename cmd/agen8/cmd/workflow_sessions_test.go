@@ -1,11 +1,17 @@
 package cmd
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8/internal/app"
 	authpkg "github.com/tinoosan/agen8/pkg/auth"
+	"github.com/tinoosan/agen8/pkg/config"
+	"github.com/tinoosan/agen8/pkg/fsutil"
 )
 
 func TestAttachCommand_RequiresSessionID(t *testing.T) {
@@ -15,55 +21,6 @@ func TestAttachCommand_RequiresSessionID(t *testing.T) {
 
 	if err := attachCmd.RunE(attachCmd, nil); err == nil {
 		t.Fatalf("expected error when no session id is provided")
-	}
-}
-
-func TestProjectModeDefault(t *testing.T) {
-	tests := []struct {
-		configMode string
-		want       string
-	}{
-		{"team", "multi-agent"},
-		{"multi-agent", "multi-agent"},
-		{"standalone", "single-agent"},
-		{"single-agent", "single-agent"},
-		{"", "single-agent"},
-	}
-	for _, tc := range tests {
-		ctx := app.ProjectContext{
-			Exists: true,
-			Config: app.ProjectConfig{DefaultMode: tc.configMode},
-		}
-		if got := projectModeDefault(ctx); got != tc.want {
-			t.Errorf("projectModeDefault(DefaultMode=%q)=%q want %q", tc.configMode, got, tc.want)
-		}
-	}
-	// No project
-	if got := projectModeDefault(app.ProjectContext{}); got != "single-agent" {
-		t.Errorf("projectModeDefault(no project)=%q want single-agent", got)
-	}
-}
-
-func TestProjectProfileDefault(t *testing.T) {
-	ctx := app.ProjectContext{
-		Exists: true,
-		Config: app.ProjectConfig{
-			DefaultProfile:     "general",
-			DefaultTeamProfile: "startup_team",
-		},
-	}
-	if got := projectProfileDefault(ctx, "single-agent"); got != "general" {
-		t.Errorf("projectProfileDefault(single-agent)=%q want general", got)
-	}
-	if got := projectProfileDefault(ctx, "multi-agent"); got != "startup_team" {
-		t.Errorf("projectProfileDefault(multi-agent)=%q want startup_team", got)
-	}
-	if got := projectProfileDefault(ctx, "team"); got != "startup_team" {
-		t.Errorf("projectProfileDefault(team)=%q want startup_team", got)
-	}
-	ctx.Config.DefaultTeamProfile = ""
-	if got := projectProfileDefault(ctx, "multi-agent"); got != "general" {
-		t.Errorf("projectProfileDefault(multi-agent, no team profile)=%q want general", got)
 	}
 }
 
@@ -103,6 +60,11 @@ func TestRunNewSessionFlow_RequiresChatGPTLogin(t *testing.T) {
 	prevDataDir := dataDir
 	dataDir = t.TempDir()
 	t.Cleanup(func() { dataDir = prevDataDir })
+	origRequire := requireRuntimeAuthReadyFn
+	requireRuntimeAuthReadyFn = func(context.Context, config.Config) error {
+		return fmt.Errorf("run `agen8 auth login --provider chatgpt_account`")
+	}
+	t.Cleanup(func() { requireRuntimeAuthReadyFn = origRequire })
 
 	t.Setenv(authpkg.EnvAuthProvider, authpkg.ProviderChatGPTAccount)
 	err := runNewSessionFlow(newCmd, false)
@@ -118,6 +80,11 @@ func TestRunCoordinatorForSession_RequiresChatGPTLogin(t *testing.T) {
 	prevDataDir := dataDir
 	dataDir = t.TempDir()
 	t.Cleanup(func() { dataDir = prevDataDir })
+	origRequire := requireRuntimeAuthReadyFn
+	requireRuntimeAuthReadyFn = func(context.Context, config.Config) error {
+		return fmt.Errorf("run `agen8 auth login --provider chatgpt_account`")
+	}
+	t.Cleanup(func() { requireRuntimeAuthReadyFn = origRequire })
 
 	t.Setenv(authpkg.EnvAuthProvider, authpkg.ProviderChatGPTAccount)
 	err := runCoordinatorForSession(coordinatorCmd, "sess-123")
@@ -126,5 +93,138 @@ func TestRunCoordinatorForSession_RequiresChatGPTLogin(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "auth login") {
 		t.Fatalf("expected relogin guidance, got: %v", err)
+	}
+}
+
+func TestTeamStartCommand_RequiresProfileRef(t *testing.T) {
+	if err := teamStartCmd.Args(teamStartCmd, nil); err == nil {
+		t.Fatalf("expected missing profile-ref error")
+	}
+}
+
+func TestListProfileRefs_ReturnsOnlyProfileDirectories(t *testing.T) {
+	base := t.TempDir()
+	profilesDir := filepath.Join(base, "profiles")
+	if err := os.MkdirAll(filepath.Join(profilesDir, "startup_team"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profilesDir, "startup_team", "profile.yaml"), []byte("id: startup_team\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(profilesDir, "empty_dir"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	got := listProfileRefs(profilesDir)
+	if len(got) != 1 || got[0] != "startup_team" {
+		t.Fatalf("listProfileRefs=%v", got)
+	}
+}
+
+func TestTeamList_ShowsSharedAndProjectProfiles(t *testing.T) {
+	base := t.TempDir()
+	prevDataDir := dataDir
+	prevWorkDir := workDir
+	dataDir = base
+	workDir = base
+	t.Cleanup(func() {
+		dataDir = prevDataDir
+		workDir = prevWorkDir
+	})
+
+	if _, err := app.InitProject(base, app.ProjectConfig{}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+	sharedDir := filepath.Join(fsutil.GetProfilesDir(base), "startup_team")
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll shared: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedDir, "profile.yaml"), []byte("id: startup_team\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile shared: %v", err)
+	}
+	projectDir := filepath.Join(base, ".agen8", "profiles", "delivery_team")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "profile.yaml"), []byte("id: delivery_team\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile project: %v", err)
+	}
+
+	buf := new(strings.Builder)
+	teamListCmd.SetOut(buf)
+	teamListCmd.SetErr(buf)
+	teamListCmd.SetContext(context.Background())
+	t.Cleanup(func() {
+		teamListCmd.SetOut(nil)
+		teamListCmd.SetErr(nil)
+		teamListCmd.SetContext(context.Background())
+	})
+	if err := teamListCmd.RunE(teamListCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"startup_team", "shared-profile", "delivery_team", "project-profile"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "DEFAULT") {
+		t.Fatalf("unexpected default column in output:\n%s", out)
+	}
+}
+
+func TestProjectInitHelp_HidesProfileDefaultFlags(t *testing.T) {
+	buf := new(strings.Builder)
+	projectInitCmd.SetOut(buf)
+	projectInitCmd.SetErr(buf)
+	t.Cleanup(func() {
+		projectInitCmd.SetOut(nil)
+		projectInitCmd.SetErr(nil)
+	})
+	if err := projectInitCmd.Help(); err != nil {
+		t.Fatalf("Help: %v", err)
+	}
+	helpText := buf.String()
+	for _, unwanted := range []string{"--profile ", "--team-profile", "\n      --mode "} {
+		if strings.Contains(helpText, unwanted) {
+			t.Fatalf("help unexpectedly contains %q:\n%s", unwanted, helpText)
+		}
+	}
+}
+
+func TestProjectStatus_DoesNotShowDefaultFields(t *testing.T) {
+	base := t.TempDir()
+	prevDataDir := dataDir
+	prevWorkDir := workDir
+	dataDir = base
+	workDir = base
+	t.Cleanup(func() {
+		dataDir = prevDataDir
+		workDir = prevWorkDir
+	})
+
+	if _, err := app.InitProject(base, app.ProjectConfig{
+		DefaultProfile:     "general",
+		DefaultTeamProfile: "startup_team",
+	}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	buf := new(strings.Builder)
+	projectStatusCmd.SetOut(buf)
+	projectStatusCmd.SetErr(buf)
+	projectStatusCmd.SetContext(context.Background())
+	t.Cleanup(func() {
+		projectStatusCmd.SetOut(nil)
+		projectStatusCmd.SetErr(nil)
+		projectStatusCmd.SetContext(context.Background())
+	})
+	if err := projectStatusCmd.RunE(projectStatusCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	out := buf.String()
+	for _, unwanted := range []string{"default_team", "default_profile"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("status unexpectedly contains %q:\n%s", unwanted, out)
+		}
 	}
 }

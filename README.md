@@ -1,6 +1,6 @@
 # Agen8
 
-Agen8 Core is a local agentic runtime that exposes an interactive CLI for launching sessions, resuming previous runs, and inspecting every artifact the agent creates. It builds on a virtual filesystem (VFS) abstraction so tooling remains explicit, auditable, and reproducible.
+Agen8 Core runs a local agent runtime for your project. Teams do the work, tasks are how you ask for work, `monitor` is the current primary operator surface, and focused `view ...` commands expose dashboard, activity, and mail slices when you need them.
 
 ## Table of Contents
 
@@ -25,25 +25,17 @@ Agen8 Core is a local agentic runtime that exposes an interactive CLI for launch
 ### Build and launch
 
 1. Build the CLI: `go build ./cmd/agen8`.
-2. Start an interactive session: `./agen8`
-
-The Bubble Tea-powered UI treats every user message as an agent turn. Built-in capabilities (shell, HTTP, trace, etc.) appear in the embedded system prompt.
-
-### Resume or inspect a run
-
-```sh
-./agen8 list sessions             # show session IDs + metadata
-./agen8 resume <sessionId>        # continue the most recent run for that session
-./agen8 show run <runId>          # inspect run metadata
-./agen8 show history <sessionId>  # print the JSONL operation log
-```
-
-Sessions share a workspace under `dataDir/agents/<agentId>` and persist history + artifacts in SQLite-backed directories. Use `--new-run` to start a fresh run in the same session and isolate context.
+2. Start the runtime: `./agen8 daemon start`
+3. Bind the current project: `./agen8 project init`
+4. List teams: `./agen8 team list`
+5. Start work with a team: `./agen8 team start startup_team`
+6. Operate the live system: `./agen8 monitor`
 
 ### Rapid reference
 
-- `./agen8 monitor` attaches a minimalist observer to a running agent (start the daemon first).
-- Tail structured logs with `./agen8 logs --follow` and tool activity with `./agen8 activity --follow`.
+- `./agen8 monitor` is the current live operator surface.
+- Tail structured logs with `./agen8 logs --follow`.
+- Use focused views with `./agen8 view dashboard`, `./agen8 view activity`, and `./agen8 view mail`.
 - When you need flag help, run `./agen8 --help` or read [docs/cli-usage.md](docs/cli-usage.md).
 
 ## The Vision: Kubernetes for Agents
@@ -77,42 +69,35 @@ Agen8 exposes a virtual filesystem inside each run. Key mounts include:
 - `/plan` – planning workspace (`HEAD.md` + `CHECKLIST.md`).
 - `/memory` – shared agent memory (`MEMORY.MD` + daily `YYYY-MM-DD-memory.md` files).
 
-### Sessions vs. runs
+### Teams, tasks, and views
 
-- **Sessions** group runs and define the goal/context for an agent group (standalone or team).
-- **Runs** are the individual executions inside a session. Multiple runs may share artifacts and history as long as they remain under the same session.
+- **Teams** are the configured worker shapes available to a project.
+- **Tasks** are the units of work sent to the active team.
+- **Views** are the focused operational surfaces for observing the live runtime.
+- **Sessions** and **runs** still exist internally, but they are implementation details rather than the primary public model.
 
 ## Commands & workflows
 
 Agen8 ships a Cobra CLI that covers the full agent lifecycle. Use the tables below to pick the right command for creating, observing, and inspecting agents.
 
-### Session lifecycle commands
+### Public commands
 
 | Command | Purpose |
 | ------- | ------- |
-| `agen8 init` | Initialize `.agen8` and local defaults. |
-| `agen8 new --mode <mode>` | Start a new session (team or standalone) with the selected profile. |
-| `agen8` | Launch a fresh session/run with default context. |
-| `agen8 resume <sessionId>` | Continue the most recent run for a session; add `--new-run` for a clean workspace. |
-| `agen8 list sessions` | List stored session IDs, modes, timestamps, and statuses. |
-| `agen8 list runs <sessionId>` | Show run history with statuses, durations, and parent agent metadata. |
+| `agen8 daemon start|status|stop` | Manage the local runtime process. |
+| `agen8 project init|status` | Enable Agen8 for the current project and inspect its active state. |
+| `agen8 team list|start` | List available profile-backed teams and start work with one. |
+| `agen8 task send|list` | Send work to the active team and inspect team tasks. |
+| `agen8 monitor` | Open the primary live operator surface. |
+| `agen8 view dashboard|activity|mail` | Open focused operational views. |
+| `agen8 logs` | Inspect raw runtime events and structured logs. |
 
-### Observability & coordination commands
+### Administrative commands
 
 | Command | Purpose |
 | ------- | ------- |
-| `agen8 coordinator` | Attach to the coordinator-focused chat view. |
-| `agen8 monitor` | Observe a running agent in a minimalist UI (start the daemon first). |
-| `agen8 dashboard` | Read-only overview of sessions/runs/tasks/cost. |
-| `agen8 logs` | Query structured events (`--follow`, `--agent-id`, `--level`). |
-| `agen8 activity` | Tail the live activity stream for proposals and tool calls. |
-| `agen8 show session/run/history` | Dump metadata or the JSONL operation log for diagnostics. |
-
-### Support commands
-
-- `agen8 attach <sessionId>` – Attach to an existing session even after the daemon shuts down gracefully.
-- `agen8 stop <sessionId>` – Stop a session gracefully while preserving artifacts.
-- `agen8 --help` – List commands and flag documentation generated by Cobra.
+| `agen8 auth ...` | Manage runtime authentication. |
+| `agen8 profiles ...` | Validate or inspect profiles administratively. |
 
 ## Configuration
 
@@ -187,8 +172,7 @@ Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sa
 
 ## Troubleshooting
 
-- Logs live under `dataDir/agents/<agentId>/log` (JSON/trace artifacts). Use `./agen8 show run <agentId>` to understand failure reasons.
-- Re-run `./agen8 resume <sessionId>` with `--context-bytes`/`--trace-bytes` overrides to debug context truncation.
+- Logs live under `dataDir/agents/<agentId>/log` (JSON/trace artifacts). Use `./agen8 logs --follow` to inspect live runtime behavior.
 - The [Troubleshooting guide](docs/troubleshooting.md) covers stuck agents, missing artifacts, and configuration problems with quick remediations.
 
 ## Key documentation

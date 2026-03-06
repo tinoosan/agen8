@@ -16,8 +16,8 @@ var runDetachedMonitorFn = tui.RunMonitorDetached
 
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
-	Short: "Open monitoring dashboard for the running agent",
-	Long:  "Start the daemon first (agen8 or agen8 daemon), then run agen8 monitor. With no flags it starts detached; use /new, /sessions, or /agents to attach context.",
+	Short: "Open the primary live operator surface",
+	Long:  "Start the daemon first with `agen8 daemon start`, start work with `agen8 team start <profile-ref>`, then run `agen8 monitor` to operate the live system.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := effectiveConfig(cmd)
 		if err != nil {
@@ -64,5 +64,5 @@ var monitorCmd = &cobra.Command{
 
 func init() {
 	monitorCmd.Flags().StringVar(&monitorAgentID, "agent-id", "", "agent ID to attach to")
-	monitorCmd.Flags().StringVar(&monitorTeamID, "team-id", "", "team ID to attach to in multi-agent mode")
+	monitorCmd.Flags().StringVar(&monitorTeamID, "team-id", "", "team ID to attach to in a team-scoped session")
 }

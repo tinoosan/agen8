@@ -24,31 +24,6 @@ func loadProjectContext() (app.ProjectContext, error) {
 	return app.LoadProjectContext(projectSearchDir())
 }
 
-func projectModeDefault(ctx app.ProjectContext) string {
-	if !ctx.Exists {
-		return "single-agent"
-	}
-	mode := strings.ToLower(strings.TrimSpace(ctx.Config.DefaultMode))
-	if mode == "team" || mode == "multi-agent" {
-		return "multi-agent"
-	}
-	// standalone, single-agent, or unknown → single-agent
-	return "single-agent"
-}
-
-func projectProfileDefault(ctx app.ProjectContext, mode string) string {
-	if !ctx.Exists {
-		return ""
-	}
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	if mode == "team" || mode == "multi-agent" {
-		if p := strings.TrimSpace(ctx.Config.DefaultTeamProfile); p != "" {
-			return p
-		}
-	}
-	return strings.TrimSpace(ctx.Config.DefaultProfile)
-}
-
 func applyProjectDefaults(cmd *cobra.Command) error {
 	ctx, err := loadProjectContext()
 	if err != nil {
@@ -64,11 +39,6 @@ func applyProjectDefaults(cmd *cobra.Command) error {
 			if !rootFlags.Changed("rpc-endpoint") && strings.TrimSpace(os.Getenv("AGEN8_RPC_ENDPOINT")) == "" {
 				if endpoint := strings.TrimSpace(ctx.Config.RPCEndpoint); endpoint != "" {
 					rpcEndpoint = endpoint
-				}
-			}
-			if !rootFlags.Changed("profile") && strings.TrimSpace(os.Getenv("AGEN8_PROFILE")) == "" && strings.TrimSpace(profileRef) == "" {
-				if p := projectProfileDefault(ctx, projectModeDefault(ctx)); p != "" {
-					profileRef = p
 				}
 			}
 		}

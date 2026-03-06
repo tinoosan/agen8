@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -11,14 +12,10 @@ import (
 )
 
 var (
-	initProjectID          string
-	initDefaultProfile     string
-	initDefaultMode        string
-	initDefaultTeamProfile string
-	initRPCEndpoint        string
-	initDataDirOverride    string
+	initProjectID       string
+	initRPCEndpoint     string
+	initDataDirOverride string
 
-	newMode    string
 	newProfile string
 	newModel   string
 	newAttach  bool
@@ -30,18 +27,17 @@ var (
 
 var runCoordinatorFn func(cmd *cobra.Command, sessionID string) error
 var runCoordinatorShellFn func(cmd *cobra.Command, sessionID string, runID string, teamID string) error
+var requireRuntimeAuthReadyFn = requireRuntimeAuthReady
 
 var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize a project-local .agen8 workspace",
+	Use:    "init",
+	Short:  "Initialize a project-local .agen8 workspace",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, err := app.InitProject(projectSearchDir(), app.ProjectConfig{
-			ProjectID:          strings.TrimSpace(initProjectID),
-			DefaultProfile:     strings.TrimSpace(initDefaultProfile),
-			DefaultMode:        strings.TrimSpace(initDefaultMode),
-			DefaultTeamProfile: strings.TrimSpace(initDefaultTeamProfile),
-			RPCEndpoint:        strings.TrimSpace(initRPCEndpoint),
-			DataDirOverride:    strings.TrimSpace(initDataDirOverride),
+			ProjectID:       strings.TrimSpace(initProjectID),
+			RPCEndpoint:     strings.TrimSpace(initRPCEndpoint),
+			DataDirOverride: strings.TrimSpace(initDataDirOverride),
 		})
 		if err != nil {
 			return err
@@ -52,16 +48,18 @@ var initCmd = &cobra.Command{
 }
 
 var newCmd = &cobra.Command{
-	Use:   "new",
-	Short: "Create a new session for the current project",
+	Use:    "new",
+	Short:  "Create a new session for the current project",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runNewSessionFlow(cmd, newAttach)
 	},
 }
 
 var coordinatorCmd = &cobra.Command{
-	Use:   "coordinator",
-	Short: "Attach to a session coordinator view",
+	Use:    "coordinator",
+	Short:  "Attach to a session coordinator view",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID := strings.TrimSpace(coordinatorSessionID)
 		if sessionID == "" {
@@ -78,9 +76,10 @@ var coordinatorCmd = &cobra.Command{
 }
 
 var attachCmd = &cobra.Command{
-	Use:   "attach [session-id]",
-	Short: "Attach to an existing session coordinator",
-	Args:  cobra.MaximumNArgs(1),
+	Use:    "attach [session-id]",
+	Short:  "Attach to an existing session coordinator",
+	Hidden: true,
+	Args:   cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID := strings.TrimSpace(attachSessionID)
 		if sessionID == "" && len(args) > 0 {
@@ -102,13 +101,17 @@ func runCoordinatorForSession(cmd *cobra.Command, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := requireRuntimeAuthReady(cmd.Context(), cfg); err != nil {
+	ctx := context.Background()
+	if cmd != nil && cmd.Context() != nil {
+		ctx = cmd.Context()
+	}
+	if err := requireRuntimeAuthReadyFn(ctx, cfg); err != nil {
 		return err
 	}
-	runID, teamID, err := rpcResolveCoordinatorRun(cmd.Context(), sessionID)
+	runID, teamID, err := rpcResolveCoordinatorRun(ctx, sessionID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "thread not found") {
-			if resolved, rerr := rpcResolveThread(cmd.Context(), sessionID, ""); rerr == nil && resolved.Exists {
+			if resolved, rerr := rpcResolveThread(ctx, sessionID, ""); rerr == nil && resolved.Exists {
 				runID = strings.TrimSpace(resolved.RunID)
 				teamID = strings.TrimSpace(resolved.TeamID)
 			} else {
@@ -132,10 +135,14 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 	if err != nil {
 		return err
 	}
-	if err := requireRuntimeAuthReady(cmd.Context(), cfg); err != nil {
+	ctx := context.Background()
+	if cmd != nil && cmd.Context() != nil {
+		ctx = cmd.Context()
+	}
+	if err := requireRuntimeAuthReadyFn(ctx, cfg); err != nil {
 		return err
 	}
-	if err := rpcPing(cmd.Context()); err != nil {
+	if err := rpcPing(ctx); err != nil {
 		return err
 	}
 
@@ -143,29 +150,9 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 	if err != nil {
 		return err
 	}
-	mode := strings.ToLower(strings.TrimSpace(newMode))
-	if mode == "" {
-		mode = projectModeDefault(projectCtx)
-	}
-	if mode != "team" && mode != "standalone" && mode != "single-agent" && mode != "multi-agent" {
-		return fmt.Errorf("--mode must be single-agent or multi-agent")
-	}
-	// Normalize for RPC
-	if mode == "standalone" {
-		mode = "single-agent"
-	}
-	if mode == "team" {
-		mode = "multi-agent"
-	}
 	profile := strings.TrimSpace(newProfile)
 	if profile == "" {
-		profile = projectProfileDefault(projectCtx, mode)
-	}
-	if profile == "" {
-		profile = strings.TrimSpace(profileRef)
-	}
-	if mode == "multi-agent" && profile == "" {
-		return fmt.Errorf("multi-agent mode requires --profile or project default_team_profile")
+		return fmt.Errorf("profile ref is required; use `agen8 team start <profile-ref>`")
 	}
 
 	projectRoot := ""
@@ -174,9 +161,8 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 	}
 
 	var out protocol.SessionStartResult
-	if err := rpcCall(cmd.Context(), protocol.MethodSessionStart, protocol.SessionStartParams{
+	if err := rpcCall(ctx, protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID:    detachedThreadID,
-		Mode:        mode,
 		Profile:     profile,
 		Model:       strings.TrimSpace(newModel),
 		ProjectRoot: projectRoot,
@@ -191,7 +177,7 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 	if attach {
 		return runCoordinatorFn(cmd, out.SessionID)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Created %s session %s (run %s)\n", mode, out.SessionID, out.PrimaryRunID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Started team session %s (run %s)\n", out.SessionID, out.PrimaryRunID)
 	return nil
 }
 
@@ -202,13 +188,9 @@ func init() {
 	}
 
 	initCmd.Flags().StringVar(&initProjectID, "project-id", "", "override project identifier")
-	initCmd.Flags().StringVar(&initDefaultProfile, "profile", "", "default profile for single-agent mode")
-	initCmd.Flags().StringVar(&initDefaultMode, "mode", "single-agent", "default mode (single-agent|multi-agent)")
-	initCmd.Flags().StringVar(&initDefaultTeamProfile, "team-profile", "", "default profile for multi-agent mode")
 	initCmd.Flags().StringVar(&initRPCEndpoint, "rpc-endpoint", "", "default RPC endpoint for this project")
 	initCmd.Flags().StringVar(&initDataDirOverride, "data-dir", "", "project-level data-dir override")
 
-	newCmd.Flags().StringVar(&newMode, "mode", "", "session mode (single-agent|multi-agent)")
 	newCmd.Flags().StringVar(&newProfile, "profile", "", "profile id/path")
 	newCmd.Flags().StringVar(&newModel, "model", "", "model override")
 	newCmd.Flags().BoolVar(&newAttach, "attach", true, "attach coordinator after creating session")
@@ -216,8 +198,4 @@ func init() {
 	coordinatorCmd.Flags().StringVar(&coordinatorSessionID, "session-id", "", "session id to attach")
 	attachCmd.Flags().StringVar(&attachSessionID, "session-id", "", "session id to attach")
 
-	rootCmd.AddCommand(initCmd)
-	rootCmd.AddCommand(newCmd)
-	rootCmd.AddCommand(coordinatorCmd)
-	rootCmd.AddCommand(attachCmd)
 }
