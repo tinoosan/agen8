@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/internal/tui/modelpicker"
@@ -530,7 +529,8 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 	case sessionsListMsg:
 		if msg.err != nil {
 			m.sessionPickerErr = msg.err.Error()
-			m.sessionPickerList.SetItems(nil)
+			m.sessionPickerCtrl.SetItems(nil)
+			m.syncSessionPickerState()
 			return m, m.scheduleUIRefresh()
 		}
 		m.sessionPickerErr = ""
@@ -540,17 +540,10 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 		if len(items) == 0 {
 			items = sessionsToPickerItems(msg.sessions)
 		}
-		m.sessionPickerList.SetItems(items)
-		if strings.TrimSpace(m.sessionPickerFilter) == "" {
-			m.sessionPickerList.SetFilterText("")
-			m.sessionPickerList.SetFilterState(list.Unfiltered)
-		} else {
-			m.sessionPickerList.SetFilterText(strings.TrimSpace(m.sessionPickerFilter))
-			m.sessionPickerList.SetFilterState(list.Filtering)
-		}
-		if len(items) > 0 {
-			m.sessionPickerList.Select(0)
-		}
+		m.sessionPickerCtrl.SetPage(msg.page, msg.total, m.sessionPickerPageSize)
+		m.sessionPickerCtrl.SetItems(items)
+		m.sessionPickerCtrl.SetFilter(m.sessionPickerFilter)
+		m.syncSessionPickerState()
 		return m, m.scheduleUIRefresh()
 
 	case agentsListMsg:

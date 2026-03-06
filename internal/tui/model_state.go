@@ -295,6 +295,7 @@ type Model struct {
 	modelPickerList list.Model
 
 	// Session picker state (/sessions command)
+	sessionPickerCtrl     kit.PickerController
 	sessionPickerOpen     bool
 	sessionPickerList     list.Model
 	sessionPickerErr      string
@@ -320,6 +321,7 @@ type Model struct {
 	helpModalLines int
 
 	// File picker state (workdir-scoped, triggered by typing '@' in input)
+	filePickerCtrl     kit.PickerController
 	filePickerOpen     bool
 	filePickerList     list.Model
 	filePickerAllPaths []string // canonical rel paths (slash-separated)

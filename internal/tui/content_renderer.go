@@ -20,16 +20,18 @@ import (
 //  1. format structured payloads into markdown using the helpers (FormatJSON/FormatCode)
 //  2. render with RenderMarkdown
 type ContentRenderer struct {
-	md         *markdownRenderer
-	mdAgent    *markdownRenderer
-	mdThinking *markdownRenderer
+	md            *markdownRenderer
+	mdAgent       *markdownRenderer
+	mdThinking    *markdownRenderer
+	mdCoordinator *markdownRenderer
 }
 
 func newContentRenderer() *ContentRenderer {
 	return &ContentRenderer{
-		md:         newMarkdownRenderer(markdownVariantNormal),
-		mdAgent:    newMarkdownRenderer(markdownVariantAgent),
-		mdThinking: newMarkdownRenderer(markdownVariantThinking),
+		md:            newMarkdownRenderer(markdownVariantNormal),
+		mdAgent:       newMarkdownRenderer(markdownVariantAgent),
+		mdThinking:    newMarkdownRenderer(markdownVariantThinking),
+		mdCoordinator: newMarkdownRenderer(markdownVariantCoordinator),
 	}
 }
 
@@ -67,6 +69,14 @@ func (r *ContentRenderer) RenderThinkingMarkdown(markdown string, width int) str
 		return markdown
 	}
 	return r.mdThinking.render(markdown, width)
+}
+
+// RenderCoordinatorMarkdown renders markdown for the coordinator TUI surfaces.
+func (r *ContentRenderer) RenderCoordinatorMarkdown(markdown string, width int) string {
+	if r == nil || r.mdCoordinator == nil {
+		return markdown
+	}
+	return r.mdCoordinator.render(markdown, width)
 }
 
 // FormatCode wraps code in a fenced block using a "safe fence" length.

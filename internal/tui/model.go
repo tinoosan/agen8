@@ -321,9 +321,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// back through the Bubble Tea update loop. If we don't forward this message
 		// into the picker list, the visible items will never update.
 		if m.sessionPickerOpen {
-			var cmd tea.Cmd
-			m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)
-			return m, cmd
+			m.ensureSessionPickerCtrl()
+			action := m.sessionPickerCtrl.Update(msg)
+			m.syncSessionPickerState()
+			return m, action.Cmd
 		}
 		if m.modelPickerOpen {
 			var cmd tea.Cmd
@@ -624,7 +625,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filePickerAllPaths = all
 				m.filePickerWorkdir = strings.TrimSpace(m.workdir)
 				m.applyFilePickerQuery(m.filePickerQuery)
-				m.filePickerList.Title = "Select File"
+				m.filePickerCtrl.SetTitle("Select File")
+				m.syncFilePickerState()
 				m.layout()
 			}
 		}
@@ -633,17 +635,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionsListMsg:
 		if msg.err != nil {
 			m.sessionPickerErr = msg.err.Error()
-			m.sessionPickerList.SetItems(nil)
+			m.sessionPickerCtrl.SetItems(nil)
+			m.syncSessionPickerState()
 			m.layout()
 			return m, nil
 		}
 		m.sessionPickerTotal = msg.total
 		m.sessionPickerPage = msg.page
 		items := sessionsToPickerItems(msg.sessions)
-		m.sessionPickerList.SetItems(items)
-		if len(items) > 0 {
-			m.sessionPickerList.Select(0)
-		}
+		m.sessionPickerCtrl.SetPage(msg.page, msg.total, m.sessionPickerPageSize)
+		m.sessionPickerCtrl.SetItems(items)
+		m.syncSessionPickerState()
 		m.layout()
 		return m, nil
 
@@ -671,7 +673,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filePickerWorkdir = strings.TrimSpace(m.workdir)
 				m.applyFilePickerQuery(m.filePickerQuery)
 				if strings.Contains(m.filePickerList.Title, "loading") {
-					m.filePickerList.Title = "Select File"
+					m.filePickerCtrl.SetTitle("Select File")
+					m.syncFilePickerState()
 				}
 			}
 		}
@@ -1185,7 +1188,8 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				m.filePickerWorkdir = wdNow
 				m.applyFilePickerQuery(m.filePickerQuery)
 				if strings.Contains(m.filePickerList.Title, "loading") {
-					m.filePickerList.Title = "Select File"
+					m.filePickerCtrl.SetTitle("Select File")
+					m.syncFilePickerState()
 				}
 			}
 		}

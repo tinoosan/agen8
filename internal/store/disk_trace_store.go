@@ -85,14 +85,11 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor pkgstore.TraceCurs
 	r := bufio.NewReader(lr)
 
 	var (
-		events        []pkgstore.TraceEvent
+		records       []traceRecord
 		bytesConsumed int64
-		linesTotal    int
-		parsed        int
-		parseErrors   int
 	)
 
-	for len(events) < limit {
+	for {
 		lineStart := offset + bytesConsumed
 		line, readErr := r.ReadBytes('\n')
 		if len(line) == 0 && readErr != nil {
@@ -109,7 +106,6 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor pkgstore.TraceCurs
 		}
 
 		bytesConsumed += int64(len(line))
-		linesTotal++
 
 		text := strings.TrimSpace(string(bytesutil.TrimRightNewlines(line)))
 		if text == "" {
@@ -118,14 +114,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor pkgstore.TraceCurs
 			}
 			continue
 		}
-
-		event, ok := parseTraceEvent(text)
-		if !ok {
-			parseErrors++
-		} else {
-			parsed++
-			events = append(events, event)
-		}
+		records = append(records, traceRecord{raw: text, size: len(line)})
 
 		if errors.Is(readErr, io.EOF) {
 			break
@@ -138,17 +127,10 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor pkgstore.TraceCurs
 	}
 	truncated := cursorAfter < size
 
-	return pkgstore.TraceBatch{
-		Events:         events,
-		CursorAfter:    pkgstore.TraceCursorFromInt64(cursorAfter),
-		BytesRead:      int(bytesConsumed),
-		LinesTotal:     linesTotal,
-		Parsed:         parsed,
-		ParseErrors:    parseErrors,
-		Returned:       len(events),
-		ReturnedCapped: len(events) >= limit,
-		Truncated:      truncated,
-	}, nil
+	result := buildTraceSinceBatch(records, maxBytes, limit)
+	result.batch.CursorAfter = pkgstore.TraceCursorFromInt64(cursorAfter)
+	result.batch.Truncated = result.batch.Truncated || truncated
+	return result.batch, nil
 }
 
 func (s DiskTraceStore) EventsLatest(_ context.Context, opts pkgstore.TraceLatestOptions) (pkgstore.TraceBatch, error) {
@@ -192,10 +174,7 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts pkgstore.TraceLates
 
 	// Split into lines; first line may be partial if we started mid-file.
 	rawLines := strings.Split(string(b), "\n")
-	linesTotal := 0
-	parsed := 0
-	parseErrors := 0
-	var parsedEvents []pkgstore.TraceEvent
+	var records []traceRecord
 
 	// Parse in order, skipping empty/partial prefixes that fail to unmarshal.
 	for _, ln := range rawLines {
@@ -203,30 +182,9 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts pkgstore.TraceLates
 		if ln == "" {
 			continue
 		}
-		linesTotal++
-		event, ok := parseTraceEvent(ln)
-		if !ok {
-			parseErrors++
-			continue
-		}
-		parsed++
-		parsedEvents = append(parsedEvents, event)
+		records = append(records, traceRecord{raw: ln, size: len(ln) + 1})
 	}
-
-	// Keep only last N, preserving chronological order.
-	if len(parsedEvents) > limit {
-		parsedEvents = parsedEvents[len(parsedEvents)-limit:]
-	}
-
-	return pkgstore.TraceBatch{
-		Events:         parsedEvents,
-		CursorAfter:    pkgstore.TraceCursorFromInt64(size),
-		BytesRead:      len(b),
-		LinesTotal:     linesTotal,
-		Parsed:         parsed,
-		ParseErrors:    parseErrors,
-		Returned:       len(parsedEvents),
-		ReturnedCapped: len(parsedEvents) >= limit,
-		Truncated:      readSize < size || len(parsedEvents) >= limit,
-	}, nil
+	batch := buildTraceLatestBatch(records, maxBytes, limit, readSize < size)
+	batch.CursorAfter = pkgstore.TraceCursorFromInt64(size)
+	return batch, nil
 }

@@ -151,51 +151,30 @@ func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor pkgstore.Histo
 	}
 	defer rows.Close()
 
-	var (
-		out        [][]byte
-		bytesRead  int
-		linesTotal int
-		truncated  bool
-		lastSeq    = offset
-	)
+	var records []historyRecord
+	var seqs []int64
 
 	for rows.Next() {
-		if bytesRead >= maxBytes {
-			truncated = true
-			break
-		}
 		var seq int64
 		var line string
 		if err := rows.Scan(&seq, &line); err != nil {
-			return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(lastSeq)}, err
+			return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(offset)}, err
 		}
-		linesTotal++
-		lastSeq = seq
 		line = strings.TrimRight(line, "\n")
-		lineBytes := []byte(line)
-		bytesRead += len(lineBytes) + 1
-		trim := bytesutil.TrimRightNewlines(lineBytes)
-		if len(trim) > 0 {
-			out = append(out, append([]byte(nil), trim...))
-		}
-		if len(out) >= limit {
-			truncated = true
-			break
-		}
+		records = append(records, historyRecord{line: []byte(line), size: len(line) + 1})
+		seqs = append(seqs, seq)
 	}
 	if err := rows.Err(); err != nil {
-		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(lastSeq)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(offset)}, err
 	}
 
-	return pkgstore.HistoryBatch{
-		Lines:          out,
-		CursorAfter:    pkgstore.HistoryCursorFromInt64(lastSeq),
-		BytesRead:      bytesRead,
-		LinesTotal:     linesTotal,
-		Returned:       len(out),
-		ReturnedCapped: len(out) >= limit,
-		Truncated:      truncated,
-	}, nil
+	result := buildHistorySinceBatch(records, maxBytes, limit)
+	lastSeq := offset
+	if result.consumed > 0 {
+		lastSeq = seqs[result.consumed-1]
+	}
+	result.batch.CursorAfter = pkgstore.HistoryCursorFromInt64(lastSeq)
+	return result.batch, nil
 }
 
 func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts pkgstore.HistoryLatestOptions) (pkgstore.HistoryBatch, error) {
@@ -215,13 +194,8 @@ func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts pkgstore.Histor
 	}
 	defer rows.Close()
 
-	var (
-		lines      [][]byte
-		bytesRead  int
-		linesTotal int
-		lastSeq    int64
-		truncated  bool
-	)
+	var records []historyRecord
+	var lastSeq int64
 
 	for rows.Next() {
 		var seq int64
@@ -229,40 +203,23 @@ func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts pkgstore.Histor
 		if err := rows.Scan(&seq, &line); err != nil {
 			return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(lastSeq)}, err
 		}
-		linesTotal++
 		if seq > lastSeq {
 			lastSeq = seq
 		}
 		line = strings.TrimRight(line, "\n")
-		lineBytes := []byte(line)
-		if bytesRead+len(lineBytes)+1 > maxBytes {
-			truncated = true
-			continue
-		}
-		bytesRead += len(lineBytes) + 1
-		trim := bytesutil.TrimRightNewlines(lineBytes)
-		if len(trim) > 0 {
-			lines = append(lines, append([]byte(nil), trim...))
-		}
+		records = append(records, historyRecord{line: []byte(line), size: len(line) + 1})
 	}
 	if err := rows.Err(); err != nil {
 		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(lastSeq)}, err
 	}
 
-	// Reverse to chronological order.
-	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
-		lines[i], lines[j] = lines[j], lines[i]
+	// Convert newest-first query results into chronological order for the shared batch builder.
+	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
+		records[i], records[j] = records[j], records[i]
 	}
-
-	return pkgstore.HistoryBatch{
-		Lines:          lines,
-		CursorAfter:    pkgstore.HistoryCursorFromInt64(lastSeq),
-		BytesRead:      bytesRead,
-		LinesTotal:     linesTotal,
-		Returned:       len(lines),
-		ReturnedCapped: truncated || len(lines) >= limit,
-		Truncated:      truncated,
-	}, nil
+	batch := buildHistoryLatestBatch(records, maxBytes, limit, false)
+	batch.CursorAfter = pkgstore.HistoryCursorFromInt64(lastSeq)
+	return batch, nil
 }
 
 func nullIfEmpty(s string) any {

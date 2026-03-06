@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/atref"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/pkg/fsutil"
@@ -111,20 +110,19 @@ func (m *Model) scanFilePickerPaths(workdir string) ([]string, error) {
 }
 
 func (m *Model) openFilePicker(initialQuery string) tea.Cmd {
-	m.filePickerOpen = true
-
-	l := list.New([]list.Item{}, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), nil), 0, 0)
-	l.Title = "Select File"
-	l.SetShowHelp(false)
-	l.SetShowStatusBar(false)
-	l.SetShowPagination(true)
-	// Important: we do substring filtering ourselves from the input's @token.
-	l.SetFilteringEnabled(false)
-	l.SetShowFilter(false)
-	l.Styles.Title = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#707070")).
-		Bold(true)
-	m.filePickerList = l
+	m.filePickerCtrl.Open(kit.PickerConfig{
+		Title:            "Select File",
+		ShowPagination:   true,
+		CursorPageKeyNav: true,
+		Delegate:         kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), nil),
+		ModalWidth:       80,
+		ModalHeight:      22,
+		ModalMinWidth:    40,
+		ModalMinHeight:   10,
+		ModalMarginX:     8,
+		ModalMarginY:     2,
+	})
+	m.syncFilePickerState()
 
 	m.filePickerAllPaths = nil
 	m.filePickerWorkdir = ""
@@ -143,7 +141,8 @@ func (m *Model) openFilePicker(initialQuery string) tea.Cmd {
 
 	// Workdir not known yet (can happen before first turn). Prefetch it without
 	// creating a run by calling the host /pwd command.
-	m.filePickerList.Title = "Select File (loading workdir…)"
+	m.filePickerCtrl.SetLoadingTitle("Select File (loading workdir…)")
+	m.syncFilePickerState()
 	m.layout()
 	return func() tea.Msg {
 		wd, err := m.runner.RunTurn(m.ctx, "/pwd")
@@ -152,8 +151,8 @@ func (m *Model) openFilePicker(initialQuery string) tea.Cmd {
 }
 
 func (m *Model) closeFilePicker() {
-	m.filePickerOpen = false
-	m.filePickerList = list.Model{}
+	m.filePickerCtrl.Close()
+	m.syncFilePickerState()
 	m.filePickerAllPaths = nil
 	m.filePickerQuery = ""
 	m.filePickerWorkdir = ""
@@ -174,10 +173,9 @@ func (m *Model) applyFilePickerQuery(q string) {
 			}
 		}
 	}
-	m.filePickerList.SetItems(items)
-	if len(items) > 0 {
-		m.filePickerList.Select(0)
-	}
+	m.filePickerCtrl.SetItems(items)
+	m.filePickerCtrl.SetFilter(q)
+	m.syncFilePickerState()
 
 	// Surface the active query since the underlying input is hidden by the modal.
 	title := "Select File"
@@ -187,11 +185,13 @@ func (m *Model) applyFilePickerQuery(q string) {
 	if strings.Contains(m.filePickerList.Title, "loading") {
 		// Preserve loading prefix if still loading.
 		if strings.TrimSpace(m.filePickerWorkdir) == "" {
-			m.filePickerList.Title = "Select File (loading workdir…) (@" + kit.TruncateMiddle(m.filePickerQuery, 32) + ")"
+			m.filePickerCtrl.SetLoadingTitle("Select File (loading workdir…) (@" + kit.TruncateMiddle(m.filePickerQuery, 32) + ")")
+			m.syncFilePickerState()
 			return
 		}
 	}
-	m.filePickerList.Title = title
+	m.filePickerCtrl.SetTitle(title)
+	m.syncFilePickerState()
 }
 
 func isEditorCommand(input string) bool {
@@ -217,10 +217,8 @@ func (m *Model) syncFilePickerFromInput() tea.Cmd {
 }
 
 func (m *Model) selectFileFromPicker() tea.Cmd {
-	if m.filePickerList.Items() == nil || len(m.filePickerList.Items()) == 0 {
-		return nil
-	}
-	selected := m.filePickerList.SelectedItem()
+	m.ensureFilePickerCtrl()
+	selected := m.filePickerCtrl.SelectedItem()
 	it, ok := selected.(filePickerItem)
 	if !ok {
 		return nil
@@ -264,15 +262,7 @@ func (m *Model) selectFileFromPicker() tea.Cmd {
 }
 
 func (m Model) renderFilePicker(base string) string {
-	dims := kit.ComputeModalDims(m.width, m.height, 80, 22, 40, 10, 8, 2)
-	m.filePickerList.SetWidth(dims.ModalWidth - 4)
-	m.filePickerList.SetHeight(dims.ListHeight)
-
-	// Build modal content.
-	content := m.filePickerList.View()
-
-	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
-
+	m.ensureFilePickerCtrl()
 	_ = base
-	return kit.RenderOverlay(opts)
+	return m.filePickerCtrl.Render(m.width, m.height, "", "")
 }

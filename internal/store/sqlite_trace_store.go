@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/tinoosan/agen8/pkg/config"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
@@ -55,14 +54,8 @@ func (s SQLiteTraceStore) EventsSince(ctx context.Context, cursor pkgstore.Trace
 	}
 	defer rows.Close()
 
-	var (
-		events        []pkgstore.TraceEvent
-		bytesConsumed int
-		linesTotal    int
-		parsed        int
-		parseErrors   int
-		lastSeq       = offset
-	)
+	var records []traceRecord
+	var seqs []int64
 
 	for rows.Next() {
 		var seq int64
@@ -70,42 +63,20 @@ func (s SQLiteTraceStore) EventsSince(ctx context.Context, cursor pkgstore.Trace
 		if err := rows.Scan(&seq, &raw); err != nil {
 			return pkgstore.TraceBatch{}, err
 		}
-		lineBytes := len(raw) + 1
-		if bytesConsumed+lineBytes > maxBytes {
-			break
-		}
-		linesTotal++
-		bytesConsumed += lineBytes
-		lastSeq = seq
-
-		event, ok := parseTraceEvent(raw)
-		if !ok {
-			parseErrors++
-			continue
-		}
-		parsed++
-		event.Type = strings.TrimSpace(event.Type)
-		event.Message = strings.TrimSpace(event.Message)
-		events = append(events, event)
-		if len(events) >= limit {
-			break
-		}
+		records = append(records, traceRecord{raw: raw, size: len(raw) + 1})
+		seqs = append(seqs, seq)
 	}
 	if err := rows.Err(); err != nil {
 		return pkgstore.TraceBatch{}, err
 	}
 
-	return pkgstore.TraceBatch{
-		Events:         events,
-		CursorAfter:    pkgstore.TraceCursorFromInt64(lastSeq),
-		BytesRead:      bytesConsumed,
-		LinesTotal:     linesTotal,
-		Parsed:         parsed,
-		ParseErrors:    parseErrors,
-		Returned:       len(events),
-		ReturnedCapped: len(events) >= limit,
-		Truncated:      bytesConsumed >= maxBytes || len(events) >= limit,
-	}, nil
+	result := buildTraceSinceBatch(records, maxBytes, limit)
+	lastSeq := offset
+	if result.consumed > 0 {
+		lastSeq = seqs[result.consumed-1]
+	}
+	result.batch.CursorAfter = pkgstore.TraceCursorFromInt64(lastSeq)
+	return result.batch, nil
 }
 
 func (s SQLiteTraceStore) EventsLatest(ctx context.Context, opts pkgstore.TraceLatestOptions) (pkgstore.TraceBatch, error) {
@@ -145,14 +116,8 @@ func (s SQLiteTraceStore) EventsLatest(ctx context.Context, opts pkgstore.TraceL
 	}
 	defer rows.Close()
 
-	var (
-		eventsNewest  []pkgstore.TraceEvent
-		bytesConsumed int
-		linesTotal    int
-		parsed        int
-		parseErrors   int
-		latestSeq     int64
-	)
+	var records []traceRecord
+	var latestSeq int64
 
 	for rows.Next() {
 		var seq int64
@@ -163,45 +128,16 @@ func (s SQLiteTraceStore) EventsLatest(ctx context.Context, opts pkgstore.TraceL
 		if latestSeq == 0 || seq > latestSeq {
 			latestSeq = seq
 		}
-
-		lineBytes := len(raw) + 1
-		if len(eventsNewest) > 0 && bytesConsumed+lineBytes > maxBytes {
-			break
-		}
-		if len(eventsNewest) >= limit {
-			break
-		}
-		linesTotal++
-		bytesConsumed += lineBytes
-
-		event, ok := parseTraceEvent(raw)
-		if !ok {
-			parseErrors++
-			continue
-		}
-		parsed++
-		event.Type = strings.TrimSpace(event.Type)
-		event.Message = strings.TrimSpace(event.Message)
-		eventsNewest = append(eventsNewest, event)
+		records = append(records, traceRecord{raw: raw, size: len(raw) + 1})
 	}
 	if err := rows.Err(); err != nil {
 		return pkgstore.TraceBatch{}, err
 	}
 
-	// Reverse to chronological order.
-	for i, j := 0, len(eventsNewest)-1; i < j; i, j = i+1, j-1 {
-		eventsNewest[i], eventsNewest[j] = eventsNewest[j], eventsNewest[i]
+	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
+		records[i], records[j] = records[j], records[i]
 	}
-
-	return pkgstore.TraceBatch{
-		Events:         eventsNewest,
-		CursorAfter:    pkgstore.TraceCursorFromInt64(latestSeq),
-		BytesRead:      bytesConsumed,
-		LinesTotal:     linesTotal,
-		Parsed:         parsed,
-		ParseErrors:    parseErrors,
-		Returned:       len(eventsNewest),
-		ReturnedCapped: len(eventsNewest) >= limit,
-		Truncated:      bytesConsumed >= maxBytes || len(eventsNewest) >= limit,
-	}, nil
+	batch := buildTraceLatestBatch(records, maxBytes, limit, false)
+	batch.CursorAfter = pkgstore.TraceCursorFromInt64(latestSeq)
+	return batch, nil
 }
