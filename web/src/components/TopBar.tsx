@@ -1,7 +1,30 @@
-import { useStore } from '../lib/store'
+import { useStore, type Theme } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
-import { Search, ChevronLeft, Zap } from 'lucide-react'
+import { Search, ChevronLeft, Zap, Sun, Moon, Monitor } from 'lucide-react'
+
+function ThemePicker() {
+  const { theme, setTheme } = useStore()
+  const options: { value: Theme; icon: typeof Sun; label: string }[] = [
+    { value: 'light', icon: Sun, label: 'Light' },
+    { value: 'dim', icon: Monitor, label: 'Dim' },
+    { value: 'dark', icon: Moon, label: 'Dark' },
+  ]
+  return (
+    <div className="theme-picker">
+      {options.map(({ value, icon: Icon, label }) => (
+        <button
+          key={value}
+          className={theme === value ? 'active' : ''}
+          onClick={() => setTheme(value)}
+          title={label}
+        >
+          <Icon size={13} />
+        </button>
+      ))}
+    </div>
+  )
+}
 
 function TotalCost({ teamIds }: { teamIds: string[] }) {
   const statuses = teamIds.map(id => useTeamStatus(id))
@@ -37,7 +60,7 @@ export default function TopBar() {
       display: 'flex', alignItems: 'center', gap: 10,
       padding: '0 16px',
       borderBottom: '1px solid var(--border)',
-      background: 'rgba(12,12,15,0.92)',
+      background: 'color-mix(in srgb, var(--bg-app) 92%, transparent)',
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
       position: 'relative', zIndex: 10,
@@ -97,6 +120,8 @@ export default function TopBar() {
           lineHeight: 1.5,
         }}>⌘K</kbd>
       </button>
+
+      <ThemePicker />
     </header>
   )
 }

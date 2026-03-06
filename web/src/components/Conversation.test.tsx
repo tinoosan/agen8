@@ -9,6 +9,7 @@ const mockUseConversation = vi.fn()
 const mockUseActivity = vi.fn()
 const mockUseTaskHistory = vi.fn()
 const mockUseThinkingEvents = vi.fn()
+const mockUseArtifactFiles = vi.fn()
 const mockRpcCall = vi.fn()
 
 vi.mock('../hooks/useConversation', () => ({
@@ -25,6 +26,10 @@ vi.mock('../hooks/useTaskHistory', () => ({
 
 vi.mock('../hooks/useThinkingEvents', () => ({
   useThinkingEvents: (...args: unknown[]) => mockUseThinkingEvents(...args),
+}))
+
+vi.mock('../hooks/useArtifactFiles', () => ({
+  useArtifactFiles: (...args: unknown[]) => mockUseArtifactFiles(...args),
 }))
 
 vi.mock('../lib/rpc', () => ({
@@ -74,6 +79,7 @@ describe('Conversation', () => {
     mockUseActivity.mockReturnValue({ data: [], isLoading: false, isSuccess: true, refetch: vi.fn() })
     mockUseTaskHistory.mockReturnValue({ data: [], isLoading: false, isSuccess: true })
     mockUseThinkingEvents.mockReturnValue({ data: [], isLoading: false, isSuccess: true })
+    mockUseArtifactFiles.mockReturnValue({ data: [], isLoading: false, isSuccess: true })
   })
 
   it('shows connecting state when threadId is null', () => {

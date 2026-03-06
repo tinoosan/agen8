@@ -6,7 +6,11 @@ import TeamFocus from './pages/TeamFocus'
 import CommandPalette from './components/CommandPalette'
 
 export default function App() {
-  const { focusedTeamId, paletteOpen } = useStore()
+  const { focusedTeamId, paletteOpen, theme } = useStore()
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

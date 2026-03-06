@@ -201,12 +201,29 @@ export interface ActivityEvent {
   data?: Record<string, string>
 }
 
-export interface Artifact {
-  artifactId?: string
-  vpath?: string
+export interface ArtifactNode {
+  nodeKey: string
+  parentKey?: string
+  kind: 'day' | 'role' | 'stream' | 'task' | 'file'
+  label: string
+  dayBucket?: string
   role?: string
-  createdAt?: string
-  sizeBytes?: number
+  taskKind?: string
+  taskId?: string
+  status?: string
+  artifactId?: string
+  displayName?: string
+  vpath?: string
+  diskPath?: string
+  isSummary?: boolean
+  producedAt?: string
+}
+
+export interface ArtifactGetResult {
+  artifact: ArtifactNode
+  content: string
+  truncated: boolean
+  bytesRead: number
 }
 
 export interface RuntimeRunState {

@@ -1,18 +1,10 @@
-import { useQuery } from '@tanstack/react-query'
 import { useStore } from '../lib/store'
-import { rpcCall } from '../lib/rpc'
 import { X, FileText, File, FileCode } from 'lucide-react'
-import type { Artifact } from '../lib/types'
+import { useArtifactFiles } from '../hooks/useArtifactFiles'
 
 interface ArtifactsSlideOverProps {
+  threadId: string | null
   teamId: string
-}
-
-function formatBytes(bytes?: number): string {
-  if (!bytes) return ''
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function getFileIcon(path: string) {
@@ -27,18 +19,10 @@ function getFileExt(path: string): string {
   return ext ? `.${ext}` : ''
 }
 
-export default function ArtifactsSlideOver({ teamId }: ArtifactsSlideOverProps) {
+export default function ArtifactsSlideOver({ threadId, teamId }: ArtifactsSlideOverProps) {
   const { setArtifactsOpen } = useStore()
 
-  const query = useQuery<Artifact[]>({
-    queryKey: ['artifact.list', teamId],
-    queryFn: async () => {
-      const res = await rpcCall<{ artifacts: Artifact[] }>('artifact.list', { teamId })
-      return res.artifacts ?? []
-    },
-    enabled: !!teamId,
-    refetchInterval: 5000,
-  })
+  const query = useArtifactFiles(threadId, teamId)
 
   const artifacts = query.data ?? []
 
@@ -104,11 +88,11 @@ export default function ArtifactsSlideOver({ teamId }: ArtifactsSlideOverProps) 
             </div>
           ) : (
             artifacts.map((a, i) => {
-              const path = a.vpath ?? a.artifactId ?? `artifact-${i}`
+              const path = a.displayName ?? a.vpath ?? a.artifactId ?? `artifact-${i}`
               const ext = getFileExt(path)
               return (
                 <div
-                  key={a.artifactId ?? i}
+                  key={a.nodeKey ?? a.artifactId ?? i}
                   className="row-hover"
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10,
@@ -128,7 +112,6 @@ export default function ArtifactsSlideOver({ teamId }: ArtifactsSlideOverProps) 
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1, display: 'flex', gap: 6 }}>
                       {a.role && <span>{a.role}</span>}
-                      <span>{formatBytes(a.sizeBytes)}</span>
                       {ext && <span style={{ fontWeight: 500, color: 'var(--accent)', opacity: 0.7 }}>{ext}</span>}
                     </div>
                   </div>

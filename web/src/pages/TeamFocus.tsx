@@ -78,7 +78,7 @@ export default function TeamFocus({ teamId }: TeamFocusProps) {
 
       {/* Slide-over panels */}
       {mailOpen && <MailSlideOver teamId={teamId} />}
-      {artifactsOpen && <ArtifactsSlideOver teamId={teamId} />}
+      {artifactsOpen && <ArtifactsSlideOver teamId={teamId} threadId={threadId} />}
     </div>
   )
 }
