@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +108,66 @@ func (x *Index) ListByTurn(turnID TurnID, cursor string, limit int) ([]Item, str
 	defer x.mu.Unlock()
 
 	all := x.itemsByTurn[turnID]
+	if start >= len(all) {
+		return nil, ""
+	}
+	end := start + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	out := make([]Item, 0, end-start)
+	out = append(out, all[start:end]...)
+
+	nextCursor := ""
+	if end < len(all) {
+		nextCursor = fmt.Sprintf("i:%d", end)
+	}
+	return out, nextCursor
+}
+
+// ListByThread returns items across all turns belonging to the given thread,
+// sorted chronologically by turn creation time, then by item order within each turn.
+//
+// Cursor format is the same as ListByTurn: "i:<n>" indexing into the flattened list.
+func (x *Index) ListByThread(threadID ThreadID, cursor string, limit int) ([]Item, string) {
+	if x == nil {
+		return nil, ""
+	}
+	threadID = ThreadID(strings.TrimSpace(string(threadID)))
+	if threadID == "" {
+		return nil, ""
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	start := 0
+	if cursor != "" {
+		if i, ok := parseIndexCursor(cursor); ok && i >= 0 {
+			start = i
+		}
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	// Collect turn IDs belonging to this thread.
+	var turnIDs []TurnID
+	for tid, turn := range x.turns {
+		if turn.ThreadID == threadID {
+			turnIDs = append(turnIDs, tid)
+		}
+	}
+	sort.Slice(turnIDs, func(i, j int) bool {
+		return x.turns[turnIDs[i]].CreatedAt.Before(x.turns[turnIDs[j]].CreatedAt)
+	})
+
+	// Flatten items across turns.
+	var all []Item
+	for _, tid := range turnIDs {
+		all = append(all, x.itemsByTurn[tid]...)
+	}
+
 	if start >= len(all) {
 		return nil, ""
 	}

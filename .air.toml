@@ -1,0 +1,22 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin = "./tmp/agen8 web --port 8080"
+  cmd = "go build -o ./tmp/agen8 ./cmd/agen8"
+  delay = 1000
+  exclude_dir = ["tmp", "web", "node_modules", "vendor", ".git", "data", "bin", ".claude"]
+  exclude_regex = ["_test\\.go$"]
+  include_ext = ["go", "toml", "yaml"]
+  kill_delay = "1s"
+  send_interrupt = true
+  stop_on_error = true
+
+[log]
+  time = false
+
+[color]
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"

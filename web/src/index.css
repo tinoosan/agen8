@@ -61,3 +61,24 @@ body {
 
 .animate-fade-in { animation: fade-in 0.15s ease-out; }
 .animate-slide-in-right { animation: slide-in-right 0.2s ease-out; }
+
+/* Streaming cursor blink */
+@keyframes cursor-blink {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0; }
+}
+
+.streaming-cursor {
+  animation: cursor-blink 0.8s ease-in-out infinite;
+}
+
+/* Textarea focus ring */
+textarea:focus {
+  border-color: rgba(99,102,241,0.5) !important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.08);
+}
+
+/* Selection color */
+::selection {
+  background: rgba(99,102,241,0.2);
+}

@@ -61,14 +61,69 @@ export interface TeamGetManifestResult {
   createdAt: string
 }
 
+// ---- Protocol Item types (matches pkg/protocol/item.go) ----
+
+export type ItemType = 'user_message' | 'agent_message' | 'tool_execution' | 'reasoning'
+export type ItemStatus = 'started' | 'streaming' | 'completed' | 'failed' | 'canceled'
+
 export interface Item {
   id: string
-  type: string
-  role?: string
-  content?: string
-  delta?: string
-  status?: string
+  turnId: string
+  runId?: string
+  type: ItemType
+  status: ItemStatus
   createdAt?: string
+  content?: unknown // JSON: UserMessageContent | AgentMessageContent | ToolExecutionContent | ReasoningContent
+  error?: { code: number; message: string }
+}
+
+export interface UserMessageContent {
+  text: string
+  attachments?: { id?: string; name?: string; uri?: string }[]
+}
+
+export interface AgentMessageContent {
+  text: string
+  isPartial?: boolean
+  artifacts?: { id?: string; name?: string; uri?: string }[]
+}
+
+export interface ToolExecutionContent {
+  toolName: string
+  input?: unknown
+  output?: unknown
+  ok?: boolean
+}
+
+export interface ReasoningContent {
+  summary?: string
+  step?: number
+}
+
+// Notification param types (matches pkg/protocol/item.go)
+export interface ItemDeltaParams {
+  itemId: string
+  delta: {
+    textDelta?: string
+    reasoningDelta?: string
+  }
+}
+
+export interface ItemNotificationParams {
+  item: Item
+}
+
+/** Extract displayable text from an Item's typed content. */
+export function getItemText(item: Item): string {
+  if (!item.content) return ''
+  const c = item.content as Record<string, unknown>
+  if (typeof c.text === 'string') return c.text
+  if (typeof c.summary === 'string') return c.summary
+  if (typeof c.toolName === 'string') {
+    const out = c.output != null ? String(c.output).slice(0, 200) : ''
+    return `${c.toolName}${out ? ': ' + out : ''}`
+  }
+  return ''
 }
 
 export interface Task {

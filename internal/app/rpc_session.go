@@ -1293,12 +1293,19 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 
 func (s *RPCServer) itemList(ctx context.Context, p protocol.ItemListParams) (protocol.ItemListResult, error) {
 	_ = ctx
-	if strings.TrimSpace(string(p.TurnID)) == "" {
-		return protocol.ItemListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "turnId is required"}
-	}
 	if s.index == nil {
 		return protocol.ItemListResult{Items: nil}, nil
 	}
-	items, next := s.index.ListByTurn(p.TurnID, strings.TrimSpace(p.Cursor), p.Limit)
-	return protocol.ItemListResult{Items: items, NextCursor: next}, nil
+	turnID := strings.TrimSpace(string(p.TurnID))
+	threadID := strings.TrimSpace(string(p.ThreadID))
+
+	if turnID != "" {
+		items, next := s.index.ListByTurn(p.TurnID, strings.TrimSpace(p.Cursor), p.Limit)
+		return protocol.ItemListResult{Items: items, NextCursor: next}, nil
+	}
+	if threadID != "" {
+		items, next := s.index.ListByThread(p.ThreadID, strings.TrimSpace(p.Cursor), p.Limit)
+		return protocol.ItemListResult{Items: items, NextCursor: next}, nil
+	}
+	return protocol.ItemListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "turnId or threadId is required"}
 }

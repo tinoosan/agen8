@@ -1,6 +1,6 @@
 DATA_DIR ?= ./data
 
-.PHONY: run seed-clean seed-list web-install web-build build
+.PHONY: run seed-clean seed-list web-install web-build build dev dev-go dev-web
 
 # Seeding is automatic at startup (from ./defaults) for now.
 run:
@@ -16,6 +16,17 @@ web-build: web-install
 # Build the full binary (requires web assets to be built first)
 build: web-build
 	@go build -o bin/agen8 ./cmd/agen8
+
+# Dev mode: Go daemon with Air hot-reload + Vite dev server (HMR)
+# Access the UI at http://localhost:5173
+dev:
+	@$(MAKE) -j2 dev-go dev-web
+
+dev-go:
+	@air
+
+dev-web: web-install
+	@cd web && npm run dev
 
 seed-list:
 	@echo "DATA_DIR=$(DATA_DIR)"

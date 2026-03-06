@@ -15,7 +15,6 @@ export default function TeamFocus({ teamId }: TeamFocusProps) {
   const manifest = manifestQuery.data
 
   const threadId = manifest?.coordinatorThreadId ?? null
-  const coordinatorRole = manifest?.coordinatorRole
 
   return (
     <div style={{ display: 'flex', height: '100%', position: 'relative' }}>
@@ -44,7 +43,7 @@ export default function TeamFocus({ teamId }: TeamFocusProps) {
         </div>
 
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Conversation threadId={threadId} coordinatorRole={coordinatorRole} />
+          <Conversation threadId={threadId} />
         </div>
       </div>
 
