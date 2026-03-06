@@ -35,11 +35,11 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
 
       <div style={{ marginBottom: 6 }}>
         {isLoading ? (
-          <div className="roles-container" style={{ padding: 8 }}>
+          <div className="roles-container">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div className="skeleton" style={{ width: '100%', height: 14 }} />
-              <div className="skeleton" style={{ width: '80%', height: 14 }} />
-              <div className="skeleton" style={{ width: '60%', height: 14 }} />
+              <div className="skeleton" style={{ width: '100%', height: 50 }} />
+              <div className="skeleton" style={{ width: '100%', height: 50 }} />
+              <div className="skeleton" style={{ width: '100%', height: 50 }} />
             </div>
           </div>
         ) : roles.length === 0 ? (
