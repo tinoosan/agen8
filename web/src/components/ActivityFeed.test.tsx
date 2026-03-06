@@ -20,23 +20,23 @@ const { useActivity } = await import('../hooks/useActivity') as { useActivity: R
 
 function makeEvent(overrides: Partial<ActivityEvent> = {}): ActivityEvent {
   return {
-    seq: 1,
-    type: 'agent_message',
-    role: 'coordinator',
-    summary: 'Did something',
-    createdAt: new Date().toISOString(),
+    id: `evt-${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'agent_message',
+    title: 'Did something',
+    status: 'ok',
+    startedAt: new Date().toISOString(),
     ...overrides,
   }
 }
 
-function renderFeed(teamId = 'team-1') {
+function renderFeed(threadId: string | null = 'thread-1', teamId = 'team-1') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <ActivityFeed teamId={teamId} />
+      <ActivityFeed threadId={threadId} teamId={teamId} />
     </QueryClientProvider>,
   )
 }
@@ -49,26 +49,32 @@ describe('ActivityFeed', () => {
   it('shows empty state when no events', () => {
     useActivity.mockReturnValue({ data: [], isLoading: false })
     renderFeed()
-    expect(screen.getByText(/no activity yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/waiting for activity/i)).toBeInTheDocument()
   })
 
-  it('renders event rows with role and type labels', () => {
+  it('renders event rows with role and humanized kind labels', () => {
     const events = [
-      makeEvent({ seq: 1, role: 'coordinator', type: 'agent_message', summary: 'Thinking about task' }),
+      makeEvent({
+        id: 'e1',
+        kind: 'agent_message',
+        title: 'Thinking about task',
+        data: { role: 'coordinator' },
+      }),
     ]
     useActivity.mockReturnValue({ data: events, isLoading: false })
     renderFeed()
 
     expect(screen.getByText('coordinator')).toBeInTheDocument()
-    expect(screen.getByText('agent_message')).toBeInTheDocument()
+    // agent_message is humanized to "Reply" by humanizeKind()
+    expect(screen.getByText('Reply')).toBeInTheDocument()
     expect(screen.getByText('Thinking about task')).toBeInTheDocument()
   })
 
   it('renders multiple events', () => {
     const events = [
-      makeEvent({ seq: 1, summary: 'Event one' }),
-      makeEvent({ seq: 2, summary: 'Event two' }),
-      makeEvent({ seq: 3, summary: 'Event three' }),
+      makeEvent({ id: 'e1', title: 'Event one' }),
+      makeEvent({ id: 'e2', title: 'Event two' }),
+      makeEvent({ id: 'e3', title: 'Event three' }),
     ]
     useActivity.mockReturnValue({ data: events, isLoading: false })
     renderFeed()
@@ -80,7 +86,7 @@ describe('ActivityFeed', () => {
 
   it('only shows last 50 events', () => {
     const events = Array.from({ length: 60 }, (_, i) =>
-      makeEvent({ seq: i + 1, summary: `Event ${i + 1}` }),
+      makeEvent({ id: `e${i + 1}`, title: `Event ${i + 1}` }),
     )
     useActivity.mockReturnValue({ data: events, isLoading: false })
     renderFeed()
@@ -97,28 +103,32 @@ describe('ActivityFeed', () => {
     const user = userEvent.setup()
     const events = [
       makeEvent({
-        seq: 1,
-        summary: 'Has details',
-        detail: '{"key": "value"}',
+        id: 'e1',
+        title: 'Has details',
+        outputPreview: 'Detailed output content',
       }),
     ]
     useActivity.mockReturnValue({ data: events, isLoading: false })
     renderFeed()
 
     // Detail should not be visible initially
-    expect(screen.queryByText('{"key": "value"}')).not.toBeInTheDocument()
+    expect(screen.queryByText('Detailed output content')).not.toBeInTheDocument()
 
     // Click to expand
     await user.click(screen.getByText('Has details'))
 
     // Detail should now be visible
-    expect(screen.getByText('{"key": "value"}')).toBeInTheDocument()
+    expect(screen.getByText('Detailed output content')).toBeInTheDocument()
   })
 
   it('collapses detail on second click', async () => {
     const user = userEvent.setup()
     const events = [
-      makeEvent({ seq: 1, summary: 'Toggle me', detail: 'Detail content' }),
+      makeEvent({
+        id: 'e1',
+        title: 'Toggle me',
+        outputPreview: 'Detail content',
+      }),
     ]
     useActivity.mockReturnValue({ data: events, isLoading: false })
     renderFeed()
@@ -135,7 +145,13 @@ describe('ActivityFeed', () => {
   it('does not expand when event has no detail', async () => {
     const user = userEvent.setup()
     const events = [
-      makeEvent({ seq: 1, summary: 'No details', detail: undefined }),
+      makeEvent({
+        id: 'e1',
+        title: 'No details',
+        textPreview: undefined,
+        outputPreview: undefined,
+        error: undefined,
+      }),
     ]
     useActivity.mockReturnValue({ data: events, isLoading: false })
     renderFeed()
@@ -145,18 +161,28 @@ describe('ActivityFeed', () => {
     expect(screen.getByText('No details')).toBeInTheDocument()
   })
 
-  it('handles events without role or type gracefully', () => {
+  it('handles events without role or kind gracefully', () => {
     const events = [
-      makeEvent({ seq: 1, role: undefined, type: undefined, summary: 'Minimal event' }),
+      makeEvent({
+        id: 'e1',
+        kind: '',
+        title: 'Minimal event',
+        data: undefined,
+      }),
     ]
     useActivity.mockReturnValue({ data: events, isLoading: false })
     renderFeed()
     expect(screen.getByText('Minimal event')).toBeInTheDocument()
   })
 
-  it('calls useActivity with the correct teamId', () => {
+  it('calls useActivity with the correct options', () => {
     useActivity.mockReturnValue({ data: [], isLoading: false })
-    renderFeed('my-team-id')
-    expect(useActivity).toHaveBeenCalledWith('my-team-id')
+    renderFeed('thread-42', 'my-team-id')
+    expect(useActivity).toHaveBeenCalledWith({
+      threadId: 'thread-42',
+      teamId: 'my-team-id',
+      includeChildRuns: true,
+      limit: 100,
+    })
   })
 })

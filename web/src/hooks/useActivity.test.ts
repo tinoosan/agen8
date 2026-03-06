@@ -1,195 +1,189 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useActivity } from './useActivity'
 import { createWrapper } from '../test/test-utils'
 import type { ActivityEvent } from '../lib/types'
 
-// Mock rpc module
-vi.mock('../lib/rpc', () => {
-  const notificationHandlers = new Map<string, Array<(n: { jsonrpc: '2.0'; method: string; params?: unknown }) => void>>()
+// Shared notification registry (plain functions, not vi.fn, to survive vi.clearAllMocks)
+const notificationHandlers = new Map<string, Array<(n: { jsonrpc: '2.0'; method: string; params?: unknown }) => void>>()
 
-  return {
-    rpcCall: vi.fn(),
-    onNotification: vi.fn((method: string, handler: (n: { jsonrpc: '2.0'; method: string; params?: unknown }) => void) => {
-      if (!notificationHandlers.has(method)) notificationHandlers.set(method, [])
-      notificationHandlers.get(method)!.push(handler)
-      return () => {
-        const list = notificationHandlers.get(method)
-        if (list) {
-          const idx = list.indexOf(handler)
-          if (idx !== -1) list.splice(idx, 1)
-        }
-      }
-    }),
-    _notificationHandlers: notificationHandlers,
-    _dispatch: (method: string, params: unknown) => {
-      const list = notificationHandlers.get(method)
-      if (list) list.forEach(h => h({ jsonrpc: '2.0', method, params }))
-    },
-  }
-})
-
-// Import the mocked module to control it
-const rpcMock = await import('../lib/rpc') as typeof import('../lib/rpc') & {
-  _dispatch: (method: string, params: unknown) => void
-  _notificationHandlers: Map<string, unknown[]>
+function dispatch(method: string, params: unknown) {
+  const list = notificationHandlers.get(method)
+  if (list) list.forEach(h => h({ jsonrpc: '2.0', method, params }))
 }
 
-const mockRpcCall = rpcMock.rpcCall as ReturnType<typeof vi.fn>
+const mockRpcCall = vi.fn()
 
-function makeEvent(overrides: Partial<ActivityEvent> = {}): ActivityEvent {
+vi.mock('../lib/rpc', () => ({
+  rpcCall: (...args: unknown[]) => mockRpcCall(...args),
+  onNotification: (method: string, handler: (n: { jsonrpc: '2.0'; method: string; params?: unknown }) => void) => {
+    if (!notificationHandlers.has(method)) notificationHandlers.set(method, [])
+    notificationHandlers.get(method)!.push(handler)
+    return () => {
+      const list = notificationHandlers.get(method)
+      if (list) {
+        const idx = list.indexOf(handler)
+        if (idx !== -1) list.splice(idx, 1)
+      }
+    }
+  },
+}))
+
+function makeActivity(overrides: Partial<ActivityEvent> = {}): ActivityEvent {
   return {
-    seq: 1,
-    type: 'agent_message',
-    role: 'coordinator',
-    summary: 'Test event',
-    createdAt: new Date().toISOString(),
+    id: `act-${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'agent_message',
+    title: 'Test activity',
+    status: 'ok',
+    startedAt: new Date().toISOString(),
     ...overrides,
   }
 }
 
 describe('useActivity', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    rpcMock._notificationHandlers.clear()
+    mockRpcCall.mockReset()
+    notificationHandlers.clear()
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('returns empty array when teamId is null', () => {
+  it('does not fetch when threadId is null', () => {
     const { Wrapper } = createWrapper()
-    const { result } = renderHook(() => useActivity(null), { wrapper: Wrapper })
+    const { result } = renderHook(
+      () => useActivity({ threadId: null, teamId: 'team-1' }),
+      { wrapper: Wrapper },
+    )
     expect(result.current.data).toBeUndefined()
     expect(result.current.isLoading).toBe(false)
+    expect(mockRpcCall).not.toHaveBeenCalled()
   })
 
-  it('fetches events via rpcCall when teamId is provided', async () => {
-    const events = [makeEvent({ seq: 1 }), makeEvent({ seq: 2 })]
-    mockRpcCall.mockResolvedValueOnce({ events })
+  it('fetches activities via rpcCall when threadId is provided', async () => {
+    const activities = [
+      makeActivity({ id: 'a1', title: 'First' }),
+      makeActivity({ id: 'a2', title: 'Second' }),
+    ]
+    mockRpcCall.mockResolvedValueOnce({ activities })
 
     const { Wrapper } = createWrapper()
-    const { result } = renderHook(() => useActivity('team-1'), { wrapper: Wrapper })
+    const { result } = renderHook(
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1', includeChildRuns: true, limit: 200 }),
+      { wrapper: Wrapper },
+    )
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
-    expect(mockRpcCall).toHaveBeenCalledWith('activity.list', {
+    expect(mockRpcCall).toHaveBeenCalledWith('activity.list', expect.objectContaining({
+      threadId: 'thread-1',
       teamId: 'team-1',
-      limit: 100,
-    })
+      includeChildRuns: true,
+      limit: 200,
+      offset: 0,
+      sortDesc: false,
+    }))
     expect(result.current.data).toHaveLength(2)
   })
 
-  it('handles API returning empty events', async () => {
-    mockRpcCall.mockResolvedValueOnce({ events: [] })
+  it('handles API returning empty activities', async () => {
+    mockRpcCall.mockResolvedValueOnce({ activities: [] })
 
     const { Wrapper } = createWrapper()
-    const { result } = renderHook(() => useActivity('team-1'), { wrapper: Wrapper })
+    const { result } = renderHook(
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1' }),
+      { wrapper: Wrapper },
+    )
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual([])
   })
 
-  it('handles API returning undefined events', async () => {
+  it('handles API returning undefined activities', async () => {
     mockRpcCall.mockResolvedValueOnce({})
 
     const { Wrapper } = createWrapper()
-    const { result } = renderHook(() => useActivity('team-1'), { wrapper: Wrapper })
+    const { result } = renderHook(
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1' }),
+      { wrapper: Wrapper },
+    )
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toEqual([])
   })
 
-  it('appends events from event.append notifications', async () => {
-    const initialEvents = [makeEvent({ seq: 1, summary: 'First' })]
-    mockRpcCall.mockResolvedValueOnce({ events: initialEvents })
+  it('paginates through results using nextOffset', async () => {
+    const page1 = [makeActivity({ id: 'a1' }), makeActivity({ id: 'a2' })]
+    const page2 = [makeActivity({ id: 'a3' })]
+    mockRpcCall
+      .mockResolvedValueOnce({ activities: page1, nextOffset: 2 })
+      .mockResolvedValueOnce({ activities: page2 })
 
     const { Wrapper } = createWrapper()
-    const { result } = renderHook(() => useActivity('team-1'), { wrapper: Wrapper })
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(result.current.data).toHaveLength(1)
-
-    // Simulate receiving a notification for the same team
-    const newEvent = makeEvent({ seq: 2, summary: 'Second' })
-    act(() => {
-      rpcMock._dispatch('event.append', { event: newEvent, teamId: 'team-1' })
-    })
-
-    await waitFor(() => expect(result.current.data).toHaveLength(2))
-    expect(result.current.data![1].summary).toBe('Second')
-  })
-
-  it('ignores event.append notifications for different teams', async () => {
-    const initialEvents = [makeEvent({ seq: 1 })]
-    mockRpcCall.mockResolvedValueOnce({ events: initialEvents })
-
-    const { Wrapper } = createWrapper()
-    const { result } = renderHook(() => useActivity('team-1'), { wrapper: Wrapper })
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-
-    // Notification for a different team
-    act(() => {
-      rpcMock._dispatch('event.append', {
-        event: makeEvent({ seq: 2, summary: 'Other team' }),
-        teamId: 'team-2',
-      })
-    })
-
-    // Should still have only 1 event
-    expect(result.current.data).toHaveLength(1)
-  })
-
-  it('caps events at 200 to prevent memory leaks', async () => {
-    const initialEvents = Array.from({ length: 199 }, (_, i) =>
-      makeEvent({ seq: i + 1, summary: `Event ${i + 1}` }),
+    const { result } = renderHook(
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1', limit: 200 }),
+      { wrapper: Wrapper },
     )
-    mockRpcCall.mockResolvedValueOnce({ events: initialEvents })
-
-    const { Wrapper } = createWrapper()
-    const { result } = renderHook(() => useActivity('team-1'), { wrapper: Wrapper })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(result.current.data).toHaveLength(199)
+    expect(result.current.data).toHaveLength(3)
+    expect(mockRpcCall).toHaveBeenCalledTimes(2)
+    // Second call should use offset from first page
+    expect(mockRpcCall).toHaveBeenNthCalledWith(2, 'activity.list', expect.objectContaining({
+      offset: 2,
+    }))
+  })
 
-    // Add 2 more to push past 200
+  it('deduplicates activities by id', async () => {
+    const activities = [
+      makeActivity({ id: 'a1', title: 'First' }),
+      makeActivity({ id: 'a1', title: 'Duplicate' }),
+      makeActivity({ id: 'a2', title: 'Second' }),
+    ]
+    mockRpcCall.mockResolvedValueOnce({ activities })
+
+    const { Wrapper } = createWrapper()
+    const { result } = renderHook(
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1' }),
+      { wrapper: Wrapper },
+    )
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toHaveLength(2)
+    expect(result.current.data![0].title).toBe('First')
+  })
+
+  it('invalidates queries on event.append notifications', async () => {
+    mockRpcCall.mockResolvedValueOnce({ activities: [makeActivity({ id: 'a1' })] })
+
+    const { Wrapper, queryClient } = createWrapper()
+    renderHook(
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1' }),
+      { wrapper: Wrapper },
+    )
+
+    await waitFor(() => expect(notificationHandlers.get('event.append')?.length).toBeGreaterThan(0))
+
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+
     act(() => {
-      rpcMock._dispatch('event.append', {
-        event: makeEvent({ seq: 200, summary: 'Event 200' }),
-        teamId: 'team-1',
-      })
-    })
-    act(() => {
-      rpcMock._dispatch('event.append', {
-        event: makeEvent({ seq: 201, summary: 'Event 201' }),
-        teamId: 'team-1',
-      })
+      dispatch('event.append', { event: { runId: 'run-1' } })
     })
 
-    await waitFor(() => {
-      const data = result.current.data!
-      expect(data.length).toBeLessThanOrEqual(201)
-      // Last event should always be the newest
-      expect(data[data.length - 1].summary).toBe('Event 201')
-    })
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
   })
 
   it('cleans up notification listener on unmount', async () => {
-    mockRpcCall.mockResolvedValueOnce({ events: [] })
+    mockRpcCall.mockResolvedValueOnce({ activities: [] })
 
     const { Wrapper } = createWrapper()
-    const { result, unmount } = renderHook(() => useActivity('team-1'), { wrapper: Wrapper })
+    const { unmount } = renderHook(
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1' }),
+      { wrapper: Wrapper },
+    )
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-
-    // Notification handlers should be registered
-    expect(rpcMock._notificationHandlers.get('event.append')?.length).toBeGreaterThan(0)
+    await waitFor(() => expect(notificationHandlers.get('event.append')?.length).toBeGreaterThan(0))
 
     unmount()
 
-    // After unmount, handlers should be cleaned up
-    expect(rpcMock._notificationHandlers.get('event.append')?.length).toBe(0)
+    expect(notificationHandlers.get('event.append')?.length).toBe(0)
   })
 })

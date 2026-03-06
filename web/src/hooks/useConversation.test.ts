@@ -50,8 +50,14 @@ describe('useConversation', () => {
   it('does not fetch when threadId is null', () => {
     const { Wrapper } = createWrapper()
     const { result } = renderHook(() => useConversation(null), { wrapper: Wrapper })
-    expect(result.current.data).toBeUndefined()
+    expect(result.current.query.data).toBeUndefined()
     expect(mockRpcCall).not.toHaveBeenCalled()
+  })
+
+  it('returns registerTurnId callback', () => {
+    const { Wrapper } = createWrapper()
+    const { result } = renderHook(() => useConversation(null), { wrapper: Wrapper })
+    expect(typeof result.current.registerTurnId).toBe('function')
   })
 
   it('fetches items via item.list RPC', async () => {
@@ -64,13 +70,13 @@ describe('useConversation', () => {
     const { Wrapper } = createWrapper()
     const { result } = renderHook(() => useConversation('thread-1'), { wrapper: Wrapper })
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true))
 
     expect(mockRpcCall).toHaveBeenCalledWith('item.list', {
       threadId: 'thread-1',
       limit: 200,
     })
-    expect(result.current.data).toHaveLength(2)
+    expect(result.current.query.data).toHaveLength(2)
   })
 
   it('handles empty item list from API', async () => {
@@ -79,21 +85,21 @@ describe('useConversation', () => {
     const { Wrapper } = createWrapper()
     const { result } = renderHook(() => useConversation('thread-1'), { wrapper: Wrapper })
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(result.current.data).toEqual([])
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true))
+    expect(result.current.query.data).toEqual([])
   })
 
-  it('adds new items from item.started notifications', async () => {
+  it('adds new items from item.started notifications for known turns', async () => {
     const initialItems = [makeItem({ id: 'item-1', turnId: 'turn-1' })]
     mockRpcCall.mockResolvedValueOnce({ items: initialItems })
 
     const { Wrapper, queryClient } = createWrapper()
     const { result } = renderHook(() => useConversation('thread-1'), { wrapper: Wrapper })
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    // Wait for the useEffect to register notification handlers
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true))
     await waitFor(() => expect(notificationHandlers.get('item.started')?.length).toBeGreaterThan(0))
 
+    // turn-1 is already known from initial fetch, so items for it should be accepted
     const newItem = makeItem({
       id: 'item-2',
       turnId: 'turn-1',
@@ -106,19 +112,48 @@ describe('useConversation', () => {
       dispatch('item.started', { item: newItem })
     })
 
-    // Verify cache was updated
     const cached = queryClient.getQueryData<Item[]>(['item.list', 'thread-1'])
     expect(cached).toHaveLength(2)
     expect(cached![1].id).toBe('item-2')
   })
 
-  it('replaces optimistic items on item.started', async () => {
+  it('filters item.started notifications for unknown turns', async () => {
     mockRpcCall.mockResolvedValueOnce({ items: [] })
 
     const { Wrapper, queryClient } = createWrapper()
     renderHook(() => useConversation('thread-1'), { wrapper: Wrapper })
 
     await waitFor(() => expect(notificationHandlers.get('item.started')?.length).toBeGreaterThan(0))
+
+    // Dispatch an item for an unknown turn (not registered via turn.started or initial fetch)
+    const unknownTurnItem = makeItem({
+      id: 'item-foreign',
+      turnId: 'turn-unknown',
+      type: 'agent_message',
+      status: 'started',
+      content: { text: 'Foreign' },
+    })
+
+    act(() => {
+      dispatch('item.started', { item: unknownTurnItem })
+    })
+
+    const cached = queryClient.getQueryData<Item[]>(['item.list', 'thread-1'])
+    expect(cached).toHaveLength(0)
+  })
+
+  it('replaces optimistic items on item.started', async () => {
+    mockRpcCall.mockResolvedValueOnce({ items: [] })
+
+    const { Wrapper, queryClient } = createWrapper()
+    const { result } = renderHook(() => useConversation('thread-1'), { wrapper: Wrapper })
+
+    await waitFor(() => expect(notificationHandlers.get('item.started')?.length).toBeGreaterThan(0))
+
+    // Pre-register the turn ID so the item.started handler accepts it
+    act(() => {
+      result.current.registerTurnId('turn-5')
+    })
 
     // Manually inject an optimistic item
     act(() => {
@@ -159,15 +194,7 @@ describe('useConversation', () => {
 
     await waitFor(() => expect(notificationHandlers.get('item.completed')?.length).toBeGreaterThan(0))
 
-    // Register the turn ID first via item.started (the item.completed handler
-    // guards against unknown turn IDs, and the initial cache seed may run
-    // before the query resolves)
-    act(() => {
-      dispatch('item.started', {
-        item: makeItem({ id: 'item-1', turnId: 'turn-1', type: 'agent_message', status: 'started', content: { text: '' } }),
-      })
-    })
-
+    // turn-1 is known from initial fetch, so item.completed for it should be accepted
     const completedItem = makeItem({
       id: 'item-1',
       turnId: 'turn-1',
@@ -279,12 +306,12 @@ describe('useConversation', () => {
 
     await waitFor(() => expect(notificationHandlers.get('turn.started')?.length).toBeGreaterThan(0))
 
-    // Register a turn
+    // Register a turn via turn.started notification for our thread
     act(() => {
       dispatch('turn.started', { turn: { id: 'turn-new', threadId: 'thread-1' } })
     })
 
-    // Add an item for that turn
+    // Now items for that turn should be accepted
     const newItem = makeItem({
       id: 'item-new',
       turnId: 'turn-new',
@@ -301,14 +328,70 @@ describe('useConversation', () => {
     expect(cached![0].id).toBe('item-new')
   })
 
-  it('does not duplicate items on repeated item.started notifications', async () => {
+  it('ignores turn.started for different threads', async () => {
     mockRpcCall.mockResolvedValueOnce({ items: [] })
+
+    const { Wrapper, queryClient } = createWrapper()
+    renderHook(() => useConversation('thread-1'), { wrapper: Wrapper })
+
+    await waitFor(() => expect(notificationHandlers.get('turn.started')?.length).toBeGreaterThan(0))
+
+    // Register a turn for a different thread
+    act(() => {
+      dispatch('turn.started', { turn: { id: 'turn-other', threadId: 'thread-other' } })
+    })
+
+    // Items for that turn should NOT be accepted
+    act(() => {
+      dispatch('item.started', {
+        item: makeItem({ id: 'item-foreign', turnId: 'turn-other', type: 'agent_message', status: 'started' }),
+      })
+    })
+
+    const cached = queryClient.getQueryData<Item[]>(['item.list', 'thread-1'])
+    expect(cached).toHaveLength(0)
+  })
+
+  it('registerTurnId pre-registers turns for immediate acceptance', async () => {
+    mockRpcCall.mockResolvedValueOnce({ items: [] })
+
+    const { Wrapper, queryClient } = createWrapper()
+    const { result } = renderHook(() => useConversation('thread-1'), { wrapper: Wrapper })
+
+    await waitFor(() => expect(notificationHandlers.get('item.started')?.length).toBeGreaterThan(0))
+
+    // Pre-register a turn ID (simulating what happens after turn.create returns)
+    act(() => {
+      result.current.registerTurnId('turn-pre')
+    })
+
+    // Items for that turn should be accepted immediately
+    const newItem = makeItem({
+      id: 'item-pre',
+      turnId: 'turn-pre',
+      type: 'user_message',
+      status: 'completed',
+      content: { text: 'Hello' },
+    })
+    act(() => {
+      dispatch('item.started', { item: newItem })
+    })
+
+    const cached = queryClient.getQueryData<Item[]>(['item.list', 'thread-1'])
+    expect(cached).toHaveLength(1)
+    expect(cached![0].id).toBe('item-pre')
+  })
+
+  it('does not duplicate items on repeated item.started notifications', async () => {
+    const initialItems = [makeItem({ id: 'item-1', turnId: 'turn-1' })]
+    mockRpcCall.mockResolvedValueOnce({ items: initialItems })
 
     const { Wrapper, queryClient } = createWrapper()
     renderHook(() => useConversation('thread-1'), { wrapper: Wrapper })
 
     await waitFor(() => expect(notificationHandlers.get('item.started')?.length).toBeGreaterThan(0))
 
+    // turn-1 is known from initial fetch, so dispatch the same item twice
     const item = makeItem({ id: 'item-1', turnId: 'turn-1' })
 
     act(() => {
