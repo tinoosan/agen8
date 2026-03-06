@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
 // Update implements the Bubble Tea update loop.
@@ -608,18 +609,12 @@ func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	switch msg.Type {
 	case tea.KeyUp:
 		if len(m.commandPalette.Matches) > 0 {
-			m.commandPalette.Selected--
-			if m.commandPalette.Selected < 0 {
-				m.commandPalette.Selected = len(m.commandPalette.Matches) - 1
-			}
+			m.commandPalette.Move(-1, true)
 		}
 		return m, nil, true
 	case tea.KeyDown:
 		if len(m.commandPalette.Matches) > 0 {
-			m.commandPalette.Selected++
-			if m.commandPalette.Selected >= len(m.commandPalette.Matches) {
-				m.commandPalette.Selected = 0
-			}
+			m.commandPalette.Move(1, true)
 		}
 		return m, nil, true
 	case tea.KeyEnter:
@@ -637,14 +632,7 @@ func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		selectedCmd := m.commandPalette.Matches[selected]
 
 		// Determine whether the user has already typed anything beyond the first token.
-		inputValue := strings.TrimSpace(m.currentInputValue())
-		fields := strings.Fields(inputValue)
-		firstToken := ""
-		if len(fields) > 0 {
-			firstToken = fields[0]
-		}
-		rest := strings.TrimSpace(strings.TrimPrefix(inputValue, firstToken))
-		hasRest := rest != ""
+		hasRest := kit.AnalyzeCommandInput(m.currentInputValue()).HasRest
 
 		m.autocompleteCommand()
 

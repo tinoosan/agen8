@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 const (
@@ -54,6 +55,35 @@ type ProjectContext struct {
 	Exists     bool
 	Config     ProjectConfig
 	State      ProjectState
+}
+
+type projectConfigFile struct {
+	Project            projectConfigFileProject `toml:"project"`
+	ID                 string                   `toml:"id"`
+	ProjectID          string                   `toml:"project_id"`
+	DefaultProfile     string                   `toml:"default_profile"`
+	DefaultMode        string                   `toml:"default_mode"`
+	DefaultTeamProfile string                   `toml:"default_team_profile"`
+	RPCEndpoint        string                   `toml:"rpc_endpoint"`
+	DataDirOverride    string                   `toml:"data_dir_override"`
+	ObsidianVaultPath  string                   `toml:"obsidian_vault_path"`
+	ObsidianEnabled    *bool                    `toml:"obsidian_enabled"`
+	CreatedAt          string                   `toml:"created_at"`
+	Version            int                      `toml:"version"`
+}
+
+type projectConfigFileProject struct {
+	ID                 string `toml:"id"`
+	ProjectID          string `toml:"project_id"`
+	DefaultProfile     string `toml:"default_profile"`
+	DefaultMode        string `toml:"default_mode"`
+	DefaultTeamProfile string `toml:"default_team_profile"`
+	RPCEndpoint        string `toml:"rpc_endpoint"`
+	DataDirOverride    string `toml:"data_dir_override"`
+	ObsidianVaultPath  string `toml:"obsidian_vault_path"`
+	ObsidianEnabled    *bool  `toml:"obsidian_enabled"`
+	CreatedAt          string `toml:"created_at"`
+	Version            int    `toml:"version"`
 }
 
 func defaultProjectConfig(baseDir string) ProjectConfig {
@@ -293,96 +323,95 @@ func SetActiveSession(start string, state ProjectState) (ProjectContext, error) 
 }
 
 func readProjectConfig(path string, root string) (ProjectConfig, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return defaultProjectConfig(root), nil
 		}
 		return ProjectConfig{}, err
 	}
-	cfg := defaultProjectConfig(root)
-	lines := strings.Split(string(b), "\n")
-	inProjectSection := false
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section := strings.ToLower(strings.TrimSpace(strings.Trim(line, "[]")))
-			inProjectSection = section == "project"
-			continue
-		}
-		if i := strings.Index(line, "#"); i >= 0 {
-			line = strings.TrimSpace(line[:i])
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		if strings.HasPrefix(key, "project.") {
-			key = strings.TrimSpace(strings.TrimPrefix(key, "project."))
-		}
-		if !inProjectSection {
-			switch key {
-			case "project_id", "default_profile", "default_mode", "default_team_profile", "rpc_endpoint", "data_dir_override", "created_at", "obsidian_vault_path", "obsidian_enabled", "version":
-			default:
-				continue
-			}
-		}
-		raw := strings.TrimSpace(parts[1])
-		value := raw
-		if strings.HasPrefix(raw, "\"") && strings.HasSuffix(raw, "\"") {
-			if unquoted, err := strconv.Unquote(raw); err == nil {
-				value = unquoted
-			}
-		}
-		switch key {
-		case "project_id", "id":
-			cfg.ProjectID = strings.TrimSpace(value)
-		case "default_profile":
-			cfg.DefaultProfile = strings.TrimSpace(value)
-		case "default_mode":
-			cfg.DefaultMode = strings.TrimSpace(value)
-		case "default_team_profile":
-			cfg.DefaultTeamProfile = strings.TrimSpace(value)
-		case "rpc_endpoint":
-			cfg.RPCEndpoint = strings.TrimSpace(value)
-		case "data_dir_override":
-			cfg.DataDirOverride = strings.TrimSpace(value)
-		case "created_at":
-			cfg.CreatedAt = strings.TrimSpace(value)
-		case "obsidian_vault_path":
-			cfg.ObsidianVaultPath = strings.TrimSpace(value)
-		case "obsidian_enabled":
-			cfg.ObsidianEnabled = strings.EqualFold(strings.TrimSpace(value), "true")
-		case "version":
-			if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
-				cfg.Version = n
-			}
-		}
+	var raw projectConfigFile
+	if _, err := toml.DecodeFile(path, &raw); err != nil {
+		return ProjectConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
+
+	cfg := defaultProjectConfig(root)
+	cfg = mergeProjectConfig(cfg, raw.toProjectConfig())
+	cfg = mergeProjectConfig(cfg, raw.Project.toProjectConfig())
 	return normalizeProjectConfig(cfg, root), nil
 }
 
 func writeProjectConfig(path string, cfg ProjectConfig) error {
 	cfg = normalizeProjectConfig(cfg, filepath.Dir(filepath.Dir(path)))
-	lines := []string{
-		"# Agen8 project defaults",
-		"[project]",
-		"id = " + strconv.Quote(cfg.ProjectID),
-		"default_profile = " + strconv.Quote(cfg.DefaultProfile),
-		"default_mode = " + strconv.Quote(cfg.DefaultMode),
-		"default_team_profile = " + strconv.Quote(cfg.DefaultTeamProfile),
-		"rpc_endpoint = " + strconv.Quote(cfg.RPCEndpoint),
-		"data_dir_override = " + strconv.Quote(cfg.DataDirOverride),
-		"obsidian_vault_path = " + strconv.Quote(cfg.ObsidianVaultPath),
-		"obsidian_enabled = " + strconv.FormatBool(cfg.ObsidianEnabled),
-		"created_at = " + strconv.Quote(cfg.CreatedAt),
-		"version = " + strconv.Itoa(cfg.Version),
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	defer f.Close()
+
+	if _, err := f.WriteString("# Agen8 project defaults\n"); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	enc := toml.NewEncoder(f)
+	if err := enc.Encode(projectConfigFile{
+		Project: projectConfigFileProject{
+			ID:                 cfg.ProjectID,
+			DefaultProfile:     cfg.DefaultProfile,
+			DefaultMode:        cfg.DefaultMode,
+			DefaultTeamProfile: cfg.DefaultTeamProfile,
+			RPCEndpoint:        cfg.RPCEndpoint,
+			DataDirOverride:    cfg.DataDirOverride,
+			ObsidianVaultPath:  cfg.ObsidianVaultPath,
+			ObsidianEnabled:    projectBoolPtr(cfg.ObsidianEnabled),
+			CreatedAt:          cfg.CreatedAt,
+			Version:            cfg.Version,
+		},
+	}); err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	return nil
+}
+
+func (f projectConfigFile) toProjectConfig() ProjectConfig {
+	return ProjectConfig{
+		ProjectID:          firstNonEmpty(f.ProjectID, f.ID),
+		DefaultProfile:     f.DefaultProfile,
+		DefaultMode:        f.DefaultMode,
+		DefaultTeamProfile: f.DefaultTeamProfile,
+		RPCEndpoint:        f.RPCEndpoint,
+		DataDirOverride:    f.DataDirOverride,
+		ObsidianVaultPath:  f.ObsidianVaultPath,
+		ObsidianEnabled:    f.ObsidianEnabled != nil && *f.ObsidianEnabled,
+		CreatedAt:          f.CreatedAt,
+		Version:            f.Version,
+	}
+}
+
+func (f projectConfigFileProject) toProjectConfig() ProjectConfig {
+	return ProjectConfig{
+		ProjectID:          firstNonEmpty(f.ProjectID, f.ID),
+		DefaultProfile:     f.DefaultProfile,
+		DefaultMode:        f.DefaultMode,
+		DefaultTeamProfile: f.DefaultTeamProfile,
+		RPCEndpoint:        f.RPCEndpoint,
+		DataDirOverride:    f.DataDirOverride,
+		ObsidianVaultPath:  f.ObsidianVaultPath,
+		ObsidianEnabled:    f.ObsidianEnabled != nil && *f.ObsidianEnabled,
+		CreatedAt:          f.CreatedAt,
+		Version:            f.Version,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func projectBoolPtr(v bool) *bool {
+	return &v
 }
 
 func SaveProjectConfig(start string, cfg ProjectConfig) (ProjectContext, error) {

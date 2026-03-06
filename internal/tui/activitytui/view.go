@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	tuishared "github.com/tinoosan/agen8/internal/tui"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -21,10 +20,7 @@ var (
 	styleSelRow = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#c8d3f5"))
 	styleUnselRow = lipgloss.NewStyle().Foreground(lipgloss.Color("#9da3b4"))
-
-	mdMu       sync.Mutex
-	mdByWidth  = map[int]*glamour.TermRenderer{}
-	mdFallback = lipgloss.NewStyle()
+	mdRenderer    = tuishared.NewContentRenderer()
 )
 
 const (
@@ -451,43 +447,10 @@ func actTitle(a types.Activity) string {
 	return kind
 }
 
-
 func renderMarkdown(md string, width int) string {
 	md = strings.TrimSpace(md)
 	if md == "" {
 		return ""
 	}
-	if width <= 0 {
-		width = 40
-	}
-
-	r, err := markdownRenderer(width)
-	if err != nil {
-		return mdFallback.Render(md)
-	}
-	out, err := r.Render(md)
-	if err != nil {
-		return mdFallback.Render(md)
-	}
-	return strings.TrimRight(out, "\n")
-}
-
-func markdownRenderer(width int) (*glamour.TermRenderer, error) {
-	mdMu.Lock()
-	defer mdMu.Unlock()
-
-	if r, ok := mdByWidth[width]; ok {
-		return r, nil
-	}
-
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width),
-		glamour.WithPreservedNewLines(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	mdByWidth[width] = r
-	return r, nil
+	return strings.TrimRight(mdRenderer.RenderMarkdown(md, width), "\n")
 }

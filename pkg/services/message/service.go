@@ -4,12 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/types"
+	"github.com/tinoosan/agen8/pkg/wake"
 )
 
 type Service interface {
@@ -18,22 +17,19 @@ type Service interface {
 }
 
 type Manager struct {
-	store state.MessageStore
-
-	watchersMu sync.Mutex
-	watchers   map[string]messageWakeWatcher
+	store    state.MessageStore
+	watchers *wake.SignalHub[messageWakeFilter]
 }
 
-type messageWakeWatcher struct {
+type messageWakeFilter struct {
 	threadID string
 	runID    string
-	ch       chan struct{}
 }
 
 func NewManager(store state.MessageStore) *Manager {
 	return &Manager{
 		store:    store,
-		watchers: map[string]messageWakeWatcher{},
+		watchers: wake.NewSignalHub[messageWakeFilter](),
 	}
 }
 
@@ -43,27 +39,10 @@ func (m *Manager) SubscribeWake(threadID, runID string) (<-chan struct{}, func()
 		close(ch)
 		return ch, func() {}
 	}
-	id := uuid.NewString()
-	w := messageWakeWatcher{
+	return m.watchers.Subscribe(messageWakeFilter{
 		threadID: strings.TrimSpace(threadID),
 		runID:    strings.TrimSpace(runID),
-		ch:       make(chan struct{}, 1),
-	}
-	m.watchersMu.Lock()
-	m.watchers[id] = w
-	m.watchersMu.Unlock()
-	cancel := func() {
-		m.watchersMu.Lock()
-		ww, ok := m.watchers[id]
-		if ok {
-			delete(m.watchers, id)
-		}
-		m.watchersMu.Unlock()
-		if ok {
-			close(ww.ch)
-		}
-	}
-	return w.ch, cancel
+	})
 }
 
 func (m *Manager) notifyWake(threadID, runID string) {
@@ -72,20 +51,15 @@ func (m *Manager) notifyWake(threadID, runID string) {
 	}
 	threadID = strings.TrimSpace(threadID)
 	runID = strings.TrimSpace(runID)
-	m.watchersMu.Lock()
-	defer m.watchersMu.Unlock()
-	for _, w := range m.watchers {
-		if w.threadID != "" && w.threadID != threadID {
-			continue
+	m.watchers.Notify(func(filter messageWakeFilter) bool {
+		if filter.threadID != "" && filter.threadID != threadID {
+			return false
 		}
-		if w.runID != "" && w.runID != runID {
-			continue
+		if filter.runID != "" && filter.runID != runID {
+			return false
 		}
-		select {
-		case w.ch <- struct{}{}:
-		default:
-		}
-	}
+		return true
+	})
 }
 
 func (m *Manager) PublishMessage(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {

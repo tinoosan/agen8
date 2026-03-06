@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8/pkg/agent/hosttools"
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/types"
+	"github.com/tinoosan/agen8/pkg/wake"
 )
 
 // activeTaskCanceler is implemented by stores that support efficient cancel-by-run (e.g. SQLite).
@@ -28,9 +28,7 @@ type Manager struct {
 	runLoader    RunLoader
 	oracle       *RoutingOracle
 	events       taskEventAppender
-
-	watchersMu sync.Mutex
-	watchers   map[string]taskWakeWatcher
+	watchers     *wake.SignalHub[taskWakeFilter]
 }
 
 type taskEventAppender interface {
@@ -41,10 +39,9 @@ type batchCloseStore interface {
 	CloseBatchAndHandoffAtomic(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (handoffTaskID string, approved, retried, escalated int, err error)
 }
 
-type taskWakeWatcher struct {
+type taskWakeFilter struct {
 	teamID string
 	runID  string
-	ch     chan struct{}
 }
 
 var ErrRunLoaderNotConfigured = errors.New("run loader not configured")
@@ -59,7 +56,7 @@ func NewManager(store state.TaskStore, runLoader RunLoader) *Manager {
 		store:        store,
 		messageStore: messageStore,
 		runLoader:    runLoader,
-		watchers:     map[string]taskWakeWatcher{},
+		watchers:     wake.NewSignalHub[taskWakeFilter](),
 	}
 }
 
@@ -90,27 +87,10 @@ func (m *Manager) SubscribeWake(teamID, runID string) (<-chan struct{}, func()) 
 		close(ch)
 		return ch, func() {}
 	}
-	id := uuid.NewString()
-	w := taskWakeWatcher{
+	return m.watchers.Subscribe(taskWakeFilter{
 		teamID: strings.TrimSpace(teamID),
 		runID:  strings.TrimSpace(runID),
-		ch:     make(chan struct{}, 1),
-	}
-	m.watchersMu.Lock()
-	m.watchers[id] = w
-	m.watchersMu.Unlock()
-	cancel := func() {
-		m.watchersMu.Lock()
-		ww, ok := m.watchers[id]
-		if ok {
-			delete(m.watchers, id)
-		}
-		m.watchersMu.Unlock()
-		if ok {
-			close(ww.ch)
-		}
-	}
-	return w.ch, cancel
+	})
 }
 
 func (m *Manager) notifyWake(task types.Task) {
@@ -119,20 +99,15 @@ func (m *Manager) notifyWake(task types.Task) {
 	}
 	taskTeam := strings.TrimSpace(task.TeamID)
 	taskRun := strings.TrimSpace(task.RunID)
-	m.watchersMu.Lock()
-	defer m.watchersMu.Unlock()
-	for _, w := range m.watchers {
-		if w.teamID != "" && taskTeam != w.teamID {
-			continue
+	m.watchers.Notify(func(filter taskWakeFilter) bool {
+		if filter.teamID != "" && taskTeam != filter.teamID {
+			return false
 		}
-		if w.runID != "" && taskRun != w.runID {
-			continue
+		if filter.runID != "" && taskRun != filter.runID {
+			return false
 		}
-		select {
-		case w.ch <- struct{}{}:
-		default:
-		}
-	}
+		return true
+	})
 }
 
 // NotifyWake manually triggers a wake signal for workers matching the given

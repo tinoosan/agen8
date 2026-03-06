@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
@@ -123,28 +122,5 @@ func (m *Model) renderCommandPalette(contentW int) string {
 	if selected >= len(items) {
 		selected = len(items) - 1
 	}
-
-	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff")).Bold(true)
-	unselectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#c0c0c0"))
-
-	opts := kit.SelectorOptions{
-		Width:         contentW,
-		MaxHeight:     maxDisplay,
-		SelectedIndex: selected,
-		ShowPrefix:    true,
-		Styles: kit.SelectorStyles{
-			SelectedTitle:   kit.CloneStyle(selectedStyle),
-			UnselectedTitle: kit.CloneStyle(unselectedStyle),
-		},
-	}
-
-	paletteContent := kit.RenderSelector(items, opts)
-
-	paletteStyle := lipgloss.NewStyle().
-		Width(contentW).
-		Padding(0, 1).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#404040"))
-
-	return paletteStyle.Render(paletteContent)
+	return kit.RenderCommandPalette(contentW, items, selected, maxDisplay)
 }

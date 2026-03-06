@@ -33,6 +33,11 @@ func newContentRenderer() *ContentRenderer {
 	}
 }
 
+// NewContentRenderer constructs the shared markdown/content renderer for TUI packages.
+func NewContentRenderer() *ContentRenderer {
+	return newContentRenderer()
+}
+
 // RenderMarkdown renders markdown into terminal-friendly styled output.
 //
 // The markdown is preprocessed (e.g. ```json fences are pretty-printed best-effort)
