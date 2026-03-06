@@ -64,11 +64,60 @@ type runtimeSupervisor struct {
 	defaultProfile   *profile.Profile
 	soulService      pkgsoul.Service
 
-	mu                  sync.Mutex
-	workers             map[string]*managedRuntime
+	cmdCh               chan supervisorCmd
+	handles             map[string]*runHandle
+	snapshotMu          sync.RWMutex
+	snapshots           map[string]runStateSnapshot
 	lastRoutingRepairAt time.Time
 
 	spawnOverride func(context.Context, types.Session, string) (*managedRuntime, error)
+}
+
+type supervisorCmdKind int
+
+const (
+	cmdSpawn supervisorCmdKind = iota
+	cmdStop
+	cmdWorkerExited
+	cmdRepairDrift
+)
+
+type supervisorCmd struct {
+	kind      supervisorCmdKind
+	runID     string
+	sessionID string
+	sess      *types.Session
+	handle    *runHandle
+	paused    bool
+}
+
+type handleState int
+
+const (
+	handleStateSpawning handleState = iota
+	handleStateRunning
+	handleStatePaused
+	handleStateDraining
+)
+
+type runHandle struct {
+	runID       string
+	sessionID   string
+	rt          *managedRuntime
+	state       handleState
+	stopPending bool
+	stopPaused  bool
+}
+
+type runStateSnapshot struct {
+	RunID           string
+	SessionID       string
+	HandleState     handleState
+	PersistedStatus string
+	WorkerPresent   bool
+	Model           string
+	LastHeartbeatAt time.Time
+	rt              *managedRuntime
 }
 
 const defaultSubagentAwaitingReviewTimeout = 30 * time.Minute
@@ -270,21 +319,32 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 		}
 	}
 
-	s.mu.Lock()
-	worker := s.workers[runID]
-	s.mu.Unlock()
+	if err := s.trySendCmd(supervisorCmd{
+		kind:      cmdStop,
+		runID:     strings.TrimSpace(runID),
+		sessionID: strings.TrimSpace(run.SessionID),
+		paused:    false,
+	}); err != nil {
+		log.Printf("daemon: deactivate subagent: enqueue stop for run %s: %v", runID, err)
+	}
 
-	if worker != nil {
-		if worker.cancel != nil {
-			worker.cancel()
+	timeout := time.After(s.workerShutdownTimeout())
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		snap, ok := s.getSnapshot(strings.TrimSpace(runID))
+		if !ok || (!snap.WorkerPresent && snap.HandleState != handleStateSpawning && snap.HandleState != handleStateDraining) {
+			break
 		}
-		if worker.done != nil {
-			timeout := s.workerShutdownTimeout()
-			if !waitWorkerDone(worker.done, timeout) {
-				log.Printf("daemon: timed out waiting for worker shutdown during subagent cleanup: run=%s timeout=%s", runID, timeout)
-			}
+		select {
+		case <-timeout:
+			log.Printf("daemon: timed out waiting for worker shutdown during subagent cleanup: run=%s timeout=%s", runID, s.workerShutdownTimeout())
+			goto archive
+		case <-ticker.C:
 		}
 	}
+
+archive:
 
 	if run, err := s.sessionService.LoadRun(ctx, runID); err == nil {
 		if run.Runtime != nil {
@@ -295,14 +355,6 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 		}
 		_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, stopReasonArchived)
 	}
-
-	// Remove worker only after cancellation + terminal run status update to avoid
-	// a syncOnce respawn window while the run still appears running.
-	s.mu.Lock()
-	if current, ok := s.workers[runID]; ok && current == worker {
-		delete(s.workers, runID)
-	}
-	s.mu.Unlock()
 }
 
 func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
@@ -324,7 +376,9 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		workdirAbs:       cfg.WorkdirAbs,
 		defaultProfile:   cfg.DefaultProfile,
 		soulService:      cfg.SoulService,
-		workers:          map[string]*managedRuntime{},
+		cmdCh:            make(chan supervisorCmd, 256),
+		handles:          map[string]*runHandle{},
+		snapshots:        map[string]runStateSnapshot{},
 	}
 }
 
@@ -392,106 +446,35 @@ func (s *runtimeSupervisor) Run(ctx context.Context) {
 	if s == nil {
 		return
 	}
-	var (
-		wakeCh     <-chan struct{}
-		wakeCancel func()
-	)
-	if wakeSub, ok := s.sessionService.(sessionWakeSubscriber); ok && wakeSub != nil {
-		wakeCh, wakeCancel = wakeSub.SubscribeWake("", "")
+	s.ensureLoopState()
+	if err := s.loadAndSpawnActiveRuns(ctx); err != nil {
+		log.Printf("daemon: runtime supervisor startup load failed: %v", err)
+	}
+
+	var supervisorWakeCh <-chan struct{}
+	var wakeCancel func()
+	if wakeSub, ok := s.taskService.(taskWakeSubscriber); ok && wakeSub != nil {
+		supervisorWakeCh, wakeCancel = wakeSub.SubscribeWake("", "")
 	}
 	if wakeCancel != nil {
 		defer wakeCancel()
 	}
-	if wakeCh == nil {
-		// Compatibility fallback for non-pubsub session service implementations.
-		if err := s.syncOnce(ctx); err != nil {
-			log.Printf("daemon: runtime supervisor sync failed: %v", err)
-		}
-		s.runWithPollingFallback(ctx)
-		return
-	}
-	if err := s.syncOnce(ctx); err != nil {
-		log.Printf("daemon: runtime supervisor sync failed: %v", err)
-	}
+
+	repairTicker := time.NewTicker(10 * time.Second)
+	defer repairTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			s.stopAll()
+			s.stopAllHandles()
 			return
-		case <-wakeCh:
-			if err := s.syncOnce(ctx); err != nil {
-				log.Printf("daemon: runtime supervisor sync failed: %v", err)
-			}
+		case cmd := <-s.cmdCh:
+			s.processCmd(ctx, cmd)
+		case <-supervisorWakeCh:
+			s.handleTaskWake(ctx)
+		case <-repairTicker.C:
+			s.maybeRepairRoutingDrift(ctx)
 		}
 	}
-}
-
-func (s *runtimeSupervisor) runWithPollingFallback(ctx context.Context) {
-	t := time.NewTicker(1 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			s.stopAll()
-			return
-		case <-t.C:
-			if err := s.syncOnce(ctx); err != nil {
-				log.Printf("daemon: runtime supervisor sync failed: %v", err)
-			}
-		}
-	}
-}
-
-func (s *runtimeSupervisor) stopAll() {
-	s.mu.Lock()
-	workers := make([]*managedRuntime, 0, len(s.workers))
-	for _, w := range s.workers {
-		workers = append(workers, w)
-	}
-	s.workers = map[string]*managedRuntime{}
-	s.mu.Unlock()
-	for _, w := range workers {
-		if w == nil {
-			continue
-		}
-		if w.cancel != nil {
-			w.cancel()
-		}
-		if w.done != nil {
-			<-w.done
-		}
-	}
-}
-
-func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
-	if s == nil || s.sessionService == nil {
-		return nil
-	}
-	runs, err := s.sessionService.ListRunsByStatus(ctx, []string{types.RunStatusRunning, types.RunStatusPaused})
-	if err != nil {
-		return err
-	}
-	for _, run := range runs {
-		sess, lerr := s.sessionService.LoadSession(ctx, run.SessionID)
-		if lerr != nil {
-			log.Printf("daemon: load session for run %s: %v", run.RunID, lerr)
-			continue
-		}
-		teamID := strings.TrimSpace(sess.TeamID)
-		if teamID != "" && run.Runtime != nil && strings.TrimSpace(run.Runtime.Role) == "" {
-			if _, roleByRun := loadTeamManifestRunRolesFromStore(ctx, team.NewFileManifestStore(s.cfg), teamID); len(roleByRun) != 0 {
-				if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
-					run.Runtime.Role = role
-					_ = s.sessionService.SaveRun(ctx, run)
-				}
-			}
-		}
-		if err := s.ensureRun(ctx, sess, run.RunID); err != nil {
-			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
-		}
-	}
-	s.maybeRepairRoutingDrift(ctx)
-	return nil
 }
 
 func (s *runtimeSupervisor) maybeRepairRoutingDrift(ctx context.Context) {
@@ -500,13 +483,10 @@ func (s *runtimeSupervisor) maybeRepairRoutingDrift(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
-	s.mu.Lock()
 	if !s.lastRoutingRepairAt.IsZero() && now.Sub(s.lastRoutingRepairAt) < 10*time.Second {
-		s.mu.Unlock()
 		return
 	}
 	s.lastRoutingRepairAt = now
-	s.mu.Unlock()
 	n, err := repairer.RepairRoutingDrift(ctx, 400)
 	if err != nil {
 		log.Printf("daemon: routing drift repair failed: %v", err)
@@ -538,65 +518,435 @@ func collectSessionRunIDs(sess types.Session) []string {
 	return out
 }
 
-func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, runID string) error {
+func (s *runtimeSupervisor) ensureLoopState() {
+	if s == nil {
+		return
+	}
+	if s.cmdCh == nil {
+		s.cmdCh = make(chan supervisorCmd, 256)
+	}
+	if s.handles == nil {
+		s.handles = map[string]*runHandle{}
+	}
+	if s.snapshots == nil {
+		s.snapshots = map[string]runStateSnapshot{}
+	}
+}
+
+func (s *runtimeSupervisor) updateSnapshot(runID string, h *runHandle, persistedStatus string) {
+	if s == nil {
+		return
+	}
+	s.ensureLoopState()
 	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return
+	}
+	s.snapshotMu.Lock()
+	defer s.snapshotMu.Unlock()
+
+	prev := s.snapshots[runID]
+	if strings.TrimSpace(persistedStatus) == "" {
+		persistedStatus = prev.PersistedStatus
+	}
+	snap := runStateSnapshot{
+		RunID:           runID,
+		PersistedStatus: strings.TrimSpace(persistedStatus),
+	}
+	if h != nil {
+		snap.SessionID = strings.TrimSpace(h.sessionID)
+		snap.HandleState = h.state
+		snap.rt = h.rt
+		if h.rt != nil {
+			snap.WorkerPresent = h.rt.done == nil || !workerDone(h.rt.done)
+			snap.Model = strings.TrimSpace(h.rt.CurrentModel())
+			snap.LastHeartbeatAt = h.rt.LastHeartbeatAt().UTC()
+		}
+	}
+	s.snapshots[runID] = snap
+}
+
+func (s *runtimeSupervisor) setSnapshotPersistedStatus(runID, persistedStatus string) {
+	if s == nil {
+		return
+	}
+	s.ensureLoopState()
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return
+	}
+	s.snapshotMu.Lock()
+	defer s.snapshotMu.Unlock()
+	snap := s.snapshots[runID]
+	snap.RunID = runID
+	snap.PersistedStatus = strings.TrimSpace(persistedStatus)
+	s.snapshots[runID] = snap
+}
+
+func (s *runtimeSupervisor) deleteSnapshot(runID string) {
+	if s == nil {
+		return
+	}
+	s.ensureLoopState()
+	s.snapshotMu.Lock()
+	delete(s.snapshots, strings.TrimSpace(runID))
+	s.snapshotMu.Unlock()
+}
+
+func (s *runtimeSupervisor) getSnapshot(runID string) (runStateSnapshot, bool) {
+	if s == nil {
+		return runStateSnapshot{}, false
+	}
+	s.ensureLoopState()
+	s.snapshotMu.RLock()
+	defer s.snapshotMu.RUnlock()
+	snap, ok := s.snapshots[strings.TrimSpace(runID)]
+	return snap, ok
+}
+
+func (s *runtimeSupervisor) snapshotValues() []runStateSnapshot {
+	if s == nil {
+		return nil
+	}
+	s.ensureLoopState()
+	s.snapshotMu.RLock()
+	defer s.snapshotMu.RUnlock()
+	out := make([]runStateSnapshot, 0, len(s.snapshots))
+	for _, snap := range s.snapshots {
+		out = append(out, snap)
+	}
+	return out
+}
+
+func (s *runtimeSupervisor) sendCmd(cmd supervisorCmd) {
+	if s == nil {
+		return
+	}
+	s.ensureLoopState()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case s.cmdCh <- cmd:
+	case <-timer.C:
+		log.Printf("daemon: runtime supervisor command enqueue timed out: kind=%d run=%s", cmd.kind, strings.TrimSpace(cmd.runID))
+	}
+}
+
+func (s *runtimeSupervisor) trySendCmd(cmd supervisorCmd) error {
+	if s == nil {
+		return nil
+	}
+	s.ensureLoopState()
+	select {
+	case s.cmdCh <- cmd:
+		return nil
+	default:
+		return fmt.Errorf("runtime supervisor command queue full")
+	}
+}
+
+func (s *runtimeSupervisor) processCmd(ctx context.Context, cmd supervisorCmd) {
+	s.ensureLoopState()
+	switch cmd.kind {
+	case cmdSpawn:
+		if err := s.handleSpawn(ctx, cmd); err != nil {
+			log.Printf("daemon: runtime supervisor spawn failed for %s: %v", strings.TrimSpace(cmd.runID), err)
+		}
+	case cmdStop:
+		s.handleStop(cmd)
+	case cmdWorkerExited:
+		if err := s.handleWorkerExited(ctx, cmd); err != nil {
+			log.Printf("daemon: runtime supervisor exit handling failed for %s: %v", strings.TrimSpace(cmd.runID), err)
+		}
+	case cmdRepairDrift:
+		s.maybeRepairRoutingDrift(ctx)
+	}
+}
+
+func (s *runtimeSupervisor) handleSpawn(ctx context.Context, cmd supervisorCmd) error {
+	s.ensureLoopState()
+	runID := strings.TrimSpace(cmd.runID)
 	if runID == "" {
 		return nil
 	}
-	run, err := s.sessionService.LoadRun(ctx, runID)
+	run, err := s.loadRunWithTimeout(ctx, runID)
 	if err != nil {
 		return err
 	}
-	paused := strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusPaused)
+	status := strings.TrimSpace(run.Status)
+	if status == "" || isTerminalRunStatus(status) {
+		delete(s.handles, runID)
+		s.deleteSnapshot(runID)
+		return nil
+	}
+	paused := strings.EqualFold(status, types.RunStatusPaused)
 
-	s.mu.Lock()
-	if existing, ok := s.workers[runID]; ok {
-		if existing != nil && !workerDone(existing.done) {
-			s.mu.Unlock()
-			if existing.session != nil {
-				existing.session.SetPaused(paused)
+	if existing, ok := s.handles[runID]; ok && existing != nil {
+		switch existing.state {
+		case handleStateSpawning, handleStateRunning, handleStatePaused:
+			if existing.rt != nil && existing.rt.session != nil {
+				existing.rt.session.SetPaused(paused)
 			}
+			if existing.state != handleStateSpawning {
+				if paused {
+					existing.state = handleStatePaused
+				} else {
+					existing.state = handleStateRunning
+				}
+			}
+			s.updateSnapshot(runID, existing, status)
+			return nil
+		case handleStateDraining:
 			return nil
 		}
-		delete(s.workers, runID)
 	}
-	s.mu.Unlock()
 
-	isChild := strings.TrimSpace(run.ParentRunID) != ""
-	if isChild && run.Runtime != nil && run.Runtime.LifecycleState == "spawn_requested" {
-		run.Runtime.LifecycleState = "spawning"
-		_ = s.sessionService.SaveRun(ctx, run)
+	sess := cmd.sess
+	if sess == nil || strings.TrimSpace(sess.SessionID) == "" {
+		loaded, lerr := s.loadSessionWithTimeout(ctx, strings.TrimSpace(run.SessionID))
+		if lerr != nil {
+			return lerr
+		}
+		sess = &loaded
 	}
+	if sess == nil {
+		return fmt.Errorf("session is required for spawn")
+	}
+
+	if teamID := strings.TrimSpace(sess.TeamID); teamID != "" && run.Runtime != nil && strings.TrimSpace(run.Runtime.Role) == "" {
+		if _, roleByRun := loadTeamManifestRunRolesFromStore(ctx, team.NewFileManifestStore(s.cfg), teamID); len(roleByRun) != 0 {
+			if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
+				run.Runtime.Role = role
+				_ = s.sessionService.SaveRun(ctx, run)
+			}
+		}
+	}
+
+	h := &runHandle{
+		runID:     runID,
+		sessionID: strings.TrimSpace(sess.SessionID),
+		state:     handleStateSpawning,
+	}
+	s.handles[runID] = h
+	s.updateSnapshot(runID, h, status)
 
 	startFn := s.spawnOverride
 	if startFn == nil {
 		startFn = s.spawnManagedRun
 	}
-	managed, err := startFn(ctx, sess, runID)
+	managed, err := startFn(ctx, *sess, runID)
 	if err != nil {
+		delete(s.handles, runID)
+		s.deleteSnapshot(runID)
 		return err
 	}
 	if managed == nil {
+		delete(s.handles, runID)
+		s.deleteSnapshot(runID)
 		return fmt.Errorf("managed runtime is nil")
 	}
 
-	s.mu.Lock()
-	if existing, ok := s.workers[runID]; ok {
-		if existing != nil && !workerDone(existing.done) {
-			s.mu.Unlock()
-			if managed.cancel != nil {
-				managed.cancel()
-			}
-			if managed.done != nil {
-				<-managed.done
-			}
-			return nil
+	h.rt = managed
+	if h.stopPending {
+		if h.rt.session != nil {
+			h.rt.session.SetPaused(h.stopPaused)
 		}
-		delete(s.workers, runID)
+		if h.rt.cancel != nil {
+			h.rt.cancel()
+		}
+		h.state = handleStateDraining
+		s.updateSnapshot(runID, h, status)
+		s.startExitWatcher(managed, runID, h)
+		return nil
 	}
-	s.workers[runID] = managed
-	s.mu.Unlock()
+	if paused {
+		h.state = handleStatePaused
+	} else {
+		h.state = handleStateRunning
+	}
+	s.updateSnapshot(runID, h, status)
+	s.startExitWatcher(managed, runID, h)
 	return nil
+}
+
+func (s *runtimeSupervisor) handleStop(cmd supervisorCmd) {
+	s.ensureLoopState()
+	runID := strings.TrimSpace(cmd.runID)
+	if runID == "" {
+		return
+	}
+	h, ok := s.handles[runID]
+	if !ok || h == nil || h.state == handleStateDraining {
+		return
+	}
+	if h.state == handleStateSpawning || h.rt == nil {
+		h.stopPending = true
+		h.stopPaused = cmd.paused
+		s.updateSnapshot(runID, h, "")
+		return
+	}
+	if h.rt.session != nil {
+		h.rt.session.SetPaused(cmd.paused)
+	}
+	if h.rt.cancel != nil {
+		h.rt.cancel()
+	}
+	h.state = handleStateDraining
+	h.stopPending = false
+	h.stopPaused = cmd.paused
+	s.updateSnapshot(runID, h, "")
+}
+
+func (s *runtimeSupervisor) handleWorkerExited(ctx context.Context, cmd supervisorCmd) error {
+	s.ensureLoopState()
+	runID := strings.TrimSpace(cmd.runID)
+	if runID == "" {
+		return nil
+	}
+	h, ok := s.handles[runID]
+	if !ok || h != cmd.handle {
+		return nil
+	}
+	delete(s.handles, runID)
+	s.deleteSnapshot(runID)
+
+	run, err := s.loadRunWithTimeout(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusRunning) {
+		return nil
+	}
+	sess, err := s.loadSessionWithTimeout(ctx, strings.TrimSpace(run.SessionID))
+	if err != nil {
+		return err
+	}
+	return s.handleSpawn(ctx, supervisorCmd{
+		kind:      cmdSpawn,
+		runID:     runID,
+		sessionID: strings.TrimSpace(run.SessionID),
+		sess:      &sess,
+	})
+}
+
+func (s *runtimeSupervisor) startExitWatcher(managed *managedRuntime, runID string, h *runHandle) {
+	if s == nil || managed == nil || managed.done == nil {
+		return
+	}
+	go func() {
+		<-managed.done
+		s.sendCmd(supervisorCmd{kind: cmdWorkerExited, runID: strings.TrimSpace(runID), handle: h})
+	}()
+}
+
+func (s *runtimeSupervisor) loadAndSpawnActiveRuns(ctx context.Context) error {
+	if s == nil || s.sessionService == nil {
+		return nil
+	}
+	s.ensureLoopState()
+	runs, err := s.sessionService.ListRunsByStatus(ctx, []string{types.RunStatusRunning, types.RunStatusPaused})
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		sess, lerr := s.loadSessionWithTimeout(ctx, strings.TrimSpace(run.SessionID))
+		if lerr != nil {
+			log.Printf("daemon: load session for run %s: %v", run.RunID, lerr)
+			continue
+		}
+		if err := s.handleSpawn(ctx, supervisorCmd{
+			kind:      cmdSpawn,
+			runID:     strings.TrimSpace(run.RunID),
+			sessionID: strings.TrimSpace(run.SessionID),
+			sess:      &sess,
+		}); err != nil {
+			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
+		}
+	}
+	return nil
+}
+
+func (s *runtimeSupervisor) handleTaskWake(ctx context.Context) {
+	if s == nil || s.sessionService == nil {
+		return
+	}
+	s.ensureLoopState()
+	runs, err := s.sessionService.ListRunsByStatus(ctx, []string{types.RunStatusRunning})
+	if err != nil {
+		log.Printf("daemon: runtime supervisor wake scan failed: %v", err)
+		return
+	}
+	const maxWakeScanSize = 50
+	if len(runs) > maxWakeScanSize {
+		runs = runs[:maxWakeScanSize]
+	}
+	for _, run := range runs {
+		runID := strings.TrimSpace(run.RunID)
+		if runID == "" {
+			continue
+		}
+		if h := s.handles[runID]; h != nil {
+			switch h.state {
+			case handleStateSpawning, handleStateRunning, handleStatePaused, handleStateDraining:
+				continue
+			}
+		}
+		sess, lerr := s.loadSessionWithTimeout(ctx, strings.TrimSpace(run.SessionID))
+		if lerr != nil {
+			log.Printf("daemon: load session for wake spawn %s: %v", runID, lerr)
+			continue
+		}
+		if err := s.handleSpawn(ctx, supervisorCmd{
+			kind:      cmdSpawn,
+			runID:     runID,
+			sessionID: strings.TrimSpace(run.SessionID),
+			sess:      &sess,
+		}); err != nil {
+			log.Printf("daemon: wake spawn failed for %s: %v", runID, err)
+		}
+	}
+}
+
+func (s *runtimeSupervisor) stopAllHandles() {
+	s.ensureLoopState()
+	for runID, h := range s.handles {
+		if h == nil || h.rt == nil {
+			delete(s.handles, runID)
+			s.deleteSnapshot(runID)
+			continue
+		}
+		if h.rt.cancel != nil {
+			h.rt.cancel()
+		}
+		if h.rt.done != nil {
+			<-h.rt.done
+		}
+		delete(s.handles, runID)
+		s.deleteSnapshot(runID)
+	}
+}
+
+func (s *runtimeSupervisor) loadRunWithTimeout(ctx context.Context, runID string) (types.Run, error) {
+	ctx = nonNilContext(ctx)
+	ioCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return s.sessionService.LoadRun(ioCtx, strings.TrimSpace(runID))
+}
+
+func (s *runtimeSupervisor) loadSessionWithTimeout(ctx context.Context, sessionID string) (types.Session, error) {
+	ctx = nonNilContext(ctx)
+	ioCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return s.sessionService.LoadSession(ioCtx, strings.TrimSpace(sessionID))
+}
+
+func isTerminalRunStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case types.RunStatusCanceled, types.RunStatusSucceeded, types.RunStatusFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 type spawnRunState struct {
@@ -1594,10 +1944,16 @@ func (s *runtimeSupervisor) pauseRun(ctx context.Context, runID string) error {
 		return err
 	}
 	if strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusPaused) {
-		// Cancel active tasks synchronously, then drain worker in background.
-		_, err := s.taskService.CancelActiveTasksByRun(ctx, runID, "run paused")
-		go s.stopWorker(runID, true)
-		return err
+		s.setSnapshotPersistedStatus(runID, types.RunStatusPaused)
+		if sendErr := s.trySendCmd(supervisorCmd{
+			kind:      cmdStop,
+			runID:     runID,
+			sessionID: strings.TrimSpace(run.SessionID),
+			paused:    true,
+		}); sendErr != nil {
+			return sendErr
+		}
+		return nil
 	}
 	run.Status = types.RunStatusPaused
 	run.FinishedAt = nil
@@ -1605,14 +1961,16 @@ func (s *runtimeSupervisor) pauseRun(ctx context.Context, runID string) error {
 	if err := s.sessionService.SaveRun(ctx, run); err != nil {
 		return err
 	}
-
-	// Cancel active tasks first to help the in-flight LLM call abort cleanly.
-	_, err = s.taskService.CancelActiveTasksByRun(ctx, runID, "run paused")
-	// Stop worker asynchronously — run is already saved as paused in DB.
-	// stopWorker holds its own pointer reference and only deletes its own entry,
-	// so a concurrent ResumeRun+ensureRun spawning a fresh worker is safe.
-	go s.stopWorker(runID, true)
-	return err
+	s.setSnapshotPersistedStatus(runID, types.RunStatusPaused)
+	if sendErr := s.trySendCmd(supervisorCmd{
+		kind:      cmdStop,
+		runID:     runID,
+		sessionID: strings.TrimSpace(run.SessionID),
+		paused:    true,
+	}); sendErr != nil {
+		return sendErr
+	}
+	return nil
 }
 
 func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
@@ -1637,6 +1995,7 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	if err := s.sessionService.SaveRun(ctx, run); err != nil {
 		return err
 	}
+	s.setSnapshotPersistedStatus(runID, types.RunStatusRunning)
 
 	if s.sessionService == nil {
 		return nil
@@ -1645,18 +2004,14 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
-	// ensureRun handles all worker states:
-	//   - live worker  → SetPaused(false), no new spawn
-	//   - zombie worker → delete zombie, spawn fresh worker with startup tick()
-	//   - no worker    → spawn fresh worker with startup tick()
-	// This eliminates the TOCTOU race of checking workerDone then acting on it.
-	if err := s.ensureRun(ctx, sess, runID); err != nil {
+	if err := s.trySendCmd(supervisorCmd{
+		kind:      cmdSpawn,
+		runID:     runID,
+		sessionID: strings.TrimSpace(run.SessionID),
+		sess:      &sess,
+	}); err != nil {
 		return err
 	}
-	// Always send a wake signal. For live workers that ensureRun merely unpaused,
-	// this kicks the session to drain inbox messages immediately instead of
-	// waiting for the next external event. For freshly-spawned workers the
-	// startup tick() already handles the inbox, but the signal is harmless.
 	if notifier, ok := s.taskService.(taskWakeNotifier); ok {
 		teamID := ""
 		if run.Runtime != nil {
@@ -1684,21 +2039,23 @@ func (s *runtimeSupervisor) stopRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
-	run.Status = types.RunStatusCanceled
-	now := time.Now().UTC()
-	run.FinishedAt = &now
+	run.Status = types.RunStatusPaused
+	run.FinishedAt = nil
 	run.Error = nil
 	if err := s.sessionService.SaveRun(ctx, run); err != nil {
 		return err
 	}
+	s.setSnapshotPersistedStatus(runID, types.RunStatusPaused)
 
-	// Cancel active tasks first to help the in-flight LLM call abort cleanly.
 	_, err = s.taskService.CancelActiveTasksByRun(ctx, runID, "run stopped")
-
-	// Stop worker asynchronously — run is already terminal in DB so syncOnce
-	// won't respawn it. Cleanup (ctx cancel + map delete) happens in background.
-	go s.stopWorker(runID, true)
-
+	if sendErr := s.trySendCmd(supervisorCmd{
+		kind:      cmdStop,
+		runID:     runID,
+		sessionID: strings.TrimSpace(run.SessionID),
+		paused:    true,
+	}); sendErr != nil {
+		return sendErr
+	}
 	return err
 }
 
@@ -1707,48 +2064,6 @@ func nonNilContext(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return ctx
-}
-
-func (s *runtimeSupervisor) stopWorker(runID string, paused bool) {
-	if s == nil {
-		return
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return
-	}
-	s.mu.Lock()
-	worker := s.workers[runID]
-	s.mu.Unlock()
-	if worker != nil && worker.session != nil {
-		worker.session.SetPaused(paused)
-	}
-	if worker != nil && worker.cancel != nil {
-		worker.cancel()
-	}
-	if worker != nil && worker.done != nil {
-		<-worker.done
-	}
-	// Only delete our own entry. A concurrent ResumeRun → ensureRun may have
-	// already replaced this zombie with a fresh worker; guard against clobbering it.
-	s.mu.Lock()
-	if s.workers[runID] == worker {
-		delete(s.workers, runID)
-	}
-	s.mu.Unlock()
-
-	// If the run was resumed while we were draining the zombie, spawn a fresh
-	// worker now so the resumed session can pick up any pending inbox messages.
-	// ensureRun is a no-op if a live worker already exists.
-	if worker != nil && s.sessionService != nil {
-		bg := context.Background()
-		if run, err := s.sessionService.LoadRun(bg, runID); err == nil &&
-			strings.TrimSpace(run.Status) == types.RunStatusRunning {
-			if sess, err := s.sessionService.LoadSession(bg, strings.TrimSpace(run.SessionID)); err == nil {
-				_ = s.ensureRun(bg, sess, runID)
-			}
-		}
-	}
 }
 
 func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) ([]string, error) {
@@ -1838,21 +2153,17 @@ func (s *runtimeSupervisor) ApplySessionReasoning(ctx context.Context, sessionID
 	if effort == "" && summary == "" {
 		return nil, nil
 	}
-	s.mu.Lock()
-	workers := make([]*managedRuntime, 0, len(s.workers))
-	for _, w := range s.workers {
-		workers = append(workers, w)
-	}
-	s.mu.Unlock()
-	applied := make([]string, 0, len(workers))
-	for _, worker := range workers {
+	snapshots := s.snapshotValues()
+	applied := make([]string, 0, len(snapshots))
+	for _, snap := range snapshots {
+		worker := snap.rt
 		if worker == nil || worker.session == nil {
 			continue
 		}
-		if strings.TrimSpace(worker.sessionID) != sessionID {
+		if strings.TrimSpace(snap.SessionID) != sessionID {
 			continue
 		}
-		runID := strings.TrimSpace(worker.runID)
+		runID := strings.TrimSpace(snap.RunID)
 		if targetRunID != "" && targetRunID != runID {
 			continue
 		}
@@ -1877,21 +2188,17 @@ func (s *runtimeSupervisor) ApplySessionModel(ctx context.Context, sessionID, ta
 	if model == "" {
 		return nil, fmt.Errorf("model is required")
 	}
-	s.mu.Lock()
-	workers := make([]*managedRuntime, 0, len(s.workers))
-	for _, w := range s.workers {
-		workers = append(workers, w)
-	}
-	s.mu.Unlock()
-	applied := make([]string, 0, len(workers))
-	for _, worker := range workers {
+	snapshots := s.snapshotValues()
+	applied := make([]string, 0, len(snapshots))
+	for _, snap := range snapshots {
+		worker := snap.rt
 		if worker == nil || worker.session == nil {
 			continue
 		}
-		if strings.TrimSpace(worker.sessionID) != sessionID {
+		if strings.TrimSpace(snap.SessionID) != sessionID {
 			continue
 		}
-		runID := strings.TrimSpace(worker.runID)
+		runID := strings.TrimSpace(snap.RunID)
 		if targetRunID != "" && targetRunID != runID {
 			continue
 		}
@@ -2054,21 +2361,29 @@ func (s *runtimeSupervisor) GetRunState(ctx context.Context, sessionID, runID st
 		state.RunTotalTokens = stats.TotalTokens
 		state.RunTotalCostUSD = stats.TotalCost
 	}
-	s.mu.Lock()
-	worker := s.workers[runID]
-	s.mu.Unlock()
-	if worker != nil {
-		state.WorkerPresent = true
-		if strings.TrimSpace(state.Model) == "" {
-			state.Model = strings.TrimSpace(worker.CurrentModel())
+	snap, hasSnap := s.getSnapshot(runID)
+	if hasSnap {
+		state.WorkerPresent = snap.WorkerPresent
+		if snap.HandleState == handleStateSpawning {
+			state.EffectiveStatus = "spawning"
 		}
-		lastBeat := worker.LastHeartbeatAt()
+		if snap.HandleState == handleStateDraining {
+			state.EffectiveStatus = "draining"
+		}
+		if strings.TrimSpace(snap.Model) != "" {
+			state.Model = strings.TrimSpace(snap.Model)
+		}
+		lastBeat := snap.LastHeartbeatAt
 		if !lastBeat.IsZero() {
 			state.LastHeartbeatAt = lastBeat.UTC().Format(time.RFC3339Nano)
 		}
 	}
 	if state.WorkerPresent && strings.EqualFold(state.PersistedStatus, types.RunStatusRunning) {
-		state.EffectiveStatus = types.RunStatusRunning
+		if hasSnap && (snap.HandleState == handleStateSpawning || snap.HandleState == handleStateDraining) {
+			// Keep transitional state visible.
+		} else {
+			state.EffectiveStatus = types.RunStatusRunning
+		}
 	}
 	state.PausedFlag = strings.EqualFold(state.PersistedStatus, types.RunStatusPaused)
 	return state, nil

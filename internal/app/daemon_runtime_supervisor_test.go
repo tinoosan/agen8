@@ -80,6 +80,74 @@ func newSupervisorTestSessionService(t *testing.T, cfg config.Config) pkgsession
 	return newTestSessionService(cfg, sessionStore)
 }
 
+func injectHandle(s *runtimeSupervisor, runID string, rt *managedRuntime, state handleState) {
+	if s == nil {
+		return
+	}
+	s.ensureLoopState()
+	h := &runHandle{
+		runID:     strings.TrimSpace(runID),
+		sessionID: strings.TrimSpace(rt.sessionID),
+		rt:        rt,
+		state:     state,
+	}
+	s.handles[h.runID] = h
+	s.updateSnapshot(h.runID, h, types.RunStatusRunning)
+	if rt != nil && rt.done != nil {
+		s.startExitWatcher(rt, h.runID, h)
+	}
+}
+
+func processNextSupervisorCmd(t *testing.T, s *runtimeSupervisor) {
+	t.Helper()
+	select {
+	case cmd := <-s.cmdCh:
+		s.processCmd(context.Background(), cmd)
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timed out waiting for supervisor command")
+	}
+}
+
+func drainSupervisorCmds(s *runtimeSupervisor) {
+	for {
+		select {
+		case cmd := <-s.cmdCh:
+			s.processCmd(context.Background(), cmd)
+		default:
+			return
+		}
+	}
+}
+
+func startSupervisorLoop(t *testing.T, s *runtimeSupervisor) (context.CancelFunc, <-chan struct{}) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		s.Run(ctx)
+		close(done)
+	}()
+	return cancel, done
+}
+
+func startSupervisorCmdProcessor(t *testing.T, s *runtimeSupervisor) (func(), <-chan struct{}) {
+	t.Helper()
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			case cmd := <-s.cmdCh:
+				s.processCmd(context.Background(), cmd)
+			}
+		}
+	}()
+	return func() { close(stop) }, done
+}
+
 func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	_, run, err := implstore.CreateSession(cfg, "stop run", 8*1024)
@@ -100,20 +168,23 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 		cfg:            cfg,
 		taskService:    taskSvc,
 		sessionService: sessionSvc,
-		workers: map[string]*managedRuntime{
-			run.RunID: {
-				runID:     run.RunID,
-				sessionID: run.SessionID,
-				cancel: func() {
-					mu.Lock()
-					cancelCalled = true
-					mu.Unlock()
-					close(done)
-				},
-				done: done,
-			},
-		},
 	}
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID:     run.RunID,
+		sessionID: run.SessionID,
+		cancel: func() {
+			mu.Lock()
+			cancelCalled = true
+			mu.Unlock()
+			close(done)
+		},
+		done: done,
+	}, handleStateRunning)
+	stopProcessor, loopDone := startSupervisorCmdProcessor(t, supervisor)
+	defer func() {
+		stopProcessor()
+		<-loopDone
+	}()
 
 	if err := supervisor.StopRun(context.Background(), run.RunID); err != nil {
 		t.Fatalf("StopRun: %v", err)
@@ -137,26 +208,25 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRun: %v", err)
 	}
-	if loaded.Status != types.RunStatusCanceled {
-		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusCanceled)
+	if loaded.Status != types.RunStatusPaused {
+		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusPaused)
 	}
 
-	// Wait for the async stopWorker goroutine to finish cleaning up the map.
+	// Wait for the worker exit to be reflected in externally visible runtime state.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		supervisor.mu.Lock()
-		_, exists := supervisor.workers[run.RunID]
-		supervisor.mu.Unlock()
-		if !exists {
+		st, stateErr := supervisor.GetRunState(context.Background(), run.SessionID, run.RunID)
+		if stateErr == nil && !st.WorkerPresent {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	supervisor.mu.Lock()
-	_, exists := supervisor.workers[run.RunID]
-	supervisor.mu.Unlock()
-	if exists {
-		t.Fatalf("expected worker to be removed after stop")
+	st, err := supervisor.GetRunState(context.Background(), run.SessionID, run.RunID)
+	if err != nil {
+		t.Fatalf("GetRunState: %v", err)
+	}
+	if st.WorkerPresent {
+		t.Fatalf("expected worker to be absent after stop")
 	}
 }
 
@@ -221,17 +291,20 @@ func TestRuntimeSupervisor_DeactivateAndArchiveSubagent_DoesNotHangOnStuckWorker
 	supervisor := &runtimeSupervisor{
 		cfg:            cfg,
 		sessionService: sessionSvc,
-		workers: map[string]*managedRuntime{
-			run.RunID: {
-				runID: run.RunID,
-				cancel: func() {
-					cancelCalled = true
-				},
-				done: make(chan struct{}), // never closes: simulates stuck worker
-			},
-		},
 	}
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID: run.RunID,
+		cancel: func() {
+			cancelCalled = true
+		},
+		done: make(chan struct{}), // never closes: simulates stuck worker
+	}, handleStateRunning)
 
+	stopProcessor, loopDone := startSupervisorCmdProcessor(t, supervisor)
+	defer func() {
+		stopProcessor()
+		<-loopDone
+	}()
 	done := make(chan struct{})
 	go func() {
 		supervisor.deactivateAndArchiveSubagent(context.Background(), run.RunID)
@@ -288,15 +361,13 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 		cfg:            cfg,
 		taskService:    taskSvc,
 		sessionService: sessionSvc,
-		workers: map[string]*managedRuntime{
-			runA.RunID: {
-				runID:     runA.RunID,
-				sessionID: runA.SessionID,
-				cancel:    func() { close(done) },
-				done:      done,
-			},
-		},
 	}
+	injectHandle(supervisor, runA.RunID, &managedRuntime{
+		runID:     runA.RunID,
+		sessionID: runA.SessionID,
+		cancel:    func() { close(done) },
+		done:      done,
+	}, handleStateRunning)
 
 	affected, err := supervisor.StopSession(context.Background(), sessA.SessionID)
 	if err != nil {
@@ -310,16 +381,16 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRun A: %v", err)
 	}
-	if loadedA.Status != types.RunStatusCanceled {
-		t.Fatalf("runA status=%q want %q", loadedA.Status, types.RunStatusCanceled)
+	if loadedA.Status != types.RunStatusPaused {
+		t.Fatalf("runA status=%q want %q", loadedA.Status, types.RunStatusPaused)
 	}
 
 	loadedA2, err := sessionSvc.LoadRun(context.Background(), runA2.RunID)
 	if err != nil {
 		t.Fatalf("LoadRun A2: %v", err)
 	}
-	if loadedA2.Status != types.RunStatusCanceled {
-		t.Fatalf("runA2 status=%q want %q", loadedA2.Status, types.RunStatusCanceled)
+	if loadedA2.Status != types.RunStatusPaused {
+		t.Fatalf("runA2 status=%q want %q", loadedA2.Status, types.RunStatusPaused)
 	}
 
 	loadedB, err := sessionSvc.LoadRun(context.Background(), runB.RunID)
@@ -331,7 +402,7 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 	}
 }
 
-func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
+func TestRuntimeSupervisor_PauseRun_CancelsWorkerButLeavesActiveTasks(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	_, run, err := implstore.CreateSession(cfg, "pause run", 8*1024)
 	if err != nil {
@@ -364,32 +435,35 @@ func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
 		cfg:            cfg,
 		taskService:    taskSvc,
 		sessionService: sessionSvc,
-		workers: map[string]*managedRuntime{
-			run.RunID: {
-				runID:     run.RunID,
-				sessionID: run.SessionID,
-				cancel: func() {
-					mu.Lock()
-					cancelCalled = true
-					mu.Unlock()
-					close(done)
-				},
-				done: done,
-			},
-		},
 	}
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID:     run.RunID,
+		sessionID: run.SessionID,
+		cancel: func() {
+			mu.Lock()
+			cancelCalled = true
+			mu.Unlock()
+			close(done)
+		},
+		done: done,
+	}, handleStateRunning)
+	stopProcessor, loopDone := startSupervisorCmdProcessor(t, supervisor)
+	defer func() {
+		stopProcessor()
+		<-loopDone
+	}()
 
 	if err := supervisor.PauseRun(context.Background(), run.RunID); err != nil {
 		t.Fatalf("PauseRun: %v", err)
 	}
 
-	// Task cancellation happens synchronously before the stopWorker goroutine fires.
+	// Pause should not cancel the active task; it only drains the worker.
 	loadedTask, err := ts.GetTask(context.Background(), "task-active")
 	if err != nil {
 		t.Fatalf("GetTask: %v", err)
 	}
-	if loadedTask.Status != types.TaskStatusCanceled {
-		t.Fatalf("task status=%q want %q", loadedTask.Status, types.TaskStatusCanceled)
+	if loadedTask.Status != types.TaskStatusActive {
+		t.Fatalf("task status=%q want %q", loadedTask.Status, types.TaskStatusActive)
 	}
 
 	// stopWorker runs asynchronously; wait for the done channel to close (cancel fires inside).
@@ -409,31 +483,27 @@ func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
 
 func TestRuntimeSupervisor_PauseRun_UsesCallerContext(t *testing.T) {
 	ctx := context.WithValue(context.Background(), struct{}{}, "marker")
-	cancelCalled := false
+	var saved types.Run
 	sessionSvc := &ctxCheckingSessionService{
 		expected: ctx,
 		loadRun: func(runID string) (types.Run, error) {
-			return types.Run{RunID: runID, Status: types.RunStatusPaused}, nil
+			return types.Run{RunID: runID, SessionID: "sess-1", Status: types.RunStatusRunning}, nil
 		},
-	}
-	taskSvc := &ctxCheckingTaskService{
-		expected: ctx,
-		cancel: func(runID, reason string) (int, error) {
-			cancelCalled = true
-			return 1, nil
+		saveRun: func(run types.Run) error {
+			saved = run
+			return nil
 		},
 	}
 	supervisor := &runtimeSupervisor{
 		sessionService: sessionSvc,
-		taskService:    taskSvc,
-		workers:        map[string]*managedRuntime{},
+		taskService:    &ctxCheckingTaskService{expected: ctx},
 	}
 
 	if err := supervisor.pauseRun(ctx, "run-ctx-1"); err != nil {
 		t.Fatalf("pauseRun: %v", err)
 	}
-	if !cancelCalled {
-		t.Fatalf("expected CancelActiveTasksByRun to be called")
+	if saved.Status != types.RunStatusPaused {
+		t.Fatalf("saved status=%q want %q", saved.Status, types.RunStatusPaused)
 	}
 }
 
@@ -461,7 +531,6 @@ func TestRuntimeSupervisor_StopRun_UsesCallerContext(t *testing.T) {
 	supervisor := &runtimeSupervisor{
 		sessionService: sessionSvc,
 		taskService:    taskSvc,
-		workers:        map[string]*managedRuntime{},
 	}
 
 	if err := supervisor.stopRun(ctx, "run-ctx-2"); err != nil {
@@ -470,8 +539,8 @@ func TestRuntimeSupervisor_StopRun_UsesCallerContext(t *testing.T) {
 	if !cancelCalled {
 		t.Fatalf("expected CancelActiveTasksByRun to be called")
 	}
-	if saved.Status != types.RunStatusCanceled {
-		t.Fatalf("saved status=%q want %q", saved.Status, types.RunStatusCanceled)
+	if saved.Status != types.RunStatusPaused {
+		t.Fatalf("saved status=%q want %q", saved.Status, types.RunStatusPaused)
 	}
 }
 
@@ -487,7 +556,6 @@ func TestRuntimeSupervisor_StopRun_HonorsCanceledContext(t *testing.T) {
 	supervisor := &runtimeSupervisor{
 		sessionService: sessionSvc,
 		taskService:    &ctxCheckingTaskService{expected: ctx},
-		workers:        map[string]*managedRuntime{},
 	}
 
 	err := supervisor.stopRun(ctx, "run-ctx-3")
@@ -527,11 +595,9 @@ func TestApplySessionModel_SkipsChildRuns(t *testing.T) {
 		cfg:            cfg,
 		taskService:    taskSvc,
 		sessionService: sessionSvc,
-		workers: map[string]*managedRuntime{
-			parentRun.RunID: {runID: parentRun.RunID, sessionID: sess.SessionID, cancel: func() {}, done: done},
-			childRun.RunID:  {runID: childRun.RunID, sessionID: sess.SessionID, cancel: func() {}, done: done},
-		},
 	}
+	injectHandle(supervisor, parentRun.RunID, &managedRuntime{runID: parentRun.RunID, sessionID: sess.SessionID, cancel: func() {}, done: done}, handleStateRunning)
+	injectHandle(supervisor, childRun.RunID, &managedRuntime{runID: childRun.RunID, sessionID: sess.SessionID, cancel: func() {}, done: done}, handleStateRunning)
 
 	applied, err := supervisor.ApplySessionModel(context.Background(), sess.SessionID, "", "new-model")
 	if err != nil {
@@ -693,10 +759,18 @@ func TestRuntimeSupervisor_SyncOnce_DoesNotCancelTeamChildRuns(t *testing.T) {
 		cfg:            cfg,
 		taskService:    taskSvc,
 		sessionService: sessionSvc,
-		workers:        map[string]*managedRuntime{},
 	}
-	if err := supervisor.syncOnce(context.Background()); err != nil {
-		t.Fatalf("syncOnce: %v", err)
+	supervisor.spawnOverride = func(_ context.Context, sess types.Session, runID string) (*managedRuntime, error) {
+		done := make(chan struct{})
+		return &managedRuntime{
+			runID:     runID,
+			sessionID: sess.SessionID,
+			cancel:    func() { close(done) },
+			done:      done,
+		}, nil
+	}
+	if err := supervisor.loadAndSpawnActiveRuns(context.Background()); err != nil {
+		t.Fatalf("loadAndSpawnActiveRuns: %v", err)
 	}
 
 	loadedChild, err := sessionSvc.LoadRun(context.Background(), childRun.RunID)
@@ -826,15 +900,13 @@ func TestApplySessionModel_SkipsWhenAlreadyOnModel(t *testing.T) {
 		cfg:            cfg,
 		taskService:    pkgtask.NewManager(ts, nil),
 		sessionService: sessionSvc,
-		workers: map[string]*managedRuntime{
-			run.RunID: {
-				runID:     run.RunID,
-				sessionID: sess.SessionID,
-				session:   rtSession,
-				model:     "openai/gpt-5-mini",
-			},
-		},
 	}
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID:     run.RunID,
+		sessionID: sess.SessionID,
+		session:   rtSession,
+		model:     "openai/gpt-5-mini",
+	}, handleStateRunning)
 
 	applied, err := supervisor.ApplySessionModel(context.Background(), sess.SessionID, "", "openai/gpt-5-mini")
 	if err != nil {
@@ -940,15 +1012,13 @@ func TestApplySessionModel_PersistsRuntimeModelEvenWhenAgentAlreadyOnTarget(t *t
 		cfg:            cfg,
 		taskService:    pkgtask.NewManager(ts, nil),
 		sessionService: sessionSvc,
-		workers: map[string]*managedRuntime{
-			run.RunID: {
-				runID:     run.RunID,
-				sessionID: sess.SessionID,
-				session:   rtSession,
-				model:     "openai/gpt-5-mini",
-			},
-		},
 	}
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID:     run.RunID,
+		sessionID: sess.SessionID,
+		session:   rtSession,
+		model:     "openai/gpt-5-mini",
+	}, handleStateRunning)
 
 	applied, err := supervisor.ApplySessionModel(context.Background(), sess.SessionID, "", "openai/gpt-5-mini")
 	if err != nil {
@@ -982,7 +1052,6 @@ func TestGetRunState_PausedStatusNotMaskedByWorker(t *testing.T) {
 	supervisor := &runtimeSupervisor{
 		sessionService: sessionSvc,
 		taskService:    taskSvc,
-		workers:        map[string]*managedRuntime{},
 	}
 
 	// Without a worker: paused should remain paused.
@@ -998,7 +1067,7 @@ func TestGetRunState_PausedStatusNotMaskedByWorker(t *testing.T) {
 	}
 
 	// With a worker present: paused should still be paused, not masked as running.
-	supervisor.workers["run-1"] = &managedRuntime{}
+	injectHandle(supervisor, "run-1", &managedRuntime{runID: "run-1"}, handleStateRunning)
 	st, err = supervisor.GetRunState(context.Background(), "sess-1", "run-1")
 	if err != nil {
 		t.Fatalf("GetRunState with worker: %v", err)
@@ -1013,7 +1082,7 @@ func TestGetRunState_PausedStatusNotMaskedByWorker(t *testing.T) {
 		t.Errorf("WorkerPresent: got false, want true")
 	}
 }
-func TestRuntimeSupervisor_Run_UsesSessionWakeToSyncRuns(t *testing.T) {
+func TestRuntimeSupervisor_Run_UsesTaskWakeToSyncRuns(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, run1, err := implstore.CreateSession(cfg, "wake sync", 8*1024)
 	if err != nil {
@@ -1067,6 +1136,7 @@ func TestRuntimeSupervisor_Run_UsesSessionWakeToSyncRuns(t *testing.T) {
 	if _, err := sessionSvc.AddRunToSession(context.Background(), sess.SessionID, run2.RunID); err != nil {
 		t.Fatalf("AddRunToSession run2: %v", err)
 	}
+	taskSvc.NotifyWake("", run2.RunID)
 
 	select {
 	case got := <-spawned:
@@ -1083,4 +1153,309 @@ func TestRuntimeSupervisor_Run_UsesSessionWakeToSyncRuns(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatalf("supervisor run did not stop on context cancel")
 	}
+}
+
+func TestRuntimeSupervisor_LifecycleOrdering(t *testing.T) {
+	t.Run("resume then immediate pause", func(t *testing.T) {
+		cfg := config.Config{DataDir: t.TempDir()}
+		_, run, err := implstore.CreateSession(cfg, "ordering", 8*1024)
+		if err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		run.Status = types.RunStatusPaused
+		if err := implstore.SaveRun(cfg, run); err != nil {
+			t.Fatalf("SaveRun paused: %v", err)
+		}
+		sessionSvc := newSupervisorTestSessionService(t, cfg)
+		taskStore, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+		if err != nil {
+			t.Fatalf("NewSQLiteTaskStore: %v", err)
+		}
+		taskSvc := pkgtask.NewManager(taskStore, nil)
+
+		cancelled := make(chan struct{})
+		supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+			Cfg:            cfg,
+			TaskService:    taskSvc,
+			SessionService: sessionSvc,
+		})
+		supervisor.spawnOverride = func(_ context.Context, sess types.Session, runID string) (*managedRuntime, error) {
+			done := make(chan struct{})
+			return &managedRuntime{
+				runID:     runID,
+				sessionID: sess.SessionID,
+				cancel:    func() { close(done); close(cancelled) },
+				done:      done,
+			}, nil
+		}
+
+		if err := supervisor.ResumeRun(context.Background(), run.RunID); err != nil {
+			t.Fatalf("ResumeRun: %v", err)
+		}
+		if err := supervisor.pauseRun(context.Background(), run.RunID); err != nil {
+			t.Fatalf("pauseRun: %v", err)
+		}
+		drainSupervisorCmds(supervisor)
+		select {
+		case <-cancelled:
+		case <-time.After(1 * time.Second):
+			t.Fatalf("expected spawned worker to be cancelled")
+		}
+		processNextSupervisorCmd(t, supervisor)
+
+		loaded, err := sessionSvc.LoadRun(context.Background(), run.RunID)
+		if err != nil {
+			t.Fatalf("LoadRun: %v", err)
+		}
+		if loaded.Status != types.RunStatusPaused {
+			t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusPaused)
+		}
+		if _, ok := supervisor.getSnapshot(run.RunID); ok {
+			t.Fatalf("expected no live snapshot after pause drain")
+		}
+	})
+
+	t.Run("stop during spawning", func(t *testing.T) {
+		cfg := config.Config{DataDir: t.TempDir()}
+		sess, run, err := implstore.CreateSession(cfg, "spawning", 8*1024)
+		if err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		sessionSvc := newSupervisorTestSessionService(t, cfg)
+		taskStore, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+		if err != nil {
+			t.Fatalf("NewSQLiteTaskStore: %v", err)
+		}
+		taskSvc := pkgtask.NewManager(taskStore, nil)
+
+		releaseSpawn := make(chan struct{})
+		cancelled := make(chan struct{})
+		supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+			Cfg:            cfg,
+			TaskService:    taskSvc,
+			SessionService: sessionSvc,
+		})
+		supervisor.spawnOverride = func(_ context.Context, sess types.Session, runID string) (*managedRuntime, error) {
+			<-releaseSpawn
+			done := make(chan struct{})
+			return &managedRuntime{
+				runID:     runID,
+				sessionID: sess.SessionID,
+				cancel:    func() { close(done); close(cancelled) },
+				done:      done,
+			}, nil
+		}
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- supervisor.handleSpawn(context.Background(), supervisorCmd{
+				kind:      cmdSpawn,
+				runID:     run.RunID,
+				sessionID: sess.SessionID,
+				sess:      &sess,
+			})
+		}()
+
+		deadline := time.Now().Add(1 * time.Second)
+		for time.Now().Before(deadline) {
+			snap, ok := supervisor.getSnapshot(run.RunID)
+			if ok && snap.HandleState == handleStateSpawning {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+
+		supervisor.handleStop(supervisorCmd{kind: cmdStop, runID: run.RunID, paused: true})
+		run.Status = types.RunStatusPaused
+		if err := sessionSvc.SaveRun(context.Background(), run); err != nil {
+			t.Fatalf("SaveRun paused: %v", err)
+		}
+		close(releaseSpawn)
+
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("handleSpawn: %v", err)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatalf("timed out waiting for spawn completion")
+		}
+		select {
+		case <-cancelled:
+		case <-time.After(1 * time.Second):
+			t.Fatalf("expected cancel after spawn completion")
+		}
+		deadline = time.Now().Add(1 * time.Second)
+		for time.Now().Before(deadline) {
+			drainSupervisorCmds(supervisor)
+			if _, ok := supervisor.getSnapshot(run.RunID); !ok {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		if _, ok := supervisor.getSnapshot(run.RunID); ok {
+			t.Fatalf("expected handle removal after stop during spawning")
+		}
+	})
+
+	t.Run("stop then resume respawns worker", func(t *testing.T) {
+		cfg := config.Config{DataDir: t.TempDir()}
+		sess, run, err := implstore.CreateSession(cfg, "stop-resume", 8*1024)
+		if err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		sessionSvc := newSupervisorTestSessionService(t, cfg)
+		taskStore, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+		if err != nil {
+			t.Fatalf("NewSQLiteTaskStore: %v", err)
+		}
+		taskSvc := pkgtask.NewManager(taskStore, nil)
+
+		supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+			Cfg:            cfg,
+			TaskService:    taskSvc,
+			SessionService: sessionSvc,
+		})
+
+		spawnCount := 0
+		cancelled := make(chan struct{}, 1)
+		supervisor.spawnOverride = func(_ context.Context, loaded types.Session, runID string) (*managedRuntime, error) {
+			spawnCount++
+			done := make(chan struct{})
+			return &managedRuntime{
+				runID:     runID,
+				sessionID: loaded.SessionID,
+				cancel: func() {
+					select {
+					case cancelled <- struct{}{}:
+					default:
+					}
+					close(done)
+				},
+				done: done,
+			}, nil
+		}
+
+		if err := supervisor.handleSpawn(context.Background(), supervisorCmd{
+			kind:      cmdSpawn,
+			runID:     run.RunID,
+			sessionID: sess.SessionID,
+			sess:      &sess,
+		}); err != nil {
+			t.Fatalf("handleSpawn: %v", err)
+		}
+		if err := supervisor.StopRun(context.Background(), run.RunID); err != nil {
+			t.Fatalf("StopRun: %v", err)
+		}
+		drainSupervisorCmds(supervisor)
+		select {
+		case <-cancelled:
+		case <-time.After(1 * time.Second):
+			t.Fatalf("expected running worker to be cancelled by stop")
+		}
+
+		stopped, err := sessionSvc.LoadRun(context.Background(), run.RunID)
+		if err != nil {
+			t.Fatalf("LoadRun after stop: %v", err)
+		}
+		if stopped.Status != types.RunStatusPaused {
+			t.Fatalf("run status after stop=%q want %q", stopped.Status, types.RunStatusPaused)
+		}
+
+		if err := supervisor.ResumeRun(context.Background(), run.RunID); err != nil {
+			t.Fatalf("ResumeRun after stop: %v", err)
+		}
+		drainSupervisorCmds(supervisor)
+
+		resumed, err := sessionSvc.LoadRun(context.Background(), run.RunID)
+		if err != nil {
+			t.Fatalf("LoadRun after resume: %v", err)
+		}
+		if resumed.Status != types.RunStatusRunning {
+			t.Fatalf("run status after resume=%q want %q", resumed.Status, types.RunStatusRunning)
+		}
+		if spawnCount != 2 {
+			t.Fatalf("spawn count=%d want 2", spawnCount)
+		}
+	})
+
+	t.Run("double resume spawns one worker", func(t *testing.T) {
+		cfg := config.Config{DataDir: t.TempDir()}
+		_, run, err := implstore.CreateSession(cfg, "double resume", 8*1024)
+		if err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		run.Status = types.RunStatusPaused
+		if err := implstore.SaveRun(cfg, run); err != nil {
+			t.Fatalf("SaveRun paused: %v", err)
+		}
+		sessionSvc := newSupervisorTestSessionService(t, cfg)
+		taskStore, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+		if err != nil {
+			t.Fatalf("NewSQLiteTaskStore: %v", err)
+		}
+		taskSvc := pkgtask.NewManager(taskStore, nil)
+
+		spawnCount := 0
+		supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+			Cfg:            cfg,
+			TaskService:    taskSvc,
+			SessionService: sessionSvc,
+		})
+		supervisor.spawnOverride = func(_ context.Context, sess types.Session, runID string) (*managedRuntime, error) {
+			spawnCount++
+			done := make(chan struct{})
+			return &managedRuntime{
+				runID:     runID,
+				sessionID: sess.SessionID,
+				cancel:    func() { close(done) },
+				done:      done,
+			}, nil
+		}
+
+		if err := supervisor.ResumeRun(context.Background(), run.RunID); err != nil {
+			t.Fatalf("ResumeRun #1: %v", err)
+		}
+		if err := supervisor.ResumeRun(context.Background(), run.RunID); err != nil {
+			t.Fatalf("ResumeRun #2: %v", err)
+		}
+		drainSupervisorCmds(supervisor)
+
+		if spawnCount != 1 {
+			t.Fatalf("spawnCount=%d want 1", spawnCount)
+		}
+	})
+
+	t.Run("stale exit watcher discarded", func(t *testing.T) {
+		supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{})
+		oldDone := make(chan struct{})
+		newDone := make(chan struct{})
+		oldHandle := &runHandle{
+			runID:     "run-1",
+			sessionID: "sess-1",
+			rt:        &managedRuntime{runID: "run-1", sessionID: "sess-1", done: oldDone},
+			state:     handleStateRunning,
+		}
+		newHandle := &runHandle{
+			runID:     "run-1",
+			sessionID: "sess-1",
+			rt:        &managedRuntime{runID: "run-1", sessionID: "sess-1", done: newDone},
+			state:     handleStateRunning,
+		}
+		supervisor.handles["run-1"] = newHandle
+		supervisor.updateSnapshot("run-1", newHandle, types.RunStatusRunning)
+
+		if err := supervisor.handleWorkerExited(context.Background(), supervisorCmd{
+			kind:   cmdWorkerExited,
+			runID:  "run-1",
+			handle: oldHandle,
+		}); err != nil {
+			t.Fatalf("handleWorkerExited: %v", err)
+		}
+
+		snap, ok := supervisor.getSnapshot("run-1")
+		if !ok || snap.rt != newHandle.rt {
+			t.Fatalf("expected stale exit to leave newer handle intact")
+		}
+	})
 }

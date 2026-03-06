@@ -2804,8 +2804,8 @@ func TestRPCServer_AgentPauseResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTask pause: %v", err)
 	}
-	if pausedTask.Status != types.TaskStatusCanceled {
-		t.Fatalf("task status after pause=%q want %q", pausedTask.Status, types.TaskStatusCanceled)
+	if pausedTask.Status != types.TaskStatusActive {
+		t.Fatalf("task status after pause=%q want %q", pausedTask.Status, types.TaskStatusActive)
 	}
 
 	reqResume, _ := protocol.NewRequest("2", protocol.MethodAgentResume, protocol.AgentResumeParams{
@@ -2944,8 +2944,25 @@ func TestRPCServer_SessionStop_DefaultSessionFromThread(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadRun stop (%s): %v", runID, err)
 		}
-		if loaded.Status != types.RunStatusCanceled {
-			t.Fatalf("status after session stop for %s = %q want %q", runID, loaded.Status, types.RunStatusCanceled)
+		if loaded.Status != types.RunStatusPaused {
+			t.Fatalf("status after session stop for %s = %q want %q", runID, loaded.Status, types.RunStatusPaused)
+		}
+	}
+
+	reqResume, _ := protocol.NewRequest("2", protocol.MethodSessionResume, protocol.SessionResumeParams{
+		ThreadID: protocol.ThreadID(runA.SessionID),
+	})
+	respResume := rpcRoundTrip(t, srv, reqResume)
+	if respResume.Error != nil {
+		t.Fatalf("session.resume after stop error: %+v", respResume.Error)
+	}
+	for _, runID := range []string{runA.RunID, runB.RunID} {
+		loaded, err := implstore.LoadRun(cfg, runID)
+		if err != nil {
+			t.Fatalf("LoadRun resume after stop (%s): %v", runID, err)
+		}
+		if loaded.Status != types.RunStatusRunning {
+			t.Fatalf("status after session resume for %s = %q want %q", runID, loaded.Status, types.RunStatusRunning)
 		}
 	}
 }

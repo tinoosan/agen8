@@ -281,7 +281,7 @@ func (m *Manager) InferRunRoleAndTeam(ctx context.Context, runID string) (role, 
 	return strings.TrimSpace(role), strings.TrimSpace(teamID)
 }
 
-// setRunPausedState updates run status to paused/running and validates scope. If paused, cancels active tasks.
+// setRunPausedState updates run status to paused/running and validates scope.
 func (m *Manager) setRunPausedState(ctx context.Context, runID, sessionID string, paused bool) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
@@ -309,10 +309,6 @@ func (m *Manager) setRunPausedState(ctx context.Context, runID, sessionID string
 	run.FinishedAt = nil
 	run.Error = nil
 	if err := m.sessions.SaveRun(ctx, run); err != nil {
-		return err
-	}
-	if paused {
-		_, err := m.taskCancel.CancelActiveTasksByRun(ctx, runID, "run paused")
 		return err
 	}
 	return nil

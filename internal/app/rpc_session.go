@@ -719,9 +719,8 @@ func (s *RPCServer) setSessionStoppedState(ctx context.Context, threadID, sessio
 		if lerr != nil {
 			return affected, fmt.Errorf("load run %s: %w", runID, lerr)
 		}
-		loaded.Status = types.RunStatusCanceled
-		now := time.Now().UTC()
-		loaded.FinishedAt = &now
+		loaded.Status = types.RunStatusPaused
+		loaded.FinishedAt = nil
 		loaded.Error = nil
 		if err := s.session.SaveRun(ctx, loaded); err != nil {
 			return affected, fmt.Errorf("save run %s: %w", runID, err)

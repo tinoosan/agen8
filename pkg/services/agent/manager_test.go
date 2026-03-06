@@ -317,8 +317,8 @@ func TestPause_WithoutController_Fallback(t *testing.T) {
 	if run.Status != types.RunStatusPaused {
 		t.Errorf("run status: got %q", run.Status)
 	}
-	if len(cancel.canceled) != 1 || cancel.canceled[0].runID != "run-1" || cancel.canceled[0].reason != "run paused" {
-		t.Errorf("expected CancelActiveTasksByRun(run-1, \"run paused\"), got %v", cancel.canceled)
+	if len(cancel.canceled) != 0 {
+		t.Errorf("expected pause fallback not to cancel active tasks, got %v", cancel.canceled)
 	}
 }
 

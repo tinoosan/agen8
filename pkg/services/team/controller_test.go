@@ -148,28 +148,31 @@ func TestController_SetReasoning_Integration(t *testing.T) {
 	}
 }
 
-func TestController_PauseRuns_ReturnsTaskCancelError(t *testing.T) {
+func TestController_PauseRuns_DoesNotCancelActiveTasks(t *testing.T) {
 	sessionSvc := &mockSessionService{}
 	rt := &mockRoleRunController{runID: "run-1", sessionID: "sess-1"}
+	cancelCalled := false
+	taskCanceler := &mockActiveTaskCanceler{
+		cancelFn: func(ctx context.Context, runID, reason string) (int, error) {
+			cancelCalled = true
+			return 0, fmt.Errorf("cancel should not be called on pause")
+		},
+	}
 	ctrl := NewController(ControllerConfig{
 		SessionService: sessionSvc,
-		TaskCanceler: &mockActiveTaskCanceler{
-			cancelFn: func(ctx context.Context, runID, reason string) (int, error) {
-				return 0, fmt.Errorf("cancel failed")
-			},
-		},
-		Runtimes: []RoleRunController{rt},
+		TaskCanceler:   taskCanceler,
+		Runtimes:       []RoleRunController{rt},
 	})
 
 	affected, err := ctrl.PauseRuns(context.Background(), "sess-1", "")
-	if err == nil {
-		t.Fatalf("expected pause error")
+	if err != nil {
+		t.Fatalf("PauseRuns: %v", err)
 	}
-	if len(affected) != 0 {
-		t.Fatalf("expected no successful runs on pause failure, got %v", affected)
+	if len(affected) != 1 || affected[0] != "run-1" {
+		t.Fatalf("affected = %v", affected)
 	}
-	if !errors.Is(err, ErrCancelActive) {
-		t.Fatalf("unexpected error: %v", err)
+	if cancelCalled {
+		t.Fatalf("expected no task cancellation on pause")
 	}
 }
 

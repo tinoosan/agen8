@@ -182,7 +182,7 @@ func (c *Controller) SetReasoning(ctx context.Context, threadID, target, effort,
 	return applied, nil
 }
 
-// PauseRuns sets each run's status to paused, SetPaused(true), and cancels active tasks for that run.
+// PauseRuns sets each run's status to paused and SetPaused(true).
 func (c *Controller) PauseRuns(ctx context.Context, threadID, sessionID string) ([]string, error) {
 	if !c.isValidThread(threadID) {
 		return nil, ErrThreadNotFound
@@ -206,13 +206,7 @@ func (c *Controller) PauseRuns(ctx context.Context, threadID, sessionID string) 
 			return err
 		}
 		r.SetPaused(true)
-		var opErr error
-		if c.taskCanceler != nil {
-			if _, err := c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run paused"); err != nil {
-				opErr = errors.Join(opErr, fmt.Errorf("%w for run %s: %w", ErrCancelActive, runID, err))
-			}
-		}
-		return opErr
+		return nil
 	})
 }
 
