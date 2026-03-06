@@ -212,3 +212,36 @@ func TestUpdate_ModelSetSchedulesImmediateRefresh(t *testing.T) {
 		t.Fatalf("expected refresh command batch after successful model set")
 	}
 }
+
+func TestApplyLiveFeedEntry_UserMessageIDNormalization_DedupesLiveAndPolled(t *testing.T) {
+	m := &Model{}
+	ts := time.Now()
+
+	live := feedEntry{
+		kind:      feedUser,
+		timestamp: ts,
+		text:      "hello",
+		sourceID:  "run-a|op-1",
+	}
+	polled := feedEntry{
+		kind:      feedUser,
+		timestamp: ts.Add(time.Millisecond),
+		text:      "hello",
+		sourceID:  "run-z:run-a|op-1",
+	}
+
+	if !m.applyLiveFeedEntry(live) {
+		t.Fatalf("expected first live entry to be applied")
+	}
+	if len(m.feed) != 1 {
+		t.Fatalf("len(feed)=%d want 1 after first entry", len(m.feed))
+	}
+
+	_ = m.applyLiveFeedEntry(polled)
+	if len(m.feed) != 1 {
+		t.Fatalf("len(feed)=%d want 1 after normalized update", len(m.feed))
+	}
+	if m.feed[0].sourceID != "run-z:run-a|op-1" {
+		t.Fatalf("sourceID=%q want updated polled source id", m.feed[0].sourceID)
+	}
+}

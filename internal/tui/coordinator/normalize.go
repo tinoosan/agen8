@@ -51,6 +51,11 @@ func feedEntryIdentityKey(e feedEntry) string {
 	if v := strings.TrimSpace(e.identityKey); v != "" {
 		return v
 	}
+	if e.kind == feedUser {
+		if sid := strings.TrimSpace(e.sourceID); sid != "" {
+			return "user:" + normalizeOpSourceID(sid)
+		}
+	}
 	if key := taskResponseKeyFromEntry(e); key != "" {
 		return "task:" + key
 	}

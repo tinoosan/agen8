@@ -52,3 +52,15 @@ func TestDedupeFeedEntriesByIdentity_ReplayStable(t *testing.T) {
 		t.Fatalf("len(feed)=%d want 1000", len(feed))
 	}
 }
+
+func TestNormalizeFeedEntry_UserIdentityKey_NormalizesSourceID(t *testing.T) {
+	entry := &feedEntry{
+		kind:      feedUser,
+		sourceID:  "run-outer:run-inner|op-1",
+		timestamp: time.Now(),
+	}
+	got := normalizeFeedEntry(entry)
+	if got.identityKey != "user:run-inner|op-1" {
+		t.Fatalf("identityKey=%q want user:run-inner|op-1", got.identityKey)
+	}
+}

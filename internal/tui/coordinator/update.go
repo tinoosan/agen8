@@ -191,13 +191,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.applyRecoveredScope(msg.scope)
-		m.feed = append(m.feed, feedEntry{
-			kind:      feedUser,
-			timestamp: time.Now(),
-			text:      msg.goal,
-		})
-		m.feedGen++
 		m.appendReconnectNotice(msg.recovered)
+		// Don't add a local user entry here. The daemon emits a user_message
+		// event synchronously before task.create returns, so the event.append
+		// notification arrives almost immediately and brings the entry in via
+		// the normal event path — avoiding a brief duplicate that would otherwise
+		// appear until the next poll collapsed the two sources.
 		m.setFeedback("queued", feedbackOK)
 		m.pinFeedToBottom()
 		return m, nil
@@ -465,8 +464,10 @@ func (m *Model) applyLiveFeedEntry(e feedEntry) bool {
 		}
 	}
 	if sid := strings.TrimSpace(e.sourceID); sid != "" {
+		normSID := normalizeOpSourceID(sid)
 		for i := range m.feed {
-			if m.feed[i].kind == e.kind && strings.TrimSpace(m.feed[i].sourceID) == sid {
+			existingSID := normalizeOpSourceID(strings.TrimSpace(m.feed[i].sourceID))
+			if m.feed[i].kind == e.kind && existingSID == normSID {
 				changed := feedEntryRenderChanged(m.feed[i], e)
 				m.feed[i] = e
 				sort.SliceStable(m.feed, func(a, b int) bool {
