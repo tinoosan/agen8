@@ -90,6 +90,9 @@ func resolveActiveProjectScope(ctx context.Context) (projectRoot, teamID, sessio
 		sessionID = strings.TrimSpace(teamInfo.PrimarySessionID)
 	}
 	if sessionID == "" {
+		if strings.EqualFold(strings.TrimSpace(teamInfo.Status), "inactive") {
+			return "", "", "", "", fmt.Errorf("team %s is inactive (start it with `agen8 team start %s --team-id %s`)", teamID, fallback(strings.TrimSpace(teamInfo.ProfileID), "<profile-ref>"), teamID)
+		}
 		return "", "", "", "", fmt.Errorf("team %s is not ready (no active control session)", teamID)
 	}
 	if runID == "" {

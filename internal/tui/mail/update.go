@@ -246,7 +246,7 @@ func (m *Model) drillIntoTeam() (tea.Model, tea.Cmd) {
 	}
 	team := m.teams[m.teamSel]
 	if strings.TrimSpace(team.PrimarySessionID) == "" {
-		m.notice = "team has no session"
+		m.notice = fmt.Sprintf("Team %s is inactive. Start the team to resume live activity.", strings.TrimSpace(team.TeamID))
 		m.noticeAt = time.Now()
 		return m, nil
 	}
@@ -273,7 +273,7 @@ func (m *Model) switchTeam(delta int) (tea.Model, tea.Cmd) {
 	}
 	team := m.teams[next]
 	if strings.TrimSpace(team.PrimarySessionID) == "" {
-		m.notice = "team has no session"
+		m.notice = fmt.Sprintf("Team %s is inactive. Start the team to resume live activity.", strings.TrimSpace(team.TeamID))
 		m.noticeAt = time.Now()
 		return m, nil
 	}

@@ -14,6 +14,7 @@ type SessionStartParams struct {
 	Profile     string   `json:"profile,omitempty"`
 	Goal        string   `json:"goal,omitempty"`
 	Model       string   `json:"model,omitempty"`
+	TeamID      string   `json:"teamId,omitempty"`
 	ProjectID   string   `json:"projectId,omitempty"`
 	ProjectRoot string   `json:"projectRoot,omitempty"` // project dir when created via agen8 new
 }

@@ -293,6 +293,8 @@ func normalizeProjectTeamStatus(status string) string {
 		return implstore.ProjectTeamStatusRegistered
 	case implstore.ProjectTeamStatusActive:
 		return implstore.ProjectTeamStatusActive
+	case implstore.ProjectTeamStatusInactive:
+		return implstore.ProjectTeamStatusInactive
 	default:
 		return status
 	}

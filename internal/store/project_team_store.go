@@ -15,6 +15,7 @@ import (
 const (
 	ProjectTeamStatusRegistered = "registered"
 	ProjectTeamStatusActive     = "active"
+	ProjectTeamStatusInactive   = "inactive"
 )
 
 // ProjectTeamRecord stores canonical project-owned team metadata.

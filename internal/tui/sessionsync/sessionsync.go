@@ -45,6 +45,9 @@ func ResolveActiveSessionID(projectRoot, endpoint string) (string, error) {
 	}
 	sessionID := strings.TrimSpace(out.Team.PrimarySessionID)
 	if sessionID == "" {
+		if strings.EqualFold(strings.TrimSpace(out.Team.Status), "inactive") {
+			return "", fmt.Errorf("active team %s is inactive", teamID)
+		}
 		return "", fmt.Errorf("active team %s has no control session", teamID)
 	}
 	return sessionID, nil

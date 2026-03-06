@@ -143,10 +143,6 @@ var sessionsDeleteCmd = &cobra.Command{
 		}, &out); err != nil {
 			return err
 		}
-		projectCtx, err := loadProjectContext()
-		if err == nil && projectCtx.Exists && strings.TrimSpace(projectCtx.State.ActiveSessionID) == sessionID {
-			_ = updateProjectActiveSession("", "", "", "sessions delete")
-		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", sessionID)
 		return nil
 	},

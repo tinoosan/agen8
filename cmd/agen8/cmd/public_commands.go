@@ -16,6 +16,7 @@ import (
 
 var (
 	teamStartModel string
+	teamStartID    string
 	teamDeleteID   string
 	taskSendRole   string
 	taskListView   string
@@ -63,6 +64,11 @@ var projectStatusCmd = &cobra.Command{
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "root=%s\n", projectCtx.RootDir)
 		fmt.Fprintf(cmd.OutOrStdout(), "active_team=%s\n", blankDash(projectCtx.State.ActiveTeamID))
+		if teamID := strings.TrimSpace(projectCtx.State.ActiveTeamID); teamID != "" {
+			if teamInfo, err := rpcGetProjectTeam(cmd.Context(), strings.TrimSpace(projectCtx.RootDir), teamID); err == nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "active_team_status=%s\n", blankDash(teamInfo.Status))
+			}
+		}
 		return nil
 	},
 }
@@ -92,23 +98,43 @@ var projectDeleteTeamsCmd = &cobra.Command{
 
 var teamCmd = &cobra.Command{
 	Use:   "team",
-	Short: "Start and inspect available profile-backed teams",
+	Short: "Start and inspect project teams",
 }
 
 var teamListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List available profile-backed team definitions",
+	Short: "List project teams",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := effectiveConfig(cmd)
-		if err != nil {
-			return err
-		}
 		projectCtx, err := loadProjectContext()
 		if err != nil {
 			return err
 		}
 		if !projectCtx.Exists {
 			return fmt.Errorf("project is not initialized; run `agen8 project init` first")
+		}
+		if projectRoot := strings.TrimSpace(projectCtx.RootDir); projectRoot != "" {
+			if teams, err := rpcListProjectTeams(cmd.Context(), projectRoot); err == nil && len(teams) > 0 {
+				activeTeamID := strings.TrimSpace(projectCtx.State.ActiveTeamID)
+				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
+				fmt.Fprintln(w, "TEAM\tPROFILE\tSTATUS\tACTIVE")
+				for _, team := range teams {
+					teamID := strings.TrimSpace(team.TeamID)
+					fmt.Fprintf(
+						w,
+						"%s\t%s\t%s\t%t\n",
+						blankDash(teamID),
+						blankDash(strings.TrimSpace(team.ProfileID)),
+						blankDash(strings.TrimSpace(team.Status)),
+						activeTeamID != "" && activeTeamID == teamID,
+					)
+				}
+				return w.Flush()
+			}
+		}
+
+		cfg, err := effectiveConfig(cmd)
+		if err != nil {
+			return err
 		}
 
 		type teamEntry struct {
@@ -177,6 +203,7 @@ var teamStartCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		newProfile = strings.TrimSpace(args[0])
+		newTeamID = strings.TrimSpace(teamStartID)
 		newAttach = false
 		if strings.TrimSpace(teamStartModel) != "" {
 			newModel = strings.TrimSpace(teamStartModel)
@@ -366,6 +393,7 @@ func init() {
 	projectInitCmd.Flags().StringVar(&initDataDirOverride, "data-dir", "", "project-level data-dir override")
 
 	teamStartCmd.Flags().StringVar(&teamStartModel, "model", "", "model override for the started team")
+	teamStartCmd.Flags().StringVar(&teamStartID, "team-id", "", "existing inactive team id to revive")
 	teamDeleteCmd.Flags().StringVar(&teamDeleteID, "team-id", "", "team id to delete (defaults to active project team)")
 
 	taskSendCmd.Flags().StringVar(&taskSendRole, "role", "", "assign the task to a specific role")

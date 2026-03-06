@@ -76,11 +76,47 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 			projectID = strings.TrimSpace(projectCtx.Config.ProjectID)
 		}
 	}
+	teamID := strings.TrimSpace(p.TeamID)
+	reattachExistingTeam := false
+	restoreProjectTeam := ProjectTeamSummary{}
+	if teamID != "" {
+		if strings.TrimSpace(p.ProjectRoot) == "" {
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "projectRoot is required when teamId is provided"}
+		}
+		if srv.projectTeamSvc == nil {
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "project team service is not configured"}
+		}
+		summary, err := srv.projectTeamSvc.GetTeam(ctx, strings.TrimSpace(p.ProjectRoot), teamID)
+		if err != nil {
+			return protocol.SessionStartResult{}, err
+		}
+		if profileID := strings.TrimSpace(summary.ProfileID); profileID != "" && !strings.EqualFold(profileID, strings.TrimSpace(prof.ID)) {
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{
+				Code:    protocol.CodeInvalidParams,
+				Message: fmt.Sprintf("team %s uses profile %s", teamID, profileID),
+			}
+		}
+		if primarySessionID := strings.TrimSpace(summary.PrimarySessionID); primarySessionID != "" {
+			if _, err := srv.session.LoadSession(ctx, primarySessionID); err == nil {
+				return protocol.SessionStartResult{}, &protocol.ProtocolError{
+					Code:    protocol.CodeInvalidState,
+					Message: fmt.Sprintf("team %s is already active", teamID),
+				}
+			}
+		}
+		restoreProjectTeam = summary
+		reattachExistingTeam = true
+		if projectID == "" {
+			projectID = strings.TrimSpace(summary.ProjectID)
+		}
+	}
+	if teamID == "" {
+		teamID = "team-" + uuid.NewString()
+	}
 	sess := types.NewSession(goal)
 	sess.CurrentGoal = goal
 	sess.Profile = strings.TrimSpace(prof.ID)
 	sess.ProjectRoot = strings.TrimSpace(p.ProjectRoot)
-	teamID := "team-" + uuid.NewString()
 	sess.TeamID = teamID
 	sess.Mode = mode
 
@@ -101,7 +137,13 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 	registeredProjectTeam := false
 	cleanupStart := func() {
 		if registeredProjectTeam && strings.TrimSpace(sess.ProjectRoot) != "" && srv.projectTeamSvc != nil {
-			_ = srv.projectTeamSvc.UnregisterTeam(ctx, strings.TrimSpace(sess.ProjectRoot), strings.TrimSpace(teamID))
+			if reattachExistingTeam {
+				restoreProjectTeam.PrimarySessionID = strings.TrimSpace(restoreProjectTeam.PrimarySessionID)
+				restoreProjectTeam.CoordinatorRunID = strings.TrimSpace(restoreProjectTeam.CoordinatorRunID)
+				_, _ = srv.projectTeamSvc.RegisterTeam(ctx, restoreProjectTeam)
+			} else {
+				_ = srv.projectTeamSvc.UnregisterTeam(ctx, strings.TrimSpace(sess.ProjectRoot), strings.TrimSpace(teamID))
+			}
 		}
 		_ = srv.session.Delete(ctx, strings.TrimSpace(sess.SessionID))
 	}
@@ -209,10 +251,11 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 			ProjectID:        projectID,
 			ProjectRoot:      strings.TrimSpace(sess.ProjectRoot),
 			TeamID:           strings.TrimSpace(teamID),
-			ProfileID:        strings.TrimSpace(prof.ID),
+			ProfileID:        firstNonEmpty(strings.TrimSpace(restoreProjectTeam.ProfileID), strings.TrimSpace(prof.ID)),
 			PrimarySessionID: strings.TrimSpace(sess.SessionID),
 			CoordinatorRunID: primaryRunID,
 			Status:           "active",
+			CreatedAt:        strings.TrimSpace(restoreProjectTeam.CreatedAt),
 		}); err != nil {
 			cleanupStart()
 			return protocol.SessionStartResult{}, err

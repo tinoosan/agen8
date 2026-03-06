@@ -531,6 +531,11 @@ func DeleteSession(cfg config.Config, sessionID string) error {
 	}
 	defer tx.Rollback()
 
+	projectTeams, err := deactivateProjectTeamsForDeletedSessionTx(tx, sessionID)
+	if err != nil {
+		return err
+	}
+
 	rows, err := tx.Query(`SELECT run_id FROM runs WHERE session_id = ?`, sessionID)
 	if err != nil {
 		return fmt.Errorf("query session runs: %w", err)
@@ -553,6 +558,10 @@ func DeleteSession(cfg config.Config, sessionID string) error {
 	}
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("close session runs: %w", err)
+	}
+
+	if err := clearDeletedSessionOwnershipTx(tx, sessionID, runIDs, projectTeams); err != nil {
+		return err
 	}
 
 	if len(runIDs) > 0 {
@@ -610,6 +619,89 @@ func DeleteSession(cfg config.Config, sessionID string) error {
 		return fmt.Errorf("remove session dir: %w", err)
 	}
 
+	return nil
+}
+
+type deletedProjectTeam struct {
+	projectRoot string
+	teamID      string
+}
+
+func deactivateProjectTeamsForDeletedSessionTx(tx *sql.Tx, sessionID string) ([]deletedProjectTeam, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("transaction is nil")
+	}
+	rows, err := tx.Query(`SELECT project_root, team_id FROM project_teams WHERE primary_session_id = ?`, sessionID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query project teams for session delete: %w", err)
+	}
+	defer rows.Close()
+	out := make([]deletedProjectTeam, 0, 1)
+	for rows.Next() {
+		var item deletedProjectTeam
+		if err := rows.Scan(&item.projectRoot, &item.teamID); err != nil {
+			return nil, fmt.Errorf("scan project teams for session delete: %w", err)
+		}
+		item.projectRoot = strings.TrimSpace(item.projectRoot)
+		item.teamID = strings.TrimSpace(item.teamID)
+		if item.projectRoot == "" || item.teamID == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate project teams for session delete: %w", err)
+	}
+	return out, nil
+}
+
+func clearDeletedSessionOwnershipTx(tx *sql.Tx, sessionID string, runIDs []string, teams []deletedProjectTeam) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+	if len(teams) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	runSet := make(map[string]struct{}, len(runIDs))
+	for _, runID := range runIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		runSet[runID] = struct{}{}
+	}
+	for _, item := range teams {
+		var coordinator sql.NullString
+		if err := tx.QueryRow(`SELECT coordinator_run_id FROM project_teams WHERE project_root = ? AND team_id = ?`, item.projectRoot, item.teamID).Scan(&coordinator); err != nil {
+			return fmt.Errorf("load project team coordinator: %w", err)
+		}
+		coordinatorRunID := strings.TrimSpace(coordinator.String)
+		nextCoordinator := coordinatorRunID
+		if _, ok := runSet[coordinatorRunID]; ok {
+			nextCoordinator = ""
+		}
+		if _, err := tx.Exec(`
+			UPDATE project_teams
+			SET primary_session_id = NULL,
+				coordinator_run_id = ?,
+				status = ?,
+				updated_at = ?
+			WHERE project_root = ? AND team_id = ? AND primary_session_id = ?
+		`,
+			nullIfEmpty(nextCoordinator),
+			ProjectTeamStatusInactive,
+			now,
+			item.projectRoot,
+			item.teamID,
+			sessionID,
+		); err != nil {
+			return fmt.Errorf("deactivate project team after session delete: %w", err)
+		}
+	}
 	return nil
 }
 

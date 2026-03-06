@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -622,5 +623,88 @@ func TestDeleteSession_PreservesTeamDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(teamDir); err != nil {
 		t.Fatalf("expected team dir preserved, err=%v", err)
+	}
+}
+
+func TestDeleteSession_MarksProjectTeamInactiveAndPreservesTeamScopedData(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, run, err := CreateSession(cfg, "team session", 64)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.Mode = "team"
+	sess.ProjectRoot = "/tmp/project-a"
+	sess.TeamID = "team-delete-test"
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	if err := SaveSession(cfg, sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	run.SessionID = sess.SessionID
+	run.RunID = strings.TrimSpace(run.RunID)
+	if err := SaveRun(cfg, run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	if _, err := UpsertProjectTeam(context.Background(), cfg, ProjectTeamRecord{
+		ProjectRoot:      sess.ProjectRoot,
+		ProjectID:        "project-a",
+		TeamID:           sess.TeamID,
+		ProfileID:        "startup",
+		PrimarySessionID: sess.SessionID,
+		CoordinatorRunID: run.RunID,
+		Status:           ProjectTeamStatusActive,
+	}); err != nil {
+		t.Fatalf("UpsertProjectTeam: %v", err)
+	}
+
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, sess.TeamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		t.Fatalf("getSQLiteDB: %v", err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE IF NOT EXISTS tasks (task_id TEXT PRIMARY KEY, team_id TEXT DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS messages (message_id TEXT PRIMARY KEY, team_id TEXT DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS artifacts (artifact_id INTEGER PRIMARY KEY AUTOINCREMENT, team_id TEXT DEFAULT '')`,
+		`INSERT INTO tasks(task_id, team_id) VALUES ('task-1', 'team-delete-test')`,
+		`INSERT INTO messages(message_id, team_id) VALUES ('msg-1', 'team-delete-test')`,
+		`INSERT INTO artifacts(team_id) VALUES ('team-delete-test')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec %q: %v", stmt, err)
+		}
+	}
+
+	if err := DeleteSession(cfg, sess.SessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	projectTeam, err := LoadProjectTeam(context.Background(), cfg, sess.ProjectRoot, sess.TeamID)
+	if err != nil {
+		t.Fatalf("LoadProjectTeam: %v", err)
+	}
+	if got := strings.TrimSpace(projectTeam.Status); got != ProjectTeamStatusInactive {
+		t.Fatalf("status=%q want %q", got, ProjectTeamStatusInactive)
+	}
+	if projectTeam.PrimarySessionID != "" {
+		t.Fatalf("primarySessionID=%q want empty", projectTeam.PrimarySessionID)
+	}
+	if projectTeam.CoordinatorRunID != "" {
+		t.Fatalf("coordinatorRunID=%q want empty", projectTeam.CoordinatorRunID)
+	}
+	if _, err := os.Stat(teamDir); err != nil {
+		t.Fatalf("expected team dir preserved, err=%v", err)
+	}
+	for _, table := range []string{"tasks", "messages", "artifacts"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE team_id = ?`, sess.TeamID).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("%s rows remaining=%d want 1", table, count)
+		}
 	}
 }

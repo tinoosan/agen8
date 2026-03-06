@@ -19,6 +19,7 @@ var (
 	newProfile string
 	newModel   string
 	newAttach  bool
+	newTeamID  string
 
 	coordinatorSessionID string
 
@@ -167,6 +168,7 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 		ThreadID:    detachedThreadID,
 		Profile:     profile,
 		Model:       strings.TrimSpace(newModel),
+		TeamID:      strings.TrimSpace(newTeamID),
 		ProjectID:   projectID,
 		ProjectRoot: projectRoot,
 	}, &out); err != nil {
@@ -181,6 +183,7 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 		return runCoordinatorFn(cmd, out.SessionID)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Started team %s\n", blankDash(out.TeamID))
+	fmt.Fprintf(cmd.OutOrStdout(), "Status: active\n")
 	return nil
 }
 

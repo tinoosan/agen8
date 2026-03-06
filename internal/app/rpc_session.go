@@ -573,9 +573,29 @@ func (s *RPCServer) sessionDelete(ctx context.Context, p protocol.SessionDeleteP
 	if sessionID == "" {
 		return protocol.SessionDeleteResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "sessionId is required"}
 	}
+	sess, err := s.session.LoadSession(ctx, sessionID)
+	if err != nil {
+		return protocol.SessionDeleteResult{}, err
+	}
 	// We call Delete on the service, which handles stopping runs and cleaning up storage.
 	if err := s.session.Delete(ctx, sessionID); err != nil {
 		return protocol.SessionDeleteResult{}, err
+	}
+	projectRoot := strings.TrimSpace(sess.ProjectRoot)
+	teamID := strings.TrimSpace(sess.TeamID)
+	if projectRoot != "" && teamID != "" {
+		if projectCtx, err := LoadProjectContext(projectRoot); err == nil && projectCtx.Exists && strings.TrimSpace(projectCtx.State.ActiveSessionID) == sessionID {
+			nextState := ProjectState{
+				ActiveTeamID: teamID,
+				LastCommand:  "session.delete",
+			}
+			if s.projectTeamSvc == nil {
+				nextState = ProjectState{LastCommand: "session.delete"}
+			} else if teamSummary, err := s.projectTeamSvc.GetTeam(ctx, projectRoot, teamID); err != nil || strings.TrimSpace(teamSummary.TeamID) == "" {
+				nextState = ProjectState{LastCommand: "session.delete"}
+			}
+			_, _ = SetActiveSession(projectRoot, nextState)
+		}
 	}
 	return protocol.SessionDeleteResult{SessionID: sessionID}, nil
 }
