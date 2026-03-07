@@ -81,6 +81,13 @@ func (s *ProjectTeamService) RegisterTeam(ctx context.Context, summary ProjectTe
 	if s == nil {
 		return ProjectTeamSummary{}, fmt.Errorf("project team service is nil")
 	}
+	metadata := map[string]any{}
+	for key, value := range summary.Metadata {
+		metadata[key] = value
+	}
+	if _, exists := metadata["source"]; !exists {
+		metadata["source"] = "session.start"
+	}
 	record, err := implstore.UpsertProjectTeam(ctx, s.cfg, implstore.ProjectTeamRecord{
 		ProjectRoot:      strings.TrimSpace(summary.ProjectRoot),
 		ProjectID:        strings.TrimSpace(summary.ProjectID),
@@ -90,9 +97,7 @@ func (s *ProjectTeamService) RegisterTeam(ctx context.Context, summary ProjectTe
 		CoordinatorRunID: strings.TrimSpace(summary.CoordinatorRunID),
 		Status:           normalizeProjectTeamStatus(summary.Status),
 		CreatedAt:        strings.TrimSpace(summary.CreatedAt),
-		Metadata: map[string]any{
-			"source": "session.start",
-		},
+		Metadata:         metadata,
 	})
 	if err != nil {
 		return ProjectTeamSummary{}, err

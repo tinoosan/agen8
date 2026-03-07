@@ -73,7 +73,7 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 
 For complete flag context and environment-variable guidance, see [docs/cli-usage.md](docs/cli-usage.md) (this document) complemented by [docs/config-toml.md](docs/config-toml.md).
 
-For project desired-state configuration, see [docs/agen8-yaml.md](docs/agen8-yaml.md).
+For project desired-state configuration, see [docs/agen8-yaml.md](docs/agen8-yaml.md). For team profile structure and recommended layout, see [docs/profile-yaml.md](docs/profile-yaml.md).
 
 ## Troubleshooting CLI sessions
 

@@ -132,7 +132,7 @@ Quick auth commands:
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. Additional flag and env var guidance resides in [docs/cli-usage.md](docs/cli-usage.md).
 
-Project desired running state is configured separately in [docs/agen8-yaml.md](docs/agen8-yaml.md). That manifest lives at `.agen8/agen8.yaml` inside each initialized project.
+Project desired running state is configured separately in [docs/agen8-yaml.md](docs/agen8-yaml.md). Team profile structure and rollout behavior are documented in [docs/profile-yaml.md](docs/profile-yaml.md).
 
 ## Email notifications (Gmail OAuth2)
 
@@ -183,6 +183,7 @@ Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sa
 - **[docs/cli-usage.md](docs/cli-usage.md)** – Step-by-step workflows, flag guidance, and session lifecycle examples for the CLI.
 - **[docs/config-toml.md](docs/config-toml.md)** – Onboarding, config hierarchy, `code_exec`, and path access settings.
 - **[docs/agen8-yaml.md](docs/agen8-yaml.md)** – Desired-state manifest for project teams, reconciliation behavior, and examples.
+- **[docs/profile-yaml.md](docs/profile-yaml.md)** – Team profile schema, directory layout, prompts, roles, and how profile changes roll through desired-state reconciliation.
 - **[docs/chatgpt-account-auth.md](docs/chatgpt-account-auth.md)** – Browser OAuth setup, token refresh behavior, and troubleshooting for `chatgpt_account`.
 - **[docs/developer-guide.md](docs/developer-guide.md)** – Internal architecture, session/run lifecycle, and execution hierarchy reference.
 - **[docs/troubleshooting.md](docs/troubleshooting.md)** – Quick triage for build issues, stuck connections, and retries.

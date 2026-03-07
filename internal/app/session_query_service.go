@@ -261,36 +261,23 @@ func (q *sessionQueryService) sessionGetTotals(ctx context.Context, p protocol.S
 			}
 		}
 	}
-	statsTotalTokens := 0
-	seenSessionIDs := map[string]struct{}{}
 	for runID := range runIDSet {
 		if srv.session != nil {
 			if run, err := srv.session.LoadRun(ctx, runID); err == nil {
-				if sessionID := strings.TrimSpace(run.SessionID); sessionID != "" {
-					if _, seen := seenSessionIDs[sessionID]; !seen {
-						seenSessionIDs[sessionID] = struct{}{}
-						if sess, serr := srv.session.LoadSession(ctx, sessionID); serr == nil {
-							out.TotalTokensIn += sess.InputTokens
-							out.TotalTokensOut += sess.OutputTokens
-						}
-					}
-				}
+				out.TotalTokensIn += run.InputTokens
+				out.TotalTokensOut += run.OutputTokens
 			}
 		}
 		rs, err := srv.taskService.GetRunStats(ctx, runID)
 		if err != nil {
 			continue
 		}
-		statsTotalTokens += rs.TotalTokens
 		out.TotalCostUSD += rs.TotalCost
 		if rs.TotalTokens > 0 && rs.TotalCost <= 0 && !pricingKnownForRun(ctx, srv.session, runID) {
 			out.PricingKnown = false
 		}
 	}
 	out.TotalTokens = out.TotalTokensIn + out.TotalTokensOut
-	if out.TotalTokens == 0 {
-		out.TotalTokens = statsTotalTokens
-	}
 	if out.TotalTokens == 0 {
 		out.PricingKnown = true
 	}

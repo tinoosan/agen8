@@ -1714,6 +1714,19 @@ func TestRuntimeSupervisor_ComputeProjectDiff_OverridesStaleReconcilingMetadataW
 	if _, err := InitProject(projectRoot, ProjectConfig{ProjectID: "p1"}); err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
+	profileDir := filepath.Join(cfg.DataDir, "profiles", "dev_team")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(profileDir): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(
+		"id: dev_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: lead\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead\n",
+	), 0o644); err != nil {
+		t.Fatalf("WriteFile(profile.yaml): %v", err)
+	}
+	currentFingerprint, err := profileFingerprintForDir(profileDir)
+	if err != nil {
+		t.Fatalf("profileFingerprintForDir: %v", err)
+	}
 
 	sessionSvc := newSupervisorTestSessionService(t, cfg)
 	projectTeamSvc := NewProjectTeamService(cfg, sessionSvc, nil)
@@ -1747,9 +1760,10 @@ func TestRuntimeSupervisor_ComputeProjectDiff_OverridesStaleReconcilingMetadataW
 		t.Fatalf("RegisterTeam: %v", err)
 	}
 	if _, err := projectTeamSvc.SetStatus(context.Background(), projectRoot, "team-1", "active", map[string]any{
-		"managedBy":       desiredStateManagedBy,
-		"desiredEnabled":  true,
-		"reconcileStatus": "reconciling",
+		"managedBy":                   desiredStateManagedBy,
+		"desiredEnabled":              true,
+		"reconcileStatus":             "reconciling",
+		profileFingerprintMetadataKey: currentFingerprint,
 	}); err != nil {
 		t.Fatalf("SetStatus: %v", err)
 	}
@@ -1884,5 +1898,94 @@ func TestRuntimeSupervisor_ApplyProject_DeletesManagedTeamRemovedFromDesiredStat
 		t.Fatalf("Load manifest after delete: %v", err)
 	} else if _, statErr := os.Stat(fsutil.GetTeamDir(cfg.DataDir, sess.TeamID)); !os.IsNotExist(statErr) {
 		t.Fatalf("expected team directory to be removed, stat err=%v", statErr)
+	}
+}
+
+func TestRuntimeSupervisor_ComputeProjectDiff_RecreatesManagedTeamWhenProfileFingerprintChanges(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(projectRoot): %v", err)
+	}
+	if _, err := InitProject(projectRoot, ProjectConfig{ProjectID: "p1"}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+	profileDir := filepath.Join(cfg.DataDir, "profiles", "dev_team")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(profileDir): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(
+		"id: dev_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: lead\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead v2\n",
+	), 0o644); err != nil {
+		t.Fatalf("WriteFile(profile.yaml): %v", err)
+	}
+
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	projectTeamSvc := NewProjectTeamService(cfg, sessionSvc, nil)
+
+	sess := types.NewSession("desired-state")
+	sess.SessionID = "sess-profile"
+	sess.ProjectRoot = projectRoot
+	sess.TeamID = "team-profile"
+	sess.Profile = "dev_team"
+	run := types.NewRun("desired-state", 8*1024, sess.SessionID)
+	run.RunID = "run-profile"
+	run.Status = types.RunStatusRunning
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := sessionSvc.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+
+	if _, err := projectTeamSvc.RegisterTeam(context.Background(), ProjectTeamSummary{
+		ProjectRoot:      projectRoot,
+		ProjectID:        "p1",
+		TeamID:           "team-profile",
+		ProfileID:        "dev_team",
+		PrimarySessionID: sess.SessionID,
+		CoordinatorRunID: run.RunID,
+		Status:           "active",
+		Metadata: map[string]any{
+			"managedBy":                   desiredStateManagedBy,
+			"desiredEnabled":              true,
+			profileFingerprintMetadataKey: "stale-fingerprint",
+		},
+	}); err != nil {
+		t.Fatalf("RegisterTeam: %v", err)
+	}
+
+	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+		Cfg:            cfg,
+		SessionService: sessionSvc,
+		ProjectTeamSvc: projectTeamSvc,
+	})
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID:     run.RunID,
+		sessionID: sess.SessionID,
+		cancel:    func() {},
+		done:      make(chan struct{}),
+	}, handleStateRunning)
+
+	out, err := supervisor.computeProjectDiff(context.Background(), projectRoot, ProjectDesiredState{
+		ProjectID: "p1",
+		Teams: []ProjectDesiredStateTeam{{
+			Profile: "dev_team",
+			Enabled: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("computeProjectDiff: %v", err)
+	}
+	if out.Converged || out.Status != "drifting" {
+		t.Fatalf("diff status=%q converged=%t want drifting/false", out.Status, out.Converged)
+	}
+	if len(out.Actions) != 1 {
+		t.Fatalf("actions=%v want 1", out.Actions)
+	}
+	if out.Actions[0].Action != "recreate" || out.Actions[0].Reason != "desired profile.yaml changed" {
+		t.Fatalf("unexpected action: %+v", out.Actions[0])
 	}
 }

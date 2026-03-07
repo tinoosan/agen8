@@ -227,38 +227,25 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 
 	totalTokensIn := 0
 	totalTokensOut := 0
-	statsTotalTokens := 0
 	totalCostUSD := 0.0
 	pricingKnown := true
-	seenSessionIDs := map[string]struct{}{}
 	for _, runID := range allRunIDs {
 		if s.session != nil {
 			if run, err := s.session.LoadRun(ctx, runID); err == nil {
-				if sessionID := strings.TrimSpace(run.SessionID); sessionID != "" {
-					if _, seen := seenSessionIDs[sessionID]; !seen {
-						seenSessionIDs[sessionID] = struct{}{}
-						if sess, serr := s.session.LoadSession(ctx, sessionID); serr == nil {
-							totalTokensIn += sess.InputTokens
-							totalTokensOut += sess.OutputTokens
-						}
-					}
-				}
+				totalTokensIn += run.InputTokens
+				totalTokensOut += run.OutputTokens
 			}
 		}
 		stats, err := s.taskService.GetRunStats(ctx, runID)
 		if err != nil {
 			continue
 		}
-		statsTotalTokens += stats.TotalTokens
 		totalCostUSD += stats.TotalCost
 		if stats.TotalTokens > 0 && stats.TotalCost <= 0 && !pricingKnownForRun(ctx, s.session, runID) {
 			pricingKnown = false
 		}
 	}
 	totalTokens := totalTokensIn + totalTokensOut
-	if totalTokens == 0 {
-		totalTokens = statsTotalTokens
-	}
 	if totalTokens == 0 {
 		pricingKnown = true
 	}

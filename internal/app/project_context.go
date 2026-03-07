@@ -475,15 +475,20 @@ func defaultProjectReadme() string {
 
 This directory stores project-local Agen8 defaults.
 
+- agen8.yaml: desired project team state.
 - config.toml: project defaults and optional overrides.
 - state.json: active session/team/run pointer for this project.
-- profiles/: optional project-local profiles.
+- profiles/: optional project-local profile source files.
 
 Precedence:
 1) CLI flags
 2) environment variables
 3) .agen8/config.toml
-4) global defaults`
+4) global defaults
+
+Recommended docs:
+- docs/agen8-yaml.md
+- docs/profile-yaml.md`
 }
 
 func migrateLegacyProjectDir(root string) error {

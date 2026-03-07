@@ -92,6 +92,70 @@ func TestSessionStart_RevivesInactiveProjectTeam(t *testing.T) {
 	if got := strings.TrimSpace(teamSummary.CoordinatorRunID); got != strings.TrimSpace(out.PrimaryRunID) {
 		t.Fatalf("coordinatorRunID=%q want %q", got, out.PrimaryRunID)
 	}
+	if got, _ := teamSummary.Metadata[profileFingerprintMetadataKey].(string); strings.TrimSpace(got) == "" {
+		t.Fatalf("expected profile fingerprint metadata, got %+v", teamSummary.Metadata)
+	}
+}
+
+func TestSessionStart_AllowsExplicitTeamIDWhenProjectTeamRecordWasDeleted(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Config{DataDir: t.TempDir()}
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(projectRoot): %v", err)
+	}
+	if _, err := InitProject(projectRoot, ProjectConfig{ProjectID: "p1"}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	sessionStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	sessionSvc := newTestSessionService(cfg, sessionStore)
+	manifestStore := team.NewFileManifestStore(cfg)
+	projectTeamSvc := NewProjectTeamService(cfg, sessionSvc, manifestStore)
+	profileDir := filepath.Join(cfg.DataDir, "profiles", "general")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(profileDir): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(
+		"id: general\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: lead\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead\n",
+	), 0o644); err != nil {
+		t.Fatalf("WriteFile(profile.yaml): %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg:               cfg,
+		Run:               types.Run{},
+		AllowAnyThread:    true,
+		TaskService:       pkgtask.NewManager(nil, nil),
+		Session:           sessionSvc,
+		ManifestStore:     manifestStore,
+		ProjectTeamSvc:    projectTeamSvc,
+		Index:             protocol.NewIndex(0, 0),
+		WorkspacePreparer: noopWorkspacePreparer{},
+	})
+
+	out, err := srv.sessionStart(ctx, protocol.SessionStartParams{
+		ThreadID:    protocol.ThreadID("detached-control"),
+		Profile:     "general",
+		ProjectRoot: projectRoot,
+		TeamID:      "team-recreated",
+	})
+	if err != nil {
+		t.Fatalf("sessionStart: %v", err)
+	}
+	if got := strings.TrimSpace(out.TeamID); got != "team-recreated" {
+		t.Fatalf("TeamID=%q want team-recreated", got)
+	}
+	teamSummary, err := projectTeamSvc.GetTeam(ctx, projectRoot, "team-recreated")
+	if err != nil {
+		t.Fatalf("GetTeam: %v", err)
+	}
+	if got := strings.TrimSpace(teamSummary.PrimarySessionID); got != strings.TrimSpace(out.SessionID) {
+		t.Fatalf("primarySessionID=%q want %q", got, out.SessionID)
+	}
 }
 
 func TestRPCSessionDelete_PreservesActiveTeamSelection(t *testing.T) {

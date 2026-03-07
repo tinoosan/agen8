@@ -97,8 +97,22 @@ func (s *runtimeSupervisor) projectDiff(ctx context.Context, projectRoot string,
 	}
 	for _, action := range diff.Actions {
 		switch strings.TrimSpace(action.Action) {
-		case "spawn", "recreate":
+		case "spawn":
 			if _, err := s.startDesiredProjectTeam(ctx, projectRoot, diff.ProjectID, strings.TrimSpace(action.Profile), strings.TrimSpace(action.TeamID)); err != nil {
+				return protocol.ProjectDiffResult{}, err
+			}
+		case "recreate":
+			teamID := strings.TrimSpace(action.TeamID)
+			if teamID != "" {
+				deleteSvc := NewTeamDeleteService(s.cfg, s.sessionService, team.NewFileManifestStore(s.cfg), s.projectTeamSvc)
+				if _, err := deleteSvc.DeleteTeam(ctx, TeamDeleteInput{
+					TeamID:      teamID,
+					ProjectRoot: projectRoot,
+				}); err != nil {
+					return protocol.ProjectDiffResult{}, err
+				}
+			}
+			if _, err := s.startDesiredProjectTeam(ctx, projectRoot, diff.ProjectID, strings.TrimSpace(action.Profile), teamID); err != nil {
 				return protocol.ProjectDiffResult{}, err
 			}
 		case "delete":
@@ -203,8 +217,10 @@ func (s *runtimeSupervisor) computeProjectDiff(ctx context.Context, projectRoot 
 		})
 	}
 	desiredProfiles := map[string]ProjectDesiredStateTeam{}
+	profileFingerprints := map[string]string{}
 	for _, desired := range state.Teams {
-		desiredProfiles[strings.ToLower(strings.TrimSpace(desired.Profile))] = desired
+		profileKey := strings.ToLower(strings.TrimSpace(desired.Profile))
+		desiredProfiles[profileKey] = desired
 		out.DesiredTeams = append(out.DesiredTeams, protocol.ProjectDesiredTeam{
 			Profile:          strings.TrimSpace(desired.Profile),
 			Enabled:          desired.Enabled,
@@ -213,7 +229,16 @@ func (s *runtimeSupervisor) computeProjectDiff(ctx context.Context, projectRoot 
 		if !desired.Enabled {
 			continue
 		}
-		match := s.pickProjectTeamMatch(actualByProfile[strings.ToLower(strings.TrimSpace(desired.Profile))], desired)
+		currentFingerprint, ok := profileFingerprints[profileKey]
+		if !ok {
+			fingerprint, err := resolveProfileFingerprint(s.cfg, strings.TrimSpace(desired.Profile))
+			if err != nil {
+				return protocol.ProjectDiffResult{}, err
+			}
+			currentFingerprint = fingerprint
+			profileFingerprints[profileKey] = currentFingerprint
+		}
+		match := s.pickProjectTeamMatch(actualByProfile[profileKey], desired)
 		if match == nil {
 			out.Actions = append(out.Actions, protocol.ProjectReconcileAction{
 				Action:  "spawn",
@@ -245,6 +270,21 @@ func (s *runtimeSupervisor) computeProjectDiff(ctx context.Context, projectRoot 
 			})
 			out.Converged = false
 			out.Status = "drifting"
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(match.ManagedBy), desiredStateManagedBy) {
+			storedFingerprint, _ := match.Metadata[profileFingerprintMetadataKey].(string)
+			if strings.TrimSpace(storedFingerprint) != strings.TrimSpace(currentFingerprint) {
+				out.Actions = append(out.Actions, protocol.ProjectReconcileAction{
+					Action:  "recreate",
+					Profile: strings.TrimSpace(desired.Profile),
+					TeamID:  strings.TrimSpace(match.TeamID),
+					Reason:  "desired profile.yaml changed",
+					Managed: true,
+				})
+				out.Converged = false
+				out.Status = "drifting"
+			}
 		}
 	}
 	for _, team := range actual {

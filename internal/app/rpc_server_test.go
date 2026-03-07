@@ -2533,8 +2533,8 @@ func TestRPCServer_SessionGetTotals_TeamScopeIncludesTokenBreakdown(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateSession team-b: %v", err)
 	}
-	sessA.InputTokens, sessA.OutputTokens, sessA.TotalTokens, sessA.CostUSD = 11, 7, 18, 0.03
-	sessB.InputTokens, sessB.OutputTokens, sessB.TotalTokens, sessB.CostUSD = 13, 5, 18, 0.02
+	runA.InputTokens, runA.OutputTokens, runA.TotalTokens, runA.CostUSD = 11, 7, 18, 0.03
+	runB.InputTokens, runB.OutputTokens, runB.TotalTokens, runB.CostUSD = 13, 5, 18, 0.02
 
 	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
 	if err != nil {
@@ -2548,6 +2548,12 @@ func TestRPCServer_SessionGetTotals_TeamScopeIncludesTokenBreakdown(t *testing.T
 	}
 	if err := sessStore.SaveSession(context.Background(), sessB); err != nil {
 		t.Fatalf("SaveSession B: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runA); err != nil {
+		t.Fatalf("SaveRun A: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runB); err != nil {
+		t.Fatalf("SaveRun B: %v", err)
 	}
 
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
@@ -2642,16 +2648,20 @@ func TestRPCServer_SessionGetTotals_TeamScope_DoesNotDoubleCountSharedSession(t 
 		t.Fatalf("expected 2 runs, got %d", len(started.RunIDs))
 	}
 
-	teamSession, err := sessStore.LoadSession(context.Background(), started.SessionID)
-	if err != nil {
-		t.Fatalf("LoadSession team: %v", err)
-	}
-	teamSession.InputTokens = 120
-	teamSession.OutputTokens = 45
-	teamSession.TotalTokens = 165
-	teamSession.CostUSD = 1.2
-	if err := sessStore.SaveSession(context.Background(), teamSession); err != nil {
-		t.Fatalf("SaveSession team: %v", err)
+	// Set tokens on each run individually (per-run aggregation).
+	for i, runID := range started.RunIDs {
+		run, lerr := sessStore.LoadRun(context.Background(), runID)
+		if lerr != nil {
+			t.Fatalf("LoadRun %s: %v", runID, lerr)
+		}
+		if i == 0 {
+			run.InputTokens, run.OutputTokens, run.TotalTokens = 70, 25, 95
+		} else {
+			run.InputTokens, run.OutputTokens, run.TotalTokens = 50, 20, 70
+		}
+		if err := sessStore.SaveRun(context.Background(), run); err != nil {
+			t.Fatalf("SaveRun %s: %v", runID, err)
+		}
 	}
 
 	now := time.Now().UTC()
@@ -4664,8 +4674,8 @@ func TestRPCServer_TeamGetStatus_IncludesTokenBreakdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession team-b: %v", err)
 	}
-	sessA.InputTokens, sessA.OutputTokens, sessA.TotalTokens, sessA.CostUSD = 100, 40, 140, 0.20
-	sessB.InputTokens, sessB.OutputTokens, sessB.TotalTokens, sessB.CostUSD = 80, 20, 100, 0.15
+	runA.InputTokens, runA.OutputTokens, runA.TotalTokens, runA.CostUSD = 100, 40, 140, 0.20
+	runB.InputTokens, runB.OutputTokens, runB.TotalTokens, runB.CostUSD = 80, 20, 100, 0.15
 
 	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
 	if err != nil {
@@ -4679,6 +4689,12 @@ func TestRPCServer_TeamGetStatus_IncludesTokenBreakdown(t *testing.T) {
 	}
 	if err := sessStore.SaveSession(context.Background(), sessB); err != nil {
 		t.Fatalf("SaveSession B: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runA); err != nil {
+		t.Fatalf("SaveRun A: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runB); err != nil {
+		t.Fatalf("SaveRun B: %v", err)
 	}
 
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
@@ -4742,8 +4758,8 @@ func TestRPCServer_SessionGetTotals_TeamScope_UsesManifestRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession stale: %v", err)
 	}
-	sessManifest.InputTokens, sessManifest.OutputTokens, sessManifest.TotalTokens = 50, 25, 75
-	sessStale.InputTokens, sessStale.OutputTokens, sessStale.TotalTokens = 9999, 9999, 19998
+	runManifest.InputTokens, runManifest.OutputTokens, runManifest.TotalTokens = 50, 25, 75
+	runStale.InputTokens, runStale.OutputTokens, runStale.TotalTokens = 9999, 9999, 19998
 
 	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
 	if err != nil {
@@ -4757,6 +4773,12 @@ func TestRPCServer_SessionGetTotals_TeamScope_UsesManifestRuns(t *testing.T) {
 	}
 	if err := sessStore.SaveSession(context.Background(), sessStale); err != nil {
 		t.Fatalf("SaveSession stale: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runManifest); err != nil {
+		t.Fatalf("SaveRun manifest: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runStale); err != nil {
+		t.Fatalf("SaveRun stale: %v", err)
 	}
 
 	teamID := "team-1"
@@ -4820,8 +4842,8 @@ func TestRPCServer_TeamGetStatus_TotalTokensMatchesInOutWhenTheyDifferFromRunSta
 	if err != nil {
 		t.Fatalf("CreateSession team-a: %v", err)
 	}
-	sessA.InputTokens, sessA.OutputTokens = 1000, 250
-	sessA.TotalTokens = 1250
+	runA.InputTokens, runA.OutputTokens = 1000, 250
+	runA.TotalTokens = 1250
 
 	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
 	if err != nil {
@@ -4832,6 +4854,9 @@ func TestRPCServer_TeamGetStatus_TotalTokensMatchesInOutWhenTheyDifferFromRunSta
 	}
 	if err := sessStore.SaveSession(context.Background(), sessA); err != nil {
 		t.Fatalf("SaveSession team-a: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runA); err != nil {
+		t.Fatalf("SaveRun A: %v", err)
 	}
 
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
@@ -4882,9 +4907,9 @@ func TestRPCServer_TeamGetStatus_SharedSessionNotDoubleCountedAcrossRuns(t *test
 	}
 	runB := types.NewRun("shared-b", 8*1024, sharedSess.SessionID)
 
-	sharedSess.InputTokens = 321
-	sharedSess.OutputTokens = 123
-	sharedSess.TotalTokens = 444
+	// Set tokens on each run individually (per-run aggregation).
+	runA.InputTokens, runA.OutputTokens, runA.TotalTokens = 200, 80, 280
+	runB.InputTokens, runB.OutputTokens, runB.TotalTokens = 121, 43, 164
 
 	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
 	if err != nil {

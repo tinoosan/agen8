@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/services/team"
@@ -46,7 +48,7 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 	if profileRef == "" {
 		profileRef = "general"
 	}
-	prof, _, err := resolveProfileRef(srv.cfg, profileRef)
+	prof, profDir, err := resolveProfileRef(srv.cfg, profileRef)
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "load profile: " + err.Error()}
 	}
@@ -88,26 +90,29 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 		}
 		summary, err := srv.projectTeamSvc.GetTeam(ctx, strings.TrimSpace(p.ProjectRoot), teamID)
 		if err != nil {
-			return protocol.SessionStartResult{}, err
-		}
-		if profileID := strings.TrimSpace(summary.ProfileID); profileID != "" && !strings.EqualFold(profileID, strings.TrimSpace(prof.ID)) {
-			return protocol.SessionStartResult{}, &protocol.ProtocolError{
-				Code:    protocol.CodeInvalidParams,
-				Message: fmt.Sprintf("team %s uses profile %s", teamID, profileID),
+			if !errors.Is(err, implstore.ErrNotFound) {
+				return protocol.SessionStartResult{}, err
 			}
-		}
-		if primarySessionID := strings.TrimSpace(summary.PrimarySessionID); primarySessionID != "" {
-			if _, err := srv.session.LoadSession(ctx, primarySessionID); err == nil {
+		} else {
+			if profileID := strings.TrimSpace(summary.ProfileID); profileID != "" && !strings.EqualFold(profileID, strings.TrimSpace(prof.ID)) {
 				return protocol.SessionStartResult{}, &protocol.ProtocolError{
-					Code:    protocol.CodeInvalidState,
-					Message: fmt.Sprintf("team %s is already active", teamID),
+					Code:    protocol.CodeInvalidParams,
+					Message: fmt.Sprintf("team %s uses profile %s", teamID, profileID),
 				}
 			}
-		}
-		restoreProjectTeam = summary
-		reattachExistingTeam = true
-		if projectID == "" {
-			projectID = strings.TrimSpace(summary.ProjectID)
+			if primarySessionID := strings.TrimSpace(summary.PrimarySessionID); primarySessionID != "" {
+				if _, err := srv.session.LoadSession(ctx, primarySessionID); err == nil {
+					return protocol.SessionStartResult{}, &protocol.ProtocolError{
+						Code:    protocol.CodeInvalidState,
+						Message: fmt.Sprintf("team %s is already active", teamID),
+					}
+				}
+			}
+			restoreProjectTeam = summary
+			reattachExistingTeam = true
+			if projectID == "" {
+				projectID = strings.TrimSpace(summary.ProjectID)
+			}
 		}
 	}
 	if teamID == "" {
@@ -247,6 +252,11 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 			cleanupStart()
 			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "project team service is not configured"}
 		}
+		profileFingerprint, err := profileFingerprintForDir(profDir)
+		if err != nil {
+			cleanupStart()
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "fingerprint profile: " + err.Error()}
+		}
 		if _, err := srv.projectTeamSvc.RegisterTeam(ctx, ProjectTeamSummary{
 			ProjectID:        projectID,
 			ProjectRoot:      strings.TrimSpace(sess.ProjectRoot),
@@ -256,6 +266,9 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 			CoordinatorRunID: primaryRunID,
 			Status:           "active",
 			CreatedAt:        strings.TrimSpace(restoreProjectTeam.CreatedAt),
+			Metadata: map[string]any{
+				profileFingerprintMetadataKey: profileFingerprint,
+			},
 		}); err != nil {
 			cleanupStart()
 			return protocol.SessionStartResult{}, err
