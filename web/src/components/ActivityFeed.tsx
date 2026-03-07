@@ -383,12 +383,11 @@ function EventRow({ event }: { event: ActivityEvent }) {
 /* ── Main Feed ──────────────────────────────────────── */
 
 export default function ActivityFeed({ threadId, teamId }: ActivityFeedProps) {
-  const query = useActivity({ threadId, teamId, includeChildRuns: true, limit: 100 })
+  const query = useActivity({ threadId, teamId, includeChildRuns: true, limit: 200 })
   const containerRef = useRef<HTMLDivElement>(null)
   const events = query.data ?? []
-  const recent = events.slice(-50)
 
-  const feed = useMemo(() => buildFeed(recent), [recent])
+  const feed = useMemo(() => buildFeed(events), [events])
 
   // Auto-scroll to latest event
   useEffect(() => {
@@ -401,7 +400,7 @@ export default function ActivityFeed({ threadId, teamId }: ActivityFeedProps) {
       ref={containerRef}
       style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}
     >
-      {recent.length === 0 ? (
+      {events.length === 0 ? (
         <div className="activity-empty">
           <div className="empty-icon">
             <Activity size={16} style={{ color: 'var(--text-3)' }} />
