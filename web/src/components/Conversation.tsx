@@ -6,7 +6,7 @@ import { useThinkingEvents } from '../hooks/useThinkingEvents'
 import { useArtifactFiles } from '../hooks/useArtifactFiles'
 import { useStore } from '../lib/store'
 import { rpcCall } from '../lib/rpc'
-import { ArrowUp, ChevronRight, Paperclip, Sparkles, X, Zap } from 'lucide-react'
+import { ArrowUp, ChevronRight, Copy, Check, Paperclip, Sparkles, X, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ActivityEvent, ArtifactGetResult, ArtifactNode, EventRecord, Item, Task, UserMessageContent, AgentMessageContent } from '../lib/types'
@@ -45,11 +45,43 @@ interface ChatTurn {
   bannerData?: RoleBannerData
 }
 
+/* ── Copy Button ─────────────────────────────────── */
+function CopyButton({ text, light }: { text: string; light?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation()
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy to clipboard"
+      style={{
+        position: 'absolute', top: 6, right: 6,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 26, height: 26, borderRadius: 6,
+        border: light ? '1px solid rgba(255,255,255,0.25)' : '1px solid var(--border)',
+        background: light ? 'rgba(255,255,255,0.15)' : 'var(--bg-elevated)',
+        color: copied ? 'var(--green)' : (light ? 'rgba(255,255,255,0.8)' : 'var(--text-3)'),
+        cursor: 'pointer', opacity: 0,
+        transition: 'opacity 0.15s, color 0.15s, background 0.15s',
+        backdropFilter: 'blur(8px)',
+      }}
+      className="copy-btn"
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  )
+}
+
 /* ── Agent Bubble ────────────────────────────────── */
 function AgentBubble({ entry }: { entry: ChatEntry }) {
   return (
     <div
-      className="animate-fade-in"
+      className="animate-fade-in msg-bubble-wrap"
       style={{
         display: 'flex',
         justifyContent: 'flex-start',
@@ -74,7 +106,7 @@ function AgentBubble({ entry }: { entry: ChatEntry }) {
       >
         <Zap size={13} color="var(--accent)" fill="var(--accent)" strokeWidth={0} />
       </div>
-      <div style={{ maxWidth: '78%', minWidth: 0 }}>
+      <div style={{ maxWidth: '78%', minWidth: 0, position: 'relative' }}>
         {entry.role && (
           <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             {entry.role}
@@ -89,8 +121,10 @@ function AgentBubble({ entry }: { entry: ChatEntry }) {
             color: 'var(--text-1)',
             fontSize: 13.5,
             overflowWrap: 'break-word',
+            position: 'relative',
           }}
         >
+          <CopyButton text={entry.text} />
           <div className="md-prose">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -378,7 +412,7 @@ function RoleActivityBanner({ data, onClickRole }: { data: RoleBannerData; onCli
 function UserBubble({ entry }: { entry: ChatEntry }) {
   return (
     <div
-      className="animate-fade-in"
+      className="animate-fade-in msg-bubble-wrap"
       style={{
         display: 'flex',
         justifyContent: 'flex-end',
@@ -399,8 +433,10 @@ function UserBubble({ entry }: { entry: ChatEntry }) {
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            position: 'relative',
           }}
         >
+          <CopyButton text={entry.text} light />
           {entry.text}
         </div>
       </div>
