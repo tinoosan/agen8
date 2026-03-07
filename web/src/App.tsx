@@ -3,6 +3,7 @@ import { useStore } from './lib/store'
 import TopBar from './components/TopBar'
 import Overview from './pages/Overview'
 import Dashboard from './pages/Dashboard'
+import Logs from './pages/Logs'
 import TeamFocus from './pages/TeamFocus'
 import CommandPalette from './components/CommandPalette'
 
@@ -35,6 +36,8 @@ export default function App() {
           <TeamFocus teamId={focusedTeamId} />
         ) : activeView === 'dashboard' ? (
           <Dashboard />
+        ) : activeView === 'logs' ? (
+          <Logs />
         ) : (
           <Overview />
         )}

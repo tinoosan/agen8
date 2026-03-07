@@ -354,7 +354,9 @@ archive:
 				slog.Error("archive subagent: save run", "component", "supervisor", "run_id", runID, "error", err)
 			}
 		}
-		_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, stopReasonArchived)
+		// stop run result is best-effort
+		// Stop result is best-effort; worker may already be stopped
+			_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, stopReasonArchived)
 	}
 }
 
@@ -524,7 +526,10 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 			if _, roleByRun := loadTeamManifestRunRolesFromStore(ctx, team.NewFileManifestStore(s.cfg), teamID); len(roleByRun) != 0 {
 				if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
 					run.Runtime.Role = role
-					_ = s.sessionService.SaveRun(ctx, run)
+					// Best-effort: save run state; errors are logged but not fatal
+		if err := s.sessionService.SaveRun(ctx, run); err != nil {
+			slog.Debug("failed to save run on stop", "runID", run.RunID, "error", err)
+		}
 				}
 			}
 		}
@@ -998,7 +1003,10 @@ func (s *runtimeSupervisor) handleSpawn(ctx context.Context, cmd supervisorCmd) 
 		if _, roleByRun := loadTeamManifestRunRolesFromStore(ctx, team.NewFileManifestStore(s.cfg), teamID); len(roleByRun) != 0 {
 			if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
 				run.Runtime.Role = role
-				_ = s.sessionService.SaveRun(ctx, run)
+				// Best-effort: save run state
+				if err := s.sessionService.SaveRun(ctx, run); err != nil {
+					slog.Debug("failed to save run", "runID", run.RunID, "error", err)
+				}
 			}
 		}
 	}
@@ -1730,7 +1738,10 @@ func (s *runtimeSupervisor) wireSpawnTools(
 	registry, err := agent.DefaultHostToolRegistry()
 	if err != nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return spawnToolWiring{}, err
 	}
 
@@ -1771,7 +1782,10 @@ func (s *runtimeSupervisor) wireSpawnTools(
 	}
 	if err := registry.Register(tool); err != nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return spawnToolWiring{}, err
 	}
 	// Register task_review tool for agents that can receive callbacks (non-child runs).
@@ -1784,20 +1798,29 @@ func (s *runtimeSupervisor) wireSpawnTools(
 		}
 		if err := registry.Register(reviewTool); err != nil {
 			orderedEmitter.Close()
-			_ = rt.Shutdown(parent)
+			// Best-effort: shutdown runtime
+			if err := rt.Shutdown(parent); err != nil {
+				slog.Debug("runtime shutdown error", "error", err)
+			}
 			return spawnToolWiring{}, err
 		}
 	}
 	if s.soulService != nil {
 		if err := registry.Register(&hosttools.SoulUpdateTool{Updater: s.soulService, Actor: pkgsoul.ActorAgent}); err != nil {
 			orderedEmitter.Close()
-			_ = rt.Shutdown(parent)
+			// Best-effort: shutdown runtime
+			if err := rt.Shutdown(parent); err != nil {
+				slog.Debug("runtime shutdown error", "error", err)
+			}
 			return spawnToolWiring{}, err
 		}
 	}
 	if err := registry.Register(&hosttools.ObsidianTool{ProjectRoot: s.workdirAbs}); err != nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return spawnToolWiring{}, err
 	}
 
@@ -1828,12 +1851,18 @@ func (s *runtimeSupervisor) wireSpawnTools(
 	modelRegistry, bridgeRegistry, err := resolveToolRegistries(registry, allowedToolsForRun, codeExecOnly)
 	if err != nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return spawnToolWiring{}, err
 	}
 	if err := configureCodeExecRuntime(parent, rt, s.cfg, modelRegistry, bridgeRegistry, resolvedCodeExecRequiredImports, codeExecOnly, emitEvent); err != nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return spawnToolWiring{}, err
 	}
 	return spawnToolWiring{
@@ -1866,7 +1895,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	}
 	if soulVersion > 0 && sess.SoulVersionSeen != soulVersion {
 		sess.SoulVersionSeen = soulVersion
-		_ = s.sessionService.SaveSession(parent, sess)
+		// Best-effort: save session state
+		if err := s.sessionService.SaveSession(parent, sess); err != nil {
+			slog.Debug("failed to save session", "error", err)
+		}
 	}
 
 	if run.Runtime == nil {
@@ -1887,7 +1919,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		return nil, err
 	}
 	run.Runtime.Model = modelInfo.model
-	_ = s.sessionService.SaveRun(parent, run)
+	// Best-effort: save run state
+	if err := s.sessionService.SaveRun(parent, run); err != nil {
+		slog.Debug("failed to save run", "runID", run.RunID, "error", err)
+	}
 
 	rtParts, err := s.buildSpawnRuntime(parent, run, role.prof, role, modelInfo, soulVersion)
 	if err != nil {
@@ -1935,7 +1970,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	a, err := agent.NewAgent(runLLMClient, rt.Executor, agentCfg)
 	if err != nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return nil, err
 	}
 	if reviewerRole == "" && coordinatorRole != "" {
@@ -1944,7 +1982,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	runConvStore, err := implstore.NewSQLiteRunConversationStoreFromConfig(s.cfg)
 	if err != nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return nil, fmt.Errorf("run conversation store: %w", err)
 	}
 
@@ -1963,7 +2004,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	messageBus, ok := s.taskService.(agentsession.MessageBus)
 	if !ok || messageBus == nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return nil, fmt.Errorf("task service does not implement message bus")
 	}
 
@@ -2012,7 +2056,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	})
 	if err != nil {
 		orderedEmitter.Close()
-		_ = rt.Shutdown(parent)
+		// Best-effort: shutdown runtime
+		if err := rt.Shutdown(parent); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
 		return nil, err
 	}
 	workerSession.SetPaused(paused)
@@ -2056,7 +2103,12 @@ func (s *runtimeSupervisor) startManagedWorkerLoop(parent context.Context, cfg s
 		defer close(done)
 		defer orderedEmitter.Close()
 		// Keep cleanup independent from workerCtx cancellation so runtime resources always release.
-		defer func() { _ = rt.Shutdown(context.Background()) }()
+		defer func() {
+		// Best-effort: runtime shutdown during cleanup
+		if err := rt.Shutdown(context.Background()); err != nil {
+			slog.Debug("runtime shutdown error", "error", err)
+		}
+	}()
 		defer cancel()
 		if wakeCancel != nil {
 			defer wakeCancel()
@@ -2075,7 +2127,10 @@ func (s *runtimeSupervisor) startManagedWorkerLoop(parent context.Context, cfg s
 
 		if isChildRun && run.Runtime != nil {
 			run.Runtime.LifecycleState = "active"
-			_ = s.sessionService.SaveRun(parent, run)
+			// Best-effort: save run state
+			if err := s.sessionService.SaveRun(parent, run); err != nil {
+				slog.Debug("failed to save run", "runID", run.RunID, "error", err)
+			}
 		}
 
 		syncRuntimeControls := func() {
@@ -2114,7 +2169,10 @@ func (s *runtimeSupervisor) startManagedWorkerLoop(parent context.Context, cfg s
 					strings.TrimSpace(s.resolved.ReasoningEffort),
 					strings.TrimSpace(s.resolved.ReasoningSummary),
 				)
-				_ = workerSession.SetReasoning(workerCtx, targetEffort, targetSummary)
+				// Best-effort: set reasoning configuration
+		if err := workerSession.SetReasoning(workerCtx, targetEffort, targetSummary); err != nil {
+			slog.Debug("failed to set reasoning", "error", err)
+		}
 			}
 		}
 
@@ -2153,7 +2211,10 @@ func (s *runtimeSupervisor) startManagedWorkerLoop(parent context.Context, cfg s
 						r, lerr := s.sessionService.LoadRun(workerCtx, run.RunID)
 						if lerr == nil && r.Runtime != nil {
 							r.Runtime.LifecycleState = "awaiting_review"
-							_ = s.sessionService.SaveRun(workerCtx, r)
+							// Best-effort: save run state
+							if err := s.sessionService.SaveRun(workerCtx, r); err != nil {
+								slog.Debug("failed to save run", "runID", r.RunID, "error", err)
+							}
 						}
 
 						// Bound awaiting_review residency to prevent leaked subagent runtimes
@@ -2176,10 +2237,15 @@ func (s *runtimeSupervisor) startManagedWorkerLoop(parent context.Context, cfg s
 							if rr, serr := s.sessionService.LoadRun(workerCtx, run.RunID); serr == nil {
 								if rr.Runtime != nil {
 									rr.Runtime.LifecycleState = lifecycleArchived
-									_ = s.sessionService.SaveRun(workerCtx, rr)
+									// Best-effort: save run state
+									if err := s.sessionService.SaveRun(workerCtx, rr); err != nil {
+										slog.Debug("failed to save run", "runID", rr.RunID, "error", err)
+									}
 								}
 							}
-							_, _ = s.sessionService.StopRun(workerCtx, run.RunID, types.RunStatusSucceeded, "archived: awaiting review timeout")
+							// stop run result is best-effort
+							// Stop result is best-effort; worker may already be stopped
+							_, _ = s.sessionService.StopRun(workerCtx, run.RunID, types.RunStatusSucceeded, stopReasonArchived)
 							return
 						}
 					}

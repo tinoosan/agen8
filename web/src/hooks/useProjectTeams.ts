@@ -2,15 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
 import type { ProjectTeamSummary } from '../lib/types'
 
-const DETACHED = 'detached-control'
-
 export function useProjectTeams() {
   return useQuery<ProjectTeamSummary[]>({
     queryKey: ['project.listTeams'],
     queryFn: async () => {
       const res = await rpcCall<{ teams: ProjectTeamSummary[] }>(
         'project.listTeams',
-        { threadId: DETACHED }
+        {}
       )
       return res.teams ?? []
     },

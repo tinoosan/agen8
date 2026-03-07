@@ -3,11 +3,13 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/tinoosan/agen8/internal/app"
 	"github.com/tinoosan/agen8/internal/web"
 )
 
@@ -26,9 +28,19 @@ The daemon must already be running (agen8 daemon start) before opening the UI.`,
 		rpc := resolvedRPCEndpoint()
 		addr := fmt.Sprintf(":%d", webPort)
 
+		// Resolve the project root from the current working directory so
+		// the web server can inject it into forwarded RPC requests.
+		var projectRoot string
+		projCtx, err := app.LoadProjectContext("")
+		if err == nil && projCtx.Exists {
+			projectRoot = projCtx.RootDir
+			slog.Info("web: resolved project root", "root", projectRoot)
+		}
+
 		srv := &web.Server{
 			Addr:        addr,
 			RPCEndpoint: rpc,
+			ProjectRoot: projectRoot,
 		}
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -1533,7 +1533,14 @@ func (c *Client) generateChat(ctx context.Context, req types.LLMRequest) (types.
 
 func (c *Client) onStreamChunk(acc *openai.ChatCompletionAccumulator, chunk openai.ChatCompletionChunk, cb types.LLMStreamCallback) error {
 	if acc != nil {
-		_ = acc.AddChunk(chunk)
+		// Chunk accumulation failures are best-effort.
+		if !acc.AddChunk(chunk) {
+			debuglog.Log("toolcalling", "H6", "openai_client.go:onStreamChunk", "chunk_accumulation_failed", map[string]any{
+				"id":      strings.TrimSpace(chunk.ID),
+				"model":   strings.TrimSpace(chunk.Model),
+				"choices": len(chunk.Choices),
+			})
+		}
 	}
 	if cb == nil || len(chunk.Choices) == 0 {
 		return nil

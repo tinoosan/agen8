@@ -70,7 +70,10 @@ func (s *Server) Run(ctx context.Context, wg *sync.WaitGroup) {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		// Shutdown is best-effort; goroutine cleanup proceeds regardless
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Debug("server shutdown error", "error", err)
+		}
 	}()
 	go func() {
 		if wg != nil {
@@ -92,7 +95,10 @@ func (s *Server) Run(ctx context.Context, wg *sync.WaitGroup) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+	// Write errors are logged but non-fatal for health endpoints
+	if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+		slog.Debug("response write error", "error", err)
+	}
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
@@ -132,5 +138,8 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"taskId": taskID, "status": "queued"})
+	// Encode errors are best-effort for async webhooks
+	if err := json.NewEncoder(w).Encode(map[string]string{"taskId": taskID, "status": "queued"}); err != nil {
+		slog.Debug("webhook response encode error", "error", err)
+	}
 }

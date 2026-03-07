@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -118,6 +119,9 @@ func ResolveRoleAllowSubagents(cfg config.Config, profileID, roleName string) bo
 	}
 	for i := range prof.Team.Roles {
 		r := &prof.Team.Roles[i]
+		if r == nil {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(r.Name), roleName) {
 			return r.AllowSubagents
 		}

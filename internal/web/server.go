@@ -6,6 +6,7 @@ package web
 import (
 	"context"
 	"embed"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -13,26 +14,39 @@ import (
 	"strings"
 )
 
-//go:embed all:dist
+// Server ports and addresses
+const (
+	// DefaultWebPort is the default HTTP server port
+	DefaultWebPort = 8080
+	// DefaultRPCPort is the default RPC endpoint port
+	DefaultRPCPort = 7777
+	// DefaultRPCHost is the default RPC endpoint host
+	DefaultRPCHost = "127.0.0.1"
+)
+
 var staticFiles embed.FS
 
 // Server serves the agen8 web UI and bridges RPC to the daemon.
 type Server struct {
-	// Addr is the HTTP listen address, e.g. ":8080".
+	// Addr is the HTTP listen address, e.g. fmt.Sprintf(":%d", DefaultWebPort).
 	Addr string
-	// RPCEndpoint is the daemon JSON-RPC TCP address, e.g. "127.0.0.1:7777".
+	// RPCEndpoint is the daemon JSON-RPC TCP address, e.g. fmt.Sprintf("%s:%d", DefaultRPCHost, DefaultRPCPort).
 	RPCEndpoint string
+	// ProjectRoot is the resolved project root directory. When set, it is
+	// injected into forwarded RPC requests so project-scoped methods can
+	// resolve the correct .agen8/ workspace.
+	ProjectRoot string
 }
 
 // Run starts the HTTP server and blocks until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
 	addr := strings.TrimSpace(s.Addr)
 	if addr == "" {
-		addr = ":8080"
+		addr = fmt.Sprintf(":%d", DefaultWebPort)
 	}
 	rpc := strings.TrimSpace(s.RPCEndpoint)
 	if rpc == "" {
-		rpc = "127.0.0.1:7777"
+		rpc = fmt.Sprintf("%s:%d", DefaultRPCHost, DefaultRPCPort)
 	}
 
 	mux := http.NewServeMux()
@@ -46,8 +60,9 @@ func (s *Server) Run(ctx context.Context) error {
 	})
 
 	// JSON-RPC proxy: forward individual requests to the daemon.
+	projectRoot := strings.TrimSpace(s.ProjectRoot)
 	mux.HandleFunc("POST /rpc", func(w http.ResponseWriter, r *http.Request) {
-		handleRPC(w, r, rpc)
+		handleRPC(w, r, rpc, projectRoot)
 	})
 
 	// Server-Sent Events: stream daemon notifications to the browser.
@@ -71,7 +86,10 @@ func (s *Server) Run(ctx context.Context) error {
 	srv := &http.Server{Handler: mux}
 	go func() {
 		<-ctx.Done()
-		_ = srv.Close()
+		// Close is best-effort; server may already be closing
+		if err := srv.Close(); err != nil {
+			slog.Debug("server close error", "error", err)
+		}
 	}()
 	if err := srv.Serve(ln); err != nil && ctx.Err() == nil {
 		return err

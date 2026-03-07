@@ -15,7 +15,9 @@ import (
 // to the daemon TCP socket and writes the response back.
 // Protocol: open fresh TCP connection, write request JSON, close write half,
 // read until we see a response whose id matches the request id.
-func handleRPC(w http.ResponseWriter, r *http.Request, rpcEndpoint string) {
+// If projectRoot is non-empty, it is injected into the request params so that
+// project-scoped RPC methods can resolve the correct workspace.
+func handleRPC(w http.ResponseWriter, r *http.Request, rpcEndpoint, projectRoot string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	if err != nil {
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
@@ -24,11 +26,18 @@ func handleRPC(w http.ResponseWriter, r *http.Request, rpcEndpoint string) {
 
 	// Parse out the request id so we can match the response.
 	var req struct {
-		ID *json.RawMessage `json:"id"`
+		ID     *json.RawMessage `json:"id"`
+		Params json.RawMessage  `json:"params"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "invalid json-rpc request: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	// Inject projectRoot into params if the server has one configured and
+	// the request doesn't already provide cwd or projectRoot.
+	if projectRoot != "" {
+		body = injectProjectRoot(body, req.Params, projectRoot)
 	}
 
 	dialer := net.Dialer{Timeout: 5 * time.Second}
@@ -153,4 +162,58 @@ func handleEvents(w http.ResponseWriter, r *http.Request, rpcEndpoint string) {
 			return
 		}
 	}
+}
+
+// injectProjectRoot adds "projectRoot" to the JSON-RPC params object if the
+// caller hasn't already provided "cwd" or "projectRoot". This allows
+// project-scoped daemon methods to locate the correct .agen8/ workspace when
+// requests originate from the web UI (which doesn't know the project directory).
+func injectProjectRoot(body []byte, rawParams json.RawMessage, projectRoot string) []byte {
+	// If params is missing or null, create a new object with projectRoot.
+	if len(rawParams) == 0 || string(rawParams) == "null" {
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			return body
+		}
+		p, _ := json.Marshal(map[string]string{"projectRoot": projectRoot})
+		envelope["params"] = p
+		out, err := json.Marshal(envelope)
+		if err != nil {
+			return body
+		}
+		return out
+	}
+
+	// Parse existing params.
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return body // params is not an object (e.g. array) — leave unchanged
+	}
+
+	// Don't overwrite if cwd or projectRoot is already set.
+	if _, ok := params["cwd"]; ok {
+		return body
+	}
+	if _, ok := params["projectRoot"]; ok {
+		return body
+	}
+
+	// Inject projectRoot into params and rebuild the full request.
+	prBytes, _ := json.Marshal(projectRoot)
+	params["projectRoot"] = prBytes
+	newParams, err := json.Marshal(params)
+	if err != nil {
+		return body
+	}
+
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return body
+	}
+	envelope["params"] = newParams
+	out, err := json.Marshal(envelope)
+	if err != nil {
+		return body
+	}
+	return out
 }

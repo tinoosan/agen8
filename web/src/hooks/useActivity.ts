@@ -12,13 +12,14 @@ interface ActivityListResult {
 interface UseActivityOptions {
   threadId: string | null
   teamId?: string | null
+  runId?: string | null
   includeChildRuns?: boolean
   limit?: number
 }
 
-export function useActivity({ threadId, teamId, includeChildRuns = true, limit = 200 }: UseActivityOptions) {
+export function useActivity({ threadId, teamId, runId, includeChildRuns = true, limit = 200 }: UseActivityOptions) {
   const queryClient = useQueryClient()
-  const key = ['activity.list', threadId, teamId ?? null, includeChildRuns, limit]
+  const key = ['activity.list', threadId, teamId ?? null, runId ?? null, includeChildRuns, limit]
 
   const query = useQuery<ActivityEvent[]>({
     queryKey: key,
@@ -33,6 +34,7 @@ export function useActivity({ threadId, teamId, includeChildRuns = true, limit =
         const res = await rpcCall<ActivityListResult>('activity.list', {
           threadId,
           teamId: teamId ?? undefined,
+          runId: runId ?? undefined,
           includeChildRuns,
           limit: pageSize,
           offset,

@@ -4,6 +4,7 @@ import { useConversation } from '../hooks/useConversation'
 import { useTaskHistory } from '../hooks/useTaskHistory'
 import { useThinkingEvents } from '../hooks/useThinkingEvents'
 import { useArtifactFiles } from '../hooks/useArtifactFiles'
+import { useStore } from '../lib/store'
 import { rpcCall } from '../lib/rpc'
 import { ArrowUp, ChevronRight, Paperclip, Sparkles, X, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -27,12 +28,21 @@ interface ChatEntry {
   source?: 'item' | 'activity' | 'task' | 'thinking' | 'optimistic'
 }
 
+interface RoleBannerData {
+  role: string
+  actionCount: number
+  durationMs: number
+  activities: ActivityEvent[]
+  live: boolean
+}
+
 interface ChatTurn {
   id: string
-  kind: 'user' | 'agent' | 'thought'
+  kind: 'user' | 'agent' | 'thought' | 'role-banner'
   role?: string
   texts: string[]
   live?: boolean
+  bannerData?: RoleBannerData
 }
 
 /* ── Agent Bubble ────────────────────────────────── */
@@ -267,6 +277,103 @@ function ThoughtBubble({ entry }: { entry: ChatEntry }) {
   )
 }
 
+/* ── Role Activity Banner ────────────────────────── */
+function RoleActivityBanner({ data, onClickRole }: { data: RoleBannerData; onClickRole: (role: string) => void }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const durationStr = data.durationMs > 0
+    ? data.durationMs < 1000 ? `${data.durationMs}ms`
+      : data.durationMs < 60_000 ? `${(data.durationMs / 1000).toFixed(1)}s`
+        : `${(data.durationMs / 60_000).toFixed(1)}m`
+    : null
+
+  return (
+    <div className="animate-fade-in" style={{ margin: '8px 0', padding: '0 16px' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 0,
+        fontSize: 11, color: 'var(--text-3)',
+      }}>
+        {/* Left line */}
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+
+        {/* Banner content */}
+        <button
+          onClick={() => setExpanded(e => !e)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '4px 12px',
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--text-3)', fontSize: 11, fontFamily: 'inherit',
+            transition: 'color 0.15s',
+          }}
+        >
+          {data.live && (
+            <span className="spinner" style={{ width: 8, height: 8, borderWidth: 1.5 }} />
+          )}
+          <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--accent)' }}>
+            {data.role}
+          </span>
+          <span>{data.actionCount} action{data.actionCount !== 1 ? 's' : ''}</span>
+          {durationStr && <span>&middot; {durationStr}</span>}
+          <ChevronRight size={10} style={{
+            transform: expanded ? 'rotate(90deg)' : 'none',
+            transition: 'transform 0.15s',
+          }} />
+        </button>
+
+        {/* View full link */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onClickRole(data.role) }}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: 10, color: 'var(--accent)', fontFamily: 'inherit',
+            padding: '2px 6px', borderRadius: 'var(--r-sm)',
+            transition: 'background 0.15s',
+          }}
+        >
+          view
+        </button>
+
+        {/* Right line */}
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      </div>
+
+      {/* Expanded mini activity list */}
+      {expanded && (
+        <div className="animate-fade-in" style={{
+          margin: '6px 20px', padding: '6px 0',
+          borderLeft: '2px solid var(--border)',
+        }}>
+          {data.activities.slice(0, 10).map((act, i) => {
+            const kind = act.kind ?? ''
+            const title = act.title || act.outputPreview || act.textPreview || kind
+            const isErr = act.status === 'error' || !!act.error
+            return (
+              <div key={act.id || i} style={{
+                padding: '2px 0 2px 10px',
+                fontSize: 11,
+                color: isErr ? 'var(--red)' : 'var(--text-2)',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span style={{
+                  width: 4, height: 4, borderRadius: '50%', flexShrink: 0,
+                  background: isErr ? 'var(--red)' : act.finishedAt ? 'var(--green)' : 'var(--amber)',
+                }} />
+                <span className="truncate">{title}</span>
+              </div>
+            )
+          })}
+          {data.activities.length > 10 && (
+            <div style={{ padding: '2px 0 2px 10px', fontSize: 10, color: 'var(--text-3)' }}>
+              +{data.activities.length - 10} more
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── User Bubble ─────────────────────────────────── */
 function UserBubble({ entry }: { entry: ChatEntry }) {
   return (
@@ -458,6 +565,86 @@ function shouldDeduplicate(prev: ChatEntry, next: ChatEntry): boolean {
   return (pair.has('task') && pair.has('activity')) || (pair.has('item') && pair.has('activity'))
 }
 
+/* ── Build role banners from non-coordinator activity ── */
+function buildRoleBanners(
+  activities: ActivityEvent[],
+  coordinatorRole: string | null,
+  entries: ChatEntry[],
+): ChatTurn[] {
+  if (!coordinatorRole || activities.length === 0 || entries.length === 0) return []
+
+  const coordLower = coordinatorRole.toLowerCase()
+
+  // Collect non-coordinator activities with timestamps
+  const otherActivities = activities.filter(act => {
+    const role = (act.data?.role || act.data?.agent_role || '').toLowerCase()
+    if (!role || role === coordLower || role === 'you') return false
+    // Skip thinking events
+    if (act.kind?.startsWith('model.thinking')) return false
+    return true
+  })
+
+  if (otherActivities.length === 0) return []
+
+  // Find time ranges between coordinator messages
+  const coordTimestamps = entries
+    .filter(e => e.kind !== 'thought' && (e.role?.toLowerCase() === coordLower || e.kind === 'user'))
+    .map(e => e.createdAt)
+    .filter(t => t > 0)
+    .sort((a, b) => a - b)
+
+  if (coordTimestamps.length < 2) return []
+
+  // For each gap between coordinator messages, find non-coordinator activity
+  const banners: ChatTurn[] = []
+  for (let i = 0; i < coordTimestamps.length - 1; i++) {
+    const gapStart = coordTimestamps[i]
+    const gapEnd = coordTimestamps[i + 1]
+
+    const gapActivities = otherActivities.filter(act => {
+      const t = act.startedAt ? new Date(act.startedAt).getTime() : 0
+      return t > gapStart && t < gapEnd
+    })
+
+    if (gapActivities.length === 0) continue
+
+    // Group by role
+    const byRole = new Map<string, ActivityEvent[]>()
+    for (const act of gapActivities) {
+      const role = act.data?.role || act.data?.agent_role || 'unknown'
+      const list = byRole.get(role) ?? []
+      list.push(act)
+      byRole.set(role, list)
+    }
+
+    for (const [role, acts] of byRole) {
+      const timestamps = acts
+        .map(a => a.startedAt ? new Date(a.startedAt).getTime() : 0)
+        .filter(t => t > 0)
+      const minT = Math.min(...timestamps)
+      const maxT = Math.max(...(acts.map(a => a.finishedAt ? new Date(a.finishedAt).getTime() : 0).filter(t => t > 0)), ...timestamps)
+      const hasLive = acts.some(a => !a.finishedAt)
+
+      banners.push({
+        id: `banner:${role}:${gapStart}`,
+        kind: 'role-banner',
+        role,
+        texts: [],
+        live: hasLive,
+        bannerData: {
+          role,
+          actionCount: acts.length,
+          durationMs: maxT > minT ? maxT - minT : 0,
+          activities: acts,
+          live: hasLive,
+        },
+      })
+    }
+  }
+
+  return banners
+}
+
 /* ── Main Component ──────────────────────────────── */
 export default function Conversation({ threadId, teamId, coordinatorRole, coordinatorRunId }: ConversationProps) {
   const { query: conversationQuery } = useConversation(threadId)
@@ -465,6 +652,8 @@ export default function Conversation({ threadId, teamId, coordinatorRole, coordi
   const taskHistoryQuery = useTaskHistory({ threadId, teamId, limit: 500 })
   const thinkingQuery = useThinkingEvents(coordinatorRunId)
   const artifactFilesQuery = useArtifactFiles(threadId, teamId)
+  const { setFocusedRole } = useStore()
+  const handleClickRole = (role: string) => setFocusedRole(role)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -516,8 +705,24 @@ export default function Conversation({ threadId, teamId, coordinatorRole, coordi
       }
       grouped.push({ id: entry.id, kind: entry.kind, role: entry.role, texts: [entry.text], live: entry.live })
     }
-    return grouped
-  }, [entries])
+
+    // Inject role activity banners between coordinator messages
+    const banners = buildRoleBanners(activityQuery.data ?? [], coordinatorRole, entries)
+    if (banners.length === 0) return grouped
+
+    // Merge banners into the timeline based on their timestamp
+    const allTurns = [...grouped, ...banners]
+    allTurns.sort((a, b) => {
+      const aTime = a.bannerData
+        ? a.bannerData.activities[0]?.startedAt ? new Date(a.bannerData.activities[0].startedAt).getTime() : 0
+        : entries.find(e => e.id === a.id)?.createdAt ?? 0
+      const bTime = b.bannerData
+        ? b.bannerData.activities[0]?.startedAt ? new Date(b.bannerData.activities[0].startedAt).getTime() : 0
+        : entries.find(e => e.id === b.id)?.createdAt ?? 0
+      return aTime - bTime
+    })
+    return allTurns
+  }, [entries, activityQuery.data, coordinatorRole])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -613,8 +818,11 @@ export default function Conversation({ threadId, teamId, coordinatorRole, coordi
           </div>
         ) : (
           turns.map((turn) => {
+            if (turn.kind === 'role-banner' && turn.bannerData) {
+              return <RoleActivityBanner key={turn.id} data={turn.bannerData} onClickRole={handleClickRole} />
+            }
             const entry: ChatEntry = {
-              id: turn.id, kind: turn.kind, role: turn.role,
+              id: turn.id, kind: turn.kind as 'user' | 'agent' | 'thought', role: turn.role,
               text: turn.texts.join('\n\n'), createdAt: 0, live: turn.live,
             }
             if (turn.kind === 'thought') return <ThoughtBubble key={turn.id} entry={entry} />

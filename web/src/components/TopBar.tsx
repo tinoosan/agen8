@@ -1,7 +1,7 @@
 import { useStore, type Theme, type ActiveView } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
-import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, LayoutGrid, BarChart3 } from 'lucide-react'
+import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, LayoutGrid, BarChart3, ScrollText } from 'lucide-react'
 
 function ThemePicker() {
   const { theme, setTheme } = useStore()
@@ -53,6 +53,7 @@ function NavTabs() {
   const tabs: { value: ActiveView; label: string; icon: typeof LayoutGrid }[] = [
     { value: 'overview', label: 'Teams', icon: LayoutGrid },
     { value: 'dashboard', label: 'Dashboard', icon: BarChart3 },
+    { value: 'logs', label: 'Logs', icon: ScrollText },
   ]
   return (
     <div style={{ display: 'flex', gap: 2, marginLeft: 8 }}>

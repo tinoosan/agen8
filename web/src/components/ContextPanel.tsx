@@ -12,7 +12,7 @@ interface ContextPanelProps {
 }
 
 export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
-  const { setMailOpen, setArtifactsOpen } = useStore()
+  const { setMailOpen, setArtifactsOpen, focusedRole, setFocusedRole } = useStore()
   const statusQuery = useTeamStatus(teamId)
   const runtimeQuery = useRuntimeState(threadId || '')
   const { badgeCount } = useMail(teamId)
@@ -64,6 +64,8 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
                 key={role.role}
                 role={role}
                 stats={statsByRole[role.role]}
+                onViewTranscript={setFocusedRole}
+                isActive={focusedRole === role.role}
               />
             ))}
           </div>

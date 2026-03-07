@@ -100,16 +100,18 @@ func (s *FileTokenStore) Save(rec OAuthTokenRecord) error {
 		return fmt.Errorf("create temp token file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
 	if err := tmp.Chmod(0o600); err != nil {
+		// Close errors are best-effort during cleanup
 		_ = tmp.Close()
 		return fmt.Errorf("chmod temp token file: %w", err)
 	}
 	if _, err := tmp.Write(body); err != nil {
+		// Close errors are best-effort during cleanup
 		_ = tmp.Close()
 		return fmt.Errorf("write temp token file: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
+		// Close errors are best-effort during cleanup
 		_ = tmp.Close()
 		return fmt.Errorf("sync temp token file: %w", err)
 	}

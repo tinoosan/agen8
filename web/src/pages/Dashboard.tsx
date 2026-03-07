@@ -1,11 +1,15 @@
 import { useState } from 'react'
+import { useQueries } from '@tanstack/react-query'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
 import { useTeamManifest } from '../hooks/useTeamStatus'
 import { useAgentList, type EnrichedAgent } from '../hooks/useAgentList'
 import PulseDot from '../components/PulseDot'
 import type { ProjectTeamSummary, TeamGetStatusResult } from '../lib/types'
+import { rpcCall } from '../lib/rpc'
 import { ChevronRight, Cpu, Coins, ListChecks, Users, Activity } from 'lucide-react'
+
+const DETACHED = 'detached-control'
 
 /* ── Status mapping ──────────────────────────────── */
 
@@ -185,10 +189,11 @@ function TeamSection({ team }: { team: ProjectTeamSummary }) {
   const [open, setOpen] = useState(true)
   const statusQuery = useTeamStatus(team.teamId)
   const manifestQuery = useTeamManifest(team.teamId)
-  const agentQuery = useAgentList(team.primarySessionId ?? null)
+  const manifest = manifestQuery.data
+  const sessionIds = manifest?.roles?.map((role) => role.sessionId).filter(Boolean) ?? (team.primarySessionId ? [team.primarySessionId] : [])
+  const agentQuery = useAgentList(sessionIds)
   const data = statusQuery.data
   const agents = agentQuery.data ?? []
-  const manifest = manifestQuery.data
 
   const isActive = (data?.active ?? 0) > 0
 
@@ -292,9 +297,16 @@ export default function Dashboard() {
   const teamsQuery = useProjectTeams()
   const teams = teamsQuery.data ?? []
 
-  // Gather statuses for summary bar
-  const statusQueries = teams.map(t => useTeamStatus(t.teamId))
-  const statuses = statusQueries.map(q => q.data)
+  const statusQueries = useQueries({
+    queries: teams.map((team) => ({
+      queryKey: ['team.getStatus', team.teamId],
+      queryFn: () => rpcCall<TeamGetStatusResult>('team.getStatus', { threadId: DETACHED, teamId: team.teamId }),
+      enabled: !!team.teamId,
+      refetchInterval: 1500,
+      retry: false,
+    })),
+  })
+  const statuses = statusQueries.map((query) => query.data)
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', padding: '32px 40px' }}>

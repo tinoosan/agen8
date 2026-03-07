@@ -18,12 +18,12 @@ import (
 
 // Security configuration constants
 const (
-	minReloadInterval     = 5 * time.Second  // Minimum time between config reloads
-	maxPackageNameLength  = 100              // Maximum length of a package name
-	maxPackagesPerReload  = 50               // Maximum number of packages per reload
+	minReloadInterval     = 5 * time.Second                // Minimum time between config reloads
+	maxPackageNameLength  = 100                            // Maximum length of a package name
+	maxPackagesPerReload  = 50                             // Maximum number of packages per reload
 	allowedPackagePattern = `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` // Valid package name pattern
-	maxPathLength         = 4096             // Maximum path length
-	maxDataDirDepth       = 10               // Maximum directory depth for DataDir
+	maxPathLength         = 4096                           // Maximum path length
+	maxDataDirDepth       = 10                             // Maximum directory depth for DataDir
 )
 
 // Rate limiter for config reloads
@@ -42,7 +42,7 @@ func newReloadRateLimiter(minInterval time.Duration) *reloadRateLimiter {
 func (r *reloadRateLimiter) allow() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	now := time.Now()
 	if now.Sub(r.lastReload) < r.minInterval {
 		return false
@@ -74,6 +74,23 @@ func (s *configFileState) update(checksum string, modTime time.Time) {
 // Package name validation
 var validPackageNameRegex = regexp.MustCompile(allowedPackagePattern)
 
+func containsControlCharacter(value string) bool {
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPathTraversal(path string) bool {
+	return strings.Contains(path, ".."+string(filepath.Separator)) ||
+		strings.Contains(path, string(filepath.Separator)+"..") ||
+		strings.Contains(path, "../") ||
+		strings.Contains(path, `..\`) ||
+		path == ".."
+}
+
 // SecurityError represents a security policy violation
 type SecurityError struct {
 	Stage   string
@@ -93,12 +110,20 @@ func (e *SecurityError) Error() string {
 
 // validatePackageName validates a Python package name according to PEP 508
 func validatePackageName(name string) error {
+	if containsControlCharacter(name) {
+		return &SecurityError{
+			Stage:   "package_validation",
+			Message: "package name contains control characters",
+			Details: fmt.Sprintf("name=%q", name),
+		}
+	}
+
 	name = strings.TrimSpace(name)
-	
+
 	if name == "" {
 		return &SecurityError{Stage: "package_validation", Message: "package name is empty"}
 	}
-	
+
 	if len(name) > maxPackageNameLength {
 		return &SecurityError{
 			Stage:   "package_validation",
@@ -106,7 +131,7 @@ func validatePackageName(name string) error {
 			Details: fmt.Sprintf("max=%d, got=%d", maxPackageNameLength, len(name)),
 		}
 	}
-	
+
 	// Check against allowlist pattern
 	if !validPackageNameRegex.MatchString(name) {
 		return &SecurityError{
@@ -115,7 +140,7 @@ func validatePackageName(name string) error {
 			Details: fmt.Sprintf("name=%q, allowed_pattern=%s", name, allowedPackagePattern),
 		}
 	}
-	
+
 	// Block dangerous patterns
 	dangerousPatterns := []string{
 		"..", "//", "~", "$", "`", "|", ";", "&",
@@ -130,7 +155,7 @@ func validatePackageName(name string) error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -139,7 +164,7 @@ func validatePackageList(packages []string) ([]string, error) {
 	if len(packages) == 0 {
 		return nil, nil
 	}
-	
+
 	if len(packages) > maxPackagesPerReload {
 		return nil, &SecurityError{
 			Stage:   "package_list_validation",
@@ -147,41 +172,49 @@ func validatePackageList(packages []string) ([]string, error) {
 			Details: fmt.Sprintf("max=%d, got=%d", maxPackagesPerReload, len(packages)),
 		}
 	}
-	
+
 	seen := make(map[string]struct{}, len(packages))
 	validated := make([]string, 0, len(packages))
-	
+
 	for _, pkg := range packages {
 		pkg = strings.TrimSpace(pkg)
 		if pkg == "" {
 			continue
 		}
-		
+
 		// Normalize for deduplication
 		normalized := strings.ToLower(pkg)
 		if _, exists := seen[normalized]; exists {
 			continue
 		}
 		seen[normalized] = struct{}{}
-		
+
 		if err := validatePackageName(pkg); err != nil {
 			return nil, err
 		}
-		
+
 		validated = append(validated, pkg)
 	}
-	
+
 	return validated, nil
 }
 
 // validateDataDir validates the DataDir configuration
 func validateDataDir(dataDir string) error {
+	if containsControlCharacter(dataDir) {
+		return &SecurityError{
+			Stage:   "datadir_validation",
+			Message: "DataDir contains control characters",
+			Details: fmt.Sprintf("path=%q", dataDir),
+		}
+	}
+
 	dataDir = strings.TrimSpace(dataDir)
-	
+
 	if dataDir == "" {
 		return &SecurityError{Stage: "datadir_validation", Message: "DataDir is empty"}
 	}
-	
+
 	if len(dataDir) > maxPathLength {
 		return &SecurityError{
 			Stage:   "datadir_validation",
@@ -189,17 +222,17 @@ func validateDataDir(dataDir string) error {
 			Details: fmt.Sprintf("max=%d, got=%d", maxPathLength, len(dataDir)),
 		}
 	}
-	
+
 	// Check for path traversal attempts
 	cleaned := filepath.Clean(dataDir)
-	if strings.Contains(cleaned, "..") {
+	if hasPathTraversal(dataDir) || cleaned == ".." {
 		return &SecurityError{
 			Stage:   "datadir_validation",
 			Message: "DataDir contains path traversal sequence",
 			Details: fmt.Sprintf("path=%q", dataDir),
 		}
 	}
-	
+
 	// Check directory depth
 	depth := 0
 	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
@@ -214,19 +247,27 @@ func validateDataDir(dataDir string) error {
 			Details: fmt.Sprintf("max=%d, got=%d", maxDataDirDepth, depth),
 		}
 	}
-	
+
 	return nil
 }
 
 // validateVenvPath validates the virtual environment path
 func validateVenvPath(venvPath string, dataDir string) error {
+	if containsControlCharacter(venvPath) {
+		return &SecurityError{
+			Stage:   "venv_validation",
+			Message: "VenvPath contains control characters",
+			Details: fmt.Sprintf("path=%q", venvPath),
+		}
+	}
+
 	venvPath = strings.TrimSpace(venvPath)
-	
+
 	if venvPath == "" {
 		// Empty venvPath is valid - will use default
 		return nil
 	}
-	
+
 	if len(venvPath) > maxPathLength {
 		return &SecurityError{
 			Stage:   "venv_validation",
@@ -234,7 +275,7 @@ func validateVenvPath(venvPath string, dataDir string) error {
 			Details: fmt.Sprintf("max=%d, got=%d", maxPathLength, len(venvPath)),
 		}
 	}
-	
+
 	// Must be relative path or within dataDir
 	if filepath.IsAbs(venvPath) {
 		// Absolute paths must be under dataDir
@@ -246,7 +287,7 @@ func validateVenvPath(venvPath string, dataDir string) error {
 				Details: err.Error(),
 			}
 		}
-		
+
 		absVenv, err := filepath.Abs(venvPath)
 		if err != nil {
 			return &SecurityError{
@@ -255,7 +296,7 @@ func validateVenvPath(venvPath string, dataDir string) error {
 				Details: err.Error(),
 			}
 		}
-		
+
 		if !strings.HasPrefix(absVenv, absDataDir+string(filepath.Separator)) {
 			return &SecurityError{
 				Stage:   "venv_validation",
@@ -264,17 +305,17 @@ func validateVenvPath(venvPath string, dataDir string) error {
 			}
 		}
 	}
-	
+
 	// Check for path traversal
 	cleaned := filepath.Clean(venvPath)
-	if strings.Contains(cleaned, "..") {
+	if hasPathTraversal(venvPath) || cleaned == ".." {
 		return &SecurityError{
 			Stage:   "venv_validation",
 			Message: "VenvPath contains path traversal sequence",
 			Details: fmt.Sprintf("path=%q", venvPath),
 		}
 	}
-	
+
 	return nil
 }
 
@@ -283,17 +324,17 @@ func sanitizeEventData(data map[string]string) map[string]string {
 	if data == nil {
 		return nil
 	}
-	
+
 	sanitized := make(map[string]string, len(data))
 	sensitiveKeys := map[string]bool{
-		"password": true,
-		"secret":   true,
-		"token":    true,
-		"key":      true,
-		"auth":     true,
+		"password":   true,
+		"secret":     true,
+		"token":      true,
+		"key":        true,
+		"auth":       true,
 		"credential": true,
 	}
-	
+
 	for k, v := range data {
 		lowerKey := strings.ToLower(k)
 		isSensitive := false
@@ -303,7 +344,7 @@ func sanitizeEventData(data map[string]string) map[string]string {
 				break
 			}
 		}
-		
+
 		if isSensitive {
 			sanitized[k] = "[REDACTED]"
 		} else {
@@ -315,7 +356,7 @@ func sanitizeEventData(data map[string]string) map[string]string {
 			}
 		}
 	}
-	
+
 	return sanitized
 }
 
@@ -349,12 +390,12 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 		}
 		return
 	}
-	
+
 	dataDir := strings.TrimSpace(baseCfg.DataDir)
 	if dataDir == "" {
 		return
 	}
-	
+
 	// Validate VenvPath if set
 	if err := validateVenvPath(baseCfg.CodeExec.VenvPath, dataDir); err != nil {
 		if emit != nil {
@@ -368,20 +409,20 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 		}
 		return
 	}
-	
+
 	cfgPath := filepath.Join(dataDir, "config.toml")
-	
+
 	// Use longer ticker interval for rate limiting
 	ticker := time.NewTicker(minReloadInterval)
 	rateLimiter := newReloadRateLimiter(minReloadInterval)
 	fileState := &configFileState{}
-	
+
 	go func() {
 		defer ticker.Stop()
-		
+
 		var lastAppliedSig string
 		var lastMtime time.Time
-		
+
 		reconcile := func(trigger string) {
 			// Rate limiting check
 			if !rateLimiter.allow() {
@@ -397,7 +438,7 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 				}
 				return
 			}
-			
+
 			// Load and decode config with error handling
 			loaded, ok, err := decodeRuntimeConfigFile(cfgPath)
 			if err != nil {
@@ -416,10 +457,10 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 			if !ok {
 				return
 			}
-			
+
 			// Apply host defaults
 			cfg := applyRuntimeConfigHostDefaults(baseCfg, loaded)
-			
+
 			// Validate required packages before proceeding
 			resolved, err := validatePackageList(cfg.CodeExec.RequiredPackages)
 			if err != nil {
@@ -435,15 +476,15 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 				}
 				return
 			}
-			
+
 			// Re-resolve imports using validated packages
 			required := resolveCodeExecRequiredImports(resolved)
 			sig := strings.Join(required, ",") + "|" + resolveCodeExecVenvPath(cfg)
-			
+
 			if sig == lastAppliedSig {
 				return
 			}
-			
+
 			out, err := ensureCodeExecPythonEnv(ctx, cfg, "", required)
 			if err != nil {
 				if emit != nil {
@@ -461,9 +502,9 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 				}
 				return
 			}
-			
+
 			lastAppliedSig = sig
-			
+
 			if emit != nil {
 				data := sanitizeEventData(map[string]string{
 					"path":             cfgPath,
@@ -472,17 +513,17 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 					"python":           strings.TrimSpace(out.PythonBin),
 					"requiredPackages": strings.Join(required, ","),
 				})
-				
+
 				if len(out.InstalledMods) > 0 {
 					data["installedPackages"] = strings.Join(out.InstalledMods, ",")
 				}
-				
+
 				emit(ctx, events.Event{
 					Type:    "code_exec.env.reconciled",
 					Message: "code_exec package reconcile complete",
 					Data:    data,
 				})
-				
+
 				emit(ctx, events.Event{
 					Type:    "config.reload.success",
 					Message: "config.toml reloaded",
@@ -492,9 +533,9 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 				})
 			}
 		}
-		
+
 		reconcile("startup")
-		
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -504,9 +545,9 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 				if err != nil {
 					continue
 				}
-				
+
 				mod := st.ModTime().UTC()
-				
+
 				// Check for actual file content changes using checksum
 				if mod.After(lastMtime) {
 					checksum, err := computeFileChecksum(cfgPath)
@@ -523,7 +564,7 @@ func startCodeExecConfigReloader(ctx context.Context, baseCfg config.Config, emi
 						}
 						continue
 					}
-					
+
 					if fileState.hasChanged(checksum, mod) {
 						fileState.update(checksum, mod)
 						lastMtime = mod
