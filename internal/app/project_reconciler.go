@@ -34,14 +34,14 @@ type projectReconcileNotification struct {
 }
 
 func (s *runtimeSupervisor) DiffProject(ctx context.Context, projectRoot string) (protocol.ProjectDiffResult, error) {
-	return s.projectDiff(ctx, projectRoot, false)
+	return s.projectDiff(ctx, projectRoot, false, false)
 }
 
 func (s *runtimeSupervisor) ApplyProject(ctx context.Context, projectRoot string) (protocol.ProjectDiffResult, error) {
-	return s.projectDiff(ctx, projectRoot, true)
+	return s.projectDiff(ctx, projectRoot, true, true)
 }
 
-func (s *runtimeSupervisor) projectDiff(ctx context.Context, projectRoot string, apply bool) (protocol.ProjectDiffResult, error) {
+func (s *runtimeSupervisor) projectDiff(ctx context.Context, projectRoot string, apply bool, notify bool) (protocol.ProjectDiffResult, error) {
 	if s == nil {
 		return protocol.ProjectDiffResult{}, fmt.Errorf("runtime supervisor is nil")
 	}
@@ -82,15 +82,15 @@ func (s *runtimeSupervisor) projectDiff(ctx context.Context, projectRoot string,
 			return protocol.ProjectDiffResult{}, err
 		}
 	}
-	if apply {
-		_ = s.notifyProjectReconcile(protocol.NotifyProjectReconcileStarted, projectRoot, strings.TrimSpace(state.ProjectID), "reconciling", nil, "")
-	}
 	diff, err := s.computeProjectDiff(ctx, projectRoot, state)
 	if err != nil {
 		if apply {
-			_ = s.notifyProjectReconcile(protocol.NotifyProjectReconcileFailed, projectRoot, strings.TrimSpace(state.ProjectID), "failed", nil, err.Error())
+			_ = s.notifyProjectReconcile(protocol.NotifyProjectReconcileFailed, projectRoot, strings.TrimSpace(state.ProjectID), "failed", nil, nil, err.Error())
 		}
 		return protocol.ProjectDiffResult{}, err
+	}
+	if apply && notify {
+		_ = s.notifyProjectReconcile(protocol.NotifyProjectReconcileStarted, projectRoot, strings.TrimSpace(state.ProjectID), "reconciling", nil, projectTeamIDsForDiff(diff), "")
 	}
 	if !apply {
 		return diff, nil
@@ -139,11 +139,13 @@ func (s *runtimeSupervisor) projectDiff(ctx context.Context, projectRoot string,
 	if len(applied.Actions) == 0 {
 		applied.Converged = true
 		applied.Status = "converged"
-		_ = s.notifyProjectReconcile(protocol.NotifyProjectReconcileConverged, projectRoot, strings.TrimSpace(state.ProjectID), applied.Status, applied.Actions, "")
+		if notify {
+			_ = s.notifyProjectReconcile(protocol.NotifyProjectReconcileConverged, projectRoot, strings.TrimSpace(state.ProjectID), applied.Status, applied.Actions, projectTeamIDsForDiff(applied), "")
+		}
 	} else {
 		applied.Converged = false
 		applied.Status = "reconciling"
-		_ = s.notifyProjectReconcile(protocol.NotifyProjectReconcileDrift, projectRoot, strings.TrimSpace(state.ProjectID), applied.Status, applied.Actions, "")
+		_ = s.notifyProjectReconcile(protocol.NotifyProjectReconcileDrift, projectRoot, strings.TrimSpace(state.ProjectID), applied.Status, applied.Actions, projectTeamIDsForDiff(applied), "")
 	}
 	return applied, nil
 }
@@ -160,7 +162,7 @@ func (s *runtimeSupervisor) reconcileRegisteredProjects(ctx context.Context, sta
 		if !project.Enabled {
 			continue
 		}
-		if _, err := s.projectDiff(ctx, strings.TrimSpace(project.ProjectRoot), true); err != nil {
+		if _, err := s.projectDiff(ctx, strings.TrimSpace(project.ProjectRoot), true, false); err != nil {
 			slog.Error("project desired-state reconcile failed", "component", "supervisor", "project_root", project.ProjectRoot, "startup", startup, "error", err)
 		}
 	}
@@ -414,15 +416,9 @@ func (s *runtimeSupervisor) startDesiredProjectTeam(ctx context.Context, project
 	return out, nil
 }
 
-func (s *runtimeSupervisor) notifyProjectReconcile(method, projectRoot, projectID, status string, actions []protocol.ProjectReconcileAction, errText string) error {
+func (s *runtimeSupervisor) notifyProjectReconcile(method, projectRoot, projectID, status string, actions []protocol.ProjectReconcileAction, teamIDs []string, errText string) error {
 	if s == nil || s.broadcaster == nil {
 		return nil
-	}
-	teamIDs := make([]string, 0, len(actions))
-	for _, action := range actions {
-		if teamID := strings.TrimSpace(action.TeamID); teamID != "" {
-			teamIDs = append(teamIDs, teamID)
-		}
 	}
 	return s.broadcaster.Notify(method, projectReconcileNotification{
 		ProjectRoot: strings.TrimSpace(projectRoot),
@@ -434,6 +430,34 @@ func (s *runtimeSupervisor) notifyProjectReconcile(method, projectRoot, projectI
 		TickAt:      time.Now().UTC().Format(time.RFC3339Nano),
 		Error:       strings.TrimSpace(errText),
 	})
+}
+
+func projectTeamIDsForDiff(diff protocol.ProjectDiffResult) []string {
+	seen := map[string]struct{}{}
+	teamIDs := make([]string, 0, len(diff.ActualTeams)+len(diff.Actions))
+	for _, team := range diff.ActualTeams {
+		teamID := strings.TrimSpace(team.TeamID)
+		if teamID == "" {
+			continue
+		}
+		if _, ok := seen[teamID]; ok {
+			continue
+		}
+		seen[teamID] = struct{}{}
+		teamIDs = append(teamIDs, teamID)
+	}
+	for _, action := range diff.Actions {
+		teamID := strings.TrimSpace(action.TeamID)
+		if teamID == "" {
+			continue
+		}
+		if _, ok := seen[teamID]; ok {
+			continue
+		}
+		seen[teamID] = struct{}{}
+		teamIDs = append(teamIDs, teamID)
+	}
+	return teamIDs
 }
 
 func heartbeatOverride(item ProjectDesiredStateTeam) string {
