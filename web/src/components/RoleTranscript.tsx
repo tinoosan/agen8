@@ -93,6 +93,7 @@ function SmallCopyButton({ text }: { text: string }) {
     <button
       onClick={handleCopy}
       title="Copy to clipboard"
+      className="copy-btn"
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         width: 22, height: 22, borderRadius: 5, flexShrink: 0,

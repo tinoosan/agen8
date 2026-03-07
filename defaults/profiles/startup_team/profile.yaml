@@ -58,7 +58,7 @@ team:
     - roleRef: ../base/roles/worker-web.yaml
       name: operations-lead
       replicas: 1
-      description: Manages day-to-day operations, vendor relationships, processes, and logistics. Reviews delegated work and provides quality feedback.
+      description: Manages day-to-day operations, vendor relationships, processes, and logistics.
       prompts:
         systemPromptPath: operations-lead-prompt.md
       allowedTools:
