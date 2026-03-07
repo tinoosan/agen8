@@ -249,6 +249,12 @@ That means:
 - and the team is managed through `.agen8/agen8.yaml`
 - the reconciler marks that team for `recreate`
 
+Current rollout behavior:
+
+- old session/run history is preserved
+- the active team session is replaced with a fresh one for the same team
+- this is a rollout/replacement, not a destructive team delete
+
 Current scope of rollout detection:
 
 - tracked: the resolved `profile.yaml` file contents

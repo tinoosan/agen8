@@ -1989,3 +1989,122 @@ func TestRuntimeSupervisor_ComputeProjectDiff_RecreatesManagedTeamWhenProfileFin
 		t.Fatalf("unexpected action: %+v", out.Actions[0])
 	}
 }
+
+func TestRuntimeSupervisor_ApplyProject_RecreatesManagedTeamWithoutDeletingSessionHistory(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(projectRoot): %v", err)
+	}
+	if _, err := InitProject(projectRoot, ProjectConfig{ProjectID: "p1"}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+	profileDir := filepath.Join(cfg.DataDir, "profiles", "dev_team")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(profileDir): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(
+		"id: dev_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: lead\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead v2\n",
+	), 0o644); err != nil {
+		t.Fatalf("WriteFile(profile.yaml): %v", err)
+	}
+
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	manifestStore := team.NewFileManifestStore(cfg)
+	projectTeamSvc := NewProjectTeamService(cfg, sessionSvc, manifestStore)
+
+	sess := types.NewSession("desired-state")
+	sess.SessionID = "sess-old"
+	sess.ProjectRoot = projectRoot
+	sess.TeamID = "team-rollout"
+	sess.Profile = "dev_team"
+	run := types.NewRun("desired-state", 8*1024, sess.SessionID)
+	run.RunID = "run-old"
+	run.Status = types.RunStatusRunning
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := sessionSvc.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	if err := manifestStore.Save(context.Background(), team.BuildManifest(
+		sess.TeamID, "dev_team", "lead", run.RunID, "openai/gpt-5-mini",
+		[]team.RoleRecord{{RoleName: "lead", RunID: run.RunID, SessionID: sess.SessionID}}, nil, "",
+	)); err != nil {
+		t.Fatalf("SaveManifest: %v", err)
+	}
+
+	if _, err := projectTeamSvc.RegisterTeam(context.Background(), ProjectTeamSummary{
+		ProjectRoot:      projectRoot,
+		ProjectID:        "p1",
+		TeamID:           sess.TeamID,
+		ProfileID:        "dev_team",
+		PrimarySessionID: sess.SessionID,
+		CoordinatorRunID: run.RunID,
+		Status:           "active",
+		Metadata: map[string]any{
+			"managedBy":                   desiredStateManagedBy,
+			"desiredEnabled":              true,
+			profileFingerprintMetadataKey: "stale-fingerprint",
+		},
+	}); err != nil {
+		t.Fatalf("RegisterTeam: %v", err)
+	}
+
+	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+		Cfg:            cfg,
+		SessionService: sessionSvc,
+		ProjectTeamSvc: projectTeamSvc,
+	})
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID:     run.RunID,
+		sessionID: sess.SessionID,
+		cancel:    func() {},
+		done:      make(chan struct{}),
+	}, handleStateRunning)
+
+	if err := writeProjectDesiredState(projectRoot, ProjectDesiredState{
+		ProjectID: "p1",
+		Teams: []ProjectDesiredStateTeam{{
+			Profile: "dev_team",
+			Enabled: true,
+		}},
+	}); err != nil {
+		t.Fatalf("writeProjectDesiredState: %v", err)
+	}
+
+	out, err := supervisor.ApplyProject(context.Background(), projectRoot)
+	if err != nil {
+		t.Fatalf("ApplyProject: %v", err)
+	}
+	foundRecreate := false
+	for _, action := range out.Actions {
+		if action.Action == "recreate" && action.TeamID == sess.TeamID {
+			foundRecreate = true
+			break
+		}
+	}
+	if !foundRecreate {
+		t.Fatalf("expected recreate action for rollout, got %+v", out.Actions)
+	}
+
+	updatedTeam, err := projectTeamSvc.GetTeam(context.Background(), projectRoot, sess.TeamID)
+	if err != nil {
+		t.Fatalf("GetTeam: %v", err)
+	}
+	if got := strings.TrimSpace(updatedTeam.PrimarySessionID); got == "" || got == sess.SessionID {
+		t.Fatalf("primarySessionID=%q want new session id", got)
+	}
+	if _, err := sessionSvc.LoadSession(context.Background(), sess.SessionID); err != nil {
+		t.Fatalf("expected old session history to remain, LoadSession: %v", err)
+	}
+	oldRun, err := sessionSvc.LoadRun(context.Background(), run.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun(old): %v", err)
+	}
+	if strings.TrimSpace(oldRun.Status) == types.RunStatusRunning {
+		t.Fatalf("old run should no longer be running, status=%q", oldRun.Status)
+	}
+}

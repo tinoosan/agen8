@@ -103,11 +103,32 @@ func (s *runtimeSupervisor) projectDiff(ctx context.Context, projectRoot string,
 			}
 		case "recreate":
 			teamID := strings.TrimSpace(action.TeamID)
-			if teamID != "" {
-				deleteSvc := NewTeamDeleteService(s.cfg, s.sessionService, team.NewFileManifestStore(s.cfg), s.projectTeamSvc)
-				if _, err := deleteSvc.DeleteTeam(ctx, TeamDeleteInput{
-					TeamID:      teamID,
-					ProjectRoot: projectRoot,
+			if teamID != "" && s.projectTeamSvc != nil {
+				summary, err := s.projectTeamSvc.GetTeam(ctx, projectRoot, teamID)
+				if err != nil {
+					return protocol.ProjectDiffResult{}, err
+				}
+				if sessionID := strings.TrimSpace(summary.PrimarySessionID); sessionID != "" {
+					if _, err := s.StopSession(ctx, sessionID); err != nil {
+						return protocol.ProjectDiffResult{}, err
+					}
+				}
+				metadata := map[string]any{}
+				for key, value := range summary.Metadata {
+					metadata[key] = value
+				}
+				metadata["reconcileStatus"] = "reconciling"
+				metadata["desiredEnabled"] = true
+				if _, err := s.projectTeamSvc.RegisterTeam(ctx, ProjectTeamSummary{
+					ProjectID:        strings.TrimSpace(summary.ProjectID),
+					ProjectRoot:      projectRoot,
+					TeamID:           teamID,
+					ProfileID:        strings.TrimSpace(summary.ProfileID),
+					PrimarySessionID: "",
+					CoordinatorRunID: "",
+					Status:           "inactive",
+					CreatedAt:        strings.TrimSpace(summary.CreatedAt),
+					Metadata:         metadata,
 				}); err != nil {
 					return protocol.ProjectDiffResult{}, err
 				}

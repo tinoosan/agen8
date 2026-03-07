@@ -2426,7 +2426,9 @@ func (s *runtimeSupervisor) stopRun(ctx context.Context, runID string) error {
 	}
 	s.setSnapshotPersistedStatus(runID, types.RunStatusPaused)
 
-	_, err = s.taskService.CancelActiveTasksByRun(ctx, runID, "run stopped")
+	if s.taskService != nil {
+		_, err = s.taskService.CancelActiveTasksByRun(ctx, runID, "run stopped")
+	}
 	if sendErr := s.trySendCmd(supervisorCmd{
 		kind:      cmdStop,
 		runID:     runID,

@@ -212,6 +212,11 @@ The last case is intentionally Kubernetes-like for managed teams:
 - removing a team from `.agen8/agen8.yaml` deletes it
 - setting `enabled: false` keeps the team definition but stops it
 
+`recreate` is not the same as `delete`:
+
+- `recreate` preserves old session/run history and replaces the active team session
+- `delete` removes the managed team and its team-scoped runtime data
+
 ## Common workflows
 
 ### Create the manifest
