@@ -16,7 +16,9 @@ const DETACHED = 'detached-control'
 
 function agentStatusDisplay(agent: EnrichedAgent): { label: string; color: string; pulse: boolean } {
   const s = agent.effectiveStatus.toLowerCase()
-  if (s === 'running' || s === 'working') return { label: 'Running', color: 'var(--green)', pulse: true }
+  if (s === 'working') return { label: 'Working', color: 'var(--green)', pulse: true }
+  // 'running' means the worker process is alive but not necessarily processing a task
+  if (s === 'running') return { label: 'Idle', color: 'var(--text-3)', pulse: false }
   if (s === 'thinking' || s === 'streaming') return { label: 'Thinking', color: 'var(--accent)', pulse: true }
   if (s === 'pending' || s === 'starting') return { label: 'Pending', color: 'var(--amber)', pulse: false }
   if (s === 'idle' || s === 'waiting') return { label: 'Idle', color: 'var(--text-3)', pulse: false }
@@ -177,18 +179,21 @@ function AgentRow({ agent }: { agent: EnrichedAgent }) {
         style={{ cursor: 'pointer', transition: 'background 0.12s' }}
         className="row-hover"
       >
-        <td style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <ChevronRight
-            size={10}
-            style={{
-              color: 'var(--text-3)',
-              transform: expanded ? 'rotate(90deg)' : 'none',
-              transition: 'transform 0.15s',
-            }}
-          />
-          <span style={{ fontWeight: 600, color: 'var(--text-1)', fontSize: 12 }}>
-            {agent.role}
-          </span>
+        <td style={{ padding: '8px 12px', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ChevronRight
+              size={10}
+              style={{
+                color: 'var(--text-3)',
+                transform: expanded ? 'rotate(90deg)' : 'none',
+                transition: 'transform 0.15s',
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontWeight: 600, color: 'var(--text-1)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {agent.role}
+            </span>
+          </div>
         </td>
         <td style={{ padding: '8px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -219,7 +224,7 @@ function AgentRow({ agent }: { agent: EnrichedAgent }) {
             </span>
           </div>
         </td>
-        <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-2)' }} className="mono">
+        <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="mono">
           {agent.model || '\u2014'}
         </td>
         <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--amber)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
@@ -387,7 +392,15 @@ function TeamSection({ team }: { team: ProjectTeamSummary }) {
               )}
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '22%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '31%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+              </colgroup>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
                   {['Role', 'Status', 'Worker', 'Model', 'Cost', 'Tokens'].map(h => (
@@ -399,6 +412,7 @@ function TeamSection({ team }: { team: ProjectTeamSummary }) {
                       letterSpacing: '0.06em',
                       color: 'var(--text-3)',
                       textAlign: 'left',
+                      overflow: 'hidden',
                     }}>
                       {h}
                     </th>
