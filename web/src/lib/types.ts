@@ -302,3 +302,8 @@ export interface ModelListResult {
   providers: { name: string; count: number }[]
   models: ModelEntry[]
 }
+
+// ---- Reasoning types ----
+
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ReasoningSummary = 'off' | 'auto' | 'concise' | 'detailed'

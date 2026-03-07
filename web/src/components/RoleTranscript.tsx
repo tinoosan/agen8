@@ -3,7 +3,7 @@ import { useActivity } from '../hooks/useActivity'
 import { useThinkingEvents } from '../hooks/useThinkingEvents'
 import { useStore } from '../lib/store'
 import type { ActivityEvent, EventRecord } from '../lib/types'
-import { ChevronLeft, ChevronRight, Activity, Cpu, Coins, Sparkles } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Activity, Cpu, Coins, Sparkles, Copy, Check } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -78,12 +78,41 @@ function thinkingEventsToEntries(events: EventRecord[]): ThinkingEntry[] {
   return entries.filter(e => e.text.trim() !== '')
 }
 
+/* ── Copy button (small inline) ──────────────────── */
+
+function SmallCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation()
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy to clipboard"
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+        border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+        color: copied ? 'var(--green)' : 'var(--text-3)',
+        cursor: 'pointer',
+        transition: 'color 0.15s, background 0.15s',
+      }}
+    >
+      {copied ? <Check size={10} /> : <Copy size={10} />}
+    </button>
+  )
+}
+
 /* ── Mini thinking bubble ────────────────────────── */
 
 function MiniThought({ entry }: { entry: ThinkingEntry }) {
   const [open, setOpen] = useState(false)
   return (
-    <div style={{ margin: '8px 0' }}>
+    <div style={{ margin: '8px 0' }} className="msg-bubble-wrap">
       <button
         onClick={() => setOpen(o => !o)}
         style={{
@@ -119,8 +148,12 @@ function MiniThought({ entry }: { entry: ThinkingEntry }) {
             background: entry.live ? undefined : 'var(--bg-surface)',
             borderRadius: '4px 8px 8px 8px',
             fontSize: 12, color: 'var(--text-2)', fontStyle: 'italic',
+            position: 'relative',
           }}
         >
+          <div style={{ position: 'absolute', top: 4, right: 4 }}>
+            <SmallCopyButton text={entry.text} />
+          </div>
           <div className="md-prose">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown>
           </div>
@@ -158,7 +191,7 @@ function ActivityRow({ event }: { event: ActivityEvent }) {
         paddingLeft: 8,
         transition: 'background 0.1s',
       }}
-      className="row-hover"
+      className="row-hover msg-bubble-wrap"
     >
       {/* Status */}
       {isPending ? (
@@ -198,6 +231,7 @@ function ActivityRow({ event }: { event: ActivityEvent }) {
               {durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`}
             </span>
           )}
+          <SmallCopyButton text={title} />
         </div>
 
         {expanded && hasDetail && (

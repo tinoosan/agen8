@@ -1,6 +1,9 @@
 import { useTeamManifest } from '../hooks/useTeamStatus'
 import { useStore } from '../lib/store'
 import { useRuntimeState } from '../hooks/useRuntimeState'
+import { useProjectTeams } from '../hooks/useProjectTeams'
+import { rpcCall } from '../lib/rpc'
+import { useQueryClient } from '@tanstack/react-query'
 import Conversation from '../components/Conversation'
 import RoleTranscript from '../components/RoleTranscript'
 import ContextPanel from '../components/ContextPanel'
@@ -9,23 +12,77 @@ import ArtifactsSlideOver from '../components/ArtifactsSlideOver'
 import PlanSlideOver from '../components/PlanSlideOver'
 import PulseDot from '../components/PulseDot'
 import { useTeamStatus } from '../hooks/useTeamStatus'
+import { Pause, Play, Square, Eraser, Brain } from 'lucide-react'
+import { useState } from 'react'
+
+const DETACHED = 'detached-control'
 
 interface TeamFocusProps {
   teamId: string
 }
 
 export default function TeamFocus({ teamId }: TeamFocusProps) {
-  const { mailOpen, artifactsOpen, planOpen, focusedRole } = useStore()
+  const { mailOpen, artifactsOpen, planOpen, focusedRole, setReasoningPickerTarget } = useStore()
   const manifestQuery = useTeamManifest(teamId)
   const statusQuery = useTeamStatus(teamId)
+  const teamsQuery = useProjectTeams()
+  const queryClient = useQueryClient()
   const manifest = manifestQuery.data
   const status = statusQuery.data
 
   const threadId = manifest?.coordinatorThreadId ?? null
   const coordinatorRole = manifest?.coordinatorRole ?? null
   const coordinatorRunId = manifest?.coordinatorRunId ?? null
+  const sessionId = teamsQuery.data?.find(t => t.teamId === teamId)?.primarySessionId ?? null
   const isActive = (status?.active ?? 0) > 0
+  const isPaused = !isActive && (status?.pending ?? 0) > 0
   const cardStatus = isActive ? 'active' : 'idle'
+
+  const [teamActionLoading, setTeamActionLoading] = useState(false)
+
+  function invalidateTeamQueries() {
+    queryClient.invalidateQueries({ queryKey: ['team.getStatus'] })
+    queryClient.invalidateQueries({ queryKey: ['activity'] })
+  }
+
+  async function handlePause() {
+    if (!sessionId || teamActionLoading) return
+    setTeamActionLoading(true)
+    try {
+      await rpcCall('session.pause', { threadId: DETACHED, sessionId })
+      invalidateTeamQueries()
+    } finally { setTeamActionLoading(false) }
+  }
+
+  async function handleResume() {
+    if (!sessionId || teamActionLoading) return
+    setTeamActionLoading(true)
+    try {
+      await rpcCall('session.resume', { threadId: DETACHED, sessionId })
+      invalidateTeamQueries()
+    } finally { setTeamActionLoading(false) }
+  }
+
+  async function handleStop() {
+    if (!sessionId || teamActionLoading) return
+    if (!confirm('Stop all runs for this team? This cannot be undone.')) return
+    setTeamActionLoading(true)
+    try {
+      await rpcCall('session.stop', { threadId: DETACHED, sessionId })
+      invalidateTeamQueries()
+    } finally { setTeamActionLoading(false) }
+  }
+
+  async function handleClearHistory() {
+    if (!confirm('Clear all history for this team? This cannot be undone.')) return
+    try {
+      await rpcCall('session.clearHistory', { threadId: DETACHED, teamId })
+      queryClient.invalidateQueries({ queryKey: ['team.getStatus'] })
+      queryClient.invalidateQueries({ queryKey: ['activity'] })
+      queryClient.invalidateQueries({ queryKey: ['logs.query'] })
+      queryClient.invalidateQueries({ queryKey: ['item.list'] })
+    } catch { /* ignore */ }
+  }
 
   // Resolve focused role to runId for RoleTranscript
   const focusedRoleRecord = focusedRole
@@ -72,6 +129,90 @@ export default function TeamFocus({ teamId }: TeamFocusProps) {
               </span>
             )}
             <div style={{ flex: 1 }} />
+            {/* Team control buttons */}
+            {sessionId && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {isActive && (
+                  <button
+                    onClick={handlePause}
+                    disabled={teamActionLoading}
+                    title="Pause team"
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      width: 28, height: 28, borderRadius: 'var(--r-sm)',
+                      border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+                      color: 'var(--text-3)', cursor: 'pointer',
+                      transition: 'color 0.15s, border-color 0.15s',
+                    }}
+                    className="row-hover"
+                  >
+                    <Pause size={13} />
+                  </button>
+                )}
+                {isPaused && (
+                  <button
+                    onClick={handleResume}
+                    disabled={teamActionLoading}
+                    title="Resume team"
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      width: 28, height: 28, borderRadius: 'var(--r-sm)',
+                      border: '1px solid var(--accent)', background: 'var(--accent-dim)',
+                      color: 'var(--accent)', cursor: 'pointer',
+                      transition: 'color 0.15s, border-color 0.15s',
+                    }}
+                    className="row-hover"
+                  >
+                    <Play size={13} />
+                  </button>
+                )}
+                <button
+                  onClick={handleStop}
+                  disabled={teamActionLoading}
+                  title="Stop team"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 28, height: 28, borderRadius: 'var(--r-sm)',
+                    border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+                    color: 'var(--red)', cursor: 'pointer',
+                    transition: 'color 0.15s, border-color 0.15s',
+                  }}
+                  className="row-hover"
+                >
+                  <Square size={13} />
+                </button>
+              </div>
+            )}
+            {threadId && (
+              <button
+                onClick={() => setReasoningPickerTarget({ role: null, threadId: threadId! })}
+                title="Set reasoning (all roles)"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 28, height: 28, borderRadius: 'var(--r-sm)',
+                  border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+                  color: 'var(--text-3)', cursor: 'pointer',
+                  transition: 'color 0.15s, border-color 0.15s',
+                }}
+                className="row-hover"
+              >
+                <Brain size={13} />
+              </button>
+            )}
+            <button
+              onClick={handleClearHistory}
+              title="Clear history"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 28, height: 28, borderRadius: 'var(--r-sm)',
+                border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+                color: 'var(--text-3)', cursor: 'pointer',
+                transition: 'color 0.15s, border-color 0.15s',
+              }}
+              className="row-hover"
+            >
+              <Eraser size={13} />
+            </button>
             {threadId && (
               <span className="mono" style={{
                 fontSize: 10, color: 'var(--text-3)',

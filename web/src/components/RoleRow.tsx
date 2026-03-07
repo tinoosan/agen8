@@ -1,6 +1,6 @@
 import type { TeamRoleStatus } from '../lib/types'
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Activity, Cpu, DollarSign, Eye, Pencil } from 'lucide-react'
+import { ChevronDown, ChevronRight, Activity, Cpu, DollarSign, Eye, Pencil, Brain } from 'lucide-react'
 
 interface RoleRowProps {
   role: TeamRoleStatus
@@ -11,21 +11,23 @@ interface RoleRowProps {
   }
   onViewTranscript?: (role: string) => void
   onChangeModel?: (role: string) => void
+  onSetReasoning?: (role: string) => void
   isActive?: boolean
   replicaCount?: number
   desiredReplicas?: number
 }
 
-function inferStatus(info: string): 'active' | 'idle' | 'pending' | 'failed' | 'done' {
+function inferStatus(info: string): 'active' | 'idle' | 'pending' | 'failed' | 'done' | 'paused' {
   const lower = info.toLowerCase()
   if (lower.includes('idle') || lower.includes('waiting') || lower === '') return 'idle'
+  if (lower.includes('paus')) return 'paused'
   if (lower.includes('fail') || lower.includes('error')) return 'failed'
-  if (lower.includes('done') || lower.includes('complet')) return 'done'
+  if (lower.includes('done') || lower.includes('complet') || lower.includes('succeed')) return 'done'
   if (lower.includes('pending') || lower.includes('queue')) return 'pending'
   return 'active'
 }
 
-export default function RoleRow({ role, stats, onViewTranscript, onChangeModel, isActive: isFocused, replicaCount, desiredReplicas }: RoleRowProps) {
+export default function RoleRow({ role, stats, onViewTranscript, onChangeModel, onSetReasoning, isActive: isFocused, replicaCount, desiredReplicas }: RoleRowProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const status = inferStatus(role.info)
 
@@ -34,7 +36,8 @@ export default function RoleRow({ role, stats, onViewTranscript, onChangeModel, 
     status === 'active' ? 'var(--accent)' :
       status === 'done' ? 'var(--green)' :
         status === 'failed' ? 'var(--red)' :
-          'var(--text-4)'
+          status === 'paused' ? 'var(--amber)' :
+            'var(--text-4)'
 
   return (
     <div
@@ -150,6 +153,22 @@ export default function RoleRow({ role, stats, onViewTranscript, onChangeModel, 
               >
                 <Pencil size={10} />
                 Change model
+              </button>
+            )}
+            {onSetReasoning && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onSetReasoning(role.role) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 10px', borderRadius: 'var(--r-sm)',
+                  border: '1px solid var(--accent)', background: 'var(--accent-dim)',
+                  color: 'var(--accent)', fontSize: 10, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  transition: 'background 0.15s',
+                }}
+              >
+                <Brain size={10} />
+                Reasoning
               </button>
             )}
             {onViewTranscript && (

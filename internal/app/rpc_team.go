@@ -119,7 +119,10 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 			if s.session != nil {
 				if run, err := s.session.LoadRun(ctx, runID); err == nil {
 					status := strings.TrimSpace(run.Status)
-					if status != "" {
+					// Only override "idle" for non-running statuses (paused, failed, etc.)
+					// "running" just means the worker is alive — keep "idle" and let
+					// task-based overrides below set "active:" or "pending:" if needed.
+					if status != "" && !strings.EqualFold(status, "running") {
 						info = "run: " + status
 					}
 				}

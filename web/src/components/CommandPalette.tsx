@@ -4,7 +4,9 @@ import { useProjectTeams } from '../hooks/useProjectTeams'
 import { rpcCall } from '../lib/rpc'
 import { useQueryClient } from '@tanstack/react-query'
 import PulseDot from './PulseDot'
-import { Home, Trash2 } from 'lucide-react'
+import { Home, Trash2, Pause, Play, Square, Eraser } from 'lucide-react'
+
+const DETACHED = 'detached-control'
 
 export default function CommandPalette() {
   const { setPaletteOpen, setFocusedTeamId } = useStore()
@@ -12,10 +14,42 @@ export default function CommandPalette() {
   const teams = teamsQuery.data ?? []
   const queryClient = useQueryClient()
 
-  async function stopTeam(teamId: string) {
-    if (!confirm('Stop this team? This action cannot be undone.')) return
+  async function deleteTeam(teamId: string) {
+    if (!confirm('Delete this team? This action cannot be undone.')) return
     await rpcCall('team.delete', { teamId })
     queryClient.invalidateQueries({ queryKey: ['project.listTeams'] })
+    setPaletteOpen(false)
+  }
+
+  async function pauseTeam(sessionId: string) {
+    await rpcCall('session.pause', { threadId: DETACHED, sessionId })
+    queryClient.invalidateQueries({ queryKey: ['team.getStatus'] })
+    queryClient.invalidateQueries({ queryKey: ['activity'] })
+    setPaletteOpen(false)
+  }
+
+  async function resumeTeam(sessionId: string) {
+    await rpcCall('session.resume', { threadId: DETACHED, sessionId })
+    queryClient.invalidateQueries({ queryKey: ['team.getStatus'] })
+    queryClient.invalidateQueries({ queryKey: ['activity'] })
+    setPaletteOpen(false)
+  }
+
+  async function stopTeam(sessionId: string) {
+    if (!confirm('Stop all runs for this team? This cannot be undone.')) return
+    await rpcCall('session.stop', { threadId: DETACHED, sessionId })
+    queryClient.invalidateQueries({ queryKey: ['team.getStatus'] })
+    queryClient.invalidateQueries({ queryKey: ['activity'] })
+    setPaletteOpen(false)
+  }
+
+  async function clearHistory(teamId: string) {
+    if (!confirm('Clear all history for this team? This cannot be undone.')) return
+    await rpcCall('session.clearHistory', { threadId: DETACHED, teamId })
+    queryClient.invalidateQueries({ queryKey: ['team.getStatus'] })
+    queryClient.invalidateQueries({ queryKey: ['activity'] })
+    queryClient.invalidateQueries({ queryKey: ['logs.query'] })
+    queryClient.invalidateQueries({ queryKey: ['item.list'] })
     setPaletteOpen(false)
   }
 
@@ -129,23 +163,93 @@ export default function CommandPalette() {
               Back to overview
             </Command.Item>
 
-            {teams.map(team => (
-              <Command.Item
-                key={`stop-${team.teamId}`}
-                value={`stop delete team ${team.profileId}`}
-                onSelect={() => stopTeam(team.teamId)}
-                style={{
-                  padding: '10px 14px', cursor: 'pointer', fontSize: 13,
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  color: 'var(--red)',
-                  borderRadius: 'var(--r-md)',
-                  margin: '1px 6px',
-                }}
-              >
-                <Trash2 size={13} />
-                Stop {team.profileId ?? 'team'}
-              </Command.Item>
-            ))}
+            {teams.map(team => {
+              const sid = team.primarySessionId
+              const name = team.profileId ?? 'team'
+              return [
+                sid && (
+                  <Command.Item
+                    key={`pause-${team.teamId}`}
+                    value={`pause team ${team.profileId}`}
+                    onSelect={() => pauseTeam(sid)}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      color: 'var(--text-1)',
+                      borderRadius: 'var(--r-md)',
+                      margin: '1px 6px',
+                    }}
+                  >
+                    <Pause size={13} style={{ color: 'var(--text-3)' }} />
+                    Pause {name}
+                  </Command.Item>
+                ),
+                sid && (
+                  <Command.Item
+                    key={`resume-${team.teamId}`}
+                    value={`resume team ${team.profileId}`}
+                    onSelect={() => resumeTeam(sid)}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      color: 'var(--text-1)',
+                      borderRadius: 'var(--r-md)',
+                      margin: '1px 6px',
+                    }}
+                  >
+                    <Play size={13} style={{ color: 'var(--text-3)' }} />
+                    Resume {name}
+                  </Command.Item>
+                ),
+                sid && (
+                  <Command.Item
+                    key={`stop-${team.teamId}`}
+                    value={`stop team ${team.profileId}`}
+                    onSelect={() => stopTeam(sid)}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      color: 'var(--red)',
+                      borderRadius: 'var(--r-md)',
+                      margin: '1px 6px',
+                    }}
+                  >
+                    <Square size={13} />
+                    Stop {name}
+                  </Command.Item>
+                ),
+                <Command.Item
+                  key={`clear-${team.teamId}`}
+                  value={`clear history team ${team.profileId}`}
+                  onSelect={() => clearHistory(team.teamId)}
+                  style={{
+                    padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    color: 'var(--amber)',
+                    borderRadius: 'var(--r-md)',
+                    margin: '1px 6px',
+                  }}
+                >
+                  <Eraser size={13} />
+                  Clear history for {name}
+                </Command.Item>,
+                <Command.Item
+                  key={`delete-${team.teamId}`}
+                  value={`delete remove team ${team.profileId}`}
+                  onSelect={() => deleteTeam(team.teamId)}
+                  style={{
+                    padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    color: 'var(--red)',
+                    borderRadius: 'var(--r-md)',
+                    margin: '1px 6px',
+                  }}
+                >
+                  <Trash2 size={13} />
+                  Delete {name}
+                </Command.Item>,
+              ]
+            })}
           </Command.Group>
         </Command.List>
       </Command>

@@ -66,7 +66,7 @@ function CopyButton({ text, light }: { text: string; light?: boolean }) {
         border: light ? '1px solid rgba(255,255,255,0.25)' : '1px solid var(--border)',
         background: light ? 'rgba(255,255,255,0.15)' : 'var(--bg-elevated)',
         color: copied ? 'var(--green)' : (light ? 'rgba(255,255,255,0.8)' : 'var(--text-3)'),
-        cursor: 'pointer', opacity: 0,
+        cursor: 'pointer',
         transition: 'opacity 0.15s, color 0.15s, background 0.15s',
         backdropFilter: 'blur(8px)',
       }}

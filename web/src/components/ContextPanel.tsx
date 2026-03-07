@@ -12,7 +12,7 @@ interface ContextPanelProps {
 }
 
 export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
-  const { setMailOpen, setArtifactsOpen, setPlanOpen, setModelPickerTarget, focusedRole, setFocusedRole } = useStore()
+  const { setMailOpen, setArtifactsOpen, setPlanOpen, setModelPickerTarget, setReasoningPickerTarget, focusedRole, setFocusedRole } = useStore()
   const statusQuery = useTeamStatus(teamId)
   const manifestQuery = useTeamManifest(teamId)
   const runtimeQuery = useRuntimeState(threadId || '')
@@ -75,6 +75,7 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
                 stats={statsByRole[role.role]}
                 onViewTranscript={setFocusedRole}
                 onChangeModel={threadId ? (r) => setModelPickerTarget({ role: r, threadId: threadId! }) : undefined}
+                onSetReasoning={threadId ? (r) => setReasoningPickerTarget({ role: r, threadId: threadId! }) : undefined}
                 isActive={focusedRole === role.role}
                 replicaCount={replicaCountByRole[role.role]}
                 desiredReplicas={desiredReplicasByRole[role.role]}

@@ -28,6 +28,9 @@ interface AppStore {
   modelPickerTarget: { role: string; threadId: string } | null
   setModelPickerTarget: (target: { role: string; threadId: string } | null) => void
 
+  reasoningPickerTarget: { role: string | null; threadId: string } | null
+  setReasoningPickerTarget: (target: { role: string | null; threadId: string } | null) => void
+
   theme: Theme
   setTheme: (theme: Theme) => void
 }
@@ -42,7 +45,7 @@ function loadTheme(): Theme {
 
 export const useStore = create<AppStore>((set) => ({
   focusedTeamId: null,
-  setFocusedTeamId: (teamId) => set({ focusedTeamId: teamId, focusedRole: null, mailOpen: false, artifactsOpen: false, planOpen: false, modelPickerTarget: null }),
+  setFocusedTeamId: (teamId) => set({ focusedTeamId: teamId, focusedRole: null, mailOpen: false, artifactsOpen: false, planOpen: false, modelPickerTarget: null, reasoningPickerTarget: null }),
 
   focusedRole: null,
   setFocusedRole: (role) => set({ focusedRole: role }),
@@ -64,6 +67,9 @@ export const useStore = create<AppStore>((set) => ({
 
   modelPickerTarget: null,
   setModelPickerTarget: (target) => set({ modelPickerTarget: target }),
+
+  reasoningPickerTarget: null,
+  setReasoningPickerTarget: (target) => set({ reasoningPickerTarget: target }),
 
   theme: loadTheme(),
   setTheme: (theme) => {
