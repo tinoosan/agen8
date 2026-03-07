@@ -212,7 +212,7 @@ function EventRow({ event }: { event: ActivityEvent }) {
     if (event.outputPreview) d['Output'] = <span className="mono">{event.outputPreview}</span>
     if (event.error) d['Error'] = <span className="mono" style={{ color: 'var(--red)' }}>{event.error}</span>
     return d
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event, syntaxStyle])
 
   const hasDetail = Object.keys(detailsList).length > 0
@@ -385,20 +385,56 @@ function EventRow({ event }: { event: ActivityEvent }) {
 export default function ActivityFeed({ threadId, teamId }: ActivityFeedProps) {
   const query = useActivity({ threadId, teamId, includeChildRuns: true, limit: 200 })
   const containerRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
   const events = query.data ?? []
+  const [isAtBottom, setIsAtBottom] = useState(true)
+  const [hasNew, setHasNew] = useState(false)
+  const prevLenRef = useRef(0)
 
   const feed = useMemo(() => buildFeed(events), [events])
 
-  // Auto-scroll to latest event
+  // Track scroll position — are we near the bottom?
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    function handleScroll() {
+      if (!el) return
+      const threshold = 60
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+      setIsAtBottom(atBottom)
+      if (atBottom) setHasNew(false)
+    }
+    el.addEventListener('scroll', handleScroll, { passive: true })
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Auto-scroll when new events arrive (only if user is at bottom)
+  useEffect(() => {
+    if (feed.length > prevLenRef.current) {
+      if (isAtBottom) {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+      } else {
+        setHasNew(true)
+      }
+    }
+    prevLenRef.current = feed.length
+  }, [feed.length, isAtBottom])
+
+  // Initial scroll to bottom on mount
   useEffect(() => {
     const el = containerRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [feed.length])
+  }, [])
+
+  function scrollToBottom() {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    setHasNew(false)
+  }
 
   return (
     <div
       ref={containerRef}
-      style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}
+      style={{ overflowY: 'auto', flex: 1, minHeight: 0, position: 'relative' }}
     >
       {events.length === 0 ? (
         <div className="activity-empty">
@@ -411,15 +447,41 @@ export default function ActivityFeed({ threadId, teamId }: ActivityFeedProps) {
           </div>
         </div>
       ) : (
-        feed.map((entry) =>
-          entry.type === 'divider' ? (
-            <div className="time-divider" key={entry.key}>
-              <span>{entry.label}</span>
-            </div>
-          ) : (
-            <EventRow key={entry.event.id} event={entry.event} />
-          )
-        )
+        <>
+          {feed.map((entry) =>
+            entry.type === 'divider' ? (
+              <div className="time-divider" key={entry.key}>
+                <span>{entry.label}</span>
+              </div>
+            ) : (
+              <EventRow key={entry.event.id} event={entry.event} />
+            )
+          )}
+          <div ref={bottomRef} />
+        </>
+      )}
+
+      {/* Jump-to-bottom button */}
+      {hasNew && !isAtBottom && (
+        <button
+          onClick={scrollToBottom}
+          className="animate-fade-in"
+          style={{
+            position: 'sticky', bottom: 8,
+            left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '5px 14px', borderRadius: 999,
+            border: '1px solid var(--border)',
+            background: 'var(--bg-panel)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
+            color: 'var(--accent)', fontSize: 11, fontWeight: 600,
+            fontFamily: 'inherit', cursor: 'pointer',
+            zIndex: 5,
+            transition: 'background 0.12s',
+          }}
+        >
+          ↓ New activity
+        </button>
       )}
     </div>
   )

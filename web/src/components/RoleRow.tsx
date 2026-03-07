@@ -107,7 +107,7 @@ export default function RoleRow({ role, stats, onViewTranscript, onChangeModel, 
       </div>
 
       {/* Expanded Stats View */}
-      {isExpanded && stats && (
+      {isExpanded && (
         <div style={{
           marginTop: 8,
           paddingTop: 8,
@@ -117,45 +117,58 @@ export default function RoleRow({ role, stats, onViewTranscript, onChangeModel, 
           gap: 6,
           paddingLeft: 12,
         }}>
-          {stats.model && (
+          {stats?.model && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
               <Cpu size={12} style={{ opacity: 0.6 }} />
               <span className="truncate">{stats.model}</span>
-              {onChangeModel && (
-                <Pencil
-                  size={10}
-                  style={{ opacity: 0.4, cursor: 'pointer', flexShrink: 0 }}
-                  onClick={(e) => { e.stopPropagation(); onChangeModel(role.role) }}
-                />
-              )}
             </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
-            <Activity size={12} style={{ opacity: 0.6 }} />
-            <span>{stats.tokens.toLocaleString()} tokens</span>
-          </div>
-          {stats.cost > 0 && (
+          {stats && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
+              <Activity size={12} style={{ opacity: 0.6 }} />
+              <span>{stats.tokens.toLocaleString()} tokens</span>
+            </div>
+          )}
+          {stats && stats.cost > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--amber)', fontWeight: 600 }}>
               <DollarSign size={12} style={{ opacity: 0.8 }} />
               <span>${stats.cost.toFixed(4)} total cost</span>
             </div>
           )}
-          {onViewTranscript && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onViewTranscript(role.role) }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                marginTop: 4, padding: '4px 8px', borderRadius: 'var(--r-sm)',
-                border: '1px solid var(--border)', background: 'var(--bg-elevated)',
-                color: 'var(--accent)', fontSize: 10, fontWeight: 600,
-                cursor: 'pointer', fontFamily: 'inherit',
-                transition: 'background 0.15s',
-              }}
-            >
-              <Eye size={10} />
-              View transcript
-            </button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            {onChangeModel && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onChangeModel(role.role) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 10px', borderRadius: 'var(--r-sm)',
+                  border: '1px solid var(--accent)', background: 'var(--accent-dim)',
+                  color: 'var(--accent)', fontSize: 10, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  transition: 'background 0.15s',
+                }}
+              >
+                <Pencil size={10} />
+                Change model
+              </button>
+            )}
+            {onViewTranscript && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onViewTranscript(role.role) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  padding: '4px 8px', borderRadius: 'var(--r-sm)',
+                  border: '1px solid var(--border)', background: 'var(--bg-elevated)',
+                  color: 'var(--accent)', fontSize: 10, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  transition: 'background 0.15s',
+                }}
+              >
+                <Eye size={10} />
+                View transcript
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
