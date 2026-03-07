@@ -564,3 +564,19 @@ type RuntimeGetSessionStateResult struct {
 	SessionID string            `json:"sessionId"`
 	Runs      []RuntimeRunState `json:"runs"`
 }
+
+type ProjectListProjectsParams struct{}
+
+type ProjectRegistrySummary struct {
+	ProjectRoot  string         `json:"projectRoot"`
+	ProjectID    string         `json:"projectId"`
+	ManifestPath string         `json:"manifestPath,omitempty"`
+	Enabled      bool           `json:"enabled"`
+	CreatedAt    string         `json:"createdAt,omitempty"`
+	UpdatedAt    string         `json:"updatedAt,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+}
+
+type ProjectListProjectsResult struct {
+	Projects []ProjectRegistrySummary `json:"projects"`
+}

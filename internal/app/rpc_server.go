@@ -54,11 +54,12 @@ type RPCServer struct {
 	sessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	sessionStop         func(ctx context.Context, threadID, sessionID string) ([]string, error)
 
-	manifestStore     team.ManifestStore
-	projectTeamSvc    *ProjectTeamService
-	planReader        PlanReaderForRPC
-	fileReader        FileReaderForRPC
-	workspacePreparer WorkspacePreparerForRPC
+	manifestStore      team.ManifestStore
+	projectTeamSvc     *ProjectTeamService
+	projectRegistrySvc *ProjectRegistryService
+	planReader         PlanReaderForRPC
+	fileReader         FileReaderForRPC
+	workspacePreparer  WorkspacePreparerForRPC
 }
 
 type RPCServerConfig struct {
@@ -83,11 +84,12 @@ type RPCServerConfig struct {
 	SessionStop   func(ctx context.Context, threadID, sessionID string) ([]string, error)
 
 	// Storage abstractions (optional; when nil, defaults use Cfg)
-	ManifestStore     team.ManifestStore
-	ProjectTeamSvc    *ProjectTeamService
-	PlanReader        PlanReaderForRPC
-	FileReader        FileReaderForRPC
-	WorkspacePreparer WorkspacePreparerForRPC
+	ManifestStore      team.ManifestStore
+	ProjectTeamSvc     *ProjectTeamService
+	ProjectRegistrySvc *ProjectRegistryService
+	PlanReader         PlanReaderForRPC
+	FileReader         FileReaderForRPC
+	WorkspacePreparer  WorkspacePreparerForRPC
 }
 
 // PlanReaderForRPC reads plan files for a run.
@@ -223,6 +225,9 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		srv.projectTeamSvc = cfg.ProjectTeamSvc
 	} else {
 		srv.projectTeamSvc = NewProjectTeamService(cfg.Cfg, sess, srv.manifestStore)
+	}
+	if cfg.ProjectRegistrySvc != nil {
+		srv.projectRegistrySvc = cfg.ProjectRegistrySvc
 	}
 	if cfg.PlanReader != nil {
 		srv.planReader = cfg.PlanReader

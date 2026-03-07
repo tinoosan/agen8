@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useStore } from './lib/store'
 import TopBar from './components/TopBar'
+import Project from './pages/Project'
 import Overview from './pages/Overview'
 import Dashboard from './pages/Dashboard'
 import Logs from './pages/Logs'
@@ -36,6 +37,8 @@ export default function App() {
       <main className="app-main">
         {focusedTeamId ? (
           <TeamFocus teamId={focusedTeamId} />
+        ) : activeView === 'project' ? (
+          <Project />
         ) : activeView === 'dashboard' ? (
           <Dashboard />
         ) : activeView === 'logs' ? (

@@ -1,5 +1,15 @@
 // Mirrors the Go protocol types used by the web UI.
 
+export interface ProjectRegistrySummary {
+  projectRoot: string
+  projectId: string
+  manifestPath?: string
+  enabled: boolean
+  createdAt?: string
+  updatedAt?: string
+  metadata?: Record<string, unknown>
+}
+
 export interface ProjectTeamSummary {
   teamId: string
   projectId?: string

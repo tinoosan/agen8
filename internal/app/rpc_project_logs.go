@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/tinoosan/agen8/pkg/protocol"
@@ -10,6 +11,10 @@ import (
 
 func registerProjectHandlers(s *RPCServer, reg methodRegistry) error {
 	return registerHandlers(
+		func() error {
+			return addBoundHandler[protocol.ProjectListProjectsParams, protocol.ProjectListProjectsResult](
+				reg, protocol.MethodProjectListProjects, true, s.projectListProjects)
+		},
 		func() error {
 			return addBoundHandler[protocol.ProjectGetContextParams, protocol.ProjectGetContextResult](reg, protocol.MethodProjectGetContext, false, s.projectGetContext)
 		},
@@ -38,6 +43,29 @@ func registerProjectHandlers(s *RPCServer, reg methodRegistry) error {
 			return addBoundHandler[protocol.ActivityStreamParams, protocol.ActivityStreamResult](reg, protocol.MethodActivityStream, false, s.activityStream)
 		},
 	)
+}
+
+func (s *RPCServer) projectListProjects(ctx context.Context, _ protocol.ProjectListProjectsParams) (protocol.ProjectListProjectsResult, error) {
+	if s.projectRegistrySvc == nil {
+		return protocol.ProjectListProjectsResult{}, fmt.Errorf("project registry not available")
+	}
+	projects, err := s.projectRegistrySvc.ListProjects(ctx)
+	if err != nil {
+		return protocol.ProjectListProjectsResult{}, err
+	}
+	out := make([]protocol.ProjectRegistrySummary, 0, len(projects))
+	for _, p := range projects {
+		out = append(out, protocol.ProjectRegistrySummary{
+			ProjectRoot:  p.ProjectRoot,
+			ProjectID:    p.ProjectID,
+			ManifestPath: p.ManifestPath,
+			Enabled:      p.Enabled,
+			CreatedAt:    p.CreatedAt,
+			UpdatedAt:    p.UpdatedAt,
+			Metadata:     p.Metadata,
+		})
+	}
+	return protocol.ProjectListProjectsResult{Projects: out}, nil
 }
 
 func toProtocolProjectContext(ctx ProjectContext) protocol.ProjectContext {

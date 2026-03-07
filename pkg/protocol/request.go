@@ -55,6 +55,8 @@ const (
 	MethodRuntimeGetRunState     = "runtime.getRunState"
 	MethodRuntimeGetSessionState = "runtime.getSessionState"
 
+	MethodProjectListProjects = "project.listProjects"
+
 	MethodEventsListPaginated = "events.listPaginated"
 	MethodEventsLatestSeq     = "events.latestSeq"
 	MethodEventsCount         = "events.count"

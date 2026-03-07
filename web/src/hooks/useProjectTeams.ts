@@ -3,14 +3,16 @@ import { useEffect } from 'react'
 import { onNotification, rpcCall } from '../lib/rpc'
 import type { ProjectReconcileNotification, ProjectTeamSummary } from '../lib/types'
 
-export function useProjectTeams() {
+export function useProjectTeams(projectRoot?: string | null) {
   const queryClient = useQueryClient()
   const query = useQuery<ProjectTeamSummary[]>({
-    queryKey: ['project.listTeams'],
+    queryKey: ['project.listTeams', projectRoot ?? ''],
     queryFn: async () => {
+      const params: Record<string, string> = {}
+      if (projectRoot) params.projectRoot = projectRoot
       const res = await rpcCall<{ teams: ProjectTeamSummary[] }>(
         'project.listTeams',
-        {}
+        params
       )
       return res.teams ?? []
     },

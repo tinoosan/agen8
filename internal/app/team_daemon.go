@@ -203,16 +203,17 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	}
 	if protocolEnabled {
 		baseCfg := RPCServerConfig{
-			Cfg:            cfg,
-			Run:            types.Run{MaxBytesForContext: maxContextB},
-			AllowAnyThread: true,
-			TaskService:    taskService,
-			Session:        sessionService,
-			AgentService:   agentManager,
-			RuntimeState:   supervisor,
-			SoulService:    soulService,
-			EventsService:  eventsWithBroadcast,
-			ProjectTeamSvc: projectTeamSvc,
+			Cfg:                cfg,
+			Run:                types.Run{MaxBytesForContext: maxContextB},
+			AllowAnyThread:     true,
+			TaskService:        taskService,
+			Session:            sessionService,
+			AgentService:       agentManager,
+			RuntimeState:       supervisor,
+			SoulService:        soulService,
+			EventsService:      eventsWithBroadcast,
+			ProjectTeamSvc:     projectTeamSvc,
+			ProjectRegistrySvc: projectRegistrySvc,
 			SessionPause: func(ctx context.Context, _, sessionID string) ([]string, error) {
 				return supervisor.PauseSession(ctx, sessionID)
 			},

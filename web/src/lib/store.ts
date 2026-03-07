@@ -1,9 +1,12 @@
 import { create } from 'zustand'
 
 export type Theme = 'dark' | 'light' | 'dim'
-export type ActiveView = 'overview' | 'dashboard' | 'logs'
+export type ActiveView = 'project' | 'overview' | 'dashboard' | 'logs'
 
 interface AppStore {
+  focusedProjectRoot: string | null
+  setFocusedProjectRoot: (root: string | null) => void
+
   focusedTeamId: string | null
   setFocusedTeamId: (teamId: string | null) => void
 
@@ -44,13 +47,16 @@ function loadTheme(): Theme {
 }
 
 export const useStore = create<AppStore>((set) => ({
+  focusedProjectRoot: null,
+  setFocusedProjectRoot: (root) => set({ focusedProjectRoot: root, focusedTeamId: null, focusedRole: null, activeView: root ? 'overview' : 'project' }),
+
   focusedTeamId: null,
   setFocusedTeamId: (teamId) => set({ focusedTeamId: teamId, focusedRole: null, mailOpen: false, artifactsOpen: false, planOpen: false, modelPickerTarget: null, reasoningPickerTarget: null }),
 
   focusedRole: null,
   setFocusedRole: (role) => set({ focusedRole: role }),
 
-  activeView: 'overview',
+  activeView: 'project',
   setActiveView: (view) => set({ activeView: view }),
 
   mailOpen: false,

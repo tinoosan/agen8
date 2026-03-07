@@ -1,7 +1,7 @@
 import { useStore, type Theme, type ActiveView } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
-import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, LayoutGrid, BarChart3, ScrollText, Coins } from 'lucide-react'
+import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, FolderKanban, LayoutGrid, BarChart3, ScrollText, Coins } from 'lucide-react'
 
 function ThemePicker() {
   const { theme, setTheme } = useStore()
@@ -60,6 +60,7 @@ function ActiveCount({ teamIds }: { teamIds: string[] }) {
 function NavTabs() {
   const { activeView, setActiveView } = useStore()
   const tabs: { value: ActiveView; label: string; icon: typeof LayoutGrid }[] = [
+    { value: 'project', label: 'Projects', icon: FolderKanban },
     { value: 'overview', label: 'Teams', icon: LayoutGrid },
     { value: 'dashboard', label: 'Dashboard', icon: BarChart3 },
     { value: 'logs', label: 'Logs', icon: ScrollText },
@@ -96,10 +97,25 @@ function NavTabs() {
 }
 
 export default function TopBar() {
-  const { focusedTeamId, setFocusedTeamId, setPaletteOpen } = useStore()
+  const { focusedTeamId, setFocusedTeamId, focusedProjectRoot, setFocusedProjectRoot, activeView, setActiveView, setPaletteOpen } = useStore()
   const teamsQuery = useProjectTeams()
   const teams = teamsQuery.data ?? []
   const teamIds = teams.map(t => t.teamId)
+
+  const projectLabel = focusedProjectRoot
+    ? focusedProjectRoot.split('/').pop() || focusedProjectRoot
+    : null
+
+  const handleBack = () => {
+    if (focusedTeamId) {
+      setFocusedTeamId(null)
+      setActiveView('overview')
+    } else if (focusedProjectRoot) {
+      setFocusedProjectRoot(null)
+    }
+  }
+
+  const showBackButton = focusedTeamId || (focusedProjectRoot && activeView !== 'project')
 
   return (
     <header style={{
@@ -113,14 +129,14 @@ export default function TopBar() {
       position: 'relative', zIndex: 10,
       flexShrink: 0,
     }}>
-      {focusedTeamId ? (
+      {showBackButton ? (
         <button
           className="btn-ghost"
-          onClick={() => setFocusedTeamId(null)}
+          onClick={handleBack}
           style={{ gap: 5, padding: '5px 10px', fontSize: 13, color: 'var(--text-2)' }}
         >
           <ChevronLeft size={14} />
-          <span>Teams</span>
+          <span>{focusedTeamId ? (projectLabel ?? 'Teams') : 'Projects'}</span>
         </button>
       ) : (
         <>
