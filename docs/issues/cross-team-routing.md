@@ -10,53 +10,123 @@ Tasks today are scoped to a single team. There is no mechanism for one team to s
 - But there is no sanctioned path for *inter-team* work handoffs at the project level either.
 - Teams that naturally produce outputs another team consumes (e.g. market research feeding product decisions) require manual operator intervention to connect.
 
+## What already exists
+
+This feature is remarkably close to buildable from what exists today:
+
+| Component | Location | Relevance |
+|---|---|---|
+| `SourceTeamID` / `DestinationTeamID` on `Task` | `pkg/protocol/task.go`, `pkg/agent/state/sqlite_task_store.go` | Cross-team routing fields are already defined in the protocol and persisted to SQLite |
+| `RoutingOracle` | `pkg/services/task/oracle.go` | Already normalises `destinationTeamId`, validates `assignedToType` (`agent`/`role`/`team`) and emits routing metadata |
+| `team.callback` / `team.batch.callback` sources | `pkg/agent/session/session.go` — `taskSourceTeamCallback` | Callback path from a destination team back to the originating coordinator already exists conceptually |
+| `task_create` host tool | `pkg/agent/hosttools/task_create.go` | Supports `assignedRole` with team-scoped routing; `TeamID` is already set on the task |
+| `isCallbackSource` | `pkg/services/task/oracle.go` | Identifies callback tasks and resolves `destinationTeamId` from the run's `Runtime.TeamID` |
+| `ProjectTeamService` | `internal/app/project_team_service.go` | Can resolve a profile/team name to an active session ID — the routing table base |
+| `TaskListParams.Scope` | `pkg/protocol/task.go` | `scope: "team"` already accepted; `scope: "project"` would be a natural addition |
+
+The `RoutingOracle` already routes tasks to `destinationTeamId` when set. The missing pieces are: (1) exposing `routeToTeam` on `task_create` so a coordinator can target another team by name, (2) a project-level routing table to resolve team name → active session, and (3) a hold-and-deliver mechanism for tasks routed to teams not yet running.
+
 ## Proposed approach
 
-### 1. Team-addressed task routing
+### 1. Extend `task_create` with `routeToTeam`
 
-Extend the `task_create` host tool to accept a `team` target in addition to `spawn_worker`:
+Add `routeToTeam` to `TaskCreateTool` in `pkg/agent/hosttools/task_create.go`:
 
 ```
 task_create(
   goal: "Research competitor pricing for Q2",
-  route_to_team: "market_researcher",
-  callback: true
+  routeToTeam: "market_researcher"
 )
 ```
 
-The runtime resolves `route_to_team` to the named team's coordinator inbox and delivers the task there. The originating team's coordinator receives a callback when the work completes, exactly as sub-agent callbacks work today.
+When `routeToTeam` is set, the tool:
+1. Looks up the target team's active session via the project routing table.
+2. Sets `destinationTeamId` and `assignedToType: "team"` on the task.
+3. The `RoutingOracle` (already wired in `pkg/services/task/manager.go`) validates and canonicalises the routing.
+4. Creates the task in the SQLite task store — the target team's session loop will claim it from its inbox on the next poll.
 
-### 2. Routing table in the daemon
+### 2. Project routing table
 
-The daemon maintains a project-level routing table: team name → active session ID. The reconciler (see `desired-state-reconciliation.md`) keeps this table current as teams start and stop.
+The daemon maintains a `teamRoutingTable`: profile name → active `{sessionID, teamID}`. This is a thin wrapper around `ProjectTeamService.ListByProject` (already exists in `internal/app/project_team_service.go`) combined with the in-memory `runHandle` map in `runtimeSupervisor`.
 
-Cross-team tasks are held in a `pending_route` state if the target team is not currently running, and delivered when it starts.
+```mermaid
+sequenceDiagram
+    participant Coord as Originating Coordinator
+    participant Tool as task_create hostTool
+    participant Oracle as RoutingOracle
+    participant Table as teamRoutingTable
+    participant Store as SQLite (task store)
+    participant Target as Target Team Coordinator
 
-### 3. Authority and trust model
+    Coord->>Tool: task_create(goal, routeToTeam="market_researcher")
+    Tool->>Table: Resolve("market_researcher")
+    Table-->>Tool: {sessionId, teamId}
 
-Cross-team routing is peer-to-peer at the coordinator level — a coordinator can request work from another team's coordinator, but cannot issue commands into that team's internal hierarchy. The receiving coordinator decides how to handle the incoming task and may decline or defer it.
+    alt target team is running
+        Tool->>Oracle: NormalizeCreate(task with destinationTeamId)
+        Oracle-->>Tool: validated task
+        Tool->>Store: CreateTask (status=pending)
+        Store-->>Target: inbox poll picks up task
+        Target->>Store: ClaimTask
+        Note over Target: processes goal...
+        Target->>Store: CompleteTask → team.callback created
+        Store-->>Coord: callback delivered to originating inbox
+    else target team not running
+        Tool->>Store: CreateTask (status=pending_route)
+        Note over Store: held until target team starts
+    end
+```
 
-This preserves the tree-based authority model within each team while allowing project-level coordination between them.
+### 3. Hold-and-deliver for offline teams
 
-### 4. CLI surface
+Tasks with `status: pending_route` are held in the task store. When the reconciler starts a team (see `desired-state-reconciliation.md`), it triggers a routing sweep: pending-route tasks whose `destinationTeamId` matches the newly started team are transitioned to `pending` so the team's session loop can pick them up.
 
-| Command | Behaviour |
-|---|---|
-| `agen8 task list --project` | Show tasks across all teams, including cross-team ones |
-| `agen8 logs` | New `task.route.*` event types for cross-team delivery |
+### 4. Authority and trust model
+
+Cross-team routing is peer-to-peer at the coordinator level — a coordinator can request work from another team's coordinator but cannot issue commands into that team's internal hierarchy. The `RoutingOracle` enforces this: `assignedToType: "team"` routes to the coordinator's inbox, not to a specific sub-role. The receiving coordinator decides how to handle the task and may decline or defer it. This is identical to how `assignedRole` is validated today for intra-team tasks.
+
+### 5. Web UI surface
+
+- **Task flow diagram** (`web/src/components/TaskFlowArrows.tsx`): extend to render cross-team arrows between `TeamCard` components.
+- **Task list** in the web UI: extend the `task.list` RPC scope filter to support `scope: "project"` for a project-wide view. The `Task` type in `web/src/lib/types.ts` already has `sourceTeamId` and `destinationTeamId` fields.
+
+```mermaid
+flowchart LR
+    DevTeam["dev_team coordinator\n(originating)"]
+    -->|task_create routeToTeam| Oracle["RoutingOracle\noracle.go"]
+    Oracle -->|destinationTeamId set| Store["SQLite task store"]
+    Store -->|inbox poll| Market["market_researcher coordinator\n(receiving)"]
+    Market -->|task complete| Store
+    Store -->|team.callback| DevTeam
+    Store -->|task.route.*| SSE["/events SSE"]
+    SSE --> FlowArrows["TaskFlowArrows.tsx\ncross-team arrows"]
+```
 
 ## Acceptance criteria
 
-- [ ] A coordinator can issue `task_create` with `route_to_team` targeting another team in the same project.
-- [ ] The routed task appears in the target team's coordinator inbox.
-- [ ] A callback is delivered to the originating coordinator when the target team completes the task.
-- [ ] Tasks routed to a team that is not running are queued and delivered on start.
-- [ ] The receiving coordinator retains full authority over how to handle the incoming task.
-- [ ] `agen8 task list --project` surfaces cross-team tasks with their routing state.
+- [ ] A coordinator can call `task_create` with `routeToTeam` naming another profile in the same project.
+- [ ] The task is delivered to the target team's coordinator inbox.
+- [ ] A `team.callback` is delivered to the originating coordinator when the task completes.
+- [ ] Tasks routed to a team that is not running are held as `pending_route` and delivered when the team starts.
+- [ ] The receiving coordinator retains full authority; `routeToTeam` only reaches the coordinator inbox, not sub-roles.
+- [ ] `task.list` with `scope: "project"` surfaces cross-team tasks with their routing state.
+- [ ] `task.route.*` events appear in the web UI activity feed.
+- [ ] `TaskFlowArrows` renders cross-team arrows between TeamCard components in the web UI.
+
+## Key files to change
+
+| File | Change |
+|---|---|
+| `pkg/agent/hosttools/task_create.go` | Add `routeToTeam` param; resolve via routing table; set `destinationTeamId` |
+| `pkg/agent/hosttools/task_create_test.go` | Add cross-team routing tests |
+| `pkg/services/task/oracle.go` | Accept `assignedToType: "team"` as a valid routed task (may already work) |
+| `pkg/services/task/manager.go` | Add `pending_route` status handling; routing sweep on team start |
+| `internal/app/daemon_runtime_supervisor.go` | Expose routing table; trigger routing sweep on `cmdSpawn` completion |
+| `internal/app/rpc_session.go` or `rpc_team.go` | Add `scope: "project"` to task list handler |
+| `web/src/components/TaskFlowArrows.tsx` | Render cross-team arrows |
+| `web/src/lib/types.ts` | Ensure `Task.sourceTeamId` / `destinationTeamId` are surfaced in list views |
 
 ## Related
 
-- `pkg/agent/hosttools/task_create.go` — host tool to extend
-- `docs/execution-model.md` — authority model this must not violate
-- `docs/issues/desired-state-reconciliation.md` — routing table depends on reconciler knowing what teams are running
-- `pkg/protocol/protocol_test.go` — existing inter-team protocol tests
+- `pkg/services/task/oracle.go` — `RoutingOracle` already handles `destinationTeamId`; cross-team routing extends it minimally
+- `docs/issues/desired-state-reconciliation.md` — routing table and routing sweep depend on the reconciler knowing which teams are running
