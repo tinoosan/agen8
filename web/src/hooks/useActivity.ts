@@ -17,6 +17,12 @@ interface UseActivityOptions {
   limit?: number
 }
 
+type EventAppendNotification = {
+  event?: {
+    runId?: string
+  }
+}
+
 export function useActivity({ threadId, teamId, runId, includeChildRuns = true, limit = 200 }: UseActivityOptions) {
   const queryClient = useQueryClient()
   const tId = threadId ?? null
@@ -71,15 +77,21 @@ export function useActivity({ threadId, teamId, runId, includeChildRuns = true, 
   })
 
   // Invalidate query when we receive an event.append SSE notification.
+  // The payload currently exposes runId but not thread/team scope, so we only
+  // narrow invalidation for run-scoped views and fall back to thread refreshes.
   useEffect(() => {
     if (!tId) return
 
-    const unsub = onNotification('event.append', () => {
+    const unsub = onNotification('event.append', (notif) => {
+      const params = notif.params as EventAppendNotification | undefined
+      const eventRunID = params?.event?.runId
+      if (rId && eventRunID && eventRunID !== rId) return
+
       queryClient.invalidateQueries({ queryKey: key })
     })
 
     return unsub
-  }, [tId, queryClient, key])
+  }, [tId, queryClient, key, rId])
 
   return query
 }

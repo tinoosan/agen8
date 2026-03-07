@@ -2036,8 +2036,23 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 	}
 	completedCount := len(callbacks)
 	if expectedCount == 0 {
-		// Hard cutover: support singleton/non-staged sources as implicit batch-of-1.
-		expectedCount = completedCount
+		// Fallback: count delegated tasks created by the coordinator for this parent.
+		expectedCount = s.countDelegatedTasksForParent(ctx, group)
+	}
+	if expectedCount == 0 {
+		// Still unknown — block the flush rather than sending a partial batch.
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "batch.flush.blocked",
+			Message: "Cannot determine expected batch count; deferring flush",
+			Data: map[string]string{
+				"parentTaskId":        group.parentTaskID,
+				"batchWaveId":         group.waveID,
+				"batchReviewer":       group.reviewerID,
+				"reason":              "expected_count_unknown",
+				"batchCompletedCount": fmt.Sprintf("%d", completedCount),
+			},
+		})
+		return
 	}
 	expectedCount = s.freezeBatchExpectedCount(ctx, parentTask, group, expectedCount)
 	undelivered := make([]types.Task, 0, len(callbacks))
@@ -2294,30 +2309,60 @@ func (s *Session) listBatchExpectedTasks(ctx context.Context, group batchGroupSc
 	if err != nil {
 		return nil
 	}
+	coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
 	out := make([]types.Task, 0, len(tasks))
 	for _, task := range tasks {
 		task = s.loadTaskDetails(ctx, task)
-		if !metadataBool(task.Metadata, "batchMode") {
+		source := metadataString(task.Metadata, taskMetaSource)
+		if isCallbackSource(source) {
 			continue
 		}
-		if metadataString(task.Metadata, "batchParentTaskId") != group.parentTaskID {
-			continue
-		}
-		if !waveMatches(group.parentTaskID, group.waveID, metadataString(task.Metadata, "batchWaveId")) {
-			continue
-		}
-		if isCallbackSource(metadataString(task.Metadata, taskMetaSource)) {
-			continue
-		}
-		if group.mode == "agent" {
-			if metadataString(task.Metadata, taskMetaSource) != taskSourceSpawnWorker {
+
+		// Primary path: tasks explicitly tagged with batchMode.
+		if metadataBool(task.Metadata, "batchMode") {
+			if metadataString(task.Metadata, "batchParentTaskId") != group.parentTaskID {
 				continue
 			}
-			if metadataString(task.Metadata, "parentRunId") != group.reviewerID {
+			if !waveMatches(group.parentTaskID, group.waveID, metadataString(task.Metadata, "batchWaveId")) {
+				continue
+			}
+			if group.mode == "agent" {
+				if source != taskSourceSpawnWorker {
+					continue
+				}
+				if metadataString(task.Metadata, "parentRunId") != group.reviewerID {
+					continue
+				}
+			}
+			out = append(out, task)
+			continue
+		}
+
+		// Fallback path (team mode): delegated tasks created by the coordinator
+		// that were not tagged with batchMode (e.g. parentTaskID was absent in
+		// the tool execution context). Match by: same team, created by
+		// coordinator, assigned to a *different* role, source == "task_create",
+		// and the task itself IS the parent that generated the callbacks.
+		if group.mode == "team" && coordinatorRole != "" {
+			if source != "task_create" {
+				continue
+			}
+			createdBy := strings.TrimSpace(task.CreatedBy)
+			assignedRole := strings.TrimSpace(task.AssignedRole)
+			if !strings.EqualFold(createdBy, coordinatorRole) {
+				continue
+			}
+			if strings.EqualFold(assignedRole, coordinatorRole) {
+				continue
+			}
+			// The callback's batchParentTaskId defaults to the delegated
+			// task's own ID when the original had no batchParentTaskId.
+			// Check if this task's ID is the group's parentTaskID.
+			if strings.TrimSpace(task.TaskID) == group.parentTaskID {
+				out = append(out, task)
 				continue
 			}
 		}
-		out = append(out, task)
 	}
 	return out
 }
@@ -2365,6 +2410,78 @@ func (s *Session) listBatchCallbacks(ctx context.Context, group batchGroupScope)
 		out = append(out, task)
 	}
 	return out
+}
+
+// countDelegatedTasksForParent counts tasks created by the coordinator that are
+// assigned to a different role (i.e. delegated work). This serves as a fallback
+// when listBatchExpectedTasks returns 0 because delegated tasks were not tagged
+// with batchMode metadata. It scans all tasks in the team and counts those with
+// source "task_create", created by the coordinator role, and assigned to another role.
+func (s *Session) countDelegatedTasksForParent(ctx context.Context, group batchGroupScope) int {
+	if group.mode != "team" {
+		return 0
+	}
+	coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
+	if coordinatorRole == "" {
+		return 0
+	}
+	filter := state.TaskFilter{
+		TeamID: strings.TrimSpace(s.cfg.TeamID),
+		SortBy: "created_at",
+		Limit:  500,
+	}
+	tasks, err := s.cfg.TaskStore.ListTasks(ctx, filter)
+	if err != nil {
+		return 0
+	}
+	// Collect task IDs that have callbacks pointing to them via
+	// batchParentTaskId == group.parentTaskID. Each callback's
+	// "callbackForTaskId" tells us the original delegated task ID.
+	callbackSourceIDs := map[string]struct{}{}
+	for _, task := range tasks {
+		task = s.loadTaskDetails(ctx, task)
+		source := metadataString(task.Metadata, taskMetaSource)
+		if source != taskSourceTeamCallback {
+			continue
+		}
+		if metadataString(task.Metadata, "batchParentTaskId") != group.parentTaskID {
+			continue
+		}
+		if sourceTaskID := metadataString(task.Metadata, "callbackForTaskId"); sourceTaskID != "" {
+			callbackSourceIDs[sourceTaskID] = struct{}{}
+		}
+	}
+	if len(callbackSourceIDs) > 0 {
+		// We found callbacks that reference delegated tasks. The number of
+		// unique source task IDs gives us a lower bound, but we need to know
+		// how many *sibling* delegated tasks were created by the coordinator
+		// in the same wave. Look for all tasks created by the coordinator role
+		// that are assigned to different roles and produced at least one callback.
+		count := 0
+		for _, task := range tasks {
+			task = s.loadTaskDetails(ctx, task)
+			source := metadataString(task.Metadata, taskMetaSource)
+			if isCallbackSource(source) {
+				continue
+			}
+			createdBy := strings.TrimSpace(task.CreatedBy)
+			assignedRole := strings.TrimSpace(task.AssignedRole)
+			if !strings.EqualFold(createdBy, coordinatorRole) {
+				continue
+			}
+			if strings.EqualFold(assignedRole, coordinatorRole) {
+				continue
+			}
+			// Only count tasks created by the coordinator, a callback exists
+			// for the parent, and this task ID has a corresponding callback OR
+			// shares the same run_id as other delegated tasks.
+			count++
+		}
+		if count > 0 {
+			return count
+		}
+	}
+	return 0
 }
 
 func (s *Session) hasOpenSyntheticBatchCallback(ctx context.Context, group batchGroupScope) bool {

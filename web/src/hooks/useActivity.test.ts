@@ -155,7 +155,7 @@ describe('useActivity', () => {
 
     const { Wrapper, queryClient } = createWrapper()
     renderHook(
-      () => useActivity({ threadId: 'thread-1', teamId: 'team-1' }),
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1', runId: 'run-1' }),
       { wrapper: Wrapper },
     )
 
@@ -168,6 +168,27 @@ describe('useActivity', () => {
     })
 
     expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('does not invalidate run-scoped queries for a different run', async () => {
+    mockRpcCall.mockResolvedValueOnce({ activities: [makeActivity({ id: 'a1' })] })
+
+    const { Wrapper, queryClient } = createWrapper()
+    renderHook(
+      () => useActivity({ threadId: 'thread-1', teamId: 'team-1', runId: 'run-1' }),
+      { wrapper: Wrapper },
+    )
+
+    await waitFor(() => expect(notificationHandlers.get('event.append')?.length).toBeGreaterThan(0))
+
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    act(() => {
+      dispatch('event.append', { event: { runId: 'run-2' } })
+    })
+
+    expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
   })
 
