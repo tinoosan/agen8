@@ -38,15 +38,16 @@ Agen8 Core runs a local agent runtime for your project. Teams do the work, tasks
 - Use focused views with `./agen8 view dashboard`, `./agen8 view activity`, and `./agen8 view mail`.
 - When you need flag help, run `./agen8 --help` or read [docs/cli-usage.md](docs/cli-usage.md).
 
-## The Vision: Kubernetes for Agents
+## What agen8 is
 
-Agen8 is designed as a **declarative runtime for autonomous agents**. Just as Kubernetes manages container lifecycles through declarative YAML manifests, Agen8 manages agent lifecycles through **Profiles** and **Skills**.
+Agen8 is a **local agent runtime** where teams are configuration, not code. You define who your agents are and what they can do in plain YAML and Markdown, start the daemon, and hand it work — agen8 manages the rest.
 
-It shifts the paradigm from "building a chain" to "configuring a workstation":
+- **Declarative identity**: define an agent's role, model, goals, and allowed tools in a YAML profile.
+- **Portable capabilities**: define what an agent _can do_ using [`SKILL.md` files](https://agentskills.io/specification) — part of the Agent Skills open standard, compatible with Claude Code, Cursor, and other runtimes.
+- **Autonomous lifecycles**: agents can wake up on a schedule via `heartbeat` jobs configured per-role in the profile — useful for background monitoring, memory consolidation, and recurring tasks.
+- **Structured teams**: a project can run one or more teams; each team has a coordinator that delegates to co-agents, which can spawn sub-agents for isolated execution work.
 
-- **Declarative Identity**: define what an agent _is_ (roles, goals, models) in simple YAML.
-- **Portable Capabilities**: define what an agent _can do_ in standard Markdown (`SKILL.md`).
-- **Autonomous Lifecycles**: specify how often an agent should "wake up" to process its inbox or clean its workspace via `heartbeats`.
+The direction is a declarative runtime for autonomous teams — closer to docker-compose today, with Kubernetes-level orchestration (multi-team scheduling, cross-team routing, declarative desired state) as the target.
 
 ## Core concepts
 
@@ -56,7 +57,7 @@ Agen8 treats agents as configuration rather than imperative code. By isolating b
 
 - **Portability**: Move an agent profile from your laptop to a server without changing code.
 - **Auditability**: Every instruction and capability is version-controllable in plain text.
-- **Interoperability**: Skills follow an open standard, allowing them to be shared across different agent instances.
+- **Interoperability**: Skills follow the [Agent Skills open standard](https://agentskills.io/specification) — shareable across agen8, Claude Code, Cursor, and any compatible runtime.
 
 ### Agentic File System (AFS)
 
@@ -188,7 +189,7 @@ Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sa
 
 - Inspect `internal/app` for session runtime wiring and `internal/store` for persistence logic.
 - The [Developer guide](docs/developer-guide.md) explains how configuration, session lifecycle, and telemetry hooks fit together.
-- The [Execution model](docs/execution-model.md) (PRD) defines sub-agents, teams, hierarchy, review gate, retry/escalation, and daemon responsibilities; it is the authoritative spec for orchestration behavior.
+- The [Execution model](docs/execution-model.md) (PRD, Status: Draft) defines the target orchestration behaviour — sub-agents, teams, hierarchy, review gate, retry/escalation, and daemon responsibilities. Implementation is in progress; treat it as the spec we're building toward.
 - Inspect `pkg/agent/hosttools` for the built-in host tool surface and `pkg/tools/builtins` for host-side implementations.
 
 Contributions are welcome—submit documentation fixes or enhancements alongside code changes to keep the docs aligned with evolving runtime behavior.
