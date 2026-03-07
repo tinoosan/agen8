@@ -46,7 +46,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return err
 	}
 	if strings.TrimSpace(resolved.AuthProvider) != "" {
-		_ = os.Setenv("AGEN8_AUTH_PROVIDER", strings.TrimSpace(resolved.AuthProvider))
+		// Best-effort: set env var for auth provider; failure-to-set will be handled downstream
+	_ = os.Setenv("AGEN8_AUTH_PROVIDER", strings.TrimSpace(resolved.AuthProvider))
 	}
 	if err := ensureRuntimeCredentials(cfg.DataDir, stdinTTY && stdoutTTY, os.Stdin, os.Stdout); err != nil {
 		return err
@@ -180,7 +181,10 @@ func startHealthServer(ctx context.Context, addr string, emit func(context.Conte
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+			// Log but don't fail: health endpoint response write failure is non-critical
+			slog.Debug("health endpoint write failed", "error", err)
+		}
 	})
 	srv := &http.Server{Addr: addr, Handler: mux}
 	if wg != nil {
@@ -193,7 +197,10 @@ func startHealthServer(ctx context.Context, addr string, emit func(context.Conte
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		// Server shutdown is best-effort; errors logged for debugging
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Debug("server shutdown error", "error", err)
+		}
 	}()
 	go func() {
 		if wg != nil {
