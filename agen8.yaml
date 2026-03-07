@@ -1,7 +1,0 @@
-projectId: agen8
-teams:
-  - profile: dev_team
-    enabled: true
-  - profile: startup_team
-    enabled: true
-

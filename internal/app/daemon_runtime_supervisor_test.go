@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -1701,5 +1702,90 @@ func TestRuntimeSupervisor_SyncOnce_ScalesRolePoolDownDeterministically(t *testi
 	}
 	if len(researcherRuns) != 1 || researcherRuns[0] != oldest.RunID {
 		t.Fatalf("remaining researcher role bindings=%v want [%s]", researcherRuns, oldest.RunID)
+	}
+}
+
+func TestRuntimeSupervisor_ComputeProjectDiff_OverridesStaleReconcilingMetadataWhenConverged(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(projectRoot): %v", err)
+	}
+	if _, err := InitProject(projectRoot, ProjectConfig{ProjectID: "p1"}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	projectTeamSvc := NewProjectTeamService(cfg, sessionSvc, nil)
+
+	sess := types.NewSession("desired-state")
+	sess.SessionID = "sess-1"
+	sess.ProjectRoot = projectRoot
+	sess.TeamID = "team-1"
+	sess.Profile = "dev_team"
+	run := types.NewRun("desired-state", 8*1024, sess.SessionID)
+	run.RunID = "run-1"
+	run.Status = types.RunStatusRunning
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := sessionSvc.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+
+	if _, err := projectTeamSvc.RegisterTeam(context.Background(), ProjectTeamSummary{
+		ProjectRoot:      projectRoot,
+		ProjectID:        "p1",
+		TeamID:           "team-1",
+		ProfileID:        "dev_team",
+		PrimarySessionID: sess.SessionID,
+		CoordinatorRunID: run.RunID,
+		Status:           "active",
+	}); err != nil {
+		t.Fatalf("RegisterTeam: %v", err)
+	}
+	if _, err := projectTeamSvc.SetStatus(context.Background(), projectRoot, "team-1", "active", map[string]any{
+		"managedBy":       desiredStateManagedBy,
+		"desiredEnabled":  true,
+		"reconcileStatus": "reconciling",
+	}); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+
+	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+		Cfg:            cfg,
+		SessionService: sessionSvc,
+		ProjectTeamSvc: projectTeamSvc,
+	})
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID:     run.RunID,
+		sessionID: sess.SessionID,
+		cancel:    func() {},
+		done:      make(chan struct{}),
+	}, handleStateRunning)
+
+	out, err := supervisor.computeProjectDiff(context.Background(), projectRoot, ProjectDesiredState{
+		ProjectID: "p1",
+		Teams: []ProjectDesiredStateTeam{{
+			Profile: "dev_team",
+			Enabled: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("computeProjectDiff: %v", err)
+	}
+	if !out.Converged || out.Status != "converged" {
+		t.Fatalf("diff status=%q converged=%t want converged/true", out.Status, out.Converged)
+	}
+	if len(out.Actions) != 0 {
+		t.Fatalf("actions=%v want none", out.Actions)
+	}
+	if len(out.ActualTeams) != 1 {
+		t.Fatalf("actual teams=%v want 1", out.ActualTeams)
+	}
+	if got := out.ActualTeams[0].ReconcileStatus; got != "converged" {
+		t.Fatalf("actual team reconcileStatus=%q want converged", got)
 	}
 }

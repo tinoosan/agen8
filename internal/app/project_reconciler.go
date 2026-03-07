@@ -260,9 +260,7 @@ func (s *runtimeSupervisor) computeProjectDiff(ctx context.Context, projectRoot 
 		actualTeam := &out.ActualTeams[i]
 		desired, exists := desiredProfiles[strings.ToLower(strings.TrimSpace(actualTeam.ProfileID))]
 		actualTeam.DesiredEnabled = exists && desired.Enabled
-		if actualTeam.ReconcileStatus == "" {
-			actualTeam.ReconcileStatus = out.Status
-		}
+		actualTeam.ReconcileStatus = out.Status
 		actualTeam.ManagedBy = strings.TrimSpace(actualTeam.ManagedBy)
 		for _, action := range out.Actions {
 			if strings.TrimSpace(action.TeamID) == strings.TrimSpace(actualTeam.TeamID) ||
