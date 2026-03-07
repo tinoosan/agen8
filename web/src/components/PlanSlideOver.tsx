@@ -46,7 +46,7 @@ function parseChecklistItems(md: string): { items: ChecklistItem[]; activeStep: 
   return { items, activeStep, done, total: items.length }
 }
 
-/** Renders the checklist in TUI tree style with progress info */
+/** Renders the checklist as a vertical stepper timeline */
 function PlanChecklist({ items, activeStep, done, total }: {
   items: ChecklistItem[]
   activeStep: string
@@ -55,6 +55,13 @@ function PlanChecklist({ items, activeStep, done, total }: {
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <style>{`
+        @keyframes stepper-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(86, 182, 194, 0.5); }
+          50% { box-shadow: 0 0 0 6px rgba(86, 182, 194, 0); }
+        }
+      `}</style>
+
       {/* Progress summary */}
       {total > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
@@ -84,30 +91,59 @@ function PlanChecklist({ items, activeStep, done, total }: {
         </div>
       )}
 
-      {/* Tree */}
-      <div className="mono" style={{ fontSize: 12, lineHeight: 1.8 }}>
+      {/* Vertical stepper */}
+      <div style={{ fontSize: 13 }}>
         {items.map((item, i) => {
           const isLast = i === items.length - 1
-          const branch = isLast ? '└─ ' : '├─ '
+          // Line color: green for segments above active, dim for at/below active
+          const lineColor = item.done ? OK_GREEN : 'var(--border)'
+
           return (
-            <div key={i} style={{ display: 'flex', alignItems: 'baseline' }}>
-              <span style={{ color: PLAN_TEAL, whiteSpace: 'pre', flexShrink: 0 }}>{branch}</span>
-              {item.done ? (
-                <span>
-                  <span style={{ color: OK_GREEN }}>✓ </span>
-                  <span style={{ color: DIM_GRAY, textDecoration: 'line-through' }}>{item.text}</span>
-                </span>
-              ) : item.active ? (
-                <span>
-                  <span style={{ color: PLAN_TEAL }}>● </span>
-                  <span style={{ color: 'var(--text-1)', fontWeight: 700 }}>{item.text}</span>
-                </span>
-              ) : (
-                <span>
-                  <span style={{ color: DIM_GRAY }}>○ </span>
-                  <span style={{ color: 'var(--text-2)' }}>{item.text}</span>
-                </span>
-              )}
+            <div key={i} style={{ display: 'flex', gap: 14 }}>
+              {/* Left column: circle + line segment */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 20 }}>
+                {item.done ? (
+                  <div style={{
+                    width: 12, height: 12, borderRadius: '50%',
+                    background: OK_GREEN, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <span style={{ color: '#fff', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>
+                  </div>
+                ) : item.active ? (
+                  <div style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: PLAN_TEAL, flexShrink: 0,
+                    animation: 'stepper-pulse 2s ease-in-out infinite',
+                  }} />
+                ) : (
+                  <div style={{
+                    width: 12, height: 12, borderRadius: '50%',
+                    border: '2px solid var(--text-4)',
+                    background: 'transparent', flexShrink: 0,
+                  }} />
+                )}
+                {!isLast && (
+                  <div style={{
+                    flex: 1, width: 2, minHeight: 16,
+                    background: lineColor,
+                  }} />
+                )}
+              </div>
+
+              {/* Right column: step text */}
+              <div style={{ paddingBottom: 20, flex: 1 }}>
+                <div style={
+                  item.done
+                    ? { color: DIM_GRAY, textDecoration: 'line-through' }
+                    : item.active
+                      ? { color: 'var(--text-1)', fontWeight: 700 }
+                      : { color: 'var(--text-3)' }
+                }>{item.text}</div>
+                {item.active && (
+                  <div style={{ fontSize: 11, color: PLAN_TEAL, marginTop: 2 }}>In progress</div>
+                )}
+              </div>
             </div>
           )
         })}
