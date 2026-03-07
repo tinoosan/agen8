@@ -648,6 +648,18 @@ textarea:focus {
   }
 }
 
+@keyframes pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.15);
+  }
+}
+
 .activity-row {
   display: flex;
   align-items: flex-start;
@@ -850,8 +862,13 @@ textarea:focus {
 
 /* ── Status bar (feedback) ───────────────────────── */
 @keyframes thinking-shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 .status-bar {
@@ -872,10 +889,9 @@ textarea:focus {
   height: 2px;
   border-radius: 1px;
   background: linear-gradient(90deg,
-    transparent 0%,
-    var(--accent) 50%,
-    transparent 100%
-  );
+      transparent 0%,
+      var(--accent) 50%,
+      transparent 100%);
   background-size: 200% 100%;
   animation: thinking-shimmer 1.5s ease-in-out infinite;
 }
@@ -883,10 +899,9 @@ textarea:focus {
 /* ── Thinking block shimmer ──────────────────────── */
 .thinking-shimmer-bg {
   background: linear-gradient(90deg,
-    var(--bg-surface) 0%,
-    var(--bg-elevated) 50%,
-    var(--bg-surface) 100%
-  );
+      var(--bg-surface) 0%,
+      var(--bg-elevated) 50%,
+      var(--bg-surface) 100%);
   background-size: 200% 100%;
   animation: thinking-shimmer 2s ease-in-out infinite;
 }

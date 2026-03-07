@@ -138,6 +138,7 @@ export interface Task {
   assignedTo?: string
   assignedToType?: string
   claimedByAgentId?: string
+  createdBy?: string
   taskKind?: string
   goal: string
   status: string
@@ -145,6 +146,8 @@ export interface Task {
   error?: string
   artifacts?: string[]
   costUSD?: number
+  totalTokens?: number
+  metadata?: Record<string, unknown>
   createdAt: string
   completedAt?: string
 }
