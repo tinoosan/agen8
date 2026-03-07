@@ -5,6 +5,7 @@ import RoleRow from './RoleRow'
 import ActivityFeed from './ActivityFeed'
 import { Mail, FolderOpen, ListChecks } from 'lucide-react'
 import { useRuntimeState } from '../hooks/useRuntimeState'
+import { useModelList } from '../hooks/useModelList'
 
 interface ContextPanelProps {
   teamId: string
@@ -16,6 +17,8 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
   const statusQuery = useTeamStatus(teamId)
   const manifestQuery = useTeamManifest(teamId)
   const runtimeQuery = useRuntimeState(threadId || '')
+  const modelQuery = useModelList(threadId || '')
+  const models = modelQuery.data?.models ?? []
   const { badgeCount } = useMail(teamId)
   const roles = statusQuery.data?.roles ?? []
   const isLoading = statusQuery.isLoading
@@ -75,7 +78,7 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
                 stats={statsByRole[role.role]}
                 onViewTranscript={setFocusedRole}
                 onChangeModel={threadId ? (r) => setModelPickerTarget({ role: r, threadId: threadId! }) : undefined}
-                onSetReasoning={threadId ? (r) => setReasoningPickerTarget({ role: r, threadId: threadId! }) : undefined}
+                onSetReasoning={threadId && models.some(m => m.id === statsByRole[role.role]?.model && m.isReasoning) ? (r) => setReasoningPickerTarget({ role: r, threadId: threadId! }) : undefined}
                 isActive={focusedRole === role.role}
                 replicaCount={replicaCountByRole[role.role]}
                 desiredReplicas={desiredReplicasByRole[role.role]}

@@ -775,7 +775,7 @@ func artifactGroupsToNodes(groups []state.ArtifactGroup) []protocol.ArtifactNode
 				fileLabel = filepath.Base(strings.TrimSpace(f.VPath))
 			}
 			out = append(out, protocol.ArtifactNode{
-				NodeKey:     "file:" + strings.TrimSpace(f.VPath),
+				NodeKey:     "file:" + role + ":" + strings.TrimSpace(f.VPath),
 				ParentKey:   taskKey,
 				Kind:        "file",
 				Label:       fileLabel,
@@ -844,7 +844,7 @@ func searchMatchesToNodes(matches []state.ArtifactRecord, byTask map[string]stat
 			fileLabel = filepath.Base(strings.TrimSpace(f.VPath))
 		}
 		add(protocol.ArtifactNode{
-			NodeKey: "file:" + strings.TrimSpace(f.VPath), ParentKey: taskKey, Kind: "file", Label: fileLabel,
+			NodeKey: "file:" + role + ":" + strings.TrimSpace(f.VPath), ParentKey: taskKey, Kind: "file", Label: fileLabel,
 			DayBucket: day, Role: role, TaskKind: kind, TaskID: taskID, Status: strings.TrimSpace(g.Status),
 			ArtifactID: strings.TrimSpace(f.ArtifactID), DisplayName: strings.TrimSpace(f.DisplayName),
 			VPath: strings.TrimSpace(f.VPath), DiskPath: strings.TrimSpace(f.DiskPath), IsSummary: f.IsSummary, ProducedAt: f.ProducedAt,
