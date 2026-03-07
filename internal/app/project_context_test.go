@@ -28,6 +28,26 @@ func TestInitProjectAndLoadContext(t *testing.T) {
 	if !strings.Contains(ctx.ProjectDir, ".agen8") {
 		t.Fatalf("project dir=%q; expected .agen8", ctx.ProjectDir)
 	}
+	if _, err := os.Stat(filepath.Join(base, ProjectDirName, ProjectDesiredStateFilename)); err != nil {
+		t.Fatalf("expected desired-state manifest: %v", err)
+	}
+}
+
+func TestReadProjectDesiredState_DefaultsToProjectID(t *testing.T) {
+	base := t.TempDir()
+	if _, err := InitProject(base, ProjectConfig{ProjectID: "software-dev"}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+	state, err := readProjectDesiredState(base)
+	if err != nil {
+		t.Fatalf("readProjectDesiredState: %v", err)
+	}
+	if got := strings.TrimSpace(state.ProjectID); got != "software-dev" {
+		t.Fatalf("projectId=%q want software-dev", got)
+	}
+	if len(state.Teams) != 0 {
+		t.Fatalf("teams=%v want empty", state.Teams)
+	}
 }
 
 func TestFindProjectRoot_WalksParents(t *testing.T) {

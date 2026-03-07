@@ -84,19 +84,16 @@ describe('ActivityFeed', () => {
     expect(screen.getByText('Event three')).toBeInTheDocument()
   })
 
-  it('only shows last 50 events', () => {
+  it('shows the full fetched activity window', () => {
     const events = Array.from({ length: 60 }, (_, i) =>
       makeEvent({ id: `e${i + 1}`, title: `Event ${i + 1}` }),
     )
     useActivity.mockReturnValue({ data: events, isLoading: false })
     renderFeed()
 
-    // First 10 events should not be shown (60 - 50 = 10)
-    expect(screen.queryByText('Event 1')).not.toBeInTheDocument()
-    expect(screen.queryByText('Event 10')).not.toBeInTheDocument()
-    // Last event should be shown
+    expect(screen.getByText('Event 1')).toBeInTheDocument()
+    expect(screen.getByText('Event 10')).toBeInTheDocument()
     expect(screen.getByText('Event 60')).toBeInTheDocument()
-    expect(screen.getByText('Event 11')).toBeInTheDocument()
   })
 
   it('expands detail on click when event has detail', async () => {
@@ -182,7 +179,7 @@ describe('ActivityFeed', () => {
       threadId: 'thread-42',
       teamId: 'my-team-id',
       includeChildRuns: true,
-      limit: 100,
+      limit: 200,
     })
   })
 })

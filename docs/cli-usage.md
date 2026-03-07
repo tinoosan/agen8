@@ -21,6 +21,8 @@ The `agen8` binary manages a local runtime for your project. The public CLI is o
    ./agen8 project init
    ```
 
+   This creates the project-local `.agen8/` workspace, including `.agen8/agen8.yaml` for desired team state.
+
 4. **Start work with a team**:
 
    ```sh
@@ -51,7 +53,7 @@ A typical onboarding workflow:
 | Command | Purpose |
 | ------- | ------- |
 | `agen8 daemon start|status|stop` | Manage the local runtime process.
-| `agen8 project init|status` | Enable the current project and inspect its runtime state.
+| `agen8 project init|status|apply` | Enable the current project, inspect its runtime state, or apply desired-state reconciliation immediately.
 | `agen8 team list|start` | List available profile-backed teams and start work with one.
 | `agen8 task send|list` | Send work to the active team and inspect active-team tasks.
 | `agen8 monitor` | Open the current primary operator surface.
@@ -70,6 +72,8 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 | `--include-history-ops` | `AGEN8_INCLUDE_HISTORY_OPS` | Whether operations from `/history` appear in prompts (default: enabled).
 
 For complete flag context and environment-variable guidance, see [docs/cli-usage.md](docs/cli-usage.md) (this document) complemented by [docs/config-toml.md](docs/config-toml.md).
+
+For project desired-state configuration, see [docs/agen8-yaml.md](docs/agen8-yaml.md).
 
 ## Troubleshooting CLI sessions
 

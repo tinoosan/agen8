@@ -186,3 +186,31 @@ func rpcDeleteProjectTeams(ctx context.Context, projectRoot string) (protocol.Pr
 	}
 	return out, nil
 }
+
+func rpcProjectDiff(ctx context.Context, projectRoot string) (protocol.ProjectDiffResult, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return protocol.ProjectDiffResult{}, fmt.Errorf("project root is required")
+	}
+	var out protocol.ProjectDiffResult
+	if err := rpcCall(ctx, protocol.MethodProjectDiff, protocol.ProjectDiffParams{
+		ProjectRoot: projectRoot,
+	}, &out); err != nil {
+		return protocol.ProjectDiffResult{}, err
+	}
+	return out, nil
+}
+
+func rpcProjectApply(ctx context.Context, projectRoot string) (protocol.ProjectDiffResult, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return protocol.ProjectDiffResult{}, fmt.Errorf("project root is required")
+	}
+	var out protocol.ProjectDiffResult
+	if err := rpcCall(ctx, protocol.MethodProjectApply, protocol.ProjectApplyParams{
+		ProjectRoot: projectRoot,
+	}, &out); err != nil {
+		return protocol.ProjectDiffResult{}, err
+	}
+	return out, nil
+}

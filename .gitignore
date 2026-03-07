@@ -59,3 +59,5 @@ internal/app/db/exec/.venv/**
 
 # Obsidian
 obsidian-vault/
+
+.DS_Store

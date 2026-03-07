@@ -95,3 +95,40 @@ func TestDeleteTeamScopedData_RemovesTasksMessagesAndArtifacts(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectRegistryStore_CRUD(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	ctx := context.Background()
+
+	record, err := UpsertProjectRegistry(ctx, cfg, ProjectRegistryRecord{
+		ProjectRoot:  "/tmp/project-a",
+		ProjectID:    "project-a",
+		ManifestPath: "/tmp/project-a/.agen8/agen8.yaml",
+		Enabled:      true,
+		Metadata: map[string]any{
+			"source": "test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertProjectRegistry: %v", err)
+	}
+	if got := record.ProjectRoot; got != "/tmp/project-a" {
+		t.Fatalf("projectRoot=%q want /tmp/project-a", got)
+	}
+
+	loaded, err := LoadProjectRegistry(ctx, cfg, "/tmp/project-a")
+	if err != nil {
+		t.Fatalf("LoadProjectRegistry: %v", err)
+	}
+	if got := loaded.ManifestPath; got != "/tmp/project-a/.agen8/agen8.yaml" {
+		t.Fatalf("manifestPath=%q want /tmp/project-a/.agen8/agen8.yaml", got)
+	}
+
+	listed, err := ListProjectRegistry(ctx, cfg)
+	if err != nil {
+		t.Fatalf("ListProjectRegistry: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("len(listed)=%d want 1", len(listed))
+	}
+}

@@ -11,6 +11,28 @@ export interface ProjectTeamSummary {
   createdAt?: string
   updatedAt?: string
   manifestPresent?: boolean
+  desiredEnabled?: boolean
+  reconcileStatus?: 'converged' | 'drifting' | 'reconciling' | 'failed' | string
+  managedBy?: string
+}
+
+export interface ProjectReconcileAction {
+  action?: string
+  profile?: string
+  teamId?: string
+  reason?: string
+  managed?: boolean
+}
+
+export interface ProjectReconcileNotification {
+  projectRoot?: string
+  projectId?: string
+  converged?: boolean
+  status?: 'converged' | 'drifting' | 'reconciling' | 'failed' | string
+  actions?: ProjectReconcileAction[]
+  teamIds?: string[]
+  tickAt?: string
+  error?: string
 }
 
 export interface TeamRoleStatus {

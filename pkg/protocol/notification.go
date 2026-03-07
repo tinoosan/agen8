@@ -12,7 +12,11 @@ const (
 	NotifyItemCompleted = "item.completed"
 
 	// NotifyEventAppend is sent when the daemon appends an event to the store (real-time push).
-	NotifyEventAppend = "event.append"
+	NotifyEventAppend               = "event.append"
+	NotifyProjectReconcileStarted   = "project.reconcile.started"
+	NotifyProjectReconcileDrift     = "project.reconcile.drift"
+	NotifyProjectReconcileConverged = "project.reconcile.converged"
+	NotifyProjectReconcileFailed    = "project.reconcile.failed"
 )
 
 // TurnNotificationParams are the params for turn.* notifications.

@@ -117,6 +117,8 @@ type EventsAppender interface {
 type RuntimeStateProvider interface {
 	GetRunState(ctx context.Context, sessionID, runID string) (protocol.RuntimeRunState, error)
 	GetSessionState(ctx context.Context, sessionID string) ([]protocol.RuntimeRunState, error)
+	DiffProject(ctx context.Context, projectRoot string) (protocol.ProjectDiffResult, error)
+	ApplyProject(ctx context.Context, projectRoot string) (protocol.ProjectDiffResult, error)
 }
 
 type MethodHandler interface {

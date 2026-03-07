@@ -300,6 +300,9 @@ func InitProject(start string, cfg ProjectConfig) (ProjectContext, error) {
 	if err := writeProjectState(statePath, initialState); err != nil {
 		return ProjectContext{}, err
 	}
+	if err := ensureProjectDesiredState(root, norm.ProjectID); err != nil {
+		return ProjectContext{}, err
+	}
 	readmePath := filepath.Join(projectDir, projectReadmeFilename)
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
 		_ = os.WriteFile(readmePath, []byte(strings.TrimSpace(defaultProjectReadme())+"\n"), 0o644)

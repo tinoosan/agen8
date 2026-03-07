@@ -75,6 +75,28 @@ func (b *EventBroadcaster) Run(ctx context.Context) {
 	}
 }
 
+func (b *EventBroadcaster) Broadcast(msg protocol.Message) {
+	if b == nil || b.broadcastCh == nil {
+		return
+	}
+	select {
+	case b.broadcastCh <- msg:
+	default:
+	}
+}
+
+func (b *EventBroadcaster) Notify(method string, params any) error {
+	if b == nil {
+		return nil
+	}
+	msg, err := protocol.NewNotification(method, params)
+	if err != nil {
+		return err
+	}
+	b.Broadcast(msg)
+	return nil
+}
+
 // broadcastingEventsAppender wraps an EventsAppender and broadcasts every Append/AppendEvent
 // as a protocol notification to the given channel. Implements both app.EventsAppender
 // and pkg/events.StoreAppender so it can be used as EventsService and EventsStore.
@@ -133,7 +155,6 @@ func (b *broadcastingEventsAppender) sendNotification(event types.EventRecord) {
 	select {
 	case b.broadcastCh <- msg:
 	default:
-		// Non-blocking: drop if broadcaster is slow
 	}
 }
 

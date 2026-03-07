@@ -24,6 +24,9 @@ var (
 	taskListOffset int
 )
 
+var rpcProjectDiffFn = rpcProjectDiff
+var rpcProjectApplyFn = rpcProjectApply
+
 var projectCmd = &cobra.Command{
 	Use:   "project",
 	Short: "Manage Agen8 project setup",
@@ -63,12 +66,37 @@ var projectStatusCmd = &cobra.Command{
 			return nil
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "root=%s\n", projectCtx.RootDir)
+		fmt.Fprintf(cmd.OutOrStdout(), "manifest=%s\n", filepath.Join(projectCtx.RootDir, app.ProjectDirName, app.ProjectDesiredStateFilename))
 		fmt.Fprintf(cmd.OutOrStdout(), "active_team=%s\n", blankDash(projectCtx.State.ActiveTeamID))
 		if teamID := strings.TrimSpace(projectCtx.State.ActiveTeamID); teamID != "" {
 			if teamInfo, err := rpcGetProjectTeam(cmd.Context(), strings.TrimSpace(projectCtx.RootDir), teamID); err == nil {
 				fmt.Fprintf(cmd.OutOrStdout(), "active_team_status=%s\n", blankDash(teamInfo.Status))
 			}
 		}
+		if diff, err := rpcProjectDiffFn(cmd.Context(), strings.TrimSpace(projectCtx.RootDir)); err == nil {
+			writeProjectDiff(cmd, diff)
+		}
+		return nil
+	},
+}
+
+var projectApplyCmd = &cobra.Command{
+	Use:   "apply",
+	Short: "Apply desired project state immediately",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectCtx, err := loadProjectContext()
+		if err != nil {
+			return err
+		}
+		if !projectCtx.Exists {
+			return fmt.Errorf("project is not initialized; run `agen8 project init` first")
+		}
+		diff, err := rpcProjectApplyFn(cmd.Context(), strings.TrimSpace(projectCtx.RootDir))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), "applied=true")
+		writeProjectDiff(cmd, diff)
 		return nil
 	},
 }
@@ -387,6 +415,20 @@ func listProfileRefs(dir string) []string {
 	return out
 }
 
+func writeProjectDiff(cmd *cobra.Command, diff protocol.ProjectDiffResult) {
+	fmt.Fprintf(cmd.OutOrStdout(), "project_id=%s\n", blankDash(diff.ProjectID))
+	fmt.Fprintf(cmd.OutOrStdout(), "desired_converged=%t\n", diff.Converged)
+	fmt.Fprintf(cmd.OutOrStdout(), "desired_status=%s\n", blankDash(diff.Status))
+	for _, action := range diff.Actions {
+		fmt.Fprintf(cmd.OutOrStdout(), "action=%s profile=%s team=%s reason=%s\n",
+			blankDash(action.Action),
+			blankDash(action.Profile),
+			blankDash(action.TeamID),
+			blankDash(action.Reason),
+		)
+	}
+}
+
 func init() {
 	projectInitCmd.Flags().StringVar(&initProjectID, "project-id", "", "override project identifier")
 	projectInitCmd.Flags().StringVar(&initRPCEndpoint, "rpc-endpoint", "", "default RPC endpoint for this project")
@@ -403,6 +445,7 @@ func init() {
 
 	projectCmd.AddCommand(projectInitCmd)
 	projectCmd.AddCommand(projectStatusCmd)
+	projectCmd.AddCommand(projectApplyCmd)
 	projectCmd.AddCommand(projectDeleteTeamsCmd)
 	teamCmd.AddCommand(teamListCmd)
 	teamCmd.AddCommand(teamStartCmd)

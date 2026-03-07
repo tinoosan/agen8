@@ -132,6 +132,8 @@ Quick auth commands:
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. Additional flag and env var guidance resides in [docs/cli-usage.md](docs/cli-usage.md).
 
+Project desired running state is configured separately in [docs/agen8-yaml.md](docs/agen8-yaml.md). That manifest lives at `.agen8/agen8.yaml` inside each initialized project.
+
 ## Email notifications (Gmail OAuth2)
 
 Agen8 can send **plain-text** email notifications through Gmail using OAuth2 (XOAUTH2 over SMTP).
@@ -180,6 +182,7 @@ Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sa
 
 - **[docs/cli-usage.md](docs/cli-usage.md)** – Step-by-step workflows, flag guidance, and session lifecycle examples for the CLI.
 - **[docs/config-toml.md](docs/config-toml.md)** – Onboarding, config hierarchy, `code_exec`, and path access settings.
+- **[docs/agen8-yaml.md](docs/agen8-yaml.md)** – Desired-state manifest for project teams, reconciliation behavior, and examples.
 - **[docs/chatgpt-account-auth.md](docs/chatgpt-account-auth.md)** – Browser OAuth setup, token refresh behavior, and troubleshooting for `chatgpt_account`.
 - **[docs/developer-guide.md](docs/developer-guide.md)** – Internal architecture, session/run lifecycle, and execution hierarchy reference.
 - **[docs/troubleshooting.md](docs/troubleshooting.md)** – Quick triage for build issues, stuck connections, and retries.

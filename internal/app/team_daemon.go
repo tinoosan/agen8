@@ -125,21 +125,25 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	realEventsStore := eventsvc.NewService(cfg)
 	eventBroadcaster, eventBroadcastCh := NewEventBroadcaster()
 	eventsWithBroadcast := NewBroadcastingEventsAppender(realEventsStore, eventBroadcastCh)
+	projectRegistrySvc := NewProjectRegistryService(cfg)
 
 	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
-		Cfg:              cfg,
-		Resolved:         resolved,
-		PollInterval:     poll,
-		TaskService:      nil, // set after taskService is created
-		SessionService:   nil, // set after sessionService is created
-		EventsStore:      eventsWithBroadcast,
-		MemoryStore:      memStore,
-		ConstructorStore: constructorStore,
-		LLMClient:        llmClient,
-		Notifier:         nil,
-		WorkdirAbs:       workdirAbs,
-		DefaultProfile:   prof,
-		SoulService:      nil,
+		Cfg:                cfg,
+		Resolved:           resolved,
+		PollInterval:       poll,
+		ReconcileInterval:  15 * time.Second,
+		TaskService:        nil, // set after taskService is created
+		SessionService:     nil, // set after sessionService is created
+		EventsStore:        eventsWithBroadcast,
+		MemoryStore:        memStore,
+		ConstructorStore:   constructorStore,
+		LLMClient:          llmClient,
+		Notifier:           nil,
+		WorkdirAbs:         workdirAbs,
+		DefaultProfile:     prof,
+		SoulService:        nil,
+		ProjectRegistrySvc: projectRegistrySvc,
+		Broadcaster:        eventBroadcaster,
 	})
 	var notifier agent.Notifier
 	if strings.TrimSpace(resolved.ResultWebhookURL) != "" {
@@ -155,6 +159,8 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 
 	sessionService := pkgsession.NewManager(cfg, sessionStore, supervisor)
 	supervisor.sessionService = sessionService
+	projectTeamSvc := NewProjectTeamService(cfg, sessionService, team.NewFileManifestStore(cfg))
+	supervisor.projectTeamSvc = projectTeamSvc
 	taskService := pkgtask.NewManager(taskStore, sessionService)
 	taskService.SetRoutingOracle(pkgtask.NewRoutingOracle())
 	taskService.SetEventsStore(eventsWithBroadcast)
@@ -206,6 +212,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			RuntimeState:   supervisor,
 			SoulService:    soulService,
 			EventsService:  eventsWithBroadcast,
+			ProjectTeamSvc: projectTeamSvc,
 			SessionPause: func(ctx context.Context, _, sessionID string) ([]string, error) {
 				return supervisor.PauseSession(ctx, sessionID)
 			},

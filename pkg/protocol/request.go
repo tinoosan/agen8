@@ -48,6 +48,8 @@ const (
 	MethodProjectListTeams       = "project.listTeams"
 	MethodProjectGetTeam         = "project.getTeam"
 	MethodProjectDeleteTeams     = "project.deleteTeams"
+	MethodProjectDiff            = "project.diff"
+	MethodProjectApply           = "project.apply"
 	MethodLogsQuery              = "logs.query"
 	MethodActivityStream         = "activity.stream"
 	MethodRuntimeGetRunState     = "runtime.getRunState"

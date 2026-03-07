@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect, useMemo } from 'react'
 import { useActivity } from '../hooks/useActivity'
 import { useStore } from '../lib/store'
-import type { ActivityEvent } from '../lib/types'
+import { onNotification } from '../lib/rpc'
+import type { ActivityEvent, ProjectReconcileNotification } from '../lib/types'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { ChevronRight, Activity } from 'lucide-react'
@@ -137,6 +138,37 @@ function buildFeed(events: ActivityEvent[]): FeedEntry[] {
   }
 
   return result
+}
+
+function projectNotificationToActivityEvent(notification: ProjectReconcileNotification, method: string): ActivityEvent | null {
+  const tickAt = notification.tickAt ?? new Date().toISOString()
+  const actions = notification.actions ?? []
+  const title = actions.length > 0
+    ? actions.map((action) => `${action.action ?? 'change'} ${action.profile ?? action.teamId ?? 'team'}`).join(', ')
+    : notification.status === 'converged'
+      ? 'Desired state converged'
+      : notification.error || 'Desired-state reconciliation update'
+  const status = notification.status === 'failed'
+    ? 'error'
+    : notification.status === 'reconciling'
+      ? 'pending'
+      : 'ok'
+  return {
+    id: `project-reconcile:${method}:${tickAt}:${(notification.teamIds ?? []).join(',')}`,
+    kind: method,
+    title,
+    status,
+    startedAt: tickAt,
+    finishedAt: notification.status === 'reconciling' ? undefined : tickAt,
+    error: notification.error,
+    data: {
+      projectId: notification.projectId ?? '',
+      projectRoot: notification.projectRoot ?? '',
+      status: notification.status ?? '',
+      teamIds: (notification.teamIds ?? []).join(', '),
+      actions: actions.map((action) => `${action.action ?? ''}:${action.profile ?? action.teamId ?? ''}:${action.reason ?? ''}`).join('\n'),
+    },
+  }
 }
 
 /* ── Single event row ───────────────────────────────── */
@@ -386,7 +418,12 @@ export default function ActivityFeed({ threadId, teamId }: ActivityFeedProps) {
   const query = useActivity({ threadId, teamId, includeChildRuns: true, limit: 200 })
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const events = query.data ?? []
+  const [projectEvents, setProjectEvents] = useState<ActivityEvent[]>([])
+  const events = useMemo(() => {
+    const merged = [...(query.data ?? []), ...projectEvents]
+    merged.sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())
+    return merged
+  }, [projectEvents, query.data])
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [hasNew, setHasNew] = useState(false)
   const prevLenRef = useRef(0)
@@ -425,6 +462,33 @@ export default function ActivityFeed({ threadId, teamId }: ActivityFeedProps) {
     const el = containerRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [])
+
+  useEffect(() => {
+    const methods = [
+      'project.reconcile.started',
+      'project.reconcile.drift',
+      'project.reconcile.converged',
+      'project.reconcile.failed',
+    ] as const
+
+    const unsubs = methods.map((method) =>
+      onNotification(method, (message) => {
+        const payload = message.params as ProjectReconcileNotification | undefined
+        if (!payload) return
+        if (payload.teamIds && payload.teamIds.length > 0 && !payload.teamIds.includes(teamId)) return
+        const synthetic = projectNotificationToActivityEvent(payload, method)
+        if (!synthetic) return
+        setProjectEvents((current) => {
+          const next = [...current.filter((event) => event.id !== synthetic.id), synthetic]
+          next.sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())
+          return next.slice(-50)
+        })
+      }),
+    )
+    return () => {
+      for (const unsub of unsubs) unsub()
+    }
+  }, [teamId])
 
   function scrollToBottom() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })

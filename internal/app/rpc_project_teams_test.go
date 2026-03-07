@@ -15,6 +15,26 @@ import (
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
+type testRuntimeState struct {
+	diff protocol.ProjectDiffResult
+}
+
+func (t testRuntimeState) GetRunState(context.Context, string, string) (protocol.RuntimeRunState, error) {
+	return protocol.RuntimeRunState{}, nil
+}
+
+func (t testRuntimeState) GetSessionState(context.Context, string) ([]protocol.RuntimeRunState, error) {
+	return nil, nil
+}
+
+func (t testRuntimeState) DiffProject(context.Context, string) (protocol.ProjectDiffResult, error) {
+	return t.diff, nil
+}
+
+func (t testRuntimeState) ApplyProject(context.Context, string) (protocol.ProjectDiffResult, error) {
+	return t.diff, nil
+}
+
 func TestRPCServer_ProjectListTeams_UsesRegistry(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sessionStore, err := implstore.NewSQLiteSessionStore(cfg)
@@ -144,5 +164,42 @@ func TestRPCServer_ProjectDeleteTeams_RemovesAllTeamsForProject(t *testing.T) {
 	}
 	if projectCtx.State.ActiveTeamID != "" || projectCtx.State.ActiveSessionID != "" {
 		t.Fatalf("project state not cleared: %+v", projectCtx.State)
+	}
+}
+
+func TestRPCServer_ProjectDiff_UsesRuntimeState(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(projectRoot): %v", err)
+	}
+	if _, err := InitProject(projectRoot, ProjectConfig{ProjectID: "p1"}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg,
+		Run: types.Run{},
+		RuntimeState: testRuntimeState{
+			diff: protocol.ProjectDiffResult{
+				ProjectRoot: projectRoot,
+				ProjectID:   "p1",
+				Converged:   false,
+				Status:      "drifting",
+				Actions: []protocol.ProjectReconcileAction{{
+					Action:  "spawn",
+					Profile: "dev_team",
+				}},
+			},
+		},
+		Index: protocol.NewIndex(0, 0),
+	})
+
+	out, err := srv.projectDiff(context.Background(), protocol.ProjectDiffParams{ProjectRoot: projectRoot})
+	if err != nil {
+		t.Fatalf("projectDiff: %v", err)
+	}
+	if out.ProjectID != "p1" || out.Status != "drifting" || len(out.Actions) != 1 {
+		t.Fatalf("unexpected diff: %+v", out)
 	}
 }

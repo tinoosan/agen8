@@ -35,35 +35,43 @@ import (
 )
 
 type runtimeSupervisorConfig struct {
-	Cfg              config.Config
-	Resolved         RunChatOptions
-	PollInterval     time.Duration
-	TaskService      pkgtask.TaskServiceForSupervisor
-	SessionService   pkgsession.Service
-	EventsStore      events.StoreAppender
-	MemoryStore      pkgstore.DailyMemoryStore
-	ConstructorStore pkgstore.ConstructorStateStore
-	LLMClient        llmtypes.LLMClient
-	Notifier         agent.Notifier
-	WorkdirAbs       string
-	DefaultProfile   *profile.Profile
-	SoulService      pkgsoul.Service
+	Cfg                config.Config
+	Resolved           RunChatOptions
+	PollInterval       time.Duration
+	ReconcileInterval  time.Duration
+	TaskService        pkgtask.TaskServiceForSupervisor
+	SessionService     pkgsession.Service
+	EventsStore        events.StoreAppender
+	MemoryStore        pkgstore.DailyMemoryStore
+	ConstructorStore   pkgstore.ConstructorStateStore
+	LLMClient          llmtypes.LLMClient
+	Notifier           agent.Notifier
+	WorkdirAbs         string
+	DefaultProfile     *profile.Profile
+	SoulService        pkgsoul.Service
+	ProjectTeamSvc     *ProjectTeamService
+	ProjectRegistrySvc *ProjectRegistryService
+	Broadcaster        *EventBroadcaster
 }
 
 type runtimeSupervisor struct {
-	cfg              config.Config
-	resolved         RunChatOptions
-	pollInterval     time.Duration
-	taskService      pkgtask.TaskServiceForSupervisor
-	sessionService   pkgsession.Service
-	eventsStore      events.StoreAppender
-	memoryStore      pkgstore.DailyMemoryStore
-	constructorStore pkgstore.ConstructorStateStore
-	llmClient        llmtypes.LLMClient
-	notifier         agent.Notifier
-	workdirAbs       string
-	defaultProfile   *profile.Profile
-	soulService      pkgsoul.Service
+	cfg                config.Config
+	resolved           RunChatOptions
+	pollInterval       time.Duration
+	reconcileInterval  time.Duration
+	taskService        pkgtask.TaskServiceForSupervisor
+	sessionService     pkgsession.Service
+	eventsStore        events.StoreAppender
+	memoryStore        pkgstore.DailyMemoryStore
+	constructorStore   pkgstore.ConstructorStateStore
+	llmClient          llmtypes.LLMClient
+	notifier           agent.Notifier
+	workdirAbs         string
+	defaultProfile     *profile.Profile
+	soulService        pkgsoul.Service
+	projectTeamSvc     *ProjectTeamService
+	projectRegistrySvc *ProjectRegistryService
+	broadcaster        *EventBroadcaster
 
 	cmdCh               chan supervisorCmd
 	handles             map[string]*runHandle
@@ -356,7 +364,7 @@ archive:
 		}
 		// stop run result is best-effort
 		// Stop result is best-effort; worker may already be stopped
-			_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, stopReasonArchived)
+		_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, stopReasonArchived)
 	}
 }
 
@@ -365,23 +373,31 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 	if poll <= 0 {
 		poll = 1 * time.Second // Faster inbox poll so callbacks and new tasks are picked up sooner
 	}
+	reconcileInterval := cfg.ReconcileInterval
+	if reconcileInterval <= 0 {
+		reconcileInterval = 15 * time.Second
+	}
 	return &runtimeSupervisor{
-		cfg:              cfg.Cfg,
-		resolved:         cfg.Resolved,
-		pollInterval:     poll,
-		taskService:      cfg.TaskService,
-		sessionService:   cfg.SessionService,
-		eventsStore:      cfg.EventsStore,
-		memoryStore:      cfg.MemoryStore,
-		constructorStore: cfg.ConstructorStore,
-		llmClient:        cfg.LLMClient,
-		notifier:         cfg.Notifier,
-		workdirAbs:       cfg.WorkdirAbs,
-		defaultProfile:   cfg.DefaultProfile,
-		soulService:      cfg.SoulService,
-		cmdCh:            make(chan supervisorCmd, 256),
-		handles:          map[string]*runHandle{},
-		snapshots:        map[string]runStateSnapshot{},
+		cfg:                cfg.Cfg,
+		resolved:           cfg.Resolved,
+		pollInterval:       poll,
+		reconcileInterval:  reconcileInterval,
+		taskService:        cfg.TaskService,
+		sessionService:     cfg.SessionService,
+		eventsStore:        cfg.EventsStore,
+		memoryStore:        cfg.MemoryStore,
+		constructorStore:   cfg.ConstructorStore,
+		llmClient:          cfg.LLMClient,
+		notifier:           cfg.Notifier,
+		workdirAbs:         cfg.WorkdirAbs,
+		defaultProfile:     cfg.DefaultProfile,
+		soulService:        cfg.SoulService,
+		projectTeamSvc:     cfg.ProjectTeamSvc,
+		projectRegistrySvc: cfg.ProjectRegistrySvc,
+		broadcaster:        cfg.Broadcaster,
+		cmdCh:              make(chan supervisorCmd, 256),
+		handles:            map[string]*runHandle{},
+		snapshots:          map[string]runStateSnapshot{},
 	}
 }
 
@@ -468,6 +484,11 @@ func (s *runtimeSupervisor) Run(ctx context.Context) {
 
 	repairTicker := time.NewTicker(10 * time.Second)
 	defer repairTicker.Stop()
+	reconcileTicker := time.NewTicker(s.reconcileInterval)
+	defer reconcileTicker.Stop()
+	if err := s.reconcileRegisteredProjects(ctx, true); err != nil {
+		slog.Error("runtime supervisor desired-state startup reconcile failed", "component", "supervisor", "error", err)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -479,6 +500,10 @@ func (s *runtimeSupervisor) Run(ctx context.Context) {
 			s.handleTaskWake(ctx)
 		case <-repairTicker.C:
 			s.maybeRepairRoutingDrift(ctx)
+		case <-reconcileTicker.C:
+			if err := s.reconcileRegisteredProjects(ctx, false); err != nil {
+				slog.Error("runtime supervisor desired-state reconcile failed", "component", "supervisor", "error", err)
+			}
 		}
 	}
 }
@@ -527,9 +552,9 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 				if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
 					run.Runtime.Role = role
 					// Best-effort: save run state; errors are logged but not fatal
-		if err := s.sessionService.SaveRun(ctx, run); err != nil {
-			slog.Debug("failed to save run on stop", "runID", run.RunID, "error", err)
-		}
+					if err := s.sessionService.SaveRun(ctx, run); err != nil {
+						slog.Debug("failed to save run on stop", "runID", run.RunID, "error", err)
+					}
 				}
 			}
 		}
@@ -2104,11 +2129,11 @@ func (s *runtimeSupervisor) startManagedWorkerLoop(parent context.Context, cfg s
 		defer orderedEmitter.Close()
 		// Keep cleanup independent from workerCtx cancellation so runtime resources always release.
 		defer func() {
-		// Best-effort: runtime shutdown during cleanup
-		if err := rt.Shutdown(context.Background()); err != nil {
-			slog.Debug("runtime shutdown error", "error", err)
-		}
-	}()
+			// Best-effort: runtime shutdown during cleanup
+			if err := rt.Shutdown(context.Background()); err != nil {
+				slog.Debug("runtime shutdown error", "error", err)
+			}
+		}()
 		defer cancel()
 		if wakeCancel != nil {
 			defer wakeCancel()
@@ -2170,9 +2195,9 @@ func (s *runtimeSupervisor) startManagedWorkerLoop(parent context.Context, cfg s
 					strings.TrimSpace(s.resolved.ReasoningSummary),
 				)
 				// Best-effort: set reasoning configuration
-		if err := workerSession.SetReasoning(workerCtx, targetEffort, targetSummary); err != nil {
-			slog.Debug("failed to set reasoning", "error", err)
-		}
+				if err := workerSession.SetReasoning(workerCtx, targetEffort, targetSummary); err != nil {
+					slog.Debug("failed to set reasoning", "error", err)
+				}
 			}
 		}
 

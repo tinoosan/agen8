@@ -2,6 +2,8 @@
 
 This document explains how Agen8 resolves runtime configuration, how first-run onboarding works, and how to run reliably in server/headless environments.
 
+This file is separate from the project desired-state manifest at `.agen8/agen8.yaml`. For desired team reconciliation, see [docs/agen8-yaml.md](agen8-yaml.md).
+
 ## Where `config.toml` lives
 
 Default path:

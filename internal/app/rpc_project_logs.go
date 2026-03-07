@@ -26,6 +26,12 @@ func registerProjectHandlers(s *RPCServer, reg methodRegistry) error {
 			return addBoundHandler[protocol.ProjectDeleteTeamsParams, protocol.ProjectDeleteTeamsResult](reg, protocol.MethodProjectDeleteTeams, false, s.projectDeleteTeams)
 		},
 		func() error {
+			return addBoundHandler[protocol.ProjectDiffParams, protocol.ProjectDiffResult](reg, protocol.MethodProjectDiff, false, s.projectDiff)
+		},
+		func() error {
+			return addBoundHandler[protocol.ProjectApplyParams, protocol.ProjectDiffResult](reg, protocol.MethodProjectApply, false, s.projectApply)
+		},
+		func() error {
 			return addBoundHandler[protocol.LogsQueryParams, protocol.LogsQueryResult](reg, protocol.MethodLogsQuery, false, s.logsQuery)
 		},
 		func() error {
@@ -85,8 +91,29 @@ func (s *RPCServer) projectListTeams(ctx context.Context, p protocol.ProjectList
 	if err != nil {
 		return protocol.ProjectListTeamsResult{}, err
 	}
+	var diff protocol.ProjectDiffResult
+	if s.runtimeState != nil {
+		diff, _ = s.runtimeState.DiffProject(ctx, projectRoot)
+	}
 	out := make([]protocol.ProjectTeamSummary, 0, len(teams))
 	for _, summary := range teams {
+		desiredEnabled := summary.DesiredEnabled
+		reconcileStatus := strings.TrimSpace(summary.ReconcileStatus)
+		for _, desired := range diff.DesiredTeams {
+			if strings.EqualFold(strings.TrimSpace(desired.Profile), strings.TrimSpace(summary.ProfileID)) {
+				desiredEnabled = desired.Enabled
+				break
+			}
+		}
+		for _, actual := range diff.ActualTeams {
+			if strings.TrimSpace(actual.TeamID) == strings.TrimSpace(summary.TeamID) {
+				reconcileStatus = strings.TrimSpace(actual.ReconcileStatus)
+				if reconcileStatus == "" {
+					reconcileStatus = strings.TrimSpace(diff.Status)
+				}
+				break
+			}
+		}
 		out = append(out, protocol.ProjectTeamSummary{
 			ProjectID:        strings.TrimSpace(summary.ProjectID),
 			ProjectRoot:      strings.TrimSpace(summary.ProjectRoot),
@@ -98,6 +125,9 @@ func (s *RPCServer) projectListTeams(ctx context.Context, p protocol.ProjectList
 			CreatedAt:        strings.TrimSpace(summary.CreatedAt),
 			UpdatedAt:        strings.TrimSpace(summary.UpdatedAt),
 			ManifestPresent:  summary.ManifestPresent,
+			DesiredEnabled:   desiredEnabled,
+			ReconcileStatus:  reconcileStatus,
+			ManagedBy:        strings.TrimSpace(summary.ManagedBy),
 		})
 	}
 	return protocol.ProjectListTeamsResult{Teams: out}, nil
@@ -177,6 +207,28 @@ func (s *RPCServer) projectDeleteTeams(ctx context.Context, p protocol.ProjectDe
 		DeletedTeamIDs:    deletedTeamIDs,
 		DeletedSessionIDs: deletedSessionIDs,
 	}, nil
+}
+
+func (s *RPCServer) projectDiff(ctx context.Context, p protocol.ProjectDiffParams) (protocol.ProjectDiffResult, error) {
+	projectRoot, err := resolveProjectRootForRPC(strings.TrimSpace(p.Cwd), strings.TrimSpace(p.ProjectRoot))
+	if err != nil {
+		return protocol.ProjectDiffResult{}, err
+	}
+	if s.runtimeState == nil {
+		return protocol.ProjectDiffResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "runtime state is not configured"}
+	}
+	return s.runtimeState.DiffProject(ctx, projectRoot)
+}
+
+func (s *RPCServer) projectApply(ctx context.Context, p protocol.ProjectApplyParams) (protocol.ProjectDiffResult, error) {
+	projectRoot, err := resolveProjectRootForRPC(strings.TrimSpace(p.Cwd), strings.TrimSpace(p.ProjectRoot))
+	if err != nil {
+		return protocol.ProjectDiffResult{}, err
+	}
+	if s.runtimeState == nil {
+		return protocol.ProjectDiffResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "runtime state is not configured"}
+	}
+	return s.runtimeState.ApplyProject(ctx, projectRoot)
 }
 
 func (s *RPCServer) projectSetActiveSession(_ context.Context, p protocol.ProjectSetActiveSessionParams) (protocol.ProjectSetActiveSessionResult, error) {

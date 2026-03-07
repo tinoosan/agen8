@@ -12,6 +12,7 @@ import (
 	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/fsutil"
+	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
 func TestAttachCommand_RequiresSessionID(t *testing.T) {
@@ -225,6 +226,77 @@ func TestProjectStatus_DoesNotShowDefaultFields(t *testing.T) {
 	for _, unwanted := range []string{"default_team", "default_profile"} {
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("status unexpectedly contains %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+func TestProjectApply_RequiresInitializedProject(t *testing.T) {
+	base := t.TempDir()
+	prevWorkDir := workDir
+	workDir = base
+	t.Cleanup(func() { workDir = prevWorkDir })
+
+	err := projectApplyCmd.RunE(projectApplyCmd, nil)
+	if err == nil {
+		t.Fatalf("expected error for uninitialized project")
+	}
+	if !strings.Contains(err.Error(), "project is not initialized") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestProjectApply_PrintsAppliedDiff(t *testing.T) {
+	base := t.TempDir()
+	prevDataDir := dataDir
+	prevWorkDir := workDir
+	prevApply := rpcProjectApplyFn
+	dataDir = base
+	workDir = base
+	rpcProjectApplyFn = func(_ context.Context, projectRoot string) (protocol.ProjectDiffResult, error) {
+		return protocol.ProjectDiffResult{
+			ProjectRoot: projectRoot,
+			ProjectID:   "p1",
+			Converged:   false,
+			Status:      "reconciling",
+			Actions: []protocol.ProjectReconcileAction{{
+				Action:  "spawn",
+				Profile: "dev_team",
+				Reason:  "desired team is missing",
+			}},
+		}, nil
+	}
+	t.Cleanup(func() {
+		dataDir = prevDataDir
+		workDir = prevWorkDir
+		rpcProjectApplyFn = prevApply
+	})
+
+	if _, err := app.InitProject(base, app.ProjectConfig{ProjectID: "p1"}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	buf := new(strings.Builder)
+	projectApplyCmd.SetOut(buf)
+	projectApplyCmd.SetErr(buf)
+	projectApplyCmd.SetContext(context.Background())
+	t.Cleanup(func() {
+		projectApplyCmd.SetOut(nil)
+		projectApplyCmd.SetErr(nil)
+		projectApplyCmd.SetContext(context.Background())
+	})
+	if err := projectApplyCmd.RunE(projectApplyCmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"applied=true",
+		"project_id=p1",
+		"desired_converged=false",
+		"desired_status=reconciling",
+		"action=spawn profile=dev_team team=- reason=desired team is missing",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
 }

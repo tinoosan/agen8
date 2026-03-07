@@ -432,6 +432,9 @@ type ProjectTeamSummary struct {
 	CreatedAt        string `json:"createdAt,omitempty"`
 	UpdatedAt        string `json:"updatedAt,omitempty"`
 	ManifestPresent  bool   `json:"manifestPresent,omitempty"`
+	DesiredEnabled   bool   `json:"desiredEnabled,omitempty"`
+	ReconcileStatus  string `json:"reconcileStatus,omitempty"`
+	ManagedBy        string `json:"managedBy,omitempty"`
 }
 
 type ProjectListTeamsResult struct {
@@ -452,6 +455,41 @@ type ProjectDeleteTeamsResult struct {
 	ProjectRoot       string   `json:"projectRoot,omitempty"`
 	DeletedTeamIDs    []string `json:"deletedTeamIds,omitempty"`
 	DeletedSessionIDs []string `json:"deletedSessionIds,omitempty"`
+}
+
+type ProjectDiffParams struct {
+	Cwd         string `json:"cwd,omitempty"`
+	ProjectRoot string `json:"projectRoot,omitempty"`
+}
+
+type ProjectApplyParams struct {
+	Cwd         string `json:"cwd,omitempty"`
+	ProjectRoot string `json:"projectRoot,omitempty"`
+}
+
+type ProjectDesiredTeam struct {
+	Profile          string `json:"profile,omitempty"`
+	Enabled          bool   `json:"enabled,omitempty"`
+	OverrideInterval string `json:"overrideInterval,omitempty"`
+}
+
+type ProjectReconcileAction struct {
+	Action  string `json:"action,omitempty"`
+	Profile string `json:"profile,omitempty"`
+	TeamID  string `json:"teamId,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Managed bool   `json:"managed,omitempty"`
+}
+
+type ProjectDiffResult struct {
+	ProjectRoot  string                   `json:"projectRoot,omitempty"`
+	ProjectID    string                   `json:"projectId,omitempty"`
+	DesiredTeams []ProjectDesiredTeam     `json:"desiredTeams,omitempty"`
+	ActualTeams  []ProjectTeamSummary     `json:"actualTeams,omitempty"`
+	Actions      []ProjectReconcileAction `json:"actions,omitempty"`
+	Converged    bool                     `json:"converged"`
+	Status       string                   `json:"status,omitempty"`
+	Error        string                   `json:"error,omitempty"`
 }
 
 type ProjectSetActiveSessionParams struct {

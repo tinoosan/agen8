@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -43,7 +44,21 @@ var initCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		cfg, err := effectiveConfig(cmd)
+		if err == nil {
+			registrySvc := app.NewProjectRegistryService(cfg)
+			_, _ = registrySvc.RegisterProject(cmd.Context(), app.ProjectRegistrySummary{
+				ProjectRoot:  strings.TrimSpace(ctx.RootDir),
+				ProjectID:    strings.TrimSpace(ctx.Config.ProjectID),
+				ManifestPath: filepath.Join(strings.TrimSpace(ctx.RootDir), app.ProjectDirName, app.ProjectDesiredStateFilename),
+				Enabled:      true,
+				Metadata: map[string]any{
+					"source": "project.init",
+				},
+			})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Initialized %s in %s\n", app.ProjectDirName, ctx.RootDir)
+		fmt.Fprintf(cmd.OutOrStdout(), "Created %s\n", filepath.Join(app.ProjectDirName, app.ProjectDesiredStateFilename))
 		return nil
 	},
 }

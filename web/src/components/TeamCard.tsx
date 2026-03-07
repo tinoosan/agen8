@@ -33,6 +33,24 @@ const statusLabelColor: Record<string, string> = {
   done: 'var(--blue)',
 }
 
+function getReconcileBadge(team: ProjectTeamSummary): { label: string; color: string; bg: string; border: string } | null {
+  const status = String(team.reconcileStatus ?? '').trim().toLowerCase()
+  if (!status) return null
+  if (status === 'converged') {
+    return { label: 'Converged', color: 'var(--green)', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.28)' }
+  }
+  if (status === 'reconciling') {
+    return { label: 'Reconciling', color: 'var(--amber)', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.26)' }
+  }
+  if (status === 'failed') {
+    return { label: 'Failed', color: 'var(--red)', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.26)' }
+  }
+  if (status === 'drifting') {
+    return { label: 'Drifting', color: 'var(--red)', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.26)' }
+  }
+  return null
+}
+
 export default function TeamCard({ team }: TeamCardProps) {
   const { setFocusedTeamId } = useStore()
   const statusQuery = useTeamStatus(team.teamId)
@@ -48,6 +66,7 @@ export default function TeamCard({ team }: TeamCardProps) {
 
   const roleSummary = data?.roles?.slice(0, 5) ?? []
   const taskCount = data !== undefined ? data.active + data.pending : null
+  const reconcileBadge = getReconcileBadge(team)
 
   async function handleDelete(e: React.MouseEvent) {
     e.stopPropagation()
@@ -96,6 +115,23 @@ export default function TeamCard({ team }: TeamCardProps) {
         }}>
           {statusLabel[cardStatus]}
         </span>
+        {reconcileBadge && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: '3px 7px',
+              borderRadius: 999,
+              color: reconcileBadge.color,
+              background: reconcileBadge.bg,
+              border: `1px solid ${reconcileBadge.border}`,
+              whiteSpace: 'nowrap',
+            }}
+            title={team.desiredEnabled ? 'Desired-state managed team' : 'Desired-state reconciliation status'}
+          >
+            {reconcileBadge.label}
+          </span>
+        )}
         <button
           onClick={handleDelete}
           className="btn-ghost-danger"

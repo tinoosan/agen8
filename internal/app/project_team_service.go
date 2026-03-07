@@ -27,6 +27,10 @@ type ProjectTeamSummary struct {
 	CreatedAt        string
 	UpdatedAt        string
 	ManifestPresent  bool
+	DesiredEnabled   bool
+	ReconcileStatus  string
+	ManagedBy        string
+	Metadata         map[string]any
 }
 
 type legacyProjectTeam struct {
@@ -104,6 +108,10 @@ func (s *ProjectTeamService) UnregisterTeam(ctx context.Context, projectRoot, te
 }
 
 func (s *ProjectTeamService) ListTeams(ctx context.Context, projectRoot string) ([]ProjectTeamSummary, error) {
+	return s.ListByProject(ctx, projectRoot)
+}
+
+func (s *ProjectTeamService) ListByProject(ctx context.Context, projectRoot string) ([]ProjectTeamSummary, error) {
 	if s == nil {
 		return nil, fmt.Errorf("project team service is nil")
 	}
@@ -146,6 +154,17 @@ func (s *ProjectTeamService) GetTeam(ctx context.Context, projectRoot, teamID st
 				return ProjectTeamSummary{}, fmt.Errorf("%w for project %s; run `agen8 project migrate-teams`", ErrProjectTeamsMigrationRequired, projectRoot)
 			}
 		}
+		return ProjectTeamSummary{}, err
+	}
+	return s.toSummary(ctx, record), nil
+}
+
+func (s *ProjectTeamService) SetStatus(ctx context.Context, projectRoot, teamID, status string, metadataPatch map[string]any) (ProjectTeamSummary, error) {
+	if s == nil {
+		return ProjectTeamSummary{}, fmt.Errorf("project team service is nil")
+	}
+	record, err := implstore.UpdateProjectTeamStatus(ctx, s.cfg, strings.TrimSpace(projectRoot), strings.TrimSpace(teamID), normalizeProjectTeamStatus(status), metadataPatch)
+	if err != nil {
 		return ProjectTeamSummary{}, err
 	}
 	return s.toSummary(ctx, record), nil
@@ -271,6 +290,16 @@ func (s *ProjectTeamService) toSummary(ctx context.Context, record implstore.Pro
 		Status:           normalizeProjectTeamStatus(record.Status),
 		CreatedAt:        strings.TrimSpace(record.CreatedAt),
 		UpdatedAt:        strings.TrimSpace(record.UpdatedAt),
+		Metadata:         record.Metadata,
+	}
+	if managedBy, _ := record.Metadata["managedBy"].(string); strings.TrimSpace(managedBy) != "" {
+		summary.ManagedBy = strings.TrimSpace(managedBy)
+	}
+	if desiredEnabled, ok := record.Metadata["desiredEnabled"].(bool); ok {
+		summary.DesiredEnabled = desiredEnabled
+	}
+	if reconcileStatus, _ := record.Metadata["reconcileStatus"].(string); strings.TrimSpace(reconcileStatus) != "" {
+		summary.ReconcileStatus = strings.TrimSpace(reconcileStatus)
 	}
 	if s.manifestStore != nil {
 		if manifest, err := s.manifestStore.Load(ctx, summary.TeamID); err == nil && manifest != nil {

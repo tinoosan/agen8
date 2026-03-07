@@ -267,6 +267,27 @@ func DeleteProjectTeam(ctx context.Context, cfg config.Config, projectRoot, team
 	return nil
 }
 
+func UpdateProjectTeamStatus(ctx context.Context, cfg config.Config, projectRoot, teamID, status string, metadata map[string]any) (ProjectTeamRecord, error) {
+	record, err := LoadProjectTeam(ctx, cfg, projectRoot, teamID)
+	if err != nil {
+		return ProjectTeamRecord{}, err
+	}
+	record.Status = strings.TrimSpace(status)
+	if metadata != nil {
+		if record.Metadata == nil {
+			record.Metadata = map[string]any{}
+		}
+		for k, v := range metadata {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			record.Metadata[k] = v
+		}
+	}
+	return UpsertProjectTeam(ctx, cfg, record)
+}
+
 func DeleteTeamScopedData(ctx context.Context, cfg config.Config, teamID string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
