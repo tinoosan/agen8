@@ -189,8 +189,15 @@ export default function ModelPicker() {
                       </span>
                     )}
                     {(model.inputPerM != null || model.outputPerM != null) && (
-                      <span style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
-                        {formatPrice(model.inputPerM)} / {formatPrice(model.outputPerM)}
+                      <span style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        fontSize: 10, whiteSpace: 'nowrap',
+                        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                        borderRadius: 'var(--r-sm)', padding: '1px 6px',
+                      }}>
+                        <span style={{ color: 'var(--green)' }}>{formatPrice(model.inputPerM)}</span>
+                        <span style={{ color: 'var(--text-4)' }}>/</span>
+                        <span style={{ color: 'var(--amber)' }}>{formatPrice(model.outputPerM)}</span>
                       </span>
                     )}
                   </button>
