@@ -131,15 +131,16 @@ func ResolveReviewerRole(prof *profile.Profile, coordinatorRole string) string {
 }
 
 // BuildManifest builds a Manifest from role records and metadata.
-func BuildManifest(teamID, profileID, coordinatorRole, coordinatorRunID, teamModel string, roles []RoleRecord, createdAt string) Manifest {
+func BuildManifest(teamID, profileID, coordinatorRole, coordinatorRunID, teamModel string, roles []RoleRecord, desiredReplicasByRole map[string]int, createdAt string) Manifest {
 	return Manifest{
-		TeamID:          strings.TrimSpace(teamID),
-		ProfileID:       strings.TrimSpace(profileID),
-		TeamModel:       strings.TrimSpace(teamModel),
-		CoordinatorRole: strings.TrimSpace(coordinatorRole),
-		CoordinatorRun:  strings.TrimSpace(coordinatorRunID),
-		Roles:           roles,
-		CreatedAt:       strings.TrimSpace(createdAt),
+		TeamID:                strings.TrimSpace(teamID),
+		ProfileID:             strings.TrimSpace(profileID),
+		TeamModel:             strings.TrimSpace(teamModel),
+		CoordinatorRole:       strings.TrimSpace(coordinatorRole),
+		CoordinatorRun:        strings.TrimSpace(coordinatorRunID),
+		Roles:                 roles,
+		DesiredReplicasByRole: desiredReplicasByRole,
+		CreatedAt:             strings.TrimSpace(createdAt),
 	}
 }
 

@@ -1,7 +1,7 @@
 import { useStore, type Theme, type ActiveView } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
-import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, LayoutGrid, BarChart3, ScrollText } from 'lucide-react'
+import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, LayoutGrid, BarChart3, ScrollText, Coins } from 'lucide-react'
 
 function ThemePicker() {
   const { theme, setTheme } = useStore()
@@ -31,7 +31,16 @@ function TotalCost({ teamIds }: { teamIds: string[] }) {
   const total = statuses.reduce((sum, s) => sum + (s.data?.totalCostUSD ?? 0), 0)
   if (total === 0) return null
   return (
-    <span style={{ fontSize: 12, color: 'var(--text-3)', letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums' }}>
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      fontSize: 12, fontWeight: 600,
+      color: 'var(--amber)',
+      background: 'var(--amber-dim)',
+      padding: '3px 10px', borderRadius: 999,
+      letterSpacing: '-0.01em',
+      fontVariantNumeric: 'tabular-nums',
+    }}>
+      <Coins size={12} />
       ${total.toFixed(2)}
     </span>
   )

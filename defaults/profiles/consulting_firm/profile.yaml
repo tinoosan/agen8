@@ -24,6 +24,7 @@ team:
             goal: "Produce a consolidated engagement progress brief from completed role outputs."
     - roleRef: ../base/roles/worker-web.yaml
       name: strategy-analyst
+      replicas: 1
       description: Performs strategic analysis — competitive positioning, market sizing, and business case evaluation.
       prompts:
         systemPromptPath: strategy-analyst-prompt.md
@@ -33,6 +34,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-web.yaml
       name: market-researcher
+      replicas: 1
       description: Conducts primary and secondary market research to inform strategic recommendations.
       prompts:
         systemPromptPath: market-researcher-prompt.md
@@ -42,6 +44,7 @@ team:
         - planning
     - roleRef: ../base/roles/worker-web.yaml
       name: data-analyst
+      replicas: 1
       description: Crunches numbers, builds models, and turns raw data into insights that support recommendations.
       prompts:
         systemPromptPath: data-analyst-prompt.md
@@ -56,6 +59,7 @@ team:
         - automation
     - roleRef: ../base/roles/worker-web.yaml
       name: deliverable-writer
+      replicas: 1
       description: Produces polished strategy decks, memos, and executive presentations. Reviews delegated work and provides quality feedback.
       prompts:
         systemPromptPath: deliverable-writer-prompt.md
@@ -69,6 +73,7 @@ team:
         - planning
     - roleRef: ../base/roles/worker-web.yaml
       name: industry-specialist
+      replicas: 1
       description: Provides deep domain expertise on specific industries, trends, and regulatory environments.
       prompts:
         systemPromptPath: industry-specialist-prompt.md

@@ -138,7 +138,7 @@ function AgentRow({ agent }: { agent: EnrichedAgent }) {
         <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-2)' }} className="mono">
           {agent.model || '—'}
         </td>
-        <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
+        <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--amber)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
           {formatCost(agent.runTotalCostUSD)}
         </td>
         <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
@@ -238,7 +238,10 @@ function TeamSection({ team }: { team: ProjectTeamSummary }) {
               <Activity size={10} />
               {data.active} active
             </span>
-            <span>{formatCost(data.totalCostUSD)}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--amber)', fontWeight: 600 }}>
+              <Coins size={10} />
+              {formatCost(data.totalCostUSD)}
+            </span>
           </div>
         )}
       </div>

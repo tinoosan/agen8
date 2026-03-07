@@ -4,7 +4,7 @@ import { rpcCall } from '../lib/rpc'
 import { useQueryClient } from '@tanstack/react-query'
 import PulseDot from './PulseDot'
 import type { ProjectTeamSummary } from '../lib/types'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Coins } from 'lucide-react'
 
 interface TeamCardProps {
   team: ProjectTeamSummary
@@ -154,7 +154,15 @@ export default function TeamCard({ team }: TeamCardProps) {
           {taskCount !== null && (
             <span>{taskCount} task{taskCount !== 1 ? 's' : ''}</span>
           )}
-          {costStr && <span>{costStr}</span>}
+          {costStr && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              color: 'var(--amber)', fontWeight: 600,
+            }}>
+              <Coins size={11} />
+              {costStr}
+            </span>
+          )}
           {!data && <div className="skeleton" style={{ width: 60, height: 12 }} />}
         </div>
       </div>

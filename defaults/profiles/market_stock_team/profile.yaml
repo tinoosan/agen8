@@ -39,6 +39,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-web.yaml
       name: market-researcher
+      replicas: 1
       description: Investigates macro themes, sector rotation, and broad market conditions.
       prompts:
         systemPromptPath: market-researcher-prompt.md
@@ -48,6 +49,7 @@ team:
         - hybrid-web
     - roleRef: ../base/roles/worker-web.yaml
       name: stock-researcher
+      replicas: 1
       description: Analyzes company fundamentals, catalysts, and valuation signals.
       prompts:
         systemPromptPath: stock-researcher-prompt.md
@@ -56,6 +58,7 @@ team:
         - financial-analysis
         - market-monitoring
     - name: report-writer
+      replicas: 1
       model: moonshotai/kimi-k2.5
       codeExecOnly: true
       allowedTools:
@@ -69,6 +72,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-web.yaml
       name: risk-analyst
+      replicas: 1
       description: Assesses portfolio risk, correlation exposure, and downside scenarios across positions. Reviews delegated work and provides quality feedback.
       prompts:
         systemPromptPath: risk-analyst-prompt.md
@@ -78,6 +82,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-web.yaml
       name: quant-researcher
+      replicas: 1
       description: Builds data-driven models, screens for signals, and backtests quantitative strategies.
       prompts:
         systemPromptPath: quant-researcher-prompt.md

@@ -267,7 +267,16 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 		cleanupStart()
 		return protocol.SessionStartResult{}, err
 	}
-	manifest := team.BuildManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, manifestRoles, time.Now().UTC().Format(time.RFC3339Nano))
+	desiredReplicas := make(map[string]int)
+	for _, role := range teamRoles {
+		if role.Replicas != nil && *role.Replicas >= 1 && !role.Coordinator {
+			desiredReplicas[strings.TrimSpace(role.Name)] = *role.Replicas
+		}
+	}
+	if len(desiredReplicas) == 0 {
+		desiredReplicas = nil
+	}
+	manifest := team.BuildManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, manifestRoles, desiredReplicas, time.Now().UTC().Format(time.RFC3339Nano))
 	if err := srv.manifestStore.Save(ctx, manifest); err != nil {
 		cleanupStart()
 		return protocol.SessionStartResult{}, err

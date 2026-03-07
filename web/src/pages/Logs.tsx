@@ -4,7 +4,7 @@ import { useTeamStatus } from '../hooks/useTeamStatus'
 import { useTeamManifest } from '../hooks/useTeamStatus'
 import { useLogEvents } from '../hooks/useLogEvents'
 import type { EventRecord } from '../lib/types'
-import { ChevronRight, Search, ArrowDown, Filter } from 'lucide-react'
+import { ChevronRight, Search, ArrowDown, ArrowUp, Filter } from 'lucide-react'
 
 /* ── Kind / type helpers (shared with ActivityFeed) ────── */
 
@@ -180,6 +180,7 @@ export default function Logs() {
   const [roleFilter, setRoleFilter] = useState<string>('')
   const [categoryFilter, setCategoryFilter] = useState<string>('')
   const [errorsOnly, setErrorsOnly] = useState(false)
+  const [sortDesc, setSortDesc] = useState(false)
 
   // Find runId for role filter
   const filterRunId = useMemo(() => {
@@ -194,7 +195,7 @@ export default function Logs() {
     sessionId: filterRunId ? undefined : sessionId,
     runId: filterRunId ?? undefined,
     limit: 500,
-    sortDesc: false,
+    sortDesc,
   })
   const events = logQuery.data ?? []
 
@@ -386,7 +387,21 @@ export default function Logs() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-panel)', zIndex: 1 }}>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Time', 'Role', 'Type', 'Message'].map(h => (
+                <th
+                  onClick={() => { setSortDesc(d => !d); if (!sortDesc) setAutoScroll(false) }}
+                  style={{
+                    padding: '8px 10px', fontSize: 9, fontWeight: 600,
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                    color: 'var(--text-3)', textAlign: 'left',
+                    borderBottom: '1px solid var(--border)',
+                    cursor: 'pointer', userSelect: 'none',
+                    display: 'flex', alignItems: 'center', gap: 4,
+                  }}
+                >
+                  Time
+                  {sortDesc ? <ArrowDown size={10} /> : <ArrowUp size={10} />}
+                </th>
+                {['Role', 'Type', 'Message'].map(h => (
                   <th key={h} style={{
                     padding: '8px 10px', fontSize: 9, fontWeight: 600,
                     textTransform: 'uppercase', letterSpacing: '0.06em',

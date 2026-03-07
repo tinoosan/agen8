@@ -6,6 +6,8 @@ import RoleTranscript from '../components/RoleTranscript'
 import ContextPanel from '../components/ContextPanel'
 import MailSlideOver from '../components/MailSlideOver'
 import ArtifactsSlideOver from '../components/ArtifactsSlideOver'
+import PlanSlideOver from '../components/PlanSlideOver'
+import ModelPicker from '../components/ModelPicker'
 import PulseDot from '../components/PulseDot'
 import { useTeamStatus } from '../hooks/useTeamStatus'
 
@@ -14,7 +16,7 @@ interface TeamFocusProps {
 }
 
 export default function TeamFocus({ teamId }: TeamFocusProps) {
-  const { mailOpen, artifactsOpen, focusedRole } = useStore()
+  const { mailOpen, artifactsOpen, planOpen, modelPickerTarget, focusedRole } = useStore()
   const manifestQuery = useTeamManifest(teamId)
   const statusQuery = useTeamStatus(teamId)
   const manifest = manifestQuery.data
@@ -113,6 +115,8 @@ export default function TeamFocus({ teamId }: TeamFocusProps) {
       {/* Slide-over panels */}
       {mailOpen && <MailSlideOver teamId={teamId} />}
       {artifactsOpen && <ArtifactsSlideOver teamId={teamId} threadId={threadId} />}
+      {planOpen && <PlanSlideOver teamId={teamId} threadId={threadId} />}
+      {modelPickerTarget && <ModelPicker />}
     </div>
   )
 }

@@ -16,6 +16,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-code.yaml
       name: cto
+      replicas: 1
       description: Owns technical architecture, builds the product, and ships working software.
       prompts:
         systemPromptPath: cto-prompt.md
@@ -25,6 +26,7 @@ team:
         - automation
     - roleRef: ../base/roles/worker-web.yaml
       name: growth-lead
+      replicas: 1
       description: Researches markets, acquires users, and runs marketing and outreach campaigns.
       prompts:
         systemPromptPath: growth-lead-prompt.md
@@ -35,6 +37,7 @@ team:
         - automation
     - roleRef: ../base/roles/worker-web.yaml
       name: finance-ops
+      replicas: 1
       description: Manages business model, budgets, revenue tracking, and operational finances.
       prompts:
         systemPromptPath: finance-ops-prompt.md
@@ -44,6 +47,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-web.yaml
       name: designer
+      replicas: 1
       description: Owns product design, branding, landing pages, and visual identity.
       prompts:
         systemPromptPath: designer-prompt.md
@@ -53,6 +57,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-web.yaml
       name: operations-lead
+      replicas: 1
       description: Manages day-to-day operations, vendor relationships, processes, and logistics. Reviews delegated work and provides quality feedback.
       prompts:
         systemPromptPath: operations-lead-prompt.md

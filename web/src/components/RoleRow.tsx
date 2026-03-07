@@ -1,6 +1,6 @@
 import type { TeamRoleStatus } from '../lib/types'
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Activity, Cpu, DollarSign, Eye } from 'lucide-react'
+import { ChevronDown, ChevronRight, Activity, Cpu, DollarSign, Eye, Pencil } from 'lucide-react'
 
 interface RoleRowProps {
   role: TeamRoleStatus
@@ -10,7 +10,10 @@ interface RoleRowProps {
     model?: string
   }
   onViewTranscript?: (role: string) => void
+  onChangeModel?: (role: string) => void
   isActive?: boolean
+  replicaCount?: number
+  desiredReplicas?: number
 }
 
 function inferStatus(info: string): 'active' | 'idle' | 'pending' | 'failed' | 'done' {
@@ -22,7 +25,7 @@ function inferStatus(info: string): 'active' | 'idle' | 'pending' | 'failed' | '
   return 'active'
 }
 
-export default function RoleRow({ role, stats, onViewTranscript, isActive: isFocused }: RoleRowProps) {
+export default function RoleRow({ role, stats, onViewTranscript, onChangeModel, isActive: isFocused, replicaCount, desiredReplicas }: RoleRowProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const status = inferStatus(role.info)
 
@@ -68,8 +71,24 @@ export default function RoleRow({ role, stats, onViewTranscript, isActive: isFoc
           color: status === 'active' ? 'var(--text-1)' : 'var(--text-3)',
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
+          display: 'flex', alignItems: 'center', gap: 6,
         }}>
           {role.role.replace(/-/g, ' ')}
+          {(replicaCount != null && replicaCount > 1 || desiredReplicas != null && desiredReplicas > 1) && (() => {
+            const actual = replicaCount ?? 1
+            const desired = desiredReplicas ?? actual
+            const atTarget = actual >= desired
+            return (
+              <span style={{
+                fontSize: 9, fontWeight: 700, padding: '0 5px',
+                borderRadius: 999, letterSpacing: 0, textTransform: 'none',
+                background: atTarget ? 'var(--accent-dim)' : 'var(--amber-dim)',
+                color: atTarget ? 'var(--accent)' : 'var(--amber)',
+              }}>
+                {atTarget ? `x${actual}` : `${actual}/${desired}`}
+              </span>
+            )
+          })()}
         </div>
 
         {/* Chevron */}
@@ -102,6 +121,13 @@ export default function RoleRow({ role, stats, onViewTranscript, isActive: isFoc
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
               <Cpu size={12} style={{ opacity: 0.6 }} />
               <span className="truncate">{stats.model}</span>
+              {onChangeModel && (
+                <Pencil
+                  size={10}
+                  style={{ opacity: 0.4, cursor: 'pointer', flexShrink: 0 }}
+                  onClick={(e) => { e.stopPropagation(); onChangeModel(role.role) }}
+                />
+              )}
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
@@ -109,8 +135,8 @@ export default function RoleRow({ role, stats, onViewTranscript, isActive: isFoc
             <span>{stats.tokens.toLocaleString()} tokens</span>
           </div>
           {stats.cost > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
-              <DollarSign size={12} style={{ opacity: 0.6 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--amber)', fontWeight: 600 }}>
+              <DollarSign size={12} style={{ opacity: 0.8 }} />
               <span>${stats.cost.toFixed(4)} total cost</span>
             </div>
           )}

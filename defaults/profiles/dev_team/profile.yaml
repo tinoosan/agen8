@@ -16,6 +16,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-code.yaml
       name: backend-engineer
+      replicas: 1
       description: Designs APIs, data models, and server-side logic.
       prompts:
         systemPromptPath: backend-engineer-prompt.md
@@ -25,6 +26,7 @@ team:
         - data-engineering
     - roleRef: ../base/roles/worker-code.yaml
       name: frontend-engineer
+      replicas: 1
       description: Builds user interfaces, client-side logic, and user-facing features.
       prompts:
         systemPromptPath: frontend-engineer-prompt.md
@@ -33,6 +35,7 @@ team:
         - planning
     - roleRef: ../base/roles/worker-code.yaml
       name: qa-engineer
+      replicas: 1
       description: Writes tests, finds bugs, validates features against acceptance criteria. Reviews delegated work and provides quality feedback.
       prompts:
         systemPromptPath: qa-engineer-prompt.md
@@ -50,6 +53,7 @@ team:
         - automation
     - roleRef: ../base/roles/worker-code.yaml
       name: devops-engineer
+      replicas: 1
       description: Manages infrastructure, CI/CD pipelines, deployments, and monitoring.
       prompts:
         systemPromptPath: devops-engineer-prompt.md
@@ -59,6 +63,7 @@ team:
         - planning
     - roleRef: ../base/roles/worker-web.yaml
       name: ux-researcher
+      replicas: 1
       description: Researches user needs, evaluates usability, and informs product decisions with evidence.
       prompts:
         systemPromptPath: ux-researcher-prompt.md

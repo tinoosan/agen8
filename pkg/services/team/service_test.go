@@ -91,7 +91,7 @@ func TestBuildManifest(t *testing.T) {
 		{RoleName: "ceo", RunID: "run-1", SessionID: "sess-1"},
 		{RoleName: "writer", RunID: "run-2", SessionID: "sess-2"},
 	}
-	m := BuildManifest("team-1", "profile-1", "ceo", "run-1", "gpt-5", roles, "2025-01-01T00:00:00Z")
+	m := BuildManifest("team-1", "profile-1", "ceo", "run-1", "gpt-5", roles, nil, "2025-01-01T00:00:00Z")
 	if m.TeamID != "team-1" || m.ProfileID != "profile-1" || m.CoordinatorRole != "ceo" || m.CoordinatorRun != "run-1" || m.TeamModel != "gpt-5" {
 		t.Fatalf("manifest = %+v", m)
 	}

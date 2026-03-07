@@ -39,6 +39,7 @@ func TestProjectTeamService_RequiresMigrationForLegacyProject(t *testing.T) {
 		"run-legacy",
 		"openai/gpt-5-mini",
 		[]team.RoleRecord{{RoleName: "lead", RunID: "run-legacy", SessionID: sess.SessionID}},
+		nil,
 		now.Format(time.RFC3339Nano),
 	)); err != nil {
 		t.Fatalf("Save manifest: %v", err)
@@ -77,6 +78,7 @@ func TestProjectTeamService_MigrateProject(t *testing.T) {
 		"run-legacy",
 		"openai/gpt-5-mini",
 		[]team.RoleRecord{{RoleName: "lead", RunID: "run-legacy", SessionID: sess.SessionID}},
+		nil,
 		now.Format(time.RFC3339Nano),
 	)); err != nil {
 		t.Fatalf("Save manifest: %v", err)

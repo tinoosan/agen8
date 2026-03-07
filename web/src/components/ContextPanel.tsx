@@ -1,9 +1,9 @@
 import { useStore } from '../lib/store'
-import { useTeamStatus } from '../hooks/useTeamStatus'
+import { useTeamStatus, useTeamManifest } from '../hooks/useTeamStatus'
 import { useMail } from '../hooks/useMail'
 import RoleRow from './RoleRow'
 import ActivityFeed from './ActivityFeed'
-import { Mail, FolderOpen } from 'lucide-react'
+import { Mail, FolderOpen, ListChecks } from 'lucide-react'
 import { useRuntimeState } from '../hooks/useRuntimeState'
 
 interface ContextPanelProps {
@@ -12,15 +12,24 @@ interface ContextPanelProps {
 }
 
 export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
-  const { setMailOpen, setArtifactsOpen, focusedRole, setFocusedRole } = useStore()
+  const { setMailOpen, setArtifactsOpen, setPlanOpen, setModelPickerTarget, focusedRole, setFocusedRole } = useStore()
   const statusQuery = useTeamStatus(teamId)
+  const manifestQuery = useTeamManifest(teamId)
   const runtimeQuery = useRuntimeState(threadId || '')
   const { badgeCount } = useMail(teamId)
   const roles = statusQuery.data?.roles ?? []
   const isLoading = statusQuery.isLoading
+  const manifest = manifestQuery.data
 
   const roleByRunId = statusQuery.data?.roleByRunId || {}
   const statsByRole: Record<string, { tokens: number; cost: number; model?: string }> = {}
+
+  // Compute actual replica counts from manifest roles
+  const replicaCountByRole: Record<string, number> = {}
+  for (const r of manifest?.roles ?? []) {
+    replicaCountByRole[r.roleName] = (replicaCountByRole[r.roleName] || 0) + 1
+  }
+  const desiredReplicasByRole = manifest?.desiredReplicasByRole ?? {}
 
   for (const run of runtimeQuery.data?.runs || []) {
     const role = roleByRunId[run.runId] || '(coordinator)'
@@ -65,7 +74,10 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
                 role={role}
                 stats={statsByRole[role.role]}
                 onViewTranscript={setFocusedRole}
+                onChangeModel={threadId ? (r) => setModelPickerTarget({ role: r, threadId: threadId! }) : undefined}
                 isActive={focusedRole === role.role}
+                replicaCount={replicaCountByRole[role.role]}
+                desiredReplicas={desiredReplicasByRole[role.role]}
               />
             ))}
           </div>
@@ -106,6 +118,13 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
         >
           <FolderOpen size={14} />
           Files
+        </button>
+        <button
+          className="action-tray-btn"
+          onClick={() => setPlanOpen(true)}
+        >
+          <ListChecks size={14} />
+          Plan
         </button>
       </div>
     </div>

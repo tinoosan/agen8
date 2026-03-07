@@ -22,6 +22,12 @@ interface AppStore {
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
 
+  planOpen: boolean
+  setPlanOpen: (open: boolean) => void
+
+  modelPickerTarget: { role: string; threadId: string } | null
+  setModelPickerTarget: (target: { role: string; threadId: string } | null) => void
+
   theme: Theme
   setTheme: (theme: Theme) => void
 }
@@ -36,7 +42,7 @@ function loadTheme(): Theme {
 
 export const useStore = create<AppStore>((set) => ({
   focusedTeamId: null,
-  setFocusedTeamId: (teamId) => set({ focusedTeamId: teamId, focusedRole: null, mailOpen: false, artifactsOpen: false }),
+  setFocusedTeamId: (teamId) => set({ focusedTeamId: teamId, focusedRole: null, mailOpen: false, artifactsOpen: false, planOpen: false, modelPickerTarget: null }),
 
   focusedRole: null,
   setFocusedRole: (role) => set({ focusedRole: role }),
@@ -52,6 +58,12 @@ export const useStore = create<AppStore>((set) => ({
 
   paletteOpen: false,
   setPaletteOpen: (open) => set({ paletteOpen: open }),
+
+  planOpen: false,
+  setPlanOpen: (open) => set({ planOpen: open }),
+
+  modelPickerTarget: null,
+  setModelPickerTarget: (target) => set({ modelPickerTarget: target }),
 
   theme: loadTheme(),
   setTheme: (theme) => {

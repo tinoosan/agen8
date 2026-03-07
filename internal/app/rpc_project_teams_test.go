@@ -88,7 +88,7 @@ func TestRPCServer_ProjectDeleteTeams_RemovesAllTeamsForProject(t *testing.T) {
 		}
 		if err := manifestStore.Save(context.Background(), team.BuildManifest(
 			teamID, "startup", "lead", runID, "openai/gpt-5-mini",
-			[]team.RoleRecord{{RoleName: "lead", RunID: runID, SessionID: sessionID}}, "",
+			[]team.RoleRecord{{RoleName: "lead", RunID: runID, SessionID: sessionID}}, nil, "",
 		)); err != nil {
 			t.Fatalf("SaveManifest(%s): %v", teamID, err)
 		}

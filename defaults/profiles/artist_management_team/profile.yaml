@@ -31,6 +31,7 @@ team:
             interval: 24h
             goal: "Produce a consolidated activity brief from completed role outputs."
     - name: marketing-strategist
+      replicas: 1
       model: moonshotai/kimi-k2.5
       codeExecOnly: true
       allowedTools:
@@ -48,6 +49,7 @@ team:
         - reporting
         - automation
     - name: release-coordinator
+      replicas: 1
       model: moonshotai/kimi-k2.5
       codeExecOnly: true
       allowedTools:
@@ -64,6 +66,7 @@ team:
         - automation
         - reporting
     - name: business-manager
+      replicas: 1
       model: moonshotai/kimi-k2.5
       codeExecOnly: true
       allowedTools:
@@ -80,6 +83,7 @@ team:
         - planning
         - reporting
     - name: creative-director
+      replicas: 1
       model: moonshotai/kimi-k2.5
       codeExecOnly: true
       allowedTools:
@@ -98,6 +102,7 @@ team:
         - hybrid-web
         - reporting
     - name: touring-events-manager
+      replicas: 1
       model: moonshotai/kimi-k2.5
       codeExecOnly: true
       allowedTools:

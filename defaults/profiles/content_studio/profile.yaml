@@ -23,6 +23,7 @@ team:
             interval: 24h
             goal: "Produce a consolidated content pipeline brief from completed role outputs."
     - name: writer
+      replicas: 1
       model: moonshotai/kimi-k2.5
       codeExecOnly: true
       allowedTools:
@@ -36,6 +37,7 @@ team:
         - reporting
     - roleRef: ../base/roles/worker-web.yaml
       name: researcher
+      replicas: 1
       description: Investigates topics, gathers data, and produces fact-checked source briefs for writers.
       prompts:
         systemPromptPath: researcher-prompt.md
@@ -45,6 +47,7 @@ team:
         - market-monitoring
     - roleRef: ../base/roles/worker-web.yaml
       name: distribution-strategist
+      replicas: 1
       description: Plans and executes content distribution across channels for maximum reach.
       prompts:
         systemPromptPath: distribution-strategist-prompt.md
@@ -54,6 +57,7 @@ team:
         - market-monitoring
     - roleRef: ../base/roles/worker-web.yaml
       name: seo-specialist
+      replicas: 1
       description: Optimizes content for search engines — keyword research, on-page SEO, and performance tracking. Reviews delegated work and provides quality feedback.
       prompts:
         systemPromptPath: seo-specialist-prompt.md
@@ -69,6 +73,7 @@ team:
         - automation
     - roleRef: ../base/roles/worker-web.yaml
       name: social-media-manager
+      replicas: 1
       description: Creates social content, plans posting schedules, and tracks engagement metrics.
       prompts:
         systemPromptPath: social-media-manager-prompt.md

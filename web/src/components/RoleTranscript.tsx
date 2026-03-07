@@ -305,7 +305,12 @@ export default function RoleTranscript({
             </span>
           )}
           {(cost ?? 0) > 0 && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              color: 'var(--amber)', fontWeight: 600,
+              background: 'var(--amber-dim)',
+              padding: '2px 8px', borderRadius: 999,
+            }}>
               <Coins size={10} /> ${cost!.toFixed(4)}
             </span>
           )}

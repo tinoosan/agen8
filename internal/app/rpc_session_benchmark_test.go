@@ -170,6 +170,7 @@ func BenchmarkActivityList_50Runs10kActivities(b *testing.B) {
 			runIDs[0],
 			"openai/gpt-5-mini",
 			roles,
+			nil,
 			time.Now().UTC().Format(time.RFC3339Nano),
 		),
 	}

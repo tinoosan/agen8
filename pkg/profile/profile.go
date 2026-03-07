@@ -187,6 +187,7 @@ type RoleConfig struct {
 	Coordinator             bool            `yaml:"coordinator,omitempty"`
 	AllowSubagents          bool            `yaml:"allowSubagents,omitempty"`
 	Heartbeat               HeartbeatConfig `yaml:"heartbeat,omitempty"`
+	Replicas                *int            `yaml:"replicas,omitempty"`
 }
 
 func (r ReviewerConfig) EffectiveName() string {
@@ -392,6 +393,12 @@ func (p Profile) Validate(profileDir string) error {
 				if strings.TrimSpace(hb.Goal) == "" {
 					return fmt.Errorf("%s (%s): heartbeat job %s goal is required", ref, role.Name, hb.Name)
 				}
+			}
+			if role.Replicas != nil && *role.Replicas < 1 {
+				return fmt.Errorf("%s (%s): replicas must be >= 1", ref, role.Name)
+			}
+			if role.Coordinator && role.Replicas != nil {
+				return fmt.Errorf("%s (%s): coordinator role cannot have replicas", ref, role.Name)
 			}
 			key := strings.ToLower(role.Name)
 			if _, ok := seenRoles[key]; ok {
@@ -610,6 +617,9 @@ func mergeRoleConfig(base, src *RoleConfig) {
 	}
 	if len(src.Heartbeat.Jobs) > 0 || src.Heartbeat.Enabled != nil {
 		base.Heartbeat = src.Heartbeat
+	}
+	if src.Replicas != nil {
+		base.Replicas = src.Replicas
 	}
 }
 

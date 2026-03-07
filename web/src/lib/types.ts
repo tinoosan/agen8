@@ -274,3 +274,28 @@ export interface EventRecord {
   data?: Record<string, string>
   origin?: string
 }
+
+// ---- Plan types ----
+
+export interface PlanGetResult {
+  checklist: string
+  checklistErr?: string
+  details: string
+  detailsErr?: string
+  sourceRuns: string[]
+}
+
+// ---- Model types ----
+
+export interface ModelEntry {
+  id: string
+  provider: string
+  inputPerM?: number
+  outputPerM?: number
+  isReasoning?: boolean
+}
+
+export interface ModelListResult {
+  providers: { name: string; count: number }[]
+  models: ModelEntry[]
+}

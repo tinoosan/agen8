@@ -55,6 +55,7 @@ func TestTeamDeleteService_DeleteTeam_RemovesRelatedData(t *testing.T) {
 		run.RunID,
 		"openai/gpt-5-mini",
 		[]team.RoleRecord{{RoleName: "lead", RunID: run.RunID, SessionID: sess.SessionID}},
+		nil,
 		"",
 	)); err != nil {
 		t.Fatalf("Save manifest: %v", err)
