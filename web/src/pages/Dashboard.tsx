@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
+import { useStore } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
 import { useTeamManifest } from '../hooks/useTeamStatus'
@@ -297,7 +298,8 @@ function TeamSection({ team }: { team: ProjectTeamSummary }) {
 /* ── Dashboard page ──────────────────────────────── */
 
 export default function Dashboard() {
-  const teamsQuery = useProjectTeams()
+  const focusedProjectRoot = useStore(s => s.focusedProjectRoot)
+  const teamsQuery = useProjectTeams(focusedProjectRoot)
   const teams = teamsQuery.data ?? []
 
   const statusQueries = useQueries({

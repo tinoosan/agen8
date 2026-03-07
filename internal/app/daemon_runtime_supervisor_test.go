@@ -1789,3 +1789,100 @@ func TestRuntimeSupervisor_ComputeProjectDiff_OverridesStaleReconcilingMetadataW
 		t.Fatalf("actual team reconcileStatus=%q want converged", got)
 	}
 }
+
+func TestRuntimeSupervisor_ApplyProject_DeletesManagedTeamRemovedFromDesiredState(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(projectRoot): %v", err)
+	}
+	if _, err := InitProject(projectRoot, ProjectConfig{ProjectID: "p1"}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	manifestStore := team.NewFileManifestStore(cfg)
+	projectTeamSvc := NewProjectTeamService(cfg, sessionSvc, manifestStore)
+
+	sess := types.NewSession("desired-state delete")
+	sess.SessionID = "sess-delete"
+	sess.ProjectRoot = projectRoot
+	sess.TeamID = "team-delete"
+	sess.Profile = "dev_team"
+	run := types.NewRun("desired-state delete", 8*1024, sess.SessionID)
+	run.RunID = "run-delete"
+	run.Status = types.RunStatusRunning
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := sessionSvc.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	if err := manifestStore.Save(context.Background(), team.BuildManifest(
+		sess.TeamID, "dev_team", "lead", run.RunID, "openai/gpt-5-mini",
+		[]team.RoleRecord{{RoleName: "lead", RunID: run.RunID, SessionID: sess.SessionID}}, nil, "",
+	)); err != nil {
+		t.Fatalf("SaveManifest: %v", err)
+	}
+	if _, err := projectTeamSvc.RegisterTeam(context.Background(), ProjectTeamSummary{
+		ProjectRoot:      projectRoot,
+		ProjectID:        "p1",
+		TeamID:           sess.TeamID,
+		ProfileID:        "dev_team",
+		PrimarySessionID: sess.SessionID,
+		CoordinatorRunID: run.RunID,
+		Status:           "active",
+	}); err != nil {
+		t.Fatalf("RegisterTeam: %v", err)
+	}
+	if _, err := projectTeamSvc.SetStatus(context.Background(), projectRoot, sess.TeamID, "active", map[string]any{
+		"managedBy":      desiredStateManagedBy,
+		"desiredEnabled": true,
+	}); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+
+	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+		Cfg:            cfg,
+		SessionService: sessionSvc,
+		ProjectTeamSvc: projectTeamSvc,
+	})
+	injectHandle(supervisor, run.RunID, &managedRuntime{
+		runID:     run.RunID,
+		sessionID: sess.SessionID,
+		cancel:    func() {},
+		done:      make(chan struct{}),
+	}, handleStateRunning)
+
+	if err := writeProjectDesiredState(projectRoot, ProjectDesiredState{
+		ProjectID: "p1",
+		Teams:     []ProjectDesiredStateTeam{},
+	}); err != nil {
+		t.Fatalf("writeProjectDesiredState: %v", err)
+	}
+
+	out, err := supervisor.ApplyProject(context.Background(), projectRoot)
+	if err != nil {
+		t.Fatalf("ApplyProject: %v", err)
+	}
+	foundDelete := false
+	for _, action := range out.Actions {
+		if action.Action == "delete" && action.TeamID == sess.TeamID {
+			foundDelete = true
+			break
+		}
+	}
+	if !foundDelete {
+		t.Fatalf("expected delete action for removed team, got %+v", out.Actions)
+	}
+	if _, err := projectTeamSvc.GetTeam(context.Background(), projectRoot, sess.TeamID); err == nil {
+		t.Fatalf("expected team record to be deleted")
+	}
+	if _, err := manifestStore.Load(context.Background(), sess.TeamID); err != nil {
+		t.Fatalf("Load manifest after delete: %v", err)
+	} else if _, statErr := os.Stat(fsutil.GetTeamDir(cfg.DataDir, sess.TeamID)); !os.IsNotExist(statErr) {
+		t.Fatalf("expected team directory to be removed, stat err=%v", statErr)
+	}
+}

@@ -1,7 +1,7 @@
 import { useStore, type Theme, type ActiveView } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
-import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, FolderKanban, LayoutGrid, BarChart3, ScrollText, Coins } from 'lucide-react'
+import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, LayoutGrid, BarChart3, ScrollText, Coins } from 'lucide-react'
 
 function ThemePicker() {
   const { theme, setTheme } = useStore()
@@ -57,16 +57,16 @@ function ActiveCount({ teamIds }: { teamIds: string[] }) {
   )
 }
 
-function NavTabs() {
+/** Tabs shown inside a focused project: Teams | Dashboard | Logs */
+function ProjectNavTabs() {
   const { activeView, setActiveView } = useStore()
   const tabs: { value: ActiveView; label: string; icon: typeof LayoutGrid }[] = [
-    { value: 'project', label: 'Projects', icon: FolderKanban },
     { value: 'overview', label: 'Teams', icon: LayoutGrid },
     { value: 'dashboard', label: 'Dashboard', icon: BarChart3 },
     { value: 'logs', label: 'Logs', icon: ScrollText },
   ]
   return (
-    <div style={{ display: 'flex', gap: 2, marginLeft: 8 }}>
+    <div style={{ display: 'flex', gap: 2 }}>
       {tabs.map(({ value, label, icon: Icon }) => {
         const active = activeView === value
         return (
@@ -97,8 +97,8 @@ function NavTabs() {
 }
 
 export default function TopBar() {
-  const { focusedTeamId, setFocusedTeamId, focusedProjectRoot, setFocusedProjectRoot, activeView, setActiveView, setPaletteOpen } = useStore()
-  const teamsQuery = useProjectTeams()
+  const { focusedTeamId, setFocusedTeamId, focusedProjectRoot, setFocusedProjectRoot, setActiveView, setPaletteOpen } = useStore()
+  const teamsQuery = useProjectTeams(focusedProjectRoot)
   const teams = teamsQuery.data ?? []
   const teamIds = teams.map(t => t.teamId)
 
@@ -115,8 +115,6 @@ export default function TopBar() {
     }
   }
 
-  const showBackButton = focusedTeamId || (focusedProjectRoot && activeView !== 'project')
-
   return (
     <header style={{
       height: 48,
@@ -129,34 +127,56 @@ export default function TopBar() {
       position: 'relative', zIndex: 10,
       flexShrink: 0,
     }}>
-      {showBackButton ? (
+      {focusedTeamId ? (
+        /* Team focused: back to project's teams list */
         <button
           className="btn-ghost"
           onClick={handleBack}
           style={{ gap: 5, padding: '5px 10px', fontSize: 13, color: 'var(--text-2)' }}
         >
           <ChevronLeft size={14} />
-          <span>{focusedTeamId ? (projectLabel ?? 'Teams') : 'Projects'}</span>
+          <span>{projectLabel ?? 'Teams'}</span>
         </button>
-      ) : (
+      ) : focusedProjectRoot ? (
+        /* Project focused: back button + project name + scoped tabs */
         <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{
-              width: 24, height: 24, borderRadius: 7,
-              background: 'linear-gradient(135deg, #8b7bf8, #6366f1)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-            }}>
-              <Zap size={13} color="#fff" fill="#fff" strokeWidth={0} />
-            </div>
-            <span style={{
-              fontWeight: 600, fontSize: 15,
-              letterSpacing: '-0.03em',
-              color: 'var(--text-1)',
-            }}>agen8</span>
-          </div>
-          <NavTabs />
+          <button
+            className="btn-ghost"
+            onClick={handleBack}
+            style={{ gap: 5, padding: '5px 10px', fontSize: 13, color: 'var(--text-2)' }}
+          >
+            <ChevronLeft size={14} />
+            <span>Projects</span>
+          </button>
+          <div style={{ width: 1, height: 18, background: 'var(--border)', margin: '0 2px' }} />
+          <span style={{
+            fontWeight: 600, fontSize: 13,
+            color: 'var(--text-1)',
+            letterSpacing: '-0.02em',
+            maxWidth: 180,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {projectLabel}
+          </span>
+          <ProjectNavTabs />
         </>
+      ) : (
+        /* No project focused: logo only (Projects page) */
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{
+            width: 24, height: 24, borderRadius: 7,
+            background: 'linear-gradient(135deg, #8b7bf8, #6366f1)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Zap size={13} color="#fff" fill="#fff" strokeWidth={0} />
+          </div>
+          <span style={{
+            fontWeight: 600, fontSize: 15,
+            letterSpacing: '-0.03em',
+            color: 'var(--text-1)',
+          }}>agen8</span>
+        </div>
       )}
 
       <div style={{ flex: 1 }} />

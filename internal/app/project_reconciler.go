@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8/internal/storage"
 	"github.com/tinoosan/agen8/pkg/protocol"
+	"github.com/tinoosan/agen8/pkg/services/team"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -98,6 +99,18 @@ func (s *runtimeSupervisor) projectDiff(ctx context.Context, projectRoot string,
 		switch strings.TrimSpace(action.Action) {
 		case "spawn", "recreate":
 			if _, err := s.startDesiredProjectTeam(ctx, projectRoot, diff.ProjectID, strings.TrimSpace(action.Profile), strings.TrimSpace(action.TeamID)); err != nil {
+				return protocol.ProjectDiffResult{}, err
+			}
+		case "delete":
+			teamID := strings.TrimSpace(action.TeamID)
+			if teamID == "" {
+				continue
+			}
+			deleteSvc := NewTeamDeleteService(s.cfg, s.sessionService, team.NewFileManifestStore(s.cfg), s.projectTeamSvc)
+			if _, err := deleteSvc.DeleteTeam(ctx, TeamDeleteInput{
+				TeamID:      teamID,
+				ProjectRoot: projectRoot,
+			}); err != nil {
 				return protocol.ProjectDiffResult{}, err
 			}
 		case "stop":
@@ -245,11 +258,17 @@ func (s *runtimeSupervisor) computeProjectDiff(ctx context.Context, projectRoot 
 			return protocol.ProjectDiffResult{}, err
 		}
 		if runtimeState.running || runtimeState.paused || runtimeState.stale {
+			action := "delete"
+			reason := "managed team is absent from desired state"
+			if exists && !desired.Enabled {
+				action = "stop"
+				reason = "managed team is disabled in desired state"
+			}
 			out.Actions = append(out.Actions, protocol.ProjectReconcileAction{
-				Action:  "stop",
+				Action:  action,
 				Profile: strings.TrimSpace(team.ProfileID),
 				TeamID:  strings.TrimSpace(team.TeamID),
-				Reason:  "managed team is absent or disabled in desired state",
+				Reason:  reason,
 				Managed: true,
 			})
 			out.Converged = false

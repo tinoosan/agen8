@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useMemo } from 'react'
+import { useStore } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
 import { useTeamManifest } from '../hooks/useTeamStatus'
@@ -52,7 +53,8 @@ function formatTime(iso: string): string {
 
 function useTeamSessionId(teamId: string | null) {
   const manifestQuery = useTeamManifest(teamId)
-  const teams = useProjectTeams()
+  const focusedProjectRoot = useStore(s => s.focusedProjectRoot)
+  const teams = useProjectTeams(focusedProjectRoot)
   const team = teams.data?.find(t => t.teamId === teamId)
   return team?.primarySessionId ?? manifestQuery.data?.coordinatorThreadId ?? null
 }
@@ -157,7 +159,8 @@ function LogRow({ event, roleByRunId }: { event: EventRecord; roleByRunId: Recor
 /* ── Main Logs Page ───────────────────────────────────── */
 
 export default function Logs() {
-  const teamsQuery = useProjectTeams()
+  const focusedProjectRoot = useStore(s => s.focusedProjectRoot)
+  const teamsQuery = useProjectTeams(focusedProjectRoot)
   const teams = teamsQuery.data ?? []
 
   // Pick first team by default

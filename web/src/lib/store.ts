@@ -57,7 +57,11 @@ export const useStore = create<AppStore>((set) => ({
   setFocusedRole: (role) => set({ focusedRole: role }),
 
   activeView: 'project',
-  setActiveView: (view) => set({ activeView: view }),
+  setActiveView: (view) => set((state) => {
+    // Guard: can't navigate to team-scoped views without a project
+    if (view !== 'project' && !state.focusedProjectRoot) return { activeView: 'project' }
+    return { activeView: view }
+  }),
 
   mailOpen: false,
   setMailOpen: (open) => set({ mailOpen: open }),

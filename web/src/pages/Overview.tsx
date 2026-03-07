@@ -1,4 +1,5 @@
 import { useRef, useCallback } from 'react'
+import { useStore } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
@@ -27,7 +28,8 @@ function useAllTasks(teamIds: string[]) {
 }
 
 export default function Overview() {
-  const teamsQuery = useProjectTeams()
+  const focusedProjectRoot = useStore(s => s.focusedProjectRoot)
+  const teamsQuery = useProjectTeams(focusedProjectRoot)
   const teams = teamsQuery.data ?? []
   const teamIds = teams.map(t => t.teamId)
   const tasksQuery = useAllTasks(teamIds)

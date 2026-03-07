@@ -11,7 +11,7 @@ import ModelPicker from './components/ModelPicker'
 import ReasoningPicker from './components/ReasoningPicker'
 
 export default function App() {
-  const { focusedTeamId, paletteOpen, modelPickerTarget, reasoningPickerTarget, theme, activeView } = useStore()
+  const { focusedTeamId, focusedProjectRoot, paletteOpen, modelPickerTarget, reasoningPickerTarget, theme, activeView } = useStore()
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -37,7 +37,7 @@ export default function App() {
       <main className="app-main">
         {focusedTeamId ? (
           <TeamFocus teamId={focusedTeamId} />
-        ) : activeView === 'project' ? (
+        ) : !focusedProjectRoot ? (
           <Project />
         ) : activeView === 'dashboard' ? (
           <Dashboard />
