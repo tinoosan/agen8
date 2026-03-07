@@ -1,7 +1,7 @@
-import { useStore, type Theme } from '../lib/store'
+import { useStore, type Theme, type ActiveView } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
-import { Search, ChevronLeft, Zap, Sun, Moon, Monitor } from 'lucide-react'
+import { Search, ChevronLeft, Zap, Sun, Moon, Monitor, LayoutGrid, BarChart3 } from 'lucide-react'
 
 function ThemePicker() {
   const { theme, setTheme } = useStore()
@@ -48,6 +48,43 @@ function ActiveCount({ teamIds }: { teamIds: string[] }) {
   )
 }
 
+function NavTabs() {
+  const { activeView, setActiveView } = useStore()
+  const tabs: { value: ActiveView; label: string; icon: typeof LayoutGrid }[] = [
+    { value: 'overview', label: 'Teams', icon: LayoutGrid },
+    { value: 'dashboard', label: 'Dashboard', icon: BarChart3 },
+  ]
+  return (
+    <div style={{ display: 'flex', gap: 2, marginLeft: 8 }}>
+      {tabs.map(({ value, label, icon: Icon }) => {
+        const active = activeView === value
+        return (
+          <button
+            key={value}
+            onClick={() => setActiveView(value)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '5px 10px',
+              borderRadius: 'var(--r-md)',
+              border: 'none',
+              background: active ? 'var(--bg-active)' : 'transparent',
+              color: active ? 'var(--text-1)' : 'var(--text-3)',
+              fontSize: 12,
+              fontWeight: 500,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+              transition: 'color 0.15s, background 0.15s',
+            }}
+          >
+            <Icon size={12} />
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function TopBar() {
   const { focusedTeamId, setFocusedTeamId, setPaletteOpen } = useStore()
   const teamsQuery = useProjectTeams()
@@ -76,21 +113,24 @@ export default function TopBar() {
           <span>Teams</span>
         </button>
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            width: 24, height: 24, borderRadius: 7,
-            background: 'linear-gradient(135deg, #8b7bf8, #6366f1)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            <Zap size={13} color="#fff" fill="#fff" strokeWidth={0} />
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{
+              width: 24, height: 24, borderRadius: 7,
+              background: 'linear-gradient(135deg, #8b7bf8, #6366f1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <Zap size={13} color="#fff" fill="#fff" strokeWidth={0} />
+            </div>
+            <span style={{
+              fontWeight: 600, fontSize: 15,
+              letterSpacing: '-0.03em',
+              color: 'var(--text-1)',
+            }}>agen8</span>
           </div>
-          <span style={{
-            fontWeight: 600, fontSize: 15,
-            letterSpacing: '-0.03em',
-            color: 'var(--text-1)',
-          }}>agen8</span>
-        </div>
+          <NavTabs />
+        </>
       )}
 
       <div style={{ flex: 1 }} />

@@ -1,8 +1,9 @@
 import { useRef, useState, useEffect, useMemo } from 'react'
 import { useActivity } from '../hooks/useActivity'
+import { useStore } from '../lib/store'
 import type { ActivityEvent } from '../lib/types'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { ChevronRight, Activity } from 'lucide-react'
 
 interface ActivityFeedProps {
@@ -31,7 +32,6 @@ const kindColors: Record<string, { bg: string; fg: string }> = {
 /** Map raw internal kind strings to short, human-friendly labels. Returns null to hide the pill. */
 function humanizeKind(kind: string): string | null {
   const lower = kind.toLowerCase()
-  // known human-friendly mappings
   const map: Record<string, string> = {
     'fs_read': 'Read',
     'fs_write': 'Write',
@@ -58,9 +58,7 @@ function humanizeKind(kind: string): string | null {
     'error': 'Error',
   }
   if (map[lower]) return map[lower]
-  // fallback: if it contains underscores or dots, it's likely an internal name — hide it
   if (lower.includes('_') || lower.includes('.')) return null
-  // short labels like "done", "start" are fine as-is
   if (kind.length <= 8) return kind
   return null
 }
@@ -79,7 +77,7 @@ function getStatusClass(event: ActivityEvent): string {
   return 'ok'
 }
 
-/* ── Relative time ──────────────────────────────────── */
+/* ── Formatting helpers ──────────────────────────────── */
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -92,6 +90,18 @@ function relativeTime(iso: string): string {
   const h = Math.floor(m / 60)
   if (h < 24) return `${h}h`
   return `${Math.floor(h / 24)}d`
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  return `${(ms / 60_000).toFixed(1)}m`
+}
+
+/** Extract the basename from a file path */
+function basename(path: string): string {
+  const parts = path.split('/')
+  return parts[parts.length - 1] || path
 }
 
 /* ── Time gap detection for dividers ────────────────── */
@@ -131,13 +141,14 @@ function buildFeed(events: ActivityEvent[]): FeedEntry[] {
 
 /* ── Single event row ───────────────────────────────── */
 
-function renderJSONOrText(data: any): string {
+function renderJSONOrText(data: unknown): string {
   if (typeof data === 'string') return data
   return JSON.stringify(data, null, 2)
 }
 
 function EventRow({ event }: { event: ActivityEvent }) {
   const [expanded, setExpanded] = useState(false)
+  const { theme } = useStore()
   const eventRole = event.data?.role || event.data?.agent_role || ''
   const message = event.title || event.outputPreview || event.textPreview || ''
 
@@ -150,6 +161,23 @@ function EventRow({ event }: { event: ActivityEvent }) {
   const role = eventRole
   const statusClass = getStatusClass(event)
   const isError = event.status === 'error' || event.kind === 'error'
+  const isPending = statusClass === 'pending'
+  const kindLower = (event.kind ?? '').toLowerCase()
+
+  // Inline context: file path, command, spawned role, error
+  const inlinePath = event.path ? basename(event.path) : null
+  const inlineCommand = (kindLower === 'code_exec' || kindLower.includes('exec')) ? (event.data?.command || event.data?.cmd) : null
+  const inlineExitCode = event.data?.exit_code ?? event.data?.exitCode
+  const inlineSpawnRole = kindLower.includes('spawn') ? (event.data?.spawned_role || event.data?.role_name || event.data?.spawnedRole) : null
+  const inlineError = isError ? (event.error || event.data?.error) : null
+
+  // Duration
+  const duration = event.duration ?? (event.finishedAt && event.startedAt
+    ? new Date(event.finishedAt).getTime() - new Date(event.startedAt).getTime()
+    : null)
+
+  // Theme-aware syntax style
+  const syntaxStyle = theme === 'light' ? vs : vscDarkPlus
 
   // Build a rich detail object of all interesting payload fields to display when expanded.
   const detailsList = useMemo(() => {
@@ -160,7 +188,7 @@ function EventRow({ event }: { event: ActivityEvent }) {
       d['Code Executed'] = (
         <SyntaxHighlighter
           language={event.data?.language || 'javascript'}
-          style={vscDarkPlus}
+          style={syntaxStyle}
           customStyle={{ margin: 0, padding: '12px', fontSize: '11px', borderRadius: '4px', background: 'rgba(0,0,0,0.2)' }}
         >
           {event.data.code}
@@ -182,9 +210,10 @@ function EventRow({ event }: { event: ActivityEvent }) {
 
     if (event.path) d['Path'] = <span className="mono">{event.path}</span>
     if (event.outputPreview) d['Output'] = <span className="mono">{event.outputPreview}</span>
-    if (event.error) d['Error'] = <span className="mono">{event.error}</span>
+    if (event.error) d['Error'] = <span className="mono" style={{ color: 'var(--red)' }}>{event.error}</span>
     return d
-  }, [event])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event, syntaxStyle])
 
   const hasDetail = Object.keys(detailsList).length > 0
 
@@ -193,8 +222,15 @@ function EventRow({ event }: { event: ActivityEvent }) {
       className={`activity-row${hasDetail ? ' has-detail' : ''}${isError ? ' is-error' : ''}`}
       onClick={() => hasDetail && setExpanded(e => !e)}
     >
-      {/* Status dot */}
-      <div className={`status-dot ${statusClass}`} />
+      {/* Status indicator */}
+      {isPending ? (
+        <span className="spinner" style={{
+          width: 6, height: 6, flexShrink: 0, marginTop: 5,
+          borderWidth: 1.5,
+        }} />
+      ) : (
+        <div className={`status-dot ${statusClass}`} />
+      )}
 
       {/* Content */}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -236,10 +272,59 @@ function EventRow({ event }: { event: ActivityEvent }) {
             )
           })()}
 
+          {/* Inline file path */}
+          {inlinePath && (
+            <span className="mono" style={{ fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }}>
+              {inlinePath}
+            </span>
+          )}
+
+          {/* Inline command for exec events */}
+          {inlineCommand && (
+            <span className="mono truncate" style={{ fontSize: 10, color: 'var(--text-2)', maxWidth: 160 }}>
+              {inlineCommand}
+            </span>
+          )}
+
+          {/* Inline exit code */}
+          {inlineExitCode != null && (
+            <span className="mono" style={{
+              fontSize: 9, flexShrink: 0, fontWeight: 600,
+              color: String(inlineExitCode) === '0' ? 'var(--green)' : 'var(--red)',
+            }}>
+              {String(inlineExitCode) === '0' ? 'ok' : `exit ${inlineExitCode}`}
+            </span>
+          )}
+
+          {/* Inline spawned role */}
+          {inlineSpawnRole && (
+            <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 500 }}>
+              {inlineSpawnRole}
+            </span>
+          )}
+
           {/* Summary text */}
           <span className="truncate" style={{ fontSize: 12, color: 'var(--text-2)', flex: 1 }}>
             {summary}
           </span>
+
+          {/* Inline error (red, visible without expanding) */}
+          {inlineError && !expanded && (
+            <span className="truncate" style={{ fontSize: 11, color: 'var(--red)', maxWidth: 200, flexShrink: 1 }}>
+              {inlineError}
+            </span>
+          )}
+
+          {/* Duration */}
+          {duration != null && duration > 0 && (
+            <span style={{
+              fontSize: 10, color: 'var(--text-3)',
+              fontVariantNumeric: 'tabular-nums',
+              flexShrink: 0,
+            }}>
+              {formatDuration(duration)}
+            </span>
+          )}
 
           {/* Relative timestamp */}
           {event.startedAt && (

@@ -241,6 +241,30 @@ export interface RuntimeGetSessionStateResult {
   runs: RuntimeRunState[]
 }
 
+// ---- Agent / Dashboard types ----
+
+export interface AgentInfo {
+  agentId: string
+  runId: string
+  role: string
+  status: string
+  profile?: string
+  parentRunId?: string
+  spawnIndex?: number
+  createdAt?: string
+}
+
+export interface AgentListResult {
+  agents: AgentInfo[]
+}
+
+export interface SessionTotals {
+  totalTokensIn: number
+  totalTokensOut: number
+  totalTokens: number
+  totalCostUSD: number
+}
+
 export interface EventRecord {
   eventId: string
   runId: string

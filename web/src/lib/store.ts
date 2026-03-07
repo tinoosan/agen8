@@ -1,10 +1,14 @@
 import { create } from 'zustand'
 
 export type Theme = 'dark' | 'light' | 'dim'
+export type ActiveView = 'overview' | 'dashboard' | 'activity'
 
 interface AppStore {
   focusedTeamId: string | null
   setFocusedTeamId: (teamId: string | null) => void
+
+  activeView: ActiveView
+  setActiveView: (view: ActiveView) => void
 
   mailOpen: boolean
   setMailOpen: (open: boolean) => void
@@ -30,6 +34,9 @@ function loadTheme(): Theme {
 export const useStore = create<AppStore>((set) => ({
   focusedTeamId: null,
   setFocusedTeamId: (teamId) => set({ focusedTeamId: teamId, mailOpen: false, artifactsOpen: false }),
+
+  activeView: 'overview',
+  setActiveView: (view) => set({ activeView: view }),
 
   mailOpen: false,
   setMailOpen: (open) => set({ mailOpen: open }),

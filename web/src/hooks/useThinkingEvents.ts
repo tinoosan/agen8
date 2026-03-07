@@ -10,7 +10,7 @@ interface EventsListPaginatedResult {
 
 const THINKING_TYPES = ['model.thinking.start', 'model.thinking.summary', 'model.thinking.end']
 
-export function useThinkingEvents(runId: string | null, limit = 2000) {
+export function useThinkingEvents(runId: string | null, limit = 500) {
   const queryClient = useQueryClient()
   const key = ['events.listPaginated.thinking', runId ?? null, limit]
 
@@ -40,8 +40,8 @@ export function useThinkingEvents(runId: string | null, limit = 2000) {
       return all
     },
     enabled: !!runId,
-    refetchInterval: 1500,
-    staleTime: 1000,
+    refetchInterval: 3000,
+    staleTime: 2000,
     retry: false,
   })
 

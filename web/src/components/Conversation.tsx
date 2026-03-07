@@ -351,23 +351,35 @@ function thinkingEventsToEntries(events: EventRecord[]): ChatEntry[] {
     if (ts !== 0) return ts
     return a.eventId.localeCompare(b.eventId)
   })
-  const byStep = new Map<string, ChatEntry>()
+
+  // Each start..end forms a separate thinking block. Use a counter to
+  // create unique IDs even when the same step value is reused.
+  const entries: ChatEntry[] = []
+  let current: ChatEntry | null = null
+  let blockIndex = 0
+
   for (const ev of order) {
     const type = (ev.type ?? '').trim()
     const step = (ev.data?.step ?? '').trim()
     if (!step) continue
+
     if (type === 'model.thinking.start') {
-      if (!byStep.has(step)) {
-        byStep.set(step, {
-          id: `thinking:${step}`, kind: 'thought', text: '',
-          role: ev.data?.role?.trim() || ev.data?.agent_role?.trim() || 'agent',
-          createdAt: getTimestampMs(ev.timestamp), live: true, source: 'thinking',
-        })
+      // Close any prior unclosed block
+      if (current) {
+        if (!current.text.trim()) current.text = 'Thinking\u2026'
+        entries.push(current)
+      }
+      blockIndex++
+      current = {
+        id: `thinking:${step}:${blockIndex}`, kind: 'thought', text: '',
+        role: ev.data?.role?.trim() || ev.data?.agent_role?.trim() || 'agent',
+        createdAt: getTimestampMs(ev.timestamp), live: true, source: 'thinking',
       }
       continue
     }
-    const current = byStep.get(step)
+
     if (!current) continue
+
     if (type === 'model.thinking.summary') {
       const line = (ev.data?.text ?? '').trim()
       if (!line) continue
@@ -375,18 +387,22 @@ function thinkingEventsToEntries(events: EventRecord[]): ChatEntry[] {
       if (!current.role) current.role = ev.data?.role?.trim() || ev.data?.agent_role?.trim() || 'agent'
       continue
     }
+
     if (type === 'model.thinking.end') {
       if (!current.text.trim()) current.text = 'Reasoning used; provider did not return a summary.'
       current.live = false
+      entries.push(current)
+      current = null
     }
   }
-  return [...byStep.values()]
-    .map((entry) => {
-      if (entry.text.trim()) return entry
-      if (entry.live) return { ...entry, text: 'Thinking\u2026' }
-      return entry
-    })
-    .filter((entry) => entry.text.trim() !== '')
+
+  // Push any still-open block (currently streaming)
+  if (current) {
+    if (!current.text.trim()) current.text = 'Thinking\u2026'
+    entries.push(current)
+  }
+
+  return entries.filter((entry) => entry.text.trim() !== '')
 }
 
 function extractActivityText(event: ActivityEvent): string {
@@ -447,7 +463,7 @@ export default function Conversation({ threadId, teamId, coordinatorRole, coordi
   const { query: conversationQuery } = useConversation(threadId)
   const activityQuery = useActivity({ threadId, teamId, includeChildRuns: true, limit: 500 })
   const taskHistoryQuery = useTaskHistory({ threadId, teamId, limit: 500 })
-  const thinkingQuery = useThinkingEvents(coordinatorRunId, 2000)
+  const thinkingQuery = useThinkingEvents(coordinatorRunId)
   const artifactFilesQuery = useArtifactFiles(threadId, teamId)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -493,7 +509,7 @@ export default function Conversation({ threadId, teamId, coordinatorRole, coordi
     const grouped: ChatTurn[] = []
     for (const entry of entries) {
       const prev = grouped[grouped.length - 1]
-      if (prev && prev.kind === entry.kind && prev.role === entry.role && (entry.kind === 'agent' || entry.kind === 'thought')) {
+      if (prev && prev.kind === entry.kind && prev.role === entry.role && entry.kind === 'agent') {
         prev.texts.push(entry.text)
         if (entry.live) prev.live = true
         continue
