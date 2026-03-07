@@ -566,7 +566,15 @@ func (s *SQLiteTaskStore) CloseBatchAndHandoffAtomic(ctx context.Context, batchT
 
 	handoffTaskID = strings.TrimSpace(metadataString(metadata, "batchHandoffTaskId"))
 	if handoffTaskID == "" {
-		handoffTaskID = "review-handoff-" + batchTaskID
+		// Only fabricate fallback ID for team batches with a dedicated reviewer.
+		// Subagent batches and coordinator self-reviews don't need a handoff.
+		needsFallbackHandoff := source == "team.batch.callback" &&
+			strings.TrimSpace(destinationTeamID) != "" &&
+			strings.TrimSpace(assignedTo) != "" &&
+			strings.TrimSpace(assignedTo) != strings.TrimSpace(metadataString(metadata, "coordinatorRole"))
+		if needsFallbackHandoff {
+			handoffTaskID = "review-handoff-" + batchTaskID
+		}
 	}
 	if metadataBool(metadata["batchClosed"]) {
 		if err := tx.Commit(); err != nil {
@@ -675,29 +683,36 @@ func (s *SQLiteTaskStore) CloseBatchAndHandoffAtomic(ctx context.Context, batchT
 		handoffGoal += " Review summary: " + reviewSummaryPath + "."
 	}
 
-	handoffAssignedType := "agent"
-	handoffAssignedTo := strings.TrimSpace(runID)
-	handoffAssignedRole := ""
-	if strings.TrimSpace(destinationTeamID) != "" {
-		handoffAssignedType = "role"
-		handoffAssignedRole = coordinatorRole
-		handoffAssignedTo = coordinatorRole
+	// Handoff only when a dedicated reviewer (not coordinator) reviewed a team batch.
+	// Subagent batches and coordinator self-reviews don't need a handoff.
+	needsHandoff := source == "team.batch.callback" &&
+		strings.TrimSpace(destinationTeamID) != "" &&
+		strings.TrimSpace(assignedTo) != "" &&
+		strings.TrimSpace(assignedTo) != coordinatorRole
+
+	if needsHandoff {
+		handoffAssignedType := "role"
+		handoffAssignedRole := coordinatorRole
+		handoffAssignedTo := coordinatorRole
 		if coordinatorRunID, coordinatorSessionID := resolveCoordinatorRunForTeamTx(ctx, tx, strings.TrimSpace(destinationTeamID), coordinatorRole); coordinatorRunID != "" {
 			runID = coordinatorRunID
 			if strings.TrimSpace(coordinatorSessionID) != "" {
 				sessionID = coordinatorSessionID
 			}
 		}
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO tasks (
-			task_id, session_id, run_id, source_team_id, destination_team_id, team_id, assigned_role, assigned_to_type, assigned_to, claimed_by, role_snapshot, task_kind, created_by,
-			goal, inputs_json, priority, status, created_at, updated_at, metadata_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, handoffTaskID, strings.TrimSpace(sessionID), strings.TrimSpace(runID), strings.TrimSpace(sourceTeamID), strings.TrimSpace(destinationTeamID), strings.TrimSpace(destinationTeamID), strings.TrimSpace(handoffAssignedRole), handoffAssignedType, strings.TrimSpace(handoffAssignedTo), "", "", normalizeTaskKind("callback"), reviewerIdentity,
-		strings.TrimSpace(handoffGoal), string(handoffInputsJSON), 1, string(types.TaskStatusPending), nowRaw, nowRaw, string(handoffMetadataJSON))
-	if err != nil {
-		return "", 0, 0, 0, err
+		_, err = tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO tasks (
+				task_id, session_id, run_id, source_team_id, destination_team_id, team_id, assigned_role, assigned_to_type, assigned_to, claimed_by, role_snapshot, task_kind, created_by,
+				goal, inputs_json, priority, status, created_at, updated_at, metadata_json
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, handoffTaskID, strings.TrimSpace(sessionID), strings.TrimSpace(runID), strings.TrimSpace(sourceTeamID), strings.TrimSpace(destinationTeamID), strings.TrimSpace(destinationTeamID), strings.TrimSpace(handoffAssignedRole), handoffAssignedType, strings.TrimSpace(handoffAssignedTo), "", "", normalizeTaskKind("callback"), reviewerIdentity,
+			strings.TrimSpace(handoffGoal), string(handoffInputsJSON), 1, string(types.TaskStatusPending), nowRaw, nowRaw, string(handoffMetadataJSON))
+		if err != nil {
+			return "", 0, 0, 0, err
+		}
+	} else {
+		// Subagent flow or coordinator self-review: no handoff needed.
+		handoffTaskID = ""
 	}
 
 	metadata["batchClosed"] = true

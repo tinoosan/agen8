@@ -1092,7 +1092,8 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 	if preErr == nil && metadataBool(preBatch.Metadata, "batchClosed") {
 		handoffTaskID := strings.TrimSpace(metadataString(preBatch.Metadata, "batchHandoffTaskId"))
 		if handoffTaskID == "" {
-			handoffTaskID = "review-handoff-" + batchTaskID
+			// No handoff stored — subagent flow or coordinator self-review.
+			return "", nil
 		}
 		if handoffTask, err := m.store.GetTask(ctx, handoffTaskID); err == nil {
 			if _, err := m.ensureTaskMessage(ctx, handoffTask); err != nil {
@@ -1110,10 +1111,33 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(handoffTaskID) == "" {
-		return "", fmt.Errorf("atomic batch close did not return handoff task id")
-	}
 	closedBatch, batchErr := m.store.GetTask(ctx, batchTaskID)
+	if strings.TrimSpace(handoffTaskID) == "" {
+		// No handoff needed (subagent flow or coordinator self-review).
+		// Still emit batch-closed event and notify wake.
+		if m.events != nil {
+			now := time.Now().UTC()
+			_ = m.events.Append(ctx, types.EventRecord{
+				EventID:   uuid.NewString(),
+				Type:      "callback.batch.closed",
+				Message:   "Batch callback closed (no handoff needed)",
+				Timestamp: now,
+				Data: map[string]string{
+					"taskId":         batchTaskID,
+					"batchTaskId":    batchTaskID,
+					"approved":       fmt.Sprintf("%d", approved),
+					"retry":          fmt.Sprintf("%d", retried),
+					"escalate":       fmt.Sprintf("%d", escalated),
+					"reviewedBy":     reviewerIdentity,
+					"closeTimestamp": now.Format(time.RFC3339Nano),
+				},
+			})
+		}
+		if batchErr == nil {
+			m.notifyWake(closedBatch)
+		}
+		return "", nil
+	}
 	if m.events != nil {
 		now := time.Now().UTC()
 		decisionIDs := batchDecisionTaskIDs(closedBatch.Metadata)

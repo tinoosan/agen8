@@ -101,27 +101,14 @@ func TestTaskReview_Execute_BatchItemApprove(t *testing.T) {
 	if got := strings.TrimSpace(fmt.Sprint(updatedChild.Metadata["batchItemStatus"])); got != "approved" {
 		t.Fatalf("batchItemStatus=%q want approved", got)
 	}
-	handoff, err := cfg.store.GetTask(context.Background(), "review-handoff-callback-batch-parent-1")
-	if err != nil {
-		all, _ := cfg.store.ListTasks(context.Background(), state.TaskFilter{Limit: 100, SortBy: "created_at"})
-		ids := make([]string, 0, len(all))
-		for _, tk := range all {
-			ids = append(ids, tk.TaskID+":"+string(tk.Status))
-		}
-		t.Fatalf("expected handoff task: %v (tasks=%v)", err, ids)
+	// Subagent batch callbacks should NOT create a handoff task (spawner already reviewed).
+	_, err = cfg.store.GetTask(context.Background(), "review-handoff-callback-batch-parent-1")
+	if err == nil {
+		t.Fatal("expected no handoff task for subagent.batch.callback, but one was created")
 	}
-	if got := strings.TrimSpace(fmt.Sprint(handoff.Metadata["source"])); got != "review.handoff" {
-		t.Fatalf("handoff source=%q", got)
-	}
+	// Idempotent re-close should still succeed.
 	if _, err := tool.Execute(context.Background(), args); err != nil {
 		t.Fatalf("idempotent batch close should not fail: %v", err)
-	}
-	handoffAgain, err := cfg.store.GetTask(context.Background(), "review-handoff-callback-batch-parent-1")
-	if err != nil {
-		t.Fatalf("expected handoff task on re-run: %v", err)
-	}
-	if handoffAgain.TaskID != handoff.TaskID {
-		t.Fatalf("expected deterministic handoff id, got %q vs %q", handoffAgain.TaskID, handoff.TaskID)
 	}
 }
 
