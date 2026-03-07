@@ -8,7 +8,7 @@ import { useAgentList, type EnrichedAgent } from '../hooks/useAgentList'
 import PulseDot from '../components/PulseDot'
 import type { ProjectTeamSummary, TeamGetStatusResult } from '../lib/types'
 import { rpcCall } from '../lib/rpc'
-import { ChevronRight, Cpu, Coins, ListChecks, Users, Activity } from 'lucide-react'
+import { ChevronRight, Cpu, Coins, ListChecks, Users, Activity, ArrowRight, Layers, AlertCircle } from 'lucide-react'
 
 const DETACHED = 'detached-control'
 
@@ -39,13 +39,50 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`
 }
 
+/* ── Reconcile badge (inlined from TeamCard) ──────── */
+
+function getReconcileBadge(team: ProjectTeamSummary): { label: string; color: string; bg: string; border: string } | null {
+  const status = String(team.reconcileStatus ?? '').trim().toLowerCase()
+  if (!status) return null
+  if (status === 'converged') {
+    return { label: 'Converged', color: 'var(--green)', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.28)' }
+  }
+  if (status === 'reconciling') {
+    return { label: 'Reconciling', color: 'var(--amber)', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.26)' }
+  }
+  if (status === 'failed') {
+    return { label: 'Failed', color: 'var(--red)', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.26)' }
+  }
+  if (status === 'drifting') {
+    return { label: 'Drifting', color: 'var(--red)', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.26)' }
+  }
+  return null
+}
+
+/* ── Card status (inlined from TeamCard) ──────────── */
+
+function inferCardStatus(status?: string, active?: number): 'active' | 'idle' | 'failed' | 'done' {
+  if (status === 'running' || (active ?? 0) > 0) return 'active'
+  if (status === 'failed') return 'failed'
+  if (status === 'done' || status === 'stopped') return 'done'
+  return 'idle'
+}
+
+function cardStatusBorderColor(cardStatus: ReturnType<typeof inferCardStatus>): string {
+  if (cardStatus === 'active') return 'var(--green)'
+  if (cardStatus === 'failed') return 'var(--red)'
+  return 'var(--border)'
+}
+
 /* ── Summary bar ─────────────────────────────────── */
 
-function SummaryBar({ statuses }: { statuses: (TeamGetStatusResult | undefined)[] }) {
+function SummaryBar({ statuses, teamCount }: { statuses: (TeamGetStatusResult | undefined)[]; teamCount: number }) {
   const totals = statuses.reduce(
     (acc, s) => {
       if (!s) return acc
       acc.tokens += s.totalTokens
+      acc.tokensIn += s.totalTokensIn
+      acc.tokensOut += s.totalTokensOut
       acc.cost += s.totalCostUSD
       acc.pending += s.pending
       acc.active += s.active
@@ -53,14 +90,39 @@ function SummaryBar({ statuses }: { statuses: (TeamGetStatusResult | undefined)[
       acc.agents += (s.runIds?.length ?? 0)
       return acc
     },
-    { tokens: 0, cost: 0, pending: 0, active: 0, done: 0, agents: 0 },
+    { tokens: 0, tokensIn: 0, tokensOut: 0, cost: 0, pending: 0, active: 0, done: 0, agents: 0 },
   )
 
-  const cards = [
-    { icon: Users, label: 'Agents', value: String(totals.agents), color: 'var(--accent)' },
-    { icon: ListChecks, label: 'Tasks', value: `${totals.active} / ${totals.pending + totals.active + totals.done}`, color: 'var(--green)' },
-    { icon: Cpu, label: 'Tokens', value: formatTokens(totals.tokens), color: 'var(--blue)' },
-    { icon: Coins, label: 'Cost', value: formatCost(totals.cost), color: 'var(--amber)' },
+  const activeTeams = statuses.filter(s => s && s.active > 0).length
+  const connectedWorkers = totals.agents // approximation — agents with runs
+
+  const cards: { icon: typeof Users; label: string; value: string; sub: string; color: string }[] = [
+    {
+      icon: Layers, label: 'Teams', value: String(teamCount),
+      sub: `${activeTeams} active`,
+      color: 'var(--accent)',
+    },
+    {
+      icon: Users, label: 'Agents', value: String(totals.agents),
+      sub: `${connectedWorkers} connected`,
+      color: 'var(--green)',
+    },
+    {
+      icon: ListChecks, label: 'Tasks',
+      value: `${totals.active} / ${totals.pending + totals.active + totals.done}`,
+      sub: `${totals.pending} pending`,
+      color: 'var(--blue)',
+    },
+    {
+      icon: Cpu, label: 'Tokens', value: formatTokens(totals.tokens),
+      sub: `${formatTokens(totals.tokensIn)} in / ${formatTokens(totals.tokensOut)} out`,
+      color: 'var(--purple, var(--accent))',
+    },
+    {
+      icon: Coins, label: 'Cost', value: formatCost(totals.cost),
+      sub: teamCount > 1 ? `~${formatCost(totals.cost / teamCount)} / team` : '',
+      color: 'var(--amber)',
+    },
   ]
 
   return (
@@ -88,6 +150,11 @@ function SummaryBar({ statuses }: { statuses: (TeamGetStatusResult | undefined)[
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>
               {c.value}
             </div>
+            {c.sub && (
+              <div style={{ fontSize: 10, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums', marginTop: 1 }}>
+                {c.sub}
+              </div>
+            )}
           </div>
         </div>
       ))}
@@ -100,6 +167,8 @@ function SummaryBar({ statuses }: { statuses: (TeamGetStatusResult | undefined)[
 function AgentRow({ agent }: { agent: EnrichedAgent }) {
   const [expanded, setExpanded] = useState(false)
   const status = agentStatusDisplay(agent)
+
+  const workerColor = agent.workerPresent ? 'var(--green)' : 'var(--red)'
 
   return (
     <>
@@ -136,8 +205,22 @@ function AgentRow({ agent }: { agent: EnrichedAgent }) {
             </span>
           </div>
         </td>
+        <td style={{ padding: '8px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: workerColor, flexShrink: 0,
+            }} />
+            <span style={{
+              fontSize: 11, color: agent.workerPresent ? 'var(--text-2)' : 'var(--red)',
+              fontWeight: agent.workerPresent ? 400 : 500,
+            }}>
+              {agent.workerPresent ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
+        </td>
         <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-2)' }} className="mono">
-          {agent.model || '—'}
+          {agent.model || '\u2014'}
         </td>
         <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--amber)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
           {formatCost(agent.runTotalCostUSD)}
@@ -148,7 +231,7 @@ function AgentRow({ agent }: { agent: EnrichedAgent }) {
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={5} style={{ padding: '0 12px 10px 30px' }}>
+          <td colSpan={6} style={{ padding: '0 12px 10px 30px' }}>
             <div className="animate-fade-in" style={{
               background: 'var(--bg-surface)',
               borderRadius: 'var(--r-md)',
@@ -188,6 +271,7 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
 
 function TeamSection({ team }: { team: ProjectTeamSummary }) {
   const [open, setOpen] = useState(true)
+  const setFocusedTeamId = useStore(s => s.setFocusedTeamId)
   const statusQuery = useTeamStatus(team.teamId)
   const manifestQuery = useTeamManifest(team.teamId)
   const manifest = manifestQuery.data
@@ -197,47 +281,70 @@ function TeamSection({ team }: { team: ProjectTeamSummary }) {
   const agents = agentQuery.data ?? []
 
   const isActive = (data?.active ?? 0) > 0
+  const cardStatus = inferCardStatus(team.status, data?.active)
+  const borderColor = cardStatusBorderColor(cardStatus)
+  const reconcileBadge = getReconcileBadge(team)
+  const modelName = manifest?.teamModel
 
   return (
     <div style={{
       background: 'var(--bg-panel)',
       border: '1px solid var(--border)',
+      borderLeft: `3px solid ${borderColor}`,
       borderRadius: 'var(--r-lg)',
       overflow: 'hidden',
       marginBottom: 12,
     }}>
       {/* Team header */}
       <div
-        onClick={() => setOpen(o => !o)}
         style={{
           display: 'flex', alignItems: 'center', gap: 10,
           padding: '12px 16px',
-          cursor: 'pointer',
-          transition: 'background 0.12s',
         }}
-        className="row-hover"
       >
-        <ChevronRight
-          size={12}
-          style={{
-            color: 'var(--text-3)',
-            transform: open ? 'rotate(90deg)' : 'none',
-            transition: 'transform 0.15s',
-          }}
-        />
         <PulseDot status={isActive ? 'active' : 'idle'} size={7} />
-        <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
+        <span
+          onClick={(e) => { e.stopPropagation(); setFocusedTeamId(team.teamId) }}
+          style={{
+            fontWeight: 600, fontSize: 15, color: 'var(--text-1)', letterSpacing: '-0.02em',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+          }}
+          className="row-hover-inline"
+        >
           {manifest?.profileId ?? team.profileId ?? team.teamId.slice(0, 12)}
+          <ArrowRight size={12} style={{ color: 'var(--text-3)', opacity: 0.5 }} />
         </span>
+
+        {modelName && (
+          <span className="mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            {modelName}
+          </span>
+        )}
+
+        {reconcileBadge && (
+          <span style={{
+            fontSize: 10, fontWeight: 600,
+            padding: '2px 8px', borderRadius: 9999,
+            color: reconcileBadge.color,
+            background: reconcileBadge.bg,
+            border: `1px solid ${reconcileBadge.border}`,
+          }}>
+            {reconcileBadge.label}
+          </span>
+        )}
 
         <div style={{ flex: 1 }} />
 
         {data && (
-          <div style={{ display: 'flex', gap: 16, fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums' }}>
+          <div style={{ display: 'flex', gap: 16, fontSize: 11, color: 'var(--text-3)', fontVariantNumeric: 'tabular-nums', alignItems: 'center' }}>
             <span>{agents.length} agent{agents.length !== 1 ? 's' : ''}</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <Activity size={10} />
               {data.active} active
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Cpu size={10} />
+              {formatTokens(data.totalTokensIn)} in / {formatTokens(data.totalTokensOut)} out
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--amber)', fontWeight: 600 }}>
               <Coins size={10} />
@@ -245,6 +352,18 @@ function TeamSection({ team }: { team: ProjectTeamSummary }) {
             </span>
           </div>
         )}
+
+        <ChevronRight
+          size={12}
+          onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}
+          style={{
+            color: 'var(--text-3)',
+            transform: open ? 'rotate(90deg)' : 'none',
+            transition: 'transform 0.15s',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        />
       </div>
 
       {/* Agent table */}
@@ -252,22 +371,26 @@ function TeamSection({ team }: { team: ProjectTeamSummary }) {
         <div style={{ borderTop: '1px solid var(--border)' }}>
           {agents.length === 0 ? (
             <div style={{
-              padding: '20px 16px',
+              padding: '28px 16px',
               textAlign: 'center',
               fontSize: 12,
               color: 'var(--text-3)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
             }}>
               {agentQuery.isLoading ? (
                 <span className="spinner spinner-sm" />
               ) : (
-                'No agents registered'
+                <>
+                  <AlertCircle size={18} style={{ color: 'var(--text-3)', opacity: 0.5 }} />
+                  <span>No agents registered yet</span>
+                </>
               )}
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Role', 'Status', 'Model', 'Cost', 'Tokens'].map(h => (
+                  {['Role', 'Status', 'Worker', 'Model', 'Cost', 'Tokens'].map(h => (
                     <th key={h} style={{
                       padding: '6px 12px',
                       fontSize: 9,
@@ -329,7 +452,7 @@ export default function Dashboard() {
       </div>
 
       {/* Summary cards */}
-      <SummaryBar statuses={statuses} />
+      <SummaryBar statuses={statuses} teamCount={teams.length} />
 
       {/* Team sections */}
       {teamsQuery.isLoading && (
@@ -342,12 +465,15 @@ export default function Dashboard() {
 
       {!teamsQuery.isLoading && teams.length === 0 && (
         <div style={{
-          padding: '40px 20px',
+          padding: '48px 20px',
           textAlign: 'center',
           color: 'var(--text-3)',
           fontSize: 13,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
         }}>
-          No teams running. Start a team with <code className="mono" style={{ color: 'var(--accent)' }}>agen8 team start</code>
+          <Layers size={28} style={{ opacity: 0.3 }} />
+          <span>No teams running</span>
+          <span>Start a team with <code className="mono" style={{ color: 'var(--accent)' }}>agen8 team start</code></span>
         </div>
       )}
 
