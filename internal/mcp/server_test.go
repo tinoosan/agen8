@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
 	humaninput "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
@@ -56,6 +57,46 @@ type testMCPToolCallResult struct {
 	} `json:"content"`
 	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
 	IsError           bool            `json:"isError,omitempty"`
+}
+
+func TestMCPSessionRefsExtractsCodexThreadMetadata(t *testing.T) {
+	req := &sdkmcp.CallToolRequest{Params: &sdkmcp.CallToolParamsRaw{
+		Meta: sdkmcp.Meta{
+			"progressToken": 42,
+			"threadId":      "thread-top",
+			"x-codex-turn-metadata": map[string]any{
+				"session_id": "session-nested",
+				"thread_id":  "thread-nested",
+			},
+		},
+	}}
+
+	sessionID, threadID := mcpSessionRefs(req)
+	if sessionID != "session-nested" {
+		t.Fatalf("sessionID=%q want session-nested", sessionID)
+	}
+	if threadID != "thread-top" {
+		t.Fatalf("threadID=%q want thread-top", threadID)
+	}
+}
+
+func TestMCPSessionRefsFallsBackToNestedCodexThreadMetadata(t *testing.T) {
+	req := &sdkmcp.CallToolRequest{Params: &sdkmcp.CallToolParamsRaw{
+		Meta: sdkmcp.Meta{
+			"x-codex-turn-metadata": map[string]any{
+				"session_id": "session-nested",
+				"thread_id":  "thread-nested",
+			},
+		},
+	}}
+
+	sessionID, threadID := mcpSessionRefs(req)
+	if sessionID != "session-nested" {
+		t.Fatalf("sessionID=%q want session-nested", sessionID)
+	}
+	if threadID != "thread-nested" {
+		t.Fatalf("threadID=%q want thread-nested", threadID)
+	}
 }
 
 type stubMCPTaskService struct{}

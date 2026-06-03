@@ -34,6 +34,12 @@
 <table>
   <tr><th>Action</th><th>Handler responsibility</th><th>Service calls</th><th>Result</th></tr>
   <tr>
+    <td><code>register</code></td>
+    <td>Resolve or create the local project and space, bind the MCP caller to an Agen8 member, activate the harness session, register the session token, and start durable message delivery for that member when the harness exposes a routable session reference.</td>
+    <td><code>ProjectSvc</code>, <code>SpaceSvc</code>, <code>HarnessSvc</code>, <code>MessageSvc.StartAgentDelivery</code>.</td>
+    <td>Project id, project root, location id, space id, member id, member type, channel id, MCP token, and MCP URL.</td>
+  </tr>
+  <tr>
     <td><code>list</code></td>
     <td>Resolve the active actor member, stamp caller context, and request open visible spaces.</td>
     <td><code>SpaceSvc.GetMember</code>, <code>SpaceSvc.List</code>.</td>
@@ -202,6 +208,27 @@ space.NewHandler().Handle(ctx, space.CallContext{
 
 <p>The agent supplies discovery intent. Agen8 supplies runtime identity. The MCP session token already binds the call to a project, space, member, and channel, so those values are not agent-required request fields. The handler uses them to stamp caller context, resolve the active actor member, and authorize service calls.</p>
 
+<h2>MCP registration and delivery</h2>
+
+<p><code>space.register</code> is the MCP-first entry point for harnesses. A harness can call it with only a working directory or project id. Agen8 resolves the project, creates or reuses the project space, creates or reuses the member identity, activates the durable harness session, and returns the ids the harness needs for later tool calls.</p>
+
+<p>When a harness exposes a stable native session or thread id in the MCP call metadata, the MCP server passes that value through the space tool call context. The daemon stores it as the harness session reference. For Codex, the server reads the top-level MCP metadata fields <code>threadId</code>, <code>thread_id</code>, <code>sessionId</code>, and <code>session_id</code>, plus the optional <code>x-codex-turn-metadata</code> object that Codex sends with <code>thread_id</code> and <code>session_id</code>.</p>
+
+<div class="callout">
+<strong>Boundary.</strong> MCP registration does not recreate Codex or Claude thread management. Agen8 stores a native session reference only when the connected harness exposes one. Tool calls, member ids, task ids, decisions, and graph records remain the durable Agen8 coordination surface. Native-thread delivery is an optional integration path for harnesses that can receive messages into an existing session.
+</div>
+
+<p>After registration, Agen8 starts the per-member durable delivery worker. The worker drains queued member messages and wakes on new messages. If the registered harness has a routable native session reference, messages can reach that existing harness session. If no native reference exists, the same durable Agen8 records remain available through MCP tools and the inspection UI.</p>
+
+<table>
+  <tr><th>Input</th><th>Source</th><th>Behavior</th></tr>
+  <tr><td><code>project_root</code> or <code>project_id</code></td><td>Tool arguments</td><td>Creates or reuses the Agen8 project and default work space.</td></tr>
+  <tr><td><code>thread_id</code> or <code>session_id</code></td><td>Tool arguments, then MCP metadata fallback</td><td>Creates or reuses a member for that native harness session and stores the value as the harness session reference.</td></tr>
+  <tr><td>No native session reference</td><td>Absent metadata</td><td>Reuses the active coordinator for the project/harness when available, otherwise creates the first coordinator member.</td></tr>
+  <tr><td>First member in a space</td><td>Agen8 roster state</td><td>Receives the coordinator role.</td></tr>
+  <tr><td>Later session-specific members</td><td>Agen8 roster state</td><td>Receive the worker role unless an existing member already has a different valid role.</td></tr>
+</table>
+
 <div class="diagram">
 <svg viewBox="0 0 900 300" width="900" height="300" role="img" aria-label="Space tool runtime identity resolution">
   <defs>
@@ -247,7 +274,12 @@ space.NewHandler().Handle(ctx, space.CallContext{
 
 <table>
   <tr><th>Field</th><th>Used by</th><th>Rule</th></tr>
-  <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>list</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update_config</code>, <code>member_remove</code>.</td></tr>
+  <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>register</code>, <code>list</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update_config</code>, <code>member_remove</code>.</td></tr>
+  <tr><td><code>project_root</code></td><td><code>register</code></td><td>Optional when <code>project_id</code> is supplied. Creates or reuses a local project for the working directory.</td></tr>
+  <tr><td><code>project_id</code></td><td><code>register</code></td><td>Optional when <code>project_root</code> is supplied. Reuses an existing project.</td></tr>
+  <tr><td><code>location_id</code></td><td><code>register</code></td><td>Optional. Defaults to the local location when a project root creates a project.</td></tr>
+  <tr><td><code>session_id</code></td><td><code>register</code></td><td>Optional stable native harness session id. Explicit arguments take precedence over MCP metadata.</td></tr>
+  <tr><td><code>thread_id</code></td><td><code>register</code></td><td>Optional stable native harness thread id. Explicit arguments take precedence over MCP metadata and session id.</td></tr>
   <tr><td><code>space_id</code></td><td><code>member_list</code>, <code>member_create</code></td><td>Optional. Defaults to the caller's current space. When supplied, it must resolve to a visible space.</td></tr>
   <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
   <tr><td><code>display_name</code></td><td><code>member_create</code></td><td>Optional display label. Created members are workers; coordinators cannot mint another coordinator through the tool.</td></tr>
