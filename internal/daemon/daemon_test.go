@@ -21,6 +21,7 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/config"
 	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
 	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
+	decisiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
 	harnessdomain "github.com/tinoosan/agen8-mcp-server/internal/services/harness/domain"
 	humaninputdomain "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/message/domain/conversation"
@@ -501,12 +502,12 @@ func TestHTTPStrategyBootstrapMCPTokenRegistersContextFromTool(t *testing.T) {
 	require.NotEmpty(t, rpcResp.Result.StructuredContent.MemberID)
 	require.Equal(t, "coordinator", rpcResp.Result.StructuredContent.MemberType)
 	require.NotEmpty(t, rpcResp.Result.StructuredContent.ChannelID)
-	require.Equal(t, "agen8-local", rpcResp.Result.StructuredContent.Token)
+	require.Equal(t, "mcp-token-"+rpcResp.Result.StructuredContent.MemberID, rpcResp.Result.StructuredContent.Token)
 
 	active, err := d.app.HarnessSvc.GetActiveSession(context.Background(), rpcResp.Result.StructuredContent.MemberID)
 	require.NoError(t, err)
 	require.NotNil(t, active)
-	require.Equal(t, "agen8-local", active.MCPToken)
+	require.Equal(t, rpcResp.Result.StructuredContent.Token, active.MCPToken)
 
 	projectSpacesReq, err := http.NewRequest(http.MethodPost, srv.URL+"/rpc", bytes.NewReader([]byte(fmt.Sprintf(`{
 		"jsonrpc": "2.0",
@@ -534,7 +535,7 @@ func TestHTTPStrategyBootstrapMCPTokenRegistersContextFromTool(t *testing.T) {
 	require.Len(t, projectSpacesRPC.Result.Spaces, 1)
 	require.Equal(t, rpcResp.Result.StructuredContent.SpaceID, projectSpacesRPC.Result.Spaces[0].SpaceID)
 
-	listReq, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(`{
+	listReq, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp?token="+rpcResp.Result.StructuredContent.Token, bytes.NewReader([]byte(`{
 		"jsonrpc": "2.0",
 		"id": "2",
 		"method": "tools/call",
@@ -674,7 +675,7 @@ func TestHTTPStrategyBootstrapMCPTokenRegistersContextFromCodexMetadata(t *testi
 	require.NoError(t, err)
 	require.NotNil(t, active)
 	require.Equal(t, "codex-thread-1", active.Ref)
-	require.Equal(t, "agen8-local", active.MCPToken)
+	require.Equal(t, "mcp-token-"+rpcResp.Result.StructuredContent.MemberID, active.MCPToken)
 	require.Eventually(t, func() bool {
 		return d.app.MessageSvc.AgentDeliveryRunning(member.ID(rpcResp.Result.StructuredContent.MemberID))
 	}, time.Second, 10*time.Millisecond)
@@ -717,6 +718,94 @@ func TestHTTPStrategyBootstrapMCPTokenRegistersContextFromCodexMetadata(t *testi
 	require.NoError(t, json.NewDecoder(registerAgainResp.Body).Decode(&registerAgainRPC))
 	require.Nil(t, registerAgainRPC.Error)
 	require.Equal(t, rpcResp.Result.StructuredContent.MemberID, registerAgainRPC.Result.StructuredContent.MemberID)
+}
+
+func TestHTTPStrategyRegisterToolReturnsStableMemberToken(t *testing.T) {
+	d := newTestDaemon(t)
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	projectRoot := filepath.Join(t.TempDir(), "agen8-mcp-server")
+	require.NoError(t, os.MkdirAll(projectRoot, 0o755))
+	registerCodexReq, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "register-codex",
+		"method": "tools/call",
+		"params": {
+			"name": "space",
+			"_meta": {"x-codex-turn-metadata": {"thread_id": "codex-thread-1"}},
+			"arguments": {"action":"register","project_root":%s,"display_name":"Codex"}
+		}
+	}`, quoteJSON(projectRoot)))))
+	require.NoError(t, err)
+	registerCodexReq.Header.Set("Content-Type", "application/json")
+	registerCodexReq.Header.Set("Accept", "application/json, text/event-stream")
+	registerCodexResp, err := http.DefaultClient.Do(registerCodexReq)
+	require.NoError(t, err)
+	defer registerCodexResp.Body.Close()
+	require.Equal(t, http.StatusOK, registerCodexResp.StatusCode)
+	var codexRPC struct {
+		Result struct {
+			StructuredContent struct {
+				ProjectID string `json:"projectId"`
+				MemberID  string `json:"memberId"`
+				Token     string `json:"token"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+		Error any `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(registerCodexResp.Body).Decode(&codexRPC))
+	require.Nil(t, codexRPC.Error)
+	require.NotEmpty(t, codexRPC.Result.StructuredContent.ProjectID)
+	require.NotEmpty(t, codexRPC.Result.StructuredContent.MemberID)
+	require.Equal(t, "mcp-token-"+codexRPC.Result.StructuredContent.MemberID, codexRPC.Result.StructuredContent.Token)
+
+	registerClaudeReq, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "register-claude",
+		"method": "tools/call",
+		"params": {
+			"name": "space",
+			"arguments": {"action":"register","project_root":%s,"harness_kind":"claude-cli","session_id":"claude-session-1"}
+		}
+	}`, quoteJSON(projectRoot)))))
+	require.NoError(t, err)
+	registerClaudeReq.Header.Set("Content-Type", "application/json")
+	registerClaudeReq.Header.Set("Accept", "application/json, text/event-stream")
+	registerClaudeResp, err := http.DefaultClient.Do(registerClaudeReq)
+	require.NoError(t, err)
+	defer registerClaudeResp.Body.Close()
+	require.Equal(t, http.StatusOK, registerClaudeResp.StatusCode)
+
+	decisionReq, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp?token="+codexRPC.Result.StructuredContent.Token, bytes.NewReader([]byte(`{
+		"jsonrpc": "2.0",
+		"id": "decision-log",
+		"method": "tools/call",
+		"params": {"name":"decision","arguments":{"action":"log","title":"Stable token identity smoke","rationale":"verify returned token remains bound to original member"}}
+	}`)))
+	require.NoError(t, err)
+	decisionReq.Header.Set("Content-Type", "application/json")
+	decisionReq.Header.Set("Accept", "application/json, text/event-stream")
+	decisionResp, err := http.DefaultClient.Do(decisionReq)
+	require.NoError(t, err)
+	defer decisionResp.Body.Close()
+	require.Equal(t, http.StatusOK, decisionResp.StatusCode)
+	var decisionRPC struct {
+		Result any `json:"result"`
+		Error  any `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(decisionResp.Body).Decode(&decisionRPC))
+	require.Nil(t, decisionRPC.Error)
+	decisions, err := d.app.DecisionSvc.List(context.Background(), decisiondomain.DecisionFilter{
+		ProjectID: codexRPC.Result.StructuredContent.ProjectID,
+		Query:     "Stable token identity smoke",
+		Limit:     1,
+	})
+	require.NoError(t, err)
+	require.Len(t, decisions, 1)
+	require.Equal(t, codexRPC.Result.StructuredContent.MemberID, decisions[0].SourceIdentity)
 }
 
 func TestHTTPStrategyBootstrapMCPTokenUsesLatestAuthenticatedLocalUser(t *testing.T) {

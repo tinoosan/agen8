@@ -232,15 +232,19 @@ func (d *Daemon) RegisterMCPContext(ctx context.Context, req mcpspace.RegisterCo
 		userID = "local-user"
 	}
 	out, err := d.registerExternalMCPHarnessForUser(ctx, userID, mcpRegisterRequest{
-		ProjectID:   req.ProjectID,
-		ProjectRoot: req.ProjectRoot,
-		LocationID:  req.LocationID,
-		SpaceID:     req.SpaceID,
-		DisplayName: req.DisplayName,
-		HarnessKind: req.HarnessKind,
-		SessionID:   req.SessionID,
-		ThreadID:    req.ThreadID,
-	}, req.Token)
+		ProjectID:      req.ProjectID,
+		ProjectRoot:    req.ProjectRoot,
+		LocationID:     req.LocationID,
+		SpaceID:        req.SpaceID,
+		DisplayName:    req.DisplayName,
+		HarnessKind:    req.HarnessKind,
+		SessionID:      req.SessionID,
+		ThreadID:       req.ThreadID,
+		Model:          req.Model,
+		Effort:         req.Effort,
+		PermissionMode: req.PermissionMode,
+		ConfigRef:      req.ConfigRef,
+	}, "")
 	if err != nil {
 		return mcpspace.RegisterContextResult{}, err
 	}
@@ -254,6 +258,7 @@ func (d *Daemon) RegisterMCPContext(ctx context.Context, req mcpspace.RegisterCo
 		ChannelID:   out.ChannelID,
 		Token:       out.Token,
 		URL:         out.URL,
+		MCPServers:  append([]string(nil), out.MCPServers...),
 	}, nil
 }
 
