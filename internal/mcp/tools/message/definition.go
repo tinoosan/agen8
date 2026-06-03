@@ -8,9 +8,9 @@ import (
 )
 
 const Name = "message"
-const Description = "[COORDINATION] Member-addressed message gateway. Sends durable inbox messages to other active members."
+const Description = "[COORDINATION] Member-addressed message gateway. Sends durable inbox messages to other active members and lets the current member inspect its durable inbox."
 
-var allActions = []string{"send"}
+var allActions = []string{"send", "inbox"}
 
 func (h Handler) Schema() json.RawMessage {
 	return mustSchema()
@@ -26,8 +26,10 @@ func mustSchema() json.RawMessage {
 			"subject":               map[string]any{"type": "string"},
 			"body":                  map[string]any{"type": "string"},
 			"correlation_id":        map[string]any{"type": "string", "description": "Required for ack and response. Optional for inform and query; generated when omitted."},
+			"status":                map[string]any{"type": "string", "enum": []string{string(types.MessageStatusQueuedTyped), string(types.MessageStatusConsumedTyped)}, "description": "For action=inbox. Defaults to all inbox statuses when omitted."},
+			"limit":                 map[string]any{"type": "integer", "minimum": 0, "maximum": 50, "description": "For action=inbox. Defaults to 10 and caps at 50."},
 		},
-		"required":             []string{"action", "destination_member_id", "kind", "subject", "body"},
+		"required":             []string{"action"},
 		"additionalProperties": false,
 	})
 	if err != nil {

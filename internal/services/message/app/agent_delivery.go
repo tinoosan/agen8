@@ -292,7 +292,7 @@ func (s *Service) drainAgentDelivery(ctx context.Context, memberID member.ID) er
 }
 
 func isRetryableAgentDeliveryError(err error) bool {
-	return isActiveRunDeliveryError(err)
+	return isActiveRunDeliveryError(err) || isTransientDeliveryStorageError(err)
 }
 
 func isActiveRunDeliveryError(err error) bool {
@@ -300,6 +300,16 @@ func isActiveRunDeliveryError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "already has active run")
+}
+
+func isTransientDeliveryStorageError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "database is locked") ||
+		strings.Contains(text, "database table is locked") ||
+		strings.Contains(text, "database is busy")
 }
 
 func (s *Service) saveAgentMessageReceivedActivity(ctx context.Context, msg types.AgentMessage, channelID types.ChannelID, result HarnessChatResult) error {

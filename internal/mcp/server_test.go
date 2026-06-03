@@ -262,6 +262,7 @@ func (s stubMCPMemberRegistrar) RemoveMember(ctx context.Context, id member.ID) 
 
 type stubMCPMessagePublisher struct {
 	publishFn func(context.Context, messagedomain.NewMessageInput) (types.AgentMessage, error)
+	listFn    func(context.Context, messagedomain.MessageFilter) ([]types.AgentMessage, error)
 }
 
 type stubMCPDecisionService struct{}
@@ -320,6 +321,13 @@ func (s stubMCPMessagePublisher) PublishAgentMessage(ctx context.Context, input 
 		return types.AgentMessage{}, err
 	}
 	return msg.Inner(), nil
+}
+
+func (s stubMCPMessagePublisher) ListMessages(ctx context.Context, filter messagedomain.MessageFilter) ([]types.AgentMessage, error) {
+	if s.listFn != nil {
+		return s.listFn(ctx, filter)
+	}
+	return nil, nil
 }
 
 func TestTokenStore_RegisterResolveRevoke(t *testing.T) {
@@ -1160,6 +1168,108 @@ func TestServer_ToolsCallExecutesNativeMessageHandler(t *testing.T) {
 	}
 	if _, exists := structured["op"]; exists {
 		t.Fatalf("structuredContent contains legacy op field: %+v", structured)
+	}
+}
+
+func TestServer_ToolsCallReadsNativeMessageInbox(t *testing.T) {
+	store := NewTokenStore()
+	store.Register("token-message-inbox", Session{
+		SpaceID:   "space-source",
+		MemberID:  "member-source",
+		ProjectID: "project-session",
+		MemberDirectory: stubMCPMemberDirectory{
+			getFn: func(_ context.Context, id member.ID) (member.Record, error) {
+				if id != "member-source" {
+					t.Fatalf("member id=%q", id)
+				}
+				return member.Record{ID: id, SpaceID: "space-source", DisplayName: "Source", LifecycleState: member.LifecycleActive}, nil
+			},
+		},
+		MessagePublisher: stubMCPMessagePublisher{
+			listFn: func(_ context.Context, filter messagedomain.MessageFilter) ([]types.AgentMessage, error) {
+				if filter.SpaceID != "space-source" || filter.DestinationMemberID != "member-source" {
+					t.Fatalf("filter route=%+v", filter)
+				}
+				if len(filter.Statuses) != 1 || filter.Statuses[0] != types.MessageStatusQueuedTyped {
+					t.Fatalf("filter statuses=%+v", filter.Statuses)
+				}
+				if filter.Limit != 5 {
+					t.Fatalf("filter limit=%d want 5", filter.Limit)
+				}
+				return []types.AgentMessage{{
+					ID:                  "msg-1",
+					SpaceID:             "space-source",
+					DestinationMemberID: "member-source",
+					ChannelID:           "channel:space-source:member:member-source",
+					Kind:                types.AgentMessageKindSystem,
+					Subject:             "Task assigned",
+					Body:                map[string]any{"taskId": "task-1", "nextAction": "claim"},
+					Producer:            "task-service",
+					CorrelationID:       "task:task-1",
+					TaskRef:             "task-1",
+					Status:              types.MessageStatusQueuedTyped,
+					VisibleAt:           fixedMCPTime,
+					CreatedAt:           fixedMCPTime,
+				}}, nil
+			},
+		},
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-message-inbox", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "message-inbox-call",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "message",
+			"arguments": map[string]any{
+				"action": "inbox",
+				"status": "queued",
+				"limit":  5,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
+	}
+	var result testMCPToolCallResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode tools/call result: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success tool result: %+v", result)
+	}
+	var structured struct {
+		Action   string `json:"action"`
+		MemberID string `json:"memberId"`
+		Count    int    `json:"count"`
+		Messages []struct {
+			MessageID string         `json:"messageId"`
+			Subject   string         `json:"subject"`
+			TaskRef   string         `json:"taskRef"`
+			Body      map[string]any `json:"body"`
+			Status    string         `json:"status"`
+			Producer  string         `json:"producer"`
+			CreatedAt string         `json:"createdAt"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(result.StructuredContent, &structured); err != nil {
+		t.Fatalf("decode structuredContent: %v", err)
+	}
+	if structured.Action != "inbox" || structured.MemberID != "member-source" || structured.Count != 1 {
+		t.Fatalf("structured=%+v", structured)
+	}
+	if structured.Messages[0].MessageID != "msg-1" || structured.Messages[0].Subject != "Task assigned" || structured.Messages[0].TaskRef != "task-1" {
+		t.Fatalf("message=%+v", structured.Messages[0])
+	}
+	if structured.Messages[0].Body["nextAction"] != "claim" || structured.Messages[0].Producer != "task-service" || structured.Messages[0].Status != "queued" {
+		t.Fatalf("message details=%+v", structured.Messages[0])
+	}
+	if strings.TrimSpace(structured.Messages[0].CreatedAt) == "" {
+		t.Fatalf("createdAt missing: %+v", structured.Messages[0])
 	}
 }
 

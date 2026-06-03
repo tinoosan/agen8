@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
@@ -41,6 +42,8 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	switch input.Action {
 	case "send":
 		return h.send(ctx, call, actor, input)
+	case "inbox":
+		return h.inbox(ctx, call, actor, input)
 	default:
 		return Result{}, fmt.Errorf("message: unsupported action %q", input.Action)
 	}
@@ -98,6 +101,66 @@ func (h Handler) send(ctx context.Context, call CallContext, actor memberRef, in
 		"subject":                published.Subject,
 		"correlationId":          string(published.CorrelationID),
 		"status":                 string(published.Status),
+	}
+	text, err := encodeText(structured)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Text: text, Structured: structured}, nil
+}
+
+func (h Handler) inbox(ctx context.Context, call CallContext, actor memberRef, input requestInput) (Result, error) {
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	filter := messagedomain.MessageFilter{
+		SpaceID:             actor.SpaceID,
+		DestinationMemberID: actor.ID,
+		Limit:               limit,
+	}
+	if input.Status != "" {
+		filter.Statuses = []types.MessageStatus{input.Status}
+	}
+	messages, err := call.Messages.ListMessages(ctx, filter)
+	if err != nil {
+		return Result{}, fmt.Errorf("message: list inbox: %w", err)
+	}
+	items := make([]map[string]any, 0, len(messages))
+	for _, msg := range messages {
+		items = append(items, map[string]any{
+			"messageId":           string(msg.ID),
+			"spaceId":             string(msg.SpaceID),
+			"channelId":           string(msg.ChannelID),
+			"sourceMemberId":      string(msg.SourceMemberID),
+			"destinationMemberId": string(msg.DestinationMemberID),
+			"kind":                string(msg.Kind),
+			"subject":             msg.Subject,
+			"body":                msg.Body,
+			"producer":            strings.TrimSpace(msg.Producer),
+			"correlationId":       string(msg.CorrelationID),
+			"taskRef":             string(msg.TaskRef),
+			"status":              string(msg.Status),
+			"visibleAt":           msg.VisibleAt.Format(time.RFC3339Nano),
+			"createdAt":           msg.CreatedAt.Format(time.RFC3339Nano),
+		})
+	}
+	structured := map[string]any{
+		"ok":            true,
+		"tool":          Name,
+		"action":        "inbox",
+		"memberId":      string(actor.ID),
+		"memberLabel":   actor.Label,
+		"spaceId":       string(actor.SpaceID),
+		"status":        string(input.Status),
+		"limit":         limit,
+		"count":         len(items),
+		"messages":      items,
+		"guidance":      "This is the durable Agen8 inbox for the current member. Treat queued system/task messages as work for this registered runtime identity.",
+		"deliveryModel": "pull; native push remains optional when the harness exposes a live delivery channel",
 	}
 	text, err := encodeText(structured)
 	if err != nil {
@@ -182,8 +245,24 @@ func decode(args json.RawMessage) (requestInput, error) {
 	if action == "" {
 		return requestInput{}, fmt.Errorf("message: action is required")
 	}
-	if action != "send" {
+	if action != "send" && action != "inbox" {
 		return requestInput{}, fmt.Errorf("message: unsupported action %q", action)
+	}
+	if action == "inbox" {
+		status := types.MessageStatus(strings.TrimSpace(strings.ToLower(ptrString(raw.Status))))
+		switch status {
+		case "", types.MessageStatusQueuedTyped, types.MessageStatusConsumedTyped:
+		default:
+			return requestInput{}, fmt.Errorf("message: status must be queued or consumed")
+		}
+		limit := 10
+		if raw.Limit != nil {
+			limit = *raw.Limit
+		}
+		if limit < 0 {
+			return requestInput{}, fmt.Errorf("message: limit must be non-negative")
+		}
+		return requestInput{Action: action, Status: status, Limit: limit}, nil
 	}
 	destinationMemberID := member.ID(strings.TrimSpace(ptrString(raw.DestinationMemberID)))
 	if destinationMemberID == "" {

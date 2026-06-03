@@ -16,6 +16,7 @@ type MemberDirectory interface {
 
 type MessagePublisher interface {
 	PublishAgentMessage(ctx context.Context, input messagedomain.NewMessageInput) (types.AgentMessage, error)
+	ListMessages(ctx context.Context, filter messagedomain.MessageFilter) ([]types.AgentMessage, error)
 }
 
 type CallContext struct {
@@ -38,6 +39,8 @@ type rawRequest struct {
 	Subject             string  `json:"subject"`
 	Body                string  `json:"body"`
 	CorrelationID       *string `json:"correlation_id"`
+	Status              *string `json:"status"`
+	Limit               *int    `json:"limit"`
 }
 
 type requestInput struct {
@@ -47,6 +50,8 @@ type requestInput struct {
 	Subject             string
 	Body                string
 	CorrelationID       types.CorrelationID
+	Status              types.MessageStatus
+	Limit               int
 }
 
 type memberRef struct {

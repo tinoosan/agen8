@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -360,6 +361,17 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 	}
 	if err := d.app.MessageSvc.StartAgentDelivery(context.WithoutCancel(ctx), member.ID(active.MemberID)); err != nil {
 		return mcpRegisterResponse{}, fmt.Errorf("start message delivery for member %s: %w", active.MemberID, err)
+	}
+	if strings.TrimSpace(active.Ref) != "" {
+		if err := d.app.HarnessSvc.EnsureExternalSessionSync(context.WithoutCancel(ctx), active.ID); err != nil {
+			slog.WarnContext(ctx, "start external harness session sync after mcp register failed",
+				"session_id", active.ID,
+				"member_id", active.MemberID,
+				"harness_kind", active.Kind,
+				"has_session_ref", strings.TrimSpace(active.Ref) != "",
+				"error", err,
+			)
+		}
 	}
 	return mcpRegisterResponse{
 		ProjectID:   projectID,

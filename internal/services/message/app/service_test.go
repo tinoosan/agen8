@@ -561,6 +561,89 @@ func TestServiceStartAgentDeliveryDrainsPublishedMessages(t *testing.T) {
 	}
 }
 
+func TestServiceStartAgentDeliveryDrainsFreshTaskNotification(t *testing.T) {
+	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	taskUpdatedAt := now.Add(-time.Minute)
+	repo := newMemoryRepo()
+	conversations := newMemoryConversationRepo()
+	delivered := make(chan HarnessChatMessage, 1)
+	harness := &fakeHarnessChatSender{
+		sendFn: func(ctx context.Context, input HarnessChatMessage) (HarnessChatResult, error) {
+			delivered <- input
+			return HarnessChatResult{SessionID: "session-1", TurnID: "turn-1", Delivery: string(conversation.DeliveryDelivered)}, nil
+		},
+	}
+	svc := newServiceWithHarnessForTest(t, repo, conversations, harness, now)
+	svc.SetTaskStateReader(fakeTaskStateReader{tasks: map[taskdomain.TaskID]taskdomain.Task{
+		"task-fresh": {
+			ID:         "task-fresh",
+			SpaceID:    "space-1",
+			AssignedTo: "member-dest",
+			Status:     taskdomain.TaskStatusPending,
+			UpdatedAt:  &taskUpdatedAt,
+		},
+	}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.StartAgentDelivery(ctx, "member-dest"); err != nil {
+		t.Fatalf("StartAgentDelivery: %v", err)
+	}
+	defer svc.StopAgentDelivery("member-dest")
+
+	if _, err := svc.PublishAgentMessage(context.Background(), domain.NewMessageInput{
+		ID: "msg-task-fresh",
+		Route: domain.MessageRoute{
+			SpaceID:             "space-1",
+			DestinationMemberID: "member-dest",
+			ChannelID:           "channel:space-1:member:member-dest",
+		},
+		Content: domain.MessageContent{
+			Kind:    types.AgentMessageKindSystem,
+			Subject: "Task assigned",
+			TaskRef: "task-fresh",
+			Body: map[string]any{
+				"event":         "assigned",
+				"message":       "Task assigned",
+				"taskId":        "task-fresh",
+				"taskStatus":    "pending",
+				"taskUpdatedAt": taskUpdatedAt.Format(time.RFC3339Nano),
+			},
+		},
+		Producer: domain.MessageProducer{IntentID: "intent-task-fresh", Producer: "task-service"},
+	}); err != nil {
+		t.Fatalf("PublishAgentMessage: %v", err)
+	}
+
+	select {
+	case input := <-delivered:
+		if input.MemberID != "member-dest" || !strings.Contains(input.Text, "taskRef: task-fresh") {
+			t.Fatalf("delivered input=%+v", input)
+		}
+		if !input.AllowSteering {
+			t.Fatalf("task inbox delivery must allow harness steering")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected fresh task notification delivery")
+	}
+	msg, err := svc.GetMessage(context.Background(), "msg-task-fresh")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Status != types.MessageStatusConsumedTyped || msg.ConsumedBy != "member-dest" {
+		t.Fatalf("message=%+v", msg)
+	}
+	activities, err := conversations.ListActivitiesByChannel(context.Background(), "channel:space-1:member:member-dest", 10)
+	if err != nil {
+		t.Fatalf("ListActivitiesByChannel: %v", err)
+	}
+	if len(activities) != 1 || activities[0].Kind != "agent_message_received" || activities[0].Status != "completed" {
+		t.Fatalf("activities=%+v", activities)
+	}
+	if activities[0].SessionID != "session-1" || activities[0].TurnID != "turn-1" {
+		t.Fatalf("activity routing=%+v", activities[0])
+	}
+}
+
 func TestServicePublishAgentMessageAutoStartsDeliveryWhenConfigured(t *testing.T) {
 	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
 	repo := newMemoryRepo()
@@ -808,6 +891,21 @@ func TestServiceStartAgentDeliveryRetriesQueuedMessageAfterHarnessBusy(t *testin
 	}
 	if msg.Status != types.MessageStatusConsumedTyped || msg.ConsumedBy != "member-dest" {
 		t.Fatalf("message=%+v", msg)
+	}
+}
+
+func TestAgentDeliveryRetryClassifiesTransientStorageErrors(t *testing.T) {
+	for _, err := range []error{
+		fmt.Errorf("load task task-1 for notification validation: database is locked"),
+		fmt.Errorf("next queued message for member-1: database table is locked"),
+		fmt.Errorf("mark message consumed msg-1: database is busy"),
+	} {
+		if !isRetryableAgentDeliveryError(err) {
+			t.Fatalf("expected retryable error: %v", err)
+		}
+	}
+	if isRetryableAgentDeliveryError(fmt.Errorf("parse task notification updatedAt: bad timestamp")) {
+		t.Fatal("programmer/data-shape errors should stay non-retryable")
 	}
 }
 

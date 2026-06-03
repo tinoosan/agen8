@@ -33,6 +33,7 @@ func (s stubMemberDirectory) GetMember(ctx context.Context, id member.ID) (membe
 
 type stubPublisher struct {
 	publishFn func(context.Context, messagedomain.NewMessageInput) (types.AgentMessage, error)
+	listFn    func(context.Context, messagedomain.MessageFilter) ([]types.AgentMessage, error)
 }
 
 func (s stubPublisher) PublishAgentMessage(ctx context.Context, input messagedomain.NewMessageInput) (types.AgentMessage, error) {
@@ -44,6 +45,13 @@ func (s stubPublisher) PublishAgentMessage(ctx context.Context, input messagedom
 		return types.AgentMessage{}, err
 	}
 	return msg.Inner(), nil
+}
+
+func (s stubPublisher) ListMessages(ctx context.Context, filter messagedomain.MessageFilter) ([]types.AgentMessage, error) {
+	if s.listFn != nil {
+		return s.listFn(ctx, filter)
+	}
+	return nil, nil
 }
 
 func TestDecodeRejectsMissingAction(t *testing.T) {
@@ -177,7 +185,70 @@ func TestHandleSendRejectsCrossSpaceDestination(t *testing.T) {
 	}
 }
 
-func TestSchemaRequiresOnlySendFields(t *testing.T) {
+func TestHandleInboxListsCurrentMemberMessages(t *testing.T) {
+	handler := NewHandler()
+	result, err := handler.Handle(context.Background(), CallContext{
+		ActorMemberID: "member-source",
+		SpaceID:       "space-1",
+		Members:       stubMemberDirectory{},
+		Messages: stubPublisher{
+			listFn: func(_ context.Context, filter messagedomain.MessageFilter) ([]types.AgentMessage, error) {
+				if filter.SpaceID != "space-1" || filter.DestinationMemberID != "member-source" {
+					t.Fatalf("filter route=%+v", filter)
+				}
+				if len(filter.Statuses) != 1 || filter.Statuses[0] != types.MessageStatusQueuedTyped {
+					t.Fatalf("filter statuses=%+v", filter.Statuses)
+				}
+				if filter.Limit != 2 {
+					t.Fatalf("filter limit=%d", filter.Limit)
+				}
+				return []types.AgentMessage{{
+					ID:                  "msg-1",
+					SpaceID:             "space-1",
+					ChannelID:           "channel:space-1:member:member-source",
+					DestinationMemberID: "member-source",
+					Kind:                types.AgentMessageKindSystem,
+					Subject:             "Task assigned",
+					Body:                map[string]any{"message": "Task assigned"},
+					Producer:            "task-service",
+					TaskRef:             "task-1",
+					Status:              types.MessageStatusQueuedTyped,
+					VisibleAt:           fixedNow,
+					CreatedAt:           fixedNow,
+				}}, nil
+			},
+		},
+	}, json.RawMessage(`{"action":"inbox","status":"queued","limit":2}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured, ok := result.Structured.(map[string]any)
+	if !ok {
+		t.Fatalf("structured type %T", result.Structured)
+	}
+	if structured["action"] != "inbox" || structured["memberId"] != "member-source" || structured["count"] != 1 {
+		t.Fatalf("structured=%+v", structured)
+	}
+	messages, ok := structured["messages"].([]map[string]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages=%T %+v", structured["messages"], structured["messages"])
+	}
+	if messages[0]["messageId"] != "msg-1" || messages[0]["taskRef"] != "task-1" {
+		t.Fatalf("message item=%+v", messages[0])
+	}
+	if !strings.Contains(result.Text, "durable Agen8 inbox") {
+		t.Fatalf("text result missing inbox guidance: %s", result.Text)
+	}
+}
+
+func TestDecodeInboxRejectsInvalidStatus(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"inbox","status":"failed"}`))
+	if err == nil || !strings.Contains(err.Error(), "status must be queued or consumed") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestSchemaRequiresOnlyAction(t *testing.T) {
 	var schema struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 		Required   []string                   `json:"required"`
@@ -185,7 +256,7 @@ func TestSchemaRequiresOnlySendFields(t *testing.T) {
 	if err := json.Unmarshal(NewHandler().Schema(), &schema); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
-	assertRequiredFields(t, schema.Required, []string{"action", "destination_member_id", "kind", "subject", "body"})
+	assertRequiredFields(t, schema.Required, []string{"action"})
 	correlation := map[string]any{}
 	if err := json.Unmarshal(schema.Properties["correlation_id"], &correlation); err != nil {
 		t.Fatalf("correlation schema: %v", err)
