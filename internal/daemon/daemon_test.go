@@ -28,6 +28,7 @@ import (
 	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
 	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
 	spacerpc "github.com/tinoosan/agen8-mcp-server/internal/services/space/rpc"
 	taskrpc "github.com/tinoosan/agen8-mcp-server/internal/services/task/rpc"
 	userapp "github.com/tinoosan/agen8-mcp-server/internal/services/user/app"
@@ -674,6 +675,12 @@ func TestHTTPStrategyBootstrapMCPTokenRegistersContextFromCodexMetadata(t *testi
 	require.NotNil(t, active)
 	require.Equal(t, "codex-thread-1", active.Ref)
 	require.Equal(t, "agen8-local", active.MCPToken)
+	require.Eventually(t, func() bool {
+		return d.app.MessageSvc.AgentDeliveryRunning(member.ID(rpcResp.Result.StructuredContent.MemberID))
+	}, time.Second, 10*time.Millisecond)
+	t.Cleanup(func() {
+		d.app.MessageSvc.StopAgentDelivery(member.ID(rpcResp.Result.StructuredContent.MemberID))
+	})
 
 	registerAgainReq, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
 		"jsonrpc": "2.0",

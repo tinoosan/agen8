@@ -222,6 +222,23 @@ func (s *Service) StopAgentDelivery(memberID member.ID) {
 	}
 }
 
+// AgentDeliveryRunning reports whether a durable delivery worker is active for
+// a member. It is intended for diagnostics and integration tests; callers must
+// not treat it as a delivery guarantee because a worker can still exit on
+// context cancellation or process shutdown.
+func (s *Service) AgentDeliveryRunning(memberID member.ID) bool {
+	if s == nil {
+		return false
+	}
+	memberID = trimMemberID(memberID)
+	if memberID == "" {
+		return false
+	}
+	s.agentDeliveriesMu.Lock()
+	defer s.agentDeliveriesMu.Unlock()
+	return s.agentDeliveries[memberID] != nil
+}
+
 func (s *Service) clearAgentDelivery(memberID member.ID, worker *agentDeliveryWorker) {
 	if s == nil || worker == nil {
 		return

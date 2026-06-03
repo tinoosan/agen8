@@ -358,7 +358,7 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 	if err := d.registerMCPTokenForSession(active); err != nil {
 		return mcpRegisterResponse{}, err
 	}
-	if err := d.app.MessageSvc.StartAgentDelivery(ctx, member.ID(active.MemberID)); err != nil {
+	if err := d.app.MessageSvc.StartAgentDelivery(context.WithoutCancel(ctx), member.ID(active.MemberID)); err != nil {
 		return mcpRegisterResponse{}, fmt.Errorf("start message delivery for member %s: %w", active.MemberID, err)
 	}
 	return mcpRegisterResponse{

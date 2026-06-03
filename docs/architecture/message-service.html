@@ -151,6 +151,8 @@
   <h2 id="agent-delivery">4. Agent-directed messages</h2>
   <p>Agent-directed messages are durable inbox items addressed to a destination member. They are used for agent-to-agent communication and system-to-agent notifications. They are not browser chat rows. A publisher records intent, route, content, producer, and correlation; the message service persists the row as <code>queued</code>, starts the destination member delivery loop when production harness delivery is available, schedules a wake on an internal delivery queue, and returns to the caller. The runtime delivery path injects the message into the destination member's active harness context out of band, retrying queued delivery when the harness is temporarily busy.</p>
 
+  <p>For MCP-registered harnesses, <code>space.register</code> activates the durable harness session and starts the member delivery worker from a daemon-owned context rather than the short HTTP request context. Task assignment then publishes a <code>Task assigned</code> system message to the member inbox. The message service saves the queued row, wakes the member worker, formats the inbox item as a runtime message, and calls the harness chat sender. If the harness session has a native thread reference, the harness service continues that thread. If the harness is busy, the worker leaves the row queued and retries. If native delivery is unavailable, the queued message remains durable and visible through MCP inspection paths.</p>
+
   <div class="diagram">
     <svg viewBox="0 0 980 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agent-directed message sources and runtime delivery">
       <defs>
