@@ -87,6 +87,7 @@ func (s *Service) DeliverNextAgentMessage(ctx context.Context, memberID member.I
 		SenderType:            "agen8",
 		SenderID:              strings.TrimSpace(msg.Producer),
 		Text:                  text,
+		AllowSteering:         true,
 		Stream:                stream,
 	})
 	if err != nil {

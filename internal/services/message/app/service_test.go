@@ -537,6 +537,9 @@ func TestServiceStartAgentDeliveryDrainsPublishedMessages(t *testing.T) {
 		if input.MemberID != "member-dest" || !strings.Contains(input.Text, "wake up") {
 			t.Fatalf("delivered input=%+v", input)
 		}
+		if !input.AllowSteering {
+			t.Fatalf("agent inbox delivery must allow harness steering")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("expected agent delivery")
 	}
