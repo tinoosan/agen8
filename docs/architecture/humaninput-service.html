@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Human Input Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .flow-svg {
+    color: var(--text);
+  }
+  .flow-svg .flow-box {
+    fill: var(--bg-elevated);
+    stroke: currentColor;
+    stroke-width: 1.5;
+  }
+  .flow-svg .flow-note {
+    fill: var(--bg-elevated);
+    stroke: currentColor;
+    stroke-width: 1.2;
+  }
+  .flow-svg text {
+    fill: currentColor;
+    stroke: none;
+    font-size: 15px;
+    font-weight: 650;
+  }
+  .flow-svg .note-text {
+    fill: currentColor;
+    font-size: 14px;
+    font-weight: 650;
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / humaninput-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Human Input Service</span>
+  <h1>Human Input Service</h1>
+  <p class="lede">
+    The human input service is the production boundary for pausing autonomous execution when a human answer is required, delivering a structured prompt to the right human surface, accepting exactly one answer or cancellation, and resuming the waiting tool call with an auditable result.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#purpose">Purpose and ownership</a></li>
+      <li><a href="#model">Domain model</a></li>
+      <li><a href="#lifecycle">Lifecycle</a></li>
+      <li><a href="#awaiting">Awaiter contract</a></li>
+      <li><a href="#repository">Repository design</a></li>
+      <li><a href="#delivery">Delivery and wake behavior</a></li>
+      <li><a href="#edge-cases">Production edge cases</a></li>
+      <li><a href="#dependencies">Production dependencies</a></li>
+      <li><a href="#interfaces">Service interfaces</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="purpose">1. Purpose and ownership</h2>
+
+  <p>Human input is not a chat message and not a decision record. It is a pending execution gate. A tool call declares that it cannot continue without bounded human judgment, the service persists that request, the UI resolves it, and the blocked tool call resumes with a typed result.</p>
+
+  <table>
+    <thead>
+      <tr><th>The human input service owns</th><th>The human input service does not own</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Pending request lifecycle, persistence, deadlines, and result storage.</td><td>The final decision audit record.</td></tr>
+      <tr><td>Structured primitives: questions, approve/reject, confirm, and form.</td><td>Agent prompt wording outside the declared payload.</td></tr>
+      <tr><td>Exactly-once resolution by answer, cancellation, expiry, or caller abort.</td><td>Task, mission, or plan domain state transitions.</td></tr>
+      <tr><td>Operator-facing delivery state and wake/resume signals.</td><td>Long-term notification inbox history.</td></tr>
+      <tr><td>Recovery of pending requests after daemon restart.</td><td>Rendering transcript cards for completed decision records.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The decision service consumes the resolved output. For <code>decision(action="ask_user")</code>, the decision tool asks the human input service to wait, receives a <code>QuestionsResult</code>, then calls <code>DecisionSvc.CompleteAskUser</code>. This keeps pending lifecycle out of the decision audit boundary.</p>
+
+  <h2 id="model">2. Domain model</h2>
+
+  <p>The current domain primitives are the transport-neutral payloads. The service wraps them in a durable request record with identity, state, deadlines, and idempotency keys.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Declaration</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Kind</span>    <span class="tok-type">PrimitiveKind</span>   <span class="tok-comment">// questions, approve_reject, confirm, form</span>
+    <span class="tok-field">Payload</span> json.<span class="tok-type">RawMessage</span> <span class="tok-comment">// valid JSON matching Kind</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Request</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>             <span class="tok-type">RequestID</span>
+    <span class="tok-field">ToolCallID</span>     <span class="tok-type">string</span>
+    <span class="tok-field">ToolName</span>       <span class="tok-type">string</span>
+    <span class="tok-field">ProjectID</span>      <span class="tok-type">string</span>
+    <span class="tok-field">SpaceID</span>        <span class="tok-type">string</span>
+    <span class="tok-field">AskerMemberID</span>  <span class="tok-type">string</span>
+    <span class="tok-field">ChannelID</span>      <span class="tok-type">string</span>
+    <span class="tok-field">Declaration</span>    <span class="tok-type">Declaration</span>
+    <span class="tok-field">Status</span>         <span class="tok-type">Status</span>
+    <span class="tok-field">Result</span>         json.<span class="tok-type">RawMessage</span>
+    <span class="tok-field">CreatedAt</span>      time.<span class="tok-type">Time</span>
+    <span class="tok-field">ExpiresAt</span>      time.<span class="tok-type">Time</span>
+    <span class="tok-field">ResolvedAt</span>     *time.<span class="tok-type">Time</span>
+    <span class="tok-field">IdempotencyKey</span> <span class="tok-type">string</span>
+    <span class="tok-field">Version</span>        <span class="tok-type">int64</span>
+}</code></pre>
+
+  <table>
+    <thead>
+      <tr><th>Status</th><th>Meaning</th><th>Terminal</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>pending</code></td><td>The request is visible to the human and the tool call is waiting.</td><td>No</td></tr>
+      <tr><td><code>answered</code></td><td>The human submitted a valid result payload.</td><td>Yes</td></tr>
+      <tr><td><code>cancelled</code></td><td>The human intentionally cancelled the request.</td><td>Yes</td></tr>
+      <tr><td><code>expired</code></td><td>The deadline passed before resolution.</td><td>Yes</td></tr>
+      <tr><td><code>aborted</code></td><td>The waiting runtime/session ended before resolution.</td><td>Yes</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="lifecycle">3. Lifecycle</h2>
+
+  <svg class="flow-svg" viewBox="0 0 980 270" role="img" aria-labelledby="lifecycle-title lifecycle-desc">
+    <title id="lifecycle-title">Human input lifecycle</title>
+    <desc id="lifecycle-desc">A tool declares human input, the service persists it, the UI resolves it, and the waiting tool call resumes.</desc>
+    <defs>
+      <marker id="arrow-humaninput" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+      </marker>
+    </defs>
+    <g fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#arrow-humaninput)">
+      <path d="M132 112 H232"></path>
+      <path d="M342 112 H442"></path>
+      <path d="M552 112 H652"></path>
+      <path d="M762 112 H862"></path>
+    </g>
+    <g>
+      <rect class="flow-box" x="24" y="58" width="108" height="108" rx="8"></rect>
+      <text x="78" y="94" text-anchor="middle">Tool</text>
+      <text x="78" y="120" text-anchor="middle">declares</text>
+      <text x="78" y="146" text-anchor="middle">input</text>
+
+      <rect class="flow-box" x="232" y="58" width="110" height="108" rx="8"></rect>
+      <text x="287" y="94" text-anchor="middle">Persist</text>
+      <text x="287" y="120" text-anchor="middle">pending</text>
+      <text x="287" y="146" text-anchor="middle">request</text>
+
+      <rect class="flow-box" x="442" y="58" width="110" height="108" rx="8"></rect>
+      <text x="497" y="94" text-anchor="middle">Deliver</text>
+      <text x="497" y="120" text-anchor="middle">to UI</text>
+      <text x="497" y="146" text-anchor="middle">surface</text>
+
+      <rect class="flow-box" x="652" y="58" width="110" height="108" rx="8"></rect>
+      <text x="707" y="94" text-anchor="middle">Answer,</text>
+      <text x="707" y="120" text-anchor="middle">cancel,</text>
+      <text x="707" y="146" text-anchor="middle">or expire</text>
+
+      <rect class="flow-box" x="862" y="58" width="92" height="108" rx="8"></rect>
+      <text x="908" y="94" text-anchor="middle">Resume</text>
+      <text x="908" y="120" text-anchor="middle">tool</text>
+      <text x="908" y="146" text-anchor="middle">call</text>
+
+      <rect class="flow-note" x="152" y="202" width="676" height="42" rx="8"></rect>
+      <text class="note-text" x="490" y="228" text-anchor="middle">Terminal transitions persist result, version, resolver, timestamp, and wake signal.</text>
+    </g>
+  </svg>
+
+  <p>Creation and terminal transitions run in transactions. A request is visible only after the pending row and delivery event are both durable. Resolution updates the row and publishes the wake signal in the same unit of work or an outbox-backed equivalent.</p>
+
+  <h2 id="awaiting">4. Awaiter contract</h2>
+
+  <p>The daemon exposes the service to MCP as an <code>Awaiter</code>. The awaiter blocks the tool execution path until the request reaches a terminal state or the context is cancelled.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Awaiter</span> <span class="tok-kw">func</span>(
+    ctx context.Context,
+    req humaninput.<span class="tok-type">PendingRequest</span>,
+) (json.<span class="tok-type">RawMessage</span>, error)</code></pre>
+
+  <p>The awaiter is not a polling loop hidden inside the decision tool. It is a service-backed wait: create pending request, subscribe to wake signal, return the typed result, and cleanly unblock when the context ends. If daemon restarts while a request is pending, the service keeps the request visible and the resumed session can reattach using <code>ToolCallID</code> and <code>IdempotencyKey</code>.</p>
+
+  <h2 id="repository">5. Repository design</h2>
+
+  <p>The repository stores pending and terminal requests in one current-state table plus a transactional outbox. Request state is updated in place because the UI, resolver, awaiter, and restart recovery paths all need one canonical row. Auditing is carried by resolver fields, terminal timestamps, version, and outbox events rather than by raw debug logs.</p>
+
+<pre><code class="lang-sql">CREATE TABLE human_input_requests (
+    id TEXT PRIMARY KEY,
+    tool_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    space_id TEXT NOT NULL,
+    asker_member_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    declaration_kind TEXT NOT NULL,
+    declaration_payload_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    result_json TEXT NOT NULL DEFAULT '{}',
+    resolver_user_id TEXT NOT NULL DEFAULT '',
+    resolver_member_id TEXT NOT NULL DEFAULT '',
+    terminal_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    resolved_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX idx_human_input_idempotency
+    ON human_input_requests(project_id, tool_name, tool_call_id, idempotency_key);
+
+CREATE INDEX idx_human_input_pending_scope
+    ON human_input_requests(project_id, space_id, status, created_at);
+
+CREATE INDEX idx_human_input_channel_pending
+    ON human_input_requests(channel_id, status, created_at);
+
+CREATE INDEX idx_human_input_expiry
+    ON human_input_requests(status, expires_at);</code></pre>
+
+  <p>The outbox is written in the same transaction as request creation or terminal transition. A dispatcher publishes events and marks rows delivered. This makes notification and wake delivery retryable without creating prompts that have no durable event path.</p>
+
+<pre><code class="lang-sql">CREATE TABLE human_input_outbox (
+    id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    delivered_at TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT ''
+);</code></pre>
+
+  <p>The domain exposes narrow repository contracts. The application service depends on <code>Repository</code>; UI queries and expiry workers depend on the smallest reader or writer contract they need. Outbox claiming is infrastructure owned by the dispatcher, not part of the service-facing repository surface.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Get</span>(ctx context.Context, id <span class="tok-type">RequestID</span>) (<span class="tok-type">Request</span>, error)
+    <span class="tok-fn">FindByIdempotency</span>(ctx context.Context, key <span class="tok-type">IdempotencyKey</span>) (<span class="tok-type">Request</span>, error)
+    <span class="tok-fn">ListPending</span>(ctx context.Context, filter <span class="tok-type">Filter</span>) ([]<span class="tok-type">Request</span>, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">CreatePending</span>(ctx context.Context, req <span class="tok-type">Request</span>) (<span class="tok-type">Request</span>, error)
+    <span class="tok-fn">Resolve</span>(ctx context.Context, cmd <span class="tok-type">ResolveMutation</span>) (<span class="tok-type">Request</span>, error)
+    <span class="tok-fn">ExpireDue</span>(ctx context.Context, now time.<span class="tok-type">Time</span>, limit <span class="tok-type">int</span>) (<span class="tok-type">ExpireBatch</span>, error)
+    <span class="tok-fn">AbortByToolCall</span>(ctx context.Context, toolCallID <span class="tok-type">ToolCallID</span>, reason <span class="tok-type">string</span>) (<span class="tok-type">Request</span>, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Repository</span> <span class="tok-kw">interface</span> {
+    <span class="tok-type">Reader</span>
+    <span class="tok-type">Writer</span>
+}</code></pre>
+
+  <table>
+    <thead>
+      <tr><th>Repository method</th><th>Contract</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>CreatePending</code></td><td>Inserts a pending request or returns the existing row for the same idempotency key. Also inserts <code>humaninput.pending</code> into the outbox.</td></tr>
+      <tr><td><code>Get</code></td><td>Loads one request by id. Missing rows return a not-found error, never an empty request.</td></tr>
+      <tr><td><code>FindByIdempotency</code></td><td>Reattaches retries and daemon restarts to the same request.</td></tr>
+      <tr><td><code>ListPending</code></td><td>Returns visible pending requests by project, space, channel, member, kind, and pagination.</td></tr>
+      <tr><td><code>Resolve</code></td><td>Atomically changes <code>pending</code> to <code>answered</code> or <code>cancelled</code> with expected version. Also inserts <code>humaninput.resolved</code>.</td></tr>
+      <tr><td><code>ExpireDue</code></td><td>Claims due pending rows, marks them <code>expired</code>, and emits resolved events. Returns an aggregate report and surfaces per-row failures.</td></tr>
+      <tr><td><code>AbortByToolCall</code></td><td>Marks a waiting request <code>aborted</code> when the owning runtime can no longer resume.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Repository implementations validate JSON before writing, preserve declaration and result payloads exactly, and return typed conflict errors for terminal rows or version mismatches. They do not decode primitive-specific answers for business validation; that belongs in the domain/service boundary before mutation.</p>
+
+  <h2 id="delivery">6. Delivery and wake behavior</h2>
+
+  <p>Human input delivery uses the same product-facing notification discipline as other agent-visible events: semantic payloads, stable IDs, and no raw debug fallback. The service publishes two event classes:</p>
+
+  <table>
+    <thead>
+      <tr><th>Event</th><th>When</th><th>Consumers</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>humaninput.pending</code></td><td>A pending request is durable and ready for the human.</td><td>Notification service, UI live query, activity feed.</td></tr>
+      <tr><td><code>humaninput.resolved</code></td><td>The request becomes answered, cancelled, expired, or aborted.</td><td>Awaiter wake path, notification dismissal, activity feed.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Delivery targets the request's <code>ChannelID</code>, <code>SpaceID</code>, and asking member identity. The UI may show pending input in a global queue and in the relevant space, but list, view, resolve, and cancel calls are authorized by the RPC/UI adapter against the project/space and human user context, not against whichever tab displays it.</p>
+
+  <h2 id="edge-cases">7. Production edge cases</h2>
+
+  <table>
+    <thead>
+      <tr><th>Case</th><th>Required behavior</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Duplicate tool retry</td><td>Use <code>IdempotencyKey</code> plus <code>ToolCallID</code>. Return the existing pending or terminal request, never create another visible prompt.</td></tr>
+      <tr><td>Double submit</td><td>Optimistic version check. The first terminal update wins; later submissions receive a conflict with the existing terminal state.</td></tr>
+      <tr><td>Daemon restart</td><td>Pending requests remain queryable. Awaiters reattach or fail visibly if the original runtime cannot resume.</td></tr>
+      <tr><td>Runtime cancellation</td><td>Context cancellation marks request <code>aborted</code> only when the waiting tool call is no longer resumable. The UI shows the terminal reason.</td></tr>
+      <tr><td>Human closes browser</td><td>No state change. Request remains pending until answer, cancel, expiry, or abort.</td></tr>
+      <tr><td>Expired request</td><td>Deadline worker marks <code>expired</code>, stores a terminal result payload, dismisses notifications, and wakes awaiters with an expiry error.</td></tr>
+      <tr><td>Invalid answer payload</td><td>Reject at the RPC/API boundary with field-level validation errors. Do not store partial answers.</td></tr>
+      <tr><td>Missing delivery target</td><td>Creation fails loudly. No pending row is created without project, space, member, channel, declaration, and tool identity.</td></tr>
+      <tr><td>Unauthorized resolver</td><td>The RPC/UI adapter rejects the request before calling the service mutation. The request remains pending and the attempt is auditable.</td></tr>
+      <tr><td>Schema evolution</td><td>Persist primitive kind and payload version. Old pending payloads remain renderable and resolvable until terminal.</td></tr>
+      <tr><td>Large form payload</td><td>Enforce payload and result size limits before persistence; return validation errors instead of truncating.</td></tr>
+      <tr><td>Notification outage</td><td>Use an outbox or transactional event table. Request creation is not considered complete until delivery can be retried durably.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="dependencies">8. Production dependencies</h2>
+
+  <p>The service is constructed with the dependencies needed to enforce human-input invariants. Runtime delivery and authorization sit at the edge around the service instead of being hidden inside it.</p>
+
+  <table>
+    <thead>
+      <tr><th>Dependency</th><th>Layer</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Repository</code></td><td>Core service</td><td>Persists current request state and outbox rows transactionally.</td></tr>
+      <tr><td><code>Clock</code></td><td>Core service</td><td>Supplies deterministic creation, expiry, and resolution timestamps.</td></tr>
+      <tr><td><code>IDGenerator</code></td><td>Core service</td><td>Creates request and outbox IDs before persistence.</td></tr>
+      <tr><td><code>PrimitiveValidator</code></td><td>Core service</td><td>Validates declaration and answer payloads for each primitive kind.</td></tr>
+      <tr><td><code>Logger</code></td><td>Core service</td><td>Records lifecycle failures with request, project, tool, status, and correlation IDs.</td></tr>
+      <tr><td><code>OutboxDispatcher</code></td><td>Runtime infrastructure</td><td>Publishes durable outbox rows to notification and wake consumers, then marks delivery attempts.</td></tr>
+      <tr><td><code>WakeRegistry</code></td><td>Runtime infrastructure</td><td>Connects waiting tool calls to terminal request events and context cancellation.</td></tr>
+      <tr><td><code>AccessPolicy</code></td><td>RPC/UI adapter</td><td>Authorizes list, view, resolve, and cancel calls before invoking service commands.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Logs are operational evidence, not product state. The service logs declaration rejection, repository failure, outbox publish failure, wake timeout, duplicate terminal submission, and expiry batch errors with structured fields. It never logs raw answer payloads or undeclared prompt text. Authorization denials are logged at the RPC/UI edge because the core service receives already-authorized commands.</p>
+
+  <h2 id="interfaces">9. Service interfaces</h2>
+
+  <p>The application service exposes narrow commands. RPC and MCP adapters translate transport payloads into these commands; they do not mutate repositories directly.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">requests</span>   <span class="tok-type">Repository</span>
+    <span class="tok-field">clock</span>      <span class="tok-type">Clock</span>
+    <span class="tok-field">ids</span>        <span class="tok-type">IDGenerator</span>
+    <span class="tok-field">validators</span> <span class="tok-type">PrimitiveValidator</span>
+    <span class="tok-field">logger</span>     *slog.<span class="tok-type">Logger</span>
+}
+
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">Declare</span>(ctx context.Context, cmd <span class="tok-type">DeclareCommand</span>) (<span class="tok-type">Request</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">Await</span>(ctx context.Context, id <span class="tok-type">RequestID</span>) (json.<span class="tok-type">RawMessage</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">Resolve</span>(ctx context.Context, cmd <span class="tok-type">ResolveCommand</span>) (<span class="tok-type">Request</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">Cancel</span>(ctx context.Context, cmd <span class="tok-type">CancelCommand</span>) (<span class="tok-type">Request</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">ExpireDue</span>(ctx context.Context, now time.<span class="tok-type">Time</span>) (<span class="tok-type">ExpireReport</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">ListPending</span>(ctx context.Context, filter <span class="tok-type">Filter</span>) ([]<span class="tok-type">Request</span>, error)</code></pre>
+
+  <p>Every command captures domain arguments: project, space, channel, tool name, tool call ID, primitive kind, and payload. Test doubles for this service capture those arguments; they do not discard them.</p>
+
+  <h2 id="invariants">10. Invariants</h2>
+
+  <table>
+    <thead>
+      <tr><th>Invariant</th><th>Enforced by</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>A pending request has exactly one terminal result.</td><td>Repository transaction, status guard, and optimistic version.</td></tr>
+      <tr><td>No prompt is visible without durable state.</td><td><code>Declare</code> transaction persists request before publishing <code>humaninput.pending</code>.</td></tr>
+      <tr><td>No raw payload fallback appears in product UI.</td><td>Primitive-specific renderers and missing-payload error states.</td></tr>
+      <tr><td>Answer shape matches declaration kind.</td><td>Boundary validation before <code>Resolve</code> mutates state.</td></tr>
+      <tr><td>Tool retries are idempotent.</td><td><code>ToolCallID</code> and <code>IdempotencyKey</code> uniqueness.</td></tr>
+      <tr><td>Awaiters never wait forever silently.</td><td>Context cancellation, expiry worker, and wake signal timeout handling.</td></tr>
+      <tr><td>Operational logs never become state.</td><td>Repository rows and outbox messages are the durable source of truth; logger writes are structured diagnostics only.</td></tr>
+      <tr><td>Decision records are created only after resolution.</td><td>Decision tool calls <code>DecisionSvc.CompleteAskUser</code> from the resolved result path.</td></tr>
+      <tr><td>Production wiring reaches the service.</td><td>Daemon composition root supplies the service-backed <code>HumanInputAwaiter</code> to MCP sessions; RPC/UI adapters call the service for pending reads and terminal resolution.</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+</body>
+</html>

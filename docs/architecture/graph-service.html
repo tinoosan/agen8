@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph Service - agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / graph-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Graph Service</span>
+  <h1>Graph Service</h1>
+  <p class="lede">The graph service is the durable work-memory boundary for typed relationships between missions, key results, tasks, decisions, operator actions, and escalations.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#boundary">Service boundary</a></li>
+      <li><a href="#subdomains">Subdomains</a></li>
+      <li><a href="#layers">Architecture layers</a></li>
+      <li><a href="#model">Domain model</a></li>
+      <li><a href="#edge-classes">Edge classes</a></li>
+      <li><a href="#service-integration">Service integration</a></li>
+      <li><a href="#queries">Query surface</a></li>
+      <li><a href="#authorization">Caller identity and scope</a></li>
+      <li><a href="#persistence">Persistence</a></li>
+      <li><a href="#repositories">Repository interfaces</a></li>
+      <li><a href="#rpc">RPC adapter</a></li>
+      <li><a href="#mcp">MCP graph tool</a></li>
+      <li><a href="#wiring">Production wiring</a></li>
+      <li><a href="#tests">Tests</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="boundary">1. Service boundary</h2>
+
+  <p>The graph service owns relationship storage, relationship validation, graph node hydration, neighbourhood expansion, graph search, and agent-facing graph mutations. It exposes typed application methods and protocol adapters; repositories remain private to the service.</p>
+
+  <div class="callout">
+    <strong>Boundary.</strong> <code>contextlink</code> is a graph subdomain. It owns the persisted edge aggregate and edge repository. The graph application service owns product operations such as <code>Node</code>, <code>Search</code>, <code>Link</code>, and <code>Unlink</code>. MCP and RPC adapters call the graph service, not the contextlink repository.
+  </div>
+
+  <p>Other services create graph edges through graph application ports when their domain events produce durable relationships. The decision service links decisions to referenced work. Operator workflows link escalations, actions, and resolving decisions. Task and mission services expose read ports used by graph hydrators; they do not embed graph traversal logic.</p>
+
+  <table>
+    <thead><tr><th>The graph service owns</th><th>The graph service does not own</th></tr></thead>
+    <tbody>
+      <tr><td>Canonical context link records and graph edge validation.</td><td>Task, mission, decision, operator-action, or escalation lifecycle state.</td></tr>
+      <tr><td>Graph node references, typed edge vocabulary, confidence, rationale metadata, and creator attribution.</td><td>Transcript rendering, React Flow layout, or frontend graph interaction state.</td></tr>
+      <tr><td>Graph query orchestration: node lookup, neighbour hydration, breadth-limited expansion, and search.</td><td>Full-text indexing or semantic embedding storage.</td></tr>
+      <tr><td>The <code>graph_query</code> MCP tool and graph RPC methods.</td><td>Decision logging, human-input waits, task review, mission progress, or message delivery.</td></tr>
+      <tr><td>Dangling-edge visibility and cleanup helpers for deleted entities.</td><td>Deleting the source domain object that an edge points at.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Hard service boundary</h3>
+  <p>The graph service is the only package that exposes graph operations to protocol layers. Context links are an internal graph repository concern, and graph query orchestration lives under the graph service boundary. The package shape is graph-first:</p>
+
+<pre><code>internal/services/graph/
+  app/
+    service.go
+    hydrators.go
+    search.go
+    ports.go
+  domain/
+    node.go
+    edge.go
+    link.go
+    repository.go
+    errors.go
+  contextlink/
+    repository.go
+    sqlite_repository.go
+    postgres_repository.go
+  rpc/
+    handler.go
+    types.go
+internal/mcp/tools/graph/
+  definition.go
+  handler.go
+  format.go
+  types.go</code></pre>
+
+  <p>Callers use <code>graphapp.Service</code> or narrow graph-owned interfaces. No production caller imports the contextlink repository implementation directly. Other services that need to write or delete links depend on graph application ports, not the contextlink repository package.</p>
+
+  <h2 id="subdomains">2. Subdomains</h2>
+
+  <p>The graph service has one persistence subdomain and one query orchestration layer. The split keeps the edge aggregate small while still giving agents a semantic graph surface.</p>
+
+  <table>
+    <thead><tr><th>Area</th><th>Code location</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td>Graph app</td><td><code>internal/services/graph/app</code></td><td>Authorizes callers, validates project scope, hydrates nodes, expands neighbourhoods, creates and deletes links, and shapes graph results.</td></tr>
+      <tr><td>Graph domain</td><td><code>internal/services/graph/domain</code></td><td>Defines graph node types, edge types, link aggregate, requests, result models, warnings, and hydrator interfaces.</td></tr>
+      <tr><td>Contextlink subdomain</td><td><code>internal/services/graph/contextlink</code></td><td>Persists typed edges and enforces edge identity, allowed edge types, confidence bounds, metadata shape, and delete semantics.</td></tr>
+      <tr><td>Hydrators</td><td><code>internal/services/graph/app/hydrators.go</code></td><td>Reads node details from task, mission, decision, and operator service ports.</td></tr>
+      <tr><td>RPC adapter</td><td><code>internal/services/graph/rpc</code></td><td>Translates JSON-RPC graph requests into typed service calls and projects results to transport DTOs.</td></tr>
+      <tr><td>MCP tool</td><td><code>internal/mcp/tools/graph</code></td><td>Owns agent-facing action names, JSON schema, session actor resolution, request validation, and deterministic MCP result formatting.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Service constructor</h3>
+  <p>The application service has an explicit constructor. Required dependencies are constructor parameters, not mutable setters. Missing production dependencies fail at startup.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">links</span>         <span class="tok-pkg">contextlink</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">clock</span>         <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>
+    <span class="tok-field">caller</span>        <span class="tok-pkg">caller</span>.<span class="tok-type">Resolver</span>
+    <span class="tok-field">members</span>       <span class="tok-type">MemberLoader</span>
+    <span class="tok-field">hydrators</span>     map[<span class="tok-type">domain</span>.<span class="tok-type">NodeType</span>]<span class="tok-type">domain</span>.<span class="tok-type">NodeHydrator</span>
+    <span class="tok-field">searchTimeout</span> time.<span class="tok-type">Duration</span>
+    <span class="tok-field">logger</span>        *slog.<span class="tok-type">Logger</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(
+    links <span class="tok-pkg">contextlink</span>.<span class="tok-type">Repository</span>,
+    clock <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>,
+    caller <span class="tok-pkg">caller</span>.<span class="tok-type">Resolver</span>,
+    members <span class="tok-type">MemberLoader</span>,
+    hydrators []<span class="tok-pkg">domain</span>.<span class="tok-type">NodeHydrator</span>,
+    searchTimeout time.<span class="tok-type">Duration</span>,
+    logger *slog.<span class="tok-type">Logger</span>,
+) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+  <p><code>links</code>, <code>clock</code>, <code>caller</code>, <code>members</code>, <code>hydrators</code>, and <code>logger</code> are required. <code>searchTimeout</code> must be positive. Hydrator node types are normalized and must be unique. A nil hydrator is a startup error.</p>
+
+  <h2 id="layers">3. Architecture layers</h2>
+
+  <div class="diagram">
+  <svg viewBox="0 0 920 430" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Graph service layers">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/>
+      </marker>
+    </defs>
+    <rect x="42" y="42" width="190" height="66" rx="8" fill="#e8f1fb" stroke="#3a78c2"/>
+    <text x="137" y="70" text-anchor="middle" font-size="14" font-weight="700">RPC adapter</text>
+    <text x="137" y="91" text-anchor="middle" font-size="12" fill="#555">browser graph calls</text>
+
+    <rect x="42" y="150" width="190" height="66" rx="8" fill="#fff4d6" stroke="#b58820"/>
+    <text x="137" y="178" text-anchor="middle" font-size="14" font-weight="700">MCP graph tool</text>
+    <text x="137" y="199" text-anchor="middle" font-size="12" fill="#555">agent graph_query</text>
+
+    <rect x="330" y="96" width="220" height="82" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+    <text x="440" y="126" text-anchor="middle" font-size="14" font-weight="700">Graph service</text>
+    <text x="440" y="148" text-anchor="middle" font-size="12" fill="#555">authorize, hydrate, traverse</text>
+    <text x="440" y="166" text-anchor="middle" font-size="12" fill="#555">link, unlink, search</text>
+
+    <rect x="660" y="42" width="210" height="66" rx="8" fill="#f7fbff" stroke="#769cc5"/>
+    <text x="765" y="70" text-anchor="middle" font-size="14" font-weight="700">Node hydrators</text>
+    <text x="765" y="91" text-anchor="middle" font-size="12" fill="#555">service read ports</text>
+
+    <rect x="660" y="150" width="210" height="66" rx="8" fill="#fff" stroke="#555"/>
+    <text x="765" y="178" text-anchor="middle" font-size="14" font-weight="700">Contextlink</text>
+    <text x="765" y="199" text-anchor="middle" font-size="12" fill="#555">edge aggregate + repo</text>
+
+    <rect x="330" y="290" width="220" height="66" rx="8" fill="#f2f2f2" stroke="#888"/>
+    <text x="440" y="318" text-anchor="middle" font-size="14" font-weight="700">Graph result</text>
+    <text x="440" y="339" text-anchor="middle" font-size="12" fill="#555">nodes, edges, warnings</text>
+
+    <line x1="232" y1="75" x2="330" y2="120" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="232" y1="183" x2="330" y2="152" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="550" y1="120" x2="660" y2="75" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="550" y1="152" x2="660" y2="183" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="440" y1="178" x2="440" y2="290" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  </svg>
+  </div>
+
+  <p>Protocol adapters are thin. They decode transport payloads, stamp caller identity, and call the graph service. The graph service owns scope checks and graph semantics. Contextlink repositories only persist edge records; they do not hydrate nodes or interpret product actions.</p>
+
+  <h3>Read flow</h3>
+  <div class="flow">
+    <div class="step"><div class="marker">1</div><div class="body">The adapter validates transport shape and maps the request into a typed graph command.</div></div>
+    <div class="step"><div class="marker">2</div><div class="body">The graph service resolves caller identity from <code>context.Context</code> and verifies the caller can access the requested project and space scope.</div></div>
+    <div class="step"><div class="marker">3</div><div class="body">The service loads the focal node through the hydrator for its node type. Missing or wrong-project nodes return an error.</div></div>
+    <div class="step"><div class="marker">4</div><div class="body">The service loads all context links where the focal node is source or target, then groups neighbouring refs by node type.</div></div>
+    <div class="step"><div class="marker">5</div><div class="body">Neighbour refs are hydrated through the same service ports. Missing hydrators and missing neighbour nodes become graph warnings with capped affected ids.</div></div>
+  </div>
+
+  <h3>Mutation flow</h3>
+  <div class="flow">
+    <div class="step"><div class="marker">1</div><div class="body">The service validates source ref, target ref, edge type, confidence, rationale, project id, and caller identity before any write.</div></div>
+    <div class="step"><div class="marker">2</div><div class="body">Both endpoints are hydrated in the requested project scope. A link cannot point to a node that the graph service cannot resolve.</div></div>
+    <div class="step"><div class="marker">3</div><div class="body">The contextlink aggregate validates the edge record. The repository writes exactly the validated edge or returns a persistence error.</div></div>
+    <div class="step"><div class="marker">4</div><div class="body">The service returns the persisted edge projection. Graph mutations do not publish agent messages; callers already receive the result synchronously.</div></div>
+  </div>
+
+  <h2 id="model">4. Domain model</h2>
+
+  <p>A graph node is any durable work object addressable by <code>type/id</code>. A context link is a directed, typed edge between two graph nodes. The direction carries meaning even when the UI renders an edge as visually symmetric.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">NodeRef</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Type</span> <span class="tok-type">NodeType</span>
+    <span class="tok-field">ID</span>   <span class="tok-type">string</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">ContextLink</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>         <span class="tok-type">ContextLinkID</span>
+    <span class="tok-field">Source</span>     <span class="tok-type">NodeRef</span>
+    <span class="tok-field">Target</span>     <span class="tok-type">NodeRef</span>
+    <span class="tok-field">EdgeType</span>   <span class="tok-type">EdgeType</span>
+    <span class="tok-field">Confidence</span> float64
+    <span class="tok-field">Metadata</span>   map[<span class="tok-type">string</span>]<span class="tok-type">string</span>
+    <span class="tok-field">CreatedAt</span>  time.<span class="tok-type">Time</span>
+    <span class="tok-field">CreatedBy</span>  <span class="tok-type">string</span>
+}</code></pre>
+
+  <p>The graph domain owns the link record. Transport adapters project it into JSON DTOs. The graph service does not use <code>pkg/types.ContextLink</code> as its domain model.</p>
+
+  <table>
+    <thead><tr><th>Concept</th><th>Fields</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Node ref</td><td><code>type</code>, <code>id</code></td><td>Type is one known graph node type; id is non-empty and resolves within the requested project scope.</td></tr>
+      <tr><td>Context link</td><td><code>id</code>, source ref, target ref, <code>edgeType</code>, <code>confidence</code>, metadata, creator, timestamp</td><td>Source and target are different nodes. Edge type is one known enum. Confidence is between <code>0.0</code> and <code>1.0</code>.</td></tr>
+      <tr><td>Graph node detail</td><td>Core node fields, neighbours, edges, optional subgraph, warnings</td><td>Every returned edge is backed by a persisted context link. Missing neighbour nodes are reported as warnings, not fabricated nodes.</td></tr>
+      <tr><td>Graph warning</td><td><code>code</code>, message, affected type, capped affected ids, count</td><td>Warnings describe partial graph shape issues without hiding service errors.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Allowed node types</h3>
+  <p><code>task</code>, <code>decision</code>, <code>key_result</code>, <code>mission</code>, <code>operator_action</code>, <code>escalation</code>, and <code>plan</code> are first-class graph nodes. <code>all</code> is accepted only by search requests.</p>
+
+  <table>
+    <thead><tr><th>Node type</th><th>Hydrator source</th><th>Scope rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>task</code></td><td>Task service read port</td><td>Task belongs to a visible same-project space.</td></tr>
+      <tr><td><code>decision</code></td><td>Decision service read port</td><td>Decision <code>ProjectID</code> equals the requested project.</td></tr>
+      <tr><td><code>key_result</code></td><td>Mission service key-result read port</td><td>Parent mission belongs to the requested project.</td></tr>
+      <tr><td><code>mission</code></td><td>Mission service read port</td><td>Mission <code>ProjectID</code> equals the requested project.</td></tr>
+      <tr><td><code>operator_action</code></td><td>Operator service read port</td><td>Action belongs to a visible same-project space.</td></tr>
+      <tr><td><code>escalation</code></td><td>Operator service escalation read port</td><td>Escalation belongs to a visible same-project space.</td></tr>
+      <tr><td><code>plan</code></td><td>Plan service read port</td><td>Plan belongs to a visible same-project space.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Allowed edge types</h3>
+  <p><code>blocked_by</code>, <code>resolved_by</code>, <code>completed_by</code>, <code>serves</code>, <code>informed_by</code>, <code>produced</code>, <code>made_during</code>, <code>spawned</code>, <code>child_of</code>, and <code>relates_to</code> are the graph edge vocabulary. Unknown edge types fail at the boundary and in the contextlink aggregate.</p>
+
+  <table>
+    <thead><tr><th>Edge type</th><th>Meaning</th><th>Typical direction</th></tr></thead>
+    <tbody>
+      <tr><td><code>blocked_by</code></td><td>The source cannot progress until the target is resolved.</td><td>Task to escalation or operator action.</td></tr>
+      <tr><td><code>resolved_by</code></td><td>The source was resolved by the target decision.</td><td>Escalation to decision.</td></tr>
+      <tr><td><code>completed_by</code></td><td>The source was completed by the target decision.</td><td>Operator action to decision.</td></tr>
+      <tr><td><code>serves</code></td><td>The source contributes toward the target objective.</td><td>Task to key result, decision to mission.</td></tr>
+      <tr><td><code>informed_by</code></td><td>The source used the target as supporting context.</td><td>Decision to decision, task, key result, or mission.</td></tr>
+      <tr><td><code>produced</code></td><td>The source produced the target work object.</td><td>Decision to task or plan.</td></tr>
+      <tr><td><code>made_during</code></td><td>The source was created during the target work context.</td><td>Decision to task or operator action.</td></tr>
+      <tr><td><code>spawned</code></td><td>The source created the target follow-up object.</td><td>Escalation to operator action.</td></tr>
+      <tr><td><code>child_of</code></td><td>The source is a child of the target in a work hierarchy.</td><td>Task to task.</td></tr>
+      <tr><td><code>relates_to</code></td><td>The source has a general durable relationship to the target.</td><td>Any visible node to any visible node.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Generic relationships use <code>relates_to</code> only when none of the semantic edge types describe the relationship. Free-form edge names are not accepted.</p>
+
+  <h2 id="edge-classes">5. Edge classes</h2>
+
+  <p>The graph stores two classes of edges with the same durable contextlink aggregate: structural edges and context shortcut edges. Structural edges mirror durable source-domain structure. Context shortcut edges preserve useful working-memory jumps so agents do not need to rediscover the same multi-hop context on every turn.</p>
+
+  <table>
+    <thead><tr><th>Class</th><th>Purpose</th><th>Examples</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Structural edge</td><td>Represents the source-domain relationship or hierarchy.</td><td><code>task --serves--&gt; key_result</code>, <code>key_result --serves--&gt; mission</code>, <code>task --child_of--&gt; task</code></td><td>The source service writes the edge when it creates or changes the underlying domain reference.</td></tr>
+      <tr><td>Context shortcut edge</td><td>Creates a direct recall path across a relationship that is semantically useful to agents.</td><td><code>decision --made_during--&gt; task</code>, <code>decision --informed_by--&gt; mission</code>, <code>task --relates_to--&gt; mission</code></td><td>The source service writes the edge when the shortcut captures durable context, with rationale metadata explaining why it exists.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="diagram">
+  <svg viewBox="0 0 920 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Structural edges and context shortcut edges">
+    <defs>
+      <marker id="edge-class-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/>
+      </marker>
+      <marker id="shortcut-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#b58820"/>
+      </marker>
+    </defs>
+
+    <text x="460" y="34" text-anchor="middle" font-size="16" font-weight="700">Structural path plus shortcut recall path</text>
+
+    <rect x="62" y="96" width="150" height="68" rx="8" fill="#e8f1fb" stroke="#3a78c2"/>
+    <text x="137" y="124" text-anchor="middle" font-size="14" font-weight="700">Mission</text>
+    <text x="137" y="146" text-anchor="middle" font-size="12" fill="#555">Kubernetes hygiene</text>
+
+    <rect x="292" y="96" width="150" height="68" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+    <text x="367" y="124" text-anchor="middle" font-size="14" font-weight="700">Key result</text>
+    <text x="367" y="146" text-anchor="middle" font-size="12" fill="#555">Restore metrics</text>
+
+    <rect x="522" y="96" width="150" height="68" rx="8" fill="#fff4d6" stroke="#b58820"/>
+    <text x="597" y="124" text-anchor="middle" font-size="14" font-weight="700">Task</text>
+    <text x="597" y="146" text-anchor="middle" font-size="12" fill="#555">Fix metrics-server</text>
+
+    <rect x="292" y="250" width="150" height="68" rx="8" fill="#f7fbff" stroke="#769cc5"/>
+    <text x="367" y="278" text-anchor="middle" font-size="14" font-weight="700">Decision</text>
+    <text x="367" y="300" text-anchor="middle" font-size="12" fill="#555">Use resolver fix</text>
+
+    <line x1="292" y1="130" x2="212" y2="130" stroke="#5f6368" stroke-width="1.6" marker-end="url(#edge-class-arrow)"/>
+    <text x="252" y="116" text-anchor="middle" font-size="12" fill="#555">serves</text>
+
+    <line x1="522" y1="130" x2="442" y2="130" stroke="#5f6368" stroke-width="1.6" marker-end="url(#edge-class-arrow)"/>
+    <text x="482" y="116" text-anchor="middle" font-size="12" fill="#555">serves</text>
+
+    <path d="M522 160 C470 220 430 230 390 250" fill="none" stroke="#5f6368" stroke-width="1.6" marker-end="url(#edge-class-arrow)"/>
+    <text x="475" y="220" text-anchor="middle" font-size="12" fill="#555">made_during</text>
+
+    <path d="M330 250 C210 222 140 192 137 164" fill="none" stroke="#b58820" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#shortcut-arrow)"/>
+    <text x="214" y="234" text-anchor="middle" font-size="12" font-weight="700" fill="#8a650f">context shortcut</text>
+    <text x="214" y="252" text-anchor="middle" font-size="12" fill="#8a650f">informed_by</text>
+
+    <rect x="704" y="86" width="160" height="210" rx="8" fill="#fff" stroke="#888"/>
+    <text x="784" y="116" text-anchor="middle" font-size="14" font-weight="700">Agent recall</text>
+    <text x="784" y="145" text-anchor="middle" font-size="12" fill="#555">Mission node lookup</text>
+    <text x="784" y="171" text-anchor="middle" font-size="12" fill="#555">returns direct</text>
+    <text x="784" y="190" text-anchor="middle" font-size="12" fill="#555">incoming decisions</text>
+    <text x="784" y="225" text-anchor="middle" font-size="12" fill="#555">No need to hop</text>
+    <text x="784" y="244" text-anchor="middle" font-size="12" fill="#555">Mission → KR → Task</text>
+    <text x="784" y="263" text-anchor="middle" font-size="12" fill="#555">before seeing context</text>
+
+    <path d="M704 188 C610 202 500 238 442 275" fill="none" stroke="#b58820" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#shortcut-arrow)"/>
+  </svg>
+  </div>
+
+  <p>Shortcut edges do not replace source-domain truth. They are explicit graph memory that optimizes recall. A mission can be connected to a decision because the decision was made while fixing a task under that mission, even when the structural path also exists through key result and task nodes.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 920 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Incoming and outgoing graph traversal">
+    <defs>
+      <marker id="direction-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#3a78c2"/>
+      </marker>
+    </defs>
+
+    <text x="460" y="34" text-anchor="middle" font-size="16" font-weight="700">Direction-aware recall around a mission</text>
+
+    <rect x="385" y="136" width="150" height="76" rx="8" fill="#e8f1fb" stroke="#3a78c2"/>
+    <text x="460" y="166" text-anchor="middle" font-size="14" font-weight="700">Mission</text>
+    <text x="460" y="189" text-anchor="middle" font-size="12" fill="#555">focal node</text>
+
+    <rect x="90" y="70" width="170" height="64" rx="8" fill="#f7fbff" stroke="#769cc5"/>
+    <text x="175" y="98" text-anchor="middle" font-size="14" font-weight="700">Decision</text>
+    <text x="175" y="118" text-anchor="middle" font-size="12" fill="#555">incoming context</text>
+
+    <rect x="90" y="224" width="170" height="64" rx="8" fill="#fff4d6" stroke="#b58820"/>
+    <text x="175" y="252" text-anchor="middle" font-size="14" font-weight="700">Task</text>
+    <text x="175" y="272" text-anchor="middle" font-size="12" fill="#555">incoming work</text>
+
+    <rect x="660" y="70" width="170" height="64" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+    <text x="745" y="98" text-anchor="middle" font-size="14" font-weight="700">Plan</text>
+    <text x="745" y="118" text-anchor="middle" font-size="12" fill="#555">outgoing follow-up</text>
+
+    <rect x="660" y="224" width="170" height="64" rx="8" fill="#f2f2f2" stroke="#888"/>
+    <text x="745" y="252" text-anchor="middle" font-size="14" font-weight="700">Escalation</text>
+    <text x="745" y="272" text-anchor="middle" font-size="12" fill="#555">outgoing blocker</text>
+
+    <line x1="260" y1="102" x2="385" y2="158" stroke="#3a78c2" stroke-width="1.8" marker-end="url(#direction-arrow)"/>
+    <text x="324" y="116" text-anchor="middle" font-size="12" fill="#3a78c2">informed_by</text>
+
+    <line x1="260" y1="256" x2="385" y2="190" stroke="#3a78c2" stroke-width="1.8" marker-end="url(#direction-arrow)"/>
+    <text x="322" y="246" text-anchor="middle" font-size="12" fill="#3a78c2">serves</text>
+
+    <line x1="535" y1="158" x2="660" y2="102" stroke="#3a78c2" stroke-width="1.8" marker-end="url(#direction-arrow)"/>
+    <text x="596" y="116" text-anchor="middle" font-size="12" fill="#3a78c2">produced</text>
+
+    <line x1="535" y1="190" x2="660" y2="256" stroke="#3a78c2" stroke-width="1.8" marker-end="url(#direction-arrow)"/>
+    <text x="598" y="246" text-anchor="middle" font-size="12" fill="#3a78c2">relates_to</text>
+
+    <text x="460" y="318" text-anchor="middle" font-size="13" fill="#555"><tspan font-weight="700">incoming_edge</tspan> reads edges pointing to the focal node. <tspan font-weight="700">outgoing_edge</tspan> reads edges leaving the focal node. <tspan font-weight="700">has_edge</tspan> reads both directions.</text>
+  </svg>
+  </div>
+
+  <p>Source services write both classes through narrow graph application ports. They do not write contextlink rows directly. The graph service validates endpoint visibility, edge vocabulary, confidence, and persistence uniqueness for every structural or shortcut edge.</p>
+
+  <h2 id="service-integration">6. Service integration</h2>
+
+  <p>Source services use the graph service through narrow graph-owned ports. They do not import <code>contextlink</code>, they do not construct persisted link rows, and they do not call graph RPC or MCP adapters. The application composition root injects the process graph service as the implementation of these ports.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">package</span> graphapp
+
+<span class="tok-kw">type</span> <span class="tok-type">Linker</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Link</span>(ctx context.Context, req <span class="tok-pkg">domain</span>.<span class="tok-type">GraphLinkRequest</span>) (<span class="tok-pkg">domain</span>.<span class="tok-type">GraphEdge</span>, []<span class="tok-pkg">domain</span>.<span class="tok-type">GraphWarning</span>, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">NodeLinkDeleter</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">DeleteLinksForNode</span>(ctx context.Context, nodeType <span class="tok-type">string</span>, nodeID <span class="tok-type">string</span>) error
+}</code></pre>
+
+  <p>The source service owns the moment and intent of the relationship. The graph service owns validation, endpoint hydration, duplicate handling, operation reporting, and persistence. A task service can therefore write <code>task --serves--&gt; key_result</code> when a task is assigned to a key result, while the graph service verifies that both endpoints resolve before storing the edge.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 920 430" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Source services use graph application ports">
+    <defs>
+      <marker id="integration-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/>
+      </marker>
+      <marker id="integration-write-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#3d8c4a"/>
+      </marker>
+    </defs>
+
+    <text x="460" y="34" text-anchor="middle" font-size="16" font-weight="700">Source services write graph intent through graph ports</text>
+
+    <rect x="40" y="70" width="170" height="64" rx="8" fill="#fff4d6" stroke="#b58820"/>
+    <text x="125" y="96" text-anchor="middle" font-size="14" font-weight="700">Task service</text>
+    <text x="125" y="116" text-anchor="middle" font-size="12" fill="#555">task serves KR</text>
+
+    <rect x="40" y="172" width="170" height="64" rx="8" fill="#f7fbff" stroke="#769cc5"/>
+    <text x="125" y="198" text-anchor="middle" font-size="14" font-weight="700">Decision service</text>
+    <text x="125" y="218" text-anchor="middle" font-size="12" fill="#555">decision shortcuts</text>
+
+    <rect x="40" y="274" width="170" height="64" rx="8" fill="#f2f2f2" stroke="#888"/>
+    <text x="125" y="300" text-anchor="middle" font-size="14" font-weight="700">Operator service</text>
+    <text x="125" y="320" text-anchor="middle" font-size="12" fill="#555">action/escalation edges</text>
+
+    <rect x="330" y="132" width="235" height="138" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+    <text x="448" y="162" text-anchor="middle" font-size="14" font-weight="700">Graph application port</text>
+    <text x="448" y="190" text-anchor="middle" font-size="12" fill="#555">Link(ctx, GraphLinkRequest)</text>
+    <text x="448" y="212" text-anchor="middle" font-size="12" fill="#555">DeleteLinksForNode(ctx, type, id)</text>
+    <text x="448" y="242" text-anchor="middle" font-size="12" fill="#555">validates endpoints, edge type, confidence</text>
+
+    <rect x="690" y="70" width="170" height="64" rx="8" fill="#e8f1fb" stroke="#3a78c2"/>
+    <text x="775" y="96" text-anchor="middle" font-size="14" font-weight="700">Hydrators</text>
+    <text x="775" y="116" text-anchor="middle" font-size="12" fill="#555">read source services</text>
+
+    <rect x="690" y="274" width="170" height="64" rx="8" fill="#fff" stroke="#555"/>
+    <text x="775" y="300" text-anchor="middle" font-size="14" font-weight="700">Contextlink repo</text>
+    <text x="775" y="320" text-anchor="middle" font-size="12" fill="#555">persists edge rows</text>
+
+    <line x1="210" y1="102" x2="330" y2="168" stroke="#3d8c4a" stroke-width="1.8" marker-end="url(#integration-write-arrow)"/>
+    <line x1="210" y1="204" x2="330" y2="204" stroke="#3d8c4a" stroke-width="1.8" marker-end="url(#integration-write-arrow)"/>
+    <line x1="210" y1="306" x2="330" y2="238" stroke="#3d8c4a" stroke-width="1.8" marker-end="url(#integration-write-arrow)"/>
+    <line x1="565" y1="170" x2="690" y2="102" stroke="#5f6368" stroke-width="1.5" marker-end="url(#integration-arrow)"/>
+    <line x1="565" y1="236" x2="690" y2="306" stroke="#5f6368" stroke-width="1.5" marker-end="url(#integration-arrow)"/>
+
+    <text x="448" y="374" text-anchor="middle" font-size="13" fill="#555">Source service decides what relationship exists. Graph service decides whether it is valid and persists exactly one edge.</text>
+  </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Source service</th><th>Structural edges</th><th>Context shortcut edges</th><th>Cleanup</th></tr></thead>
+    <tbody>
+      <tr><td>Task</td><td><code>task --serves--&gt; key_result</code>, <code>task --child_of--&gt; task</code></td><td><code>task --relates_to--&gt; mission</code> when direct mission recall is useful.</td><td>Deletes edges for the task node when the task is deleted.</td></tr>
+      <tr><td>Decision</td><td><code>decision --made_during--&gt; task</code>, <code>decision --produced--&gt; task</code></td><td><code>decision --informed_by--&gt; mission</code> or <code>decision --serves--&gt; key_result</code> when the decision should appear directly around those nodes.</td><td>Deletes edges for the decision node when the decision is deleted.</td></tr>
+      <tr><td>Mission / key result</td><td><code>key_result --serves--&gt; mission</code></td><td>Mission-level shortcut edges created from mission workflows when the relationship is durable agent context.</td><td>Deletes edges for mission or key-result nodes when those records are deleted.</td></tr>
+      <tr><td>Operator</td><td><code>escalation --spawned--&gt; operator_action</code>, <code>operator_action --completed_by--&gt; decision</code>, <code>escalation --resolved_by--&gt; decision</code></td><td><code>operator_action --relates_to--&gt; mission</code> when the action should surface directly in mission recall.</td><td>Deletes edges for operator-action and escalation nodes when those records are deleted.</td></tr>
+      <tr><td>Plan</td><td><code>plan --serves--&gt; mission</code> or <code>plan --serves--&gt; key_result</code></td><td><code>decision --produced--&gt; plan</code> when planning output is produced by a recorded decision.</td><td>Deletes edges for the plan node when the plan is deleted.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Graph write calls are synchronous. If endpoint hydration fails, the source service returns the error rather than silently skipping the edge. Link calls are idempotent for the same source, target, and edge type, so source services can retry safely and inspect <code>operation</code> to distinguish <code>created</code>, <code>updated</code>, and <code>noop</code>.</p>
+
+  <h2 id="queries">7. Query surface</h2>
+
+  <p>The graph service exposes four product operations. Reads hydrate live node records through service ports so graph output reflects current titles, statuses, scopes, and timestamps. Edges remain durable even when a referenced node is deleted; reads surface those dangling edges as warnings until cleanup removes them.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">GraphQueryService</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Node</span>(ctx context.Context, req <span class="tok-type">NodeRequest</span>) (<span class="tok-type">GraphNodeDetail</span>, []<span class="tok-type">GraphWarning</span>, error)
+    <span class="tok-fn">Search</span>(ctx context.Context, req <span class="tok-type">SearchRequest</span>) ([]<span class="tok-type">GraphNodeSummary</span>, []<span class="tok-type">GraphWarning</span>, error)
+    <span class="tok-fn">Link</span>(ctx context.Context, req <span class="tok-type">LinkRequest</span>) (<span class="tok-type">GraphEdge</span>, []<span class="tok-type">GraphWarning</span>, error)
+    <span class="tok-fn">Unlink</span>(ctx context.Context, req <span class="tok-type">UnlinkRequest</span>) (<span class="tok-type">GraphEdge</span>, []<span class="tok-type">GraphWarning</span>, error)
+}</code></pre>
+
+  <table>
+    <thead><tr><th>Operation</th><th>Inputs</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td><code>Node</code></td><td>project id, node type, node id, depth</td><td>Loads one node, its persisted edges, hydrated neighbours, and optional breadth-limited subgraph.</td></tr>
+      <tr><td><code>Search</code></td><td>project id, node type, query, limit, edge filters</td><td>Searches one hydrator or all hydrators, ranks by query relevance, and applies any-direction or direction-aware edge filters without reordering surviving hits.</td></tr>
+      <tr><td><code>Link</code></td><td>project id, source ref, target ref, edge type, confidence, rationale</td><td>Verifies both endpoints through hydrators, then creates, updates, or no-ops the matching context link.</td></tr>
+      <tr><td><code>Unlink</code></td><td>project id plus edge id, or project id plus source ref, target ref, and edge type</td><td>Deletes the exact persisted edge and returns the removed edge view with <code>operation=deleted</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Node detail shape</h3>
+  <p><code>GraphNodeDetail</code> contains the hydrated focal node, visible neighbours, all edge projections involving the focal node, optional subgraph summaries, and warning counts.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">GraphNodeDetail</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>                     <span class="tok-type">string</span>
+    <span class="tok-field">Type</span>                   <span class="tok-type">NodeType</span>
+    <span class="tok-field">Title</span>                  <span class="tok-type">string</span>
+    <span class="tok-field">Status</span>                 <span class="tok-type">string</span>
+    <span class="tok-field">ScopeID</span>                <span class="tok-type">string</span>
+    <span class="tok-field">CreatedAt</span>              <span class="tok-type">string</span>
+    <span class="tok-field">Fields</span>                 map[<span class="tok-type">string</span>]any
+    <span class="tok-field">Neighbours</span>             []<span class="tok-type">GraphNodeSummary</span>
+    <span class="tok-field">Subgraph</span>               []<span class="tok-type">GraphNodeSummary</span>
+    <span class="tok-field">Edges</span>                  []<span class="tok-type">GraphEdge</span>
+    <span class="tok-field">MissingNeighbourCount</span>  <span class="tok-type">int</span>
+    <span class="tok-field">DanglingNeighbourCount</span> <span class="tok-type">int</span>
+}</code></pre>
+
+  <h3>Search behavior</h3>
+  <p>Search accepts a concrete node type or <code>all</code>. Concrete search calls one hydrator. <code>all</code> fans out across hydrators with a per-hydrator timeout, merges hits, scores exact title matches ahead of prefix and substring matches, then sorts by score, created time, type, and id. Concrete search uses the same final scoring step when a query is present, so a newer weak match does not outrank an older title match. A hydrator timeout produces a <code>search_partial_timeout</code> warning; a non-timeout hydrator error fails the request.</p>
+
+  <table>
+    <thead><tr><th>Search input</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>query</code></td><td>Required for <code>node_type=all</code> unless an edge filter is present. Optional for concrete node types, where an empty query browses that node type.</td></tr>
+      <tr><td><code>limit</code></td><td>Defaults to <code>10</code> and caps at <code>50</code>.</td></tr>
+      <tr><td><code>has_edge</code></td><td>Filters to nodes with at least one incoming or outgoing context link of the requested edge type.</td></tr>
+      <tr><td><code>missing_edge</code></td><td>Filters to nodes with no incoming or outgoing context link of the requested edge type.</td></tr>
+      <tr><td><code>outgoing_edge</code></td><td>Filters to nodes where the node is the source of at least one matching edge.</td></tr>
+      <tr><td><code>incoming_edge</code></td><td>Filters to nodes where the node is the target of at least one matching edge.</td></tr>
+      <tr><td><code>has_edge</code> plus <code>missing_edge</code></td><td>Allowed only when the edge types differ.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Search relevance</h3>
+  <table>
+    <thead><tr><th>Match class</th><th>Score</th><th>Example for query <code>metrics</code></th></tr></thead>
+    <tbody>
+      <tr><td>Exact title match</td><td><code>1.0</code></td><td><code>metrics</code></td></tr>
+      <tr><td>Title prefix match</td><td><code>0.8</code></td><td><code>metrics-server restore</code></td></tr>
+      <tr><td>Title substring match</td><td><code>0.6</code></td><td><code>Restore metrics-server and kubectl top</code></td></tr>
+      <tr><td>Hydrator-provided fallback hit</td><td><code>0.4</code></td><td>A node returned by the source service without the query in its title.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Score is the primary sort key. Created time, node type, and id are deterministic tie-breakers. Edge filters are applied after the search candidate set is built; they preserve the relevance order of surviving hits. <code>has_edge</code> and <code>missing_edge</code> are direction-agnostic by design. Agents use <code>outgoing_edge</code> or <code>incoming_edge</code> when source/target direction matters. Search hits that survive a positive edge filter include <code>matchedEdges</code> snippets so callers can see which relationship satisfied the filter without issuing a follow-up node expansion.</p>
+
+  <h2 id="authorization">8. Caller identity and scope</h2>
+
+  <p>The graph service consumes the shared <code>internal/caller</code> contract. RPC calls carry the authenticated user identity. MCP calls resolve the active member from the session and stamp both user and member identity into context before service calls.</p>
+
+  <table>
+    <thead><tr><th>Caller</th><th>Allowed graph behavior</th><th>Scope basis</th></tr></thead>
+    <tbody>
+      <tr><td>Authenticated user</td><td>Read and mutate graph links for projects the user owns.</td><td>User owns the project and its spaces.</td></tr>
+      <tr><td>Coordinator member</td><td>Read same-project graph context and create or remove links for visible nodes.</td><td>Active member belongs to a project space and has coordinator member type.</td></tr>
+      <tr><td>Worker member</td><td>Read visible graph context and create relation links only for nodes visible to that worker.</td><td>Active member belongs to the space and is authorized by node visibility.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The service never infers project scope from a node id. Every public method requires <code>ProjectID</code>. Hydrators enforce project ownership by reading through source services and checking project or space membership. A node id prefix can infer node type for convenience on <code>node</code>, <code>link</code>, and <code>unlink</code> calls, but it cannot infer project, space, user, or member authority.</p>
+
+  <h2 id="persistence">9. Persistence</h2>
+
+  <p>The contextlink repository stores only canonical edge records. It enforces uniqueness for <code>source_type</code>, <code>source_id</code>, <code>target_type</code>, <code>target_id</code>, and <code>edge_type</code>. It does not query source-domain tables and it does not hide duplicate or missing records.</p>
+
+  <table>
+    <thead><tr><th>Column</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>id</code></td><td>Primary key, generated by the graph service when absent from internal callers.</td></tr>
+      <tr><td><code>source_type</code>, <code>source_id</code></td><td>Directed source endpoint index.</td></tr>
+      <tr><td><code>target_type</code>, <code>target_id</code></td><td>Directed target endpoint index.</td></tr>
+      <tr><td><code>edge_type</code></td><td>Semantic relationship filter and uniqueness component.</td></tr>
+      <tr><td><code>confidence</code></td><td>Confidence weight constrained to <code>0.0</code> through <code>1.0</code>.</td></tr>
+      <tr><td><code>metadata_json</code></td><td>Small graph-owned metadata such as <code>rationale</code>; not a general document store.</td></tr>
+      <tr><td><code>created_at</code>, <code>created_by</code></td><td>Audit fields for graph provenance.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Replace semantics</h3>
+  <p><code>Link</code> is idempotent for the same source, target, and edge type. If no matching edge exists, the service creates one and returns <code>operation=created</code>. If the edge exists and confidence, rationale, origin, or creator changes, the service updates the row and returns <code>operation=updated</code>. If the edge exists with the same confidence, rationale, origin, and creator, the service returns <code>operation=noop</code> and does not write. Updates preserve the link id and creation timestamp.</p>
+
+  <h2 id="repositories">10. Repository interfaces</h2>
+
+  <p>The <code>contextlink</code> package owns repository interfaces and SQL implementations. Application services consume package-namespaced contracts or narrower consumer-owned ports; they never depend on SQL repository structs directly.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 920 310" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Graph repository interface structure">
+    <defs>
+      <marker id="repo-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/>
+      </marker>
+    </defs>
+    <rect x="35" y="56" width="190" height="74" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+    <text x="130" y="84" text-anchor="middle" font-size="14" font-weight="700">graph app</text>
+    <text x="130" y="106" text-anchor="middle" font-size="12" fill="#555">Service orchestration</text>
+
+    <rect x="315" y="40" width="245" height="106" rx="8" fill="#f7fbff" stroke="#769cc5"/>
+    <text x="437" y="68" text-anchor="middle" font-size="14" font-weight="700">contextlink package</text>
+    <text x="437" y="91" text-anchor="middle" font-size="12" fill="#555">contextlink.Reader</text>
+    <text x="437" y="111" text-anchor="middle" font-size="12" fill="#555">contextlink.Writer</text>
+    <text x="437" y="131" text-anchor="middle" font-size="12" fill="#555">contextlink.Repository</text>
+
+    <rect x="665" y="56" width="210" height="74" rx="8" fill="#fff" stroke="#555"/>
+    <text x="770" y="84" text-anchor="middle" font-size="14" font-weight="700">contextlink infra</text>
+    <text x="770" y="106" text-anchor="middle" font-size="12" fill="#555">SQL implementation</text>
+
+    <rect x="315" y="205" width="245" height="62" rx="8" fill="#fff4d6" stroke="#b58820"/>
+    <text x="437" y="231" text-anchor="middle" font-size="14" font-weight="700">graph ports</text>
+    <text x="437" y="250" text-anchor="middle" font-size="12" fill="#555">source-service integration</text>
+
+    <line x1="225" y1="93" x2="315" y2="93" stroke="#5f6368" stroke-width="1.5" marker-end="url(#repo-arrow)"/>
+    <line x1="560" y1="93" x2="665" y2="93" stroke="#5f6368" stroke-width="1.5" marker-end="url(#repo-arrow)"/>
+    <line x1="437" y1="205" x2="437" y2="146" stroke="#5f6368" stroke-width="1.5" marker-end="url(#repo-arrow)"/>
+  </svg>
+  </div>
+
+  <h3>Domain contracts</h3>
+  <p>The repository contract is composed from smaller interfaces so consumers can depend only on the operations they need. The package name carries the domain namespace; the type name carries the role. That keeps imports clear and avoids stutter such as <code>contextlink.ContextLinkRepository</code>.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">package</span> contextlink
+
+<span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">FindBySource</span>(ctx context.Context, source <span class="tok-type">NodeRef</span>) ([]<span class="tok-type">ContextLink</span>, error)
+    <span class="tok-fn">FindByTarget</span>(ctx context.Context, target <span class="tok-type">NodeRef</span>) ([]<span class="tok-type">ContextLink</span>, error)
+    <span class="tok-fn">FindBetween</span>(ctx context.Context, source <span class="tok-type">NodeRef</span>, target <span class="tok-type">NodeRef</span>) ([]<span class="tok-type">ContextLink</span>, error)
+    <span class="tok-fn">FindByEdgeType</span>(ctx context.Context, edgeType <span class="tok-type">EdgeType</span>, limit <span class="tok-type">int</span>) ([]<span class="tok-type">ContextLink</span>, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Save</span>(ctx context.Context, link <span class="tok-type">ContextLink</span>) error
+    <span class="tok-fn">Replace</span>(ctx context.Context, link <span class="tok-type">ContextLink</span>) error
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Deleter</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Delete</span>(ctx context.Context, id <span class="tok-type">ContextLinkID</span>) error
+    <span class="tok-fn">DeleteLinksForEntity</span>(ctx context.Context, ref <span class="tok-type">NodeRef</span>) error
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Repository</span> <span class="tok-kw">interface</span> {
+    <span class="tok-type">Reader</span>
+    <span class="tok-type">Writer</span>
+    <span class="tok-type">Deleter</span>
+}</code></pre>
+
+  <table>
+    <thead><tr><th>Interface</th><th>Consumer</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>contextlink.Reader</code></td><td>Graph query paths and graph-owned read-only helpers.</td><td>Never mutates or repairs rows during reads.</td></tr>
+      <tr><td><code>contextlink.Writer</code></td><td>Graph application service only.</td><td>Accepts already validated graph-domain links; duplicate edges return errors unless <code>Replace</code> is called.</td></tr>
+      <tr><td><code>contextlink.Deleter</code></td><td>Graph application service only.</td><td>Deletes by id or exact node ref; deletion errors are returned, not swallowed.</td></tr>
+      <tr><td><code>contextlink.Repository</code></td><td>Graph application service only.</td><td>Full read/write/delete contract for graph orchestration.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Infrastructure implementation</h3>
+  <p><code>internal/services/graph/contextlink</code> contains the contextlink interfaces, SQL-backed repository implementations, and repository assertion tests. It is a repository package under graph. It does not define service methods, RPC handlers, MCP handlers, or caller authorization.</p>
+
+<pre><code>internal/services/graph/contextlink/
+  repository_builder.go
+  repository_assertions_test.go
+  sql_helpers.go
+  sql_store.go
+  sqlite_repository.go
+  sqlite_repository_test.go
+  postgres_repository.go</code></pre>
+
+  <p>SQLite and Postgres implementations share the same assertion suite. The suite verifies insert, duplicate rejection, replace, source lookup, target lookup, between lookup, edge-type lookup, delete by id, delete by entity, metadata round-trip, timestamp round-trip, and transaction rollback on replace failure.</p>
+
+  <h3>Replace and transactions</h3>
+  <p><code>Replace</code> is a repository operation because the uniqueness boundary belongs with persistence. It updates the one row identified by source, target, and edge type. If the row exists, <code>Replace</code> preserves id and creation audit unless the caller explicitly provides a new id for a create path. If the row does not exist, it inserts the supplied link. The operation is atomic.</p>
+
+  <h3>Source-domain cleanup</h3>
+  <p>Source services clean graph edges through the graph application's deletion port when they delete an entity that can appear in the graph. They pass an exact node type and id; the graph service deletes every row where the ref is either source or target. Cleanup is not a fallback for graph reads: reads still surface dangling edges as warnings when cleanup has not happened.</p>
+
+  <h2 id="rpc">11. RPC adapter</h2>
+
+  <p>The JSON-RPC graph adapter is a thin product API over the graph service. It is used by the web UI and any local client that needs graph queries without MCP. It stamps the authenticated caller before invoking the service.</p>
+
+  <table>
+    <thead><tr><th>RPC method</th><th>Service call</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td><code>graph.node</code></td><td><code>Node</code></td><td>Load a focused node for detail panels and graph inspection.</td></tr>
+      <tr><td><code>graph.search</code></td><td><code>Search</code></td><td>Search nodes and find relationship gaps.</td></tr>
+      <tr><td><code>graph.link</code></td><td><code>Link</code></td><td>Create or replace a relationship from UI workflows.</td></tr>
+      <tr><td><code>graph.unlink</code></td><td><code>Unlink</code></td><td>Remove a relationship from UI workflows.</td></tr>
+      <tr><td><code>graph.linksBySource</code></td><td><code>FindBySource</code></td><td>Efficient strategy-map edge loading for known source nodes.</td></tr>
+      <tr><td><code>graph.linksByTarget</code></td><td><code>FindByTarget</code></td><td>Efficient strategy-map edge loading for known target nodes.</td></tr>
+    </tbody>
+  </table>
+
+  <p>RPC views use JSON field names consistent with frontend graph types: <code>id</code>, <code>sourceType</code>, <code>sourceId</code>, <code>targetType</code>, <code>targetId</code>, <code>edgeType</code>, <code>confidence</code>, <code>rationale</code>, <code>createdAt</code>, <code>createdBy</code>, <code>origin</code>, <code>source</code>, and <code>manual</code>. <code>origin</code> is the semantic source of the relationship: <code>manual</code> for graph-tool or UI edits, <code>reference</code> for relationships materialized from domain references, and <code>system</code> for service-owned maintenance edges. <code>createdBy</code> records the actor or service that wrote the row, such as <code>graph_query</code>, <code>task_service</code>, <code>decision_service</code>, or <code>operator_service</code>. The adapter does not expose SQL errors.</p>
+
+  <h2 id="mcp">12. MCP graph tool</h2>
+
+  <p><code>graph_query</code> is the agent-facing MCP tool for durable work-memory retrieval and graph mutation. The handler owns action names, schema, strict JSON decoding, member session resolution, caller stamping, service request mapping, and structured result formatting.</p>
+
+  <table>
+    <thead><tr><th>MCP action</th><th>Service method</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td><code>node</code></td><td><code>GraphService.Node</code></td><td>One hydrated node detail with neighbours, edges, subgraph, and warnings.</td></tr>
+      <tr><td><code>search</code></td><td><code>GraphService.Search</code></td><td>A stable list of graph node summaries and warnings. Positive edge-filter hits include <code>matchedEdges</code>.</td></tr>
+      <tr><td><code>link</code></td><td><code>GraphService.Link</code></td><td>The graph edge plus stable id, audit provenance, and <code>operation</code>: <code>created</code>, <code>updated</code>, or <code>noop</code>.</td></tr>
+      <tr><td><code>unlink</code></td><td><code>GraphService.Unlink</code></td><td>The deleted graph edge plus <code>operation=deleted</code>. Callers may unlink by stable <code>edge_id</code> or by exact endpoint tuple.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The MCP session supplies <code>GraphService</code>, <code>MemberDirectory</code>, <code>ProjectID</code>, <code>SpaceID</code>, and <code>ActorMemberID</code>. The handler resolves the active member before calling the service. Missing graph service, member directory, project id, or actor member id returns an MCP error result.</p>
+
+  <h3>MCP schema</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Used by</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>action</code></td><td>all calls</td><td>One of <code>node</code>, <code>search</code>, <code>link</code>, or <code>unlink</code>.</td></tr>
+      <tr><td><code>node_type</code></td><td>node, search</td><td>Known node type. Optional for <code>node</code> when <code>node_id</code> has a recognized typed prefix. <code>all</code> is valid only for search.</td></tr>
+      <tr><td><code>node_id</code></td><td>node</td><td>Required for node lookup.</td></tr>
+      <tr><td><code>edge_id</code></td><td>unlink</td><td>Stable edge id returned by node, search, link, or unlink results. When present, endpoint fields and <code>edge_type</code> are omitted.</td></tr>
+      <tr><td><code>source_type</code>, <code>source_id</code></td><td>link, unlink</td><td>Source id is required for link and for endpoint-based unlink. Source type is optional when <code>source_id</code> has a recognized typed prefix.</td></tr>
+      <tr><td><code>target_type</code>, <code>target_id</code></td><td>link, unlink</td><td>Target id is required for link and for endpoint-based unlink. Target type is optional when <code>target_id</code> has a recognized typed prefix.</td></tr>
+      <tr><td><code>edge_type</code></td><td>link, unlink</td><td>Known edge type. Required for link and endpoint-based unlink; omitted for <code>edge_id</code> unlink.</td></tr>
+      <tr><td><code>confidence</code></td><td>link</td><td>Optional, defaults to <code>1.0</code>, constrained to <code>0.0</code> through <code>1.0</code>.</td></tr>
+      <tr><td><code>rationale</code></td><td>link</td><td>Optional short explanation stored in graph metadata.</td></tr>
+      <tr><td><code>query</code>, <code>limit</code>, <code>has_edge</code>, <code>missing_edge</code>, <code>outgoing_edge</code>, <code>incoming_edge</code></td><td>search</td><td>Search and relationship-gap filters. Empty <code>query</code> is valid only with a concrete <code>node_type</code> or an edge filter.</td></tr>
+      <tr><td><code>depth</code></td><td>node</td><td>Optional breadth expansion depth. Defaults to <code>1</code> and caps at <code>3</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The schema requires only <code>action</code> at the top level. Callers include only the fields used by the selected action. The handler rejects unknown JSON fields, fields that belong to a different action, and explicit <code>null</code> values before any service call. Required fields are validated after unmarshal. Empty strings are invalid for required fields; they are not resolved to defaults.</p>
+
+  <h3>MCP result shape</h3>
+  <p>Every successful MCP result includes text content for the agent transcript and structured content for the UI event projector. The structured payload includes <code>action</code>, <code>projectId</code>, one of <code>node</code>, <code>nodes</code>, or <code>edge</code>, and <code>warnings</code>. Edge payloads include the stable edge <code>id</code>, <code>createdAt</code>, <code>createdBy</code>, provenance <code>origin</code>, compatibility <code>source</code>, and <code>manual</code> so agents can distinguish manual graph edits from derived reference edges. Link results include <code>edge.operation</code> so agents can distinguish creates, updates, and no-ops. Unlink success returns <code>edge.operation=deleted</code>; unlink not-found remains an error result. Error results use MCP <code>isError=true</code> and contain the validation or service error message.</p>
+
+  <h2 id="wiring">13. Production wiring</h2>
+
+  <p>The application composition root constructs one graph service after the services it hydrates from are available. The same process-owned graph service is passed to RPC registration and MCP session registration.</p>
+
+<pre><code class="lang-go">contextLinks, err := graphcontextlink.NewRepository(handle)
+graphSvc, err := graphapp.NewService(graphapp.Config{
+    Links:         contextLinks,
+    Caller:        caller.ContextResolver{},
+    Members:       spaceSvc,
+    Hydrators:     graphapp.DefaultHydrators(taskSvc, decisionSvc, missionSvc, operatorSvc, planSvc),
+    SearchTimeout: 2 * time.Second,
+    Logger:        logger.With("service", "graph"),
+})</code></pre>
+
+  <p>The RPC registry binds graph methods through <code>internal/rpc/graph.go</code>. The MCP server registers <code>internal/mcp/tools/graph</code> in <code>internal/mcp/toolset.go</code> and dispatches it in <code>executeNativeMCPTool</code>. Managed harness startup includes the process graph service in every member MCP session so agents can call <code>graph_query</code> end to end.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 920 310" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Graph service production wiring">
+    <defs>
+      <marker id="wire-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/>
+      </marker>
+    </defs>
+    <rect x="40" y="55" width="170" height="64" rx="8" fill="#f7fbff" stroke="#769cc5"/>
+    <text x="125" y="82" text-anchor="middle" font-size="14" font-weight="700">Application</text>
+    <text x="125" y="102" text-anchor="middle" font-size="12" fill="#555">construct once</text>
+
+    <rect x="300" y="55" width="170" height="64" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+    <text x="385" y="82" text-anchor="middle" font-size="14" font-weight="700">GraphSvc</text>
+    <text x="385" y="102" text-anchor="middle" font-size="12" fill="#555">process-owned</text>
+
+    <rect x="585" y="32" width="210" height="64" rx="8" fill="#e8f1fb" stroke="#3a78c2"/>
+    <text x="690" y="59" text-anchor="middle" font-size="14" font-weight="700">RPC registry</text>
+    <text x="690" y="79" text-anchor="middle" font-size="12" fill="#555">graph.* methods</text>
+
+    <rect x="585" y="150" width="210" height="64" rx="8" fill="#fff4d6" stroke="#b58820"/>
+    <text x="690" y="177" text-anchor="middle" font-size="14" font-weight="700">MCP session</text>
+    <text x="690" y="197" text-anchor="middle" font-size="12" fill="#555">graph_query tool</text>
+
+    <line x1="210" y1="87" x2="300" y2="87" stroke="#5f6368" stroke-width="1.5" marker-end="url(#wire-arrow)"/>
+    <line x1="470" y1="80" x2="585" y2="64" stroke="#5f6368" stroke-width="1.5" marker-end="url(#wire-arrow)"/>
+    <line x1="470" y1="100" x2="585" y2="182" stroke="#5f6368" stroke-width="1.5" marker-end="url(#wire-arrow)"/>
+  </svg>
+  </div>
+
+  <h3>Hydrator ports</h3>
+  <p>Hydrators depend on narrow read ports owned by the graph service. They do not import repositories from source domains. Each hydrator returns a stable core shape: id, type, title, status, scope id, created timestamp, and fields.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">NodeHydrator</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">NodeType</span>() <span class="tok-type">NodeType</span>
+    <span class="tok-fn">Fetch</span>(ctx context.Context, projectID <span class="tok-type">string</span>, nodeID <span class="tok-type">string</span>) (<span class="tok-type">GraphNodeCore</span>, error)
+    <span class="tok-fn">FetchMany</span>(ctx context.Context, projectID <span class="tok-type">string</span>, nodeIDs []<span class="tok-type">string</span>) ([]<span class="tok-type">GraphNodeSummary</span>, error)
+    <span class="tok-fn">Search</span>(ctx context.Context, projectID <span class="tok-type">string</span>, query <span class="tok-type">string</span>, limit <span class="tok-type">int</span>) ([]<span class="tok-type">GraphNodeSummary</span>, error)
+}</code></pre>
+
+  <h2 id="tests">14. Tests</h2>
+
+  <p>Graph behavior is covered at every boundary. Leaf tests are useful, but the feature is complete only when production entry points can invoke it end to end.</p>
+
+  <table>
+    <thead><tr><th>Test area</th><th>Required coverage</th></tr></thead>
+    <tbody>
+      <tr><td>Domain</td><td>Context link validation rejects empty refs, same-node links, unknown edge types, out-of-range confidence, and invalid metadata.</td></tr>
+      <tr><td>Repository</td><td>Save, duplicate edge rejection, find by source, find by target, find between, find by edge type, replace, delete, and delete links for entity.</td></tr>
+      <tr><td>Service reads</td><td>Node detail success, unsupported node type, missing focal node, missing hydrator warning, dangling edge warning, depth cap, and deterministic sorting.</td></tr>
+      <tr><td>Service mutations</td><td>Link success, endpoint-not-found error, cross-project rejection, duplicate replace, invalid confidence, unlink success, and unlink-not-found error.</td></tr>
+      <tr><td>RPC</td><td>Success and common invalid-param path for every graph RPC method.</td></tr>
+      <tr><td>MCP</td><td>Valid input to expected structured output and invalid/missing input to MCP error result for every action.</td></tr>
+      <tr><td>Composition root</td><td>Application builds graph service once, RPC registration uses that service, and MCP session dispatch reaches that service through the real server.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="invariants">15. Invariants</h2>
+
+  <table>
+    <thead><tr><th>Invariant</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>Graph mutations never create edges to nodes outside the requested project.</td><td><code>GraphService.Link</code> hydrates both endpoints with the caller's project before saving.</td></tr>
+      <tr><td>Unknown node types and edge types fail loudly.</td><td>Graph request validation and contextlink aggregate validation.</td></tr>
+      <tr><td>Repositories do not authorize, hydrate, or infer defaults.</td><td>Contextlink repository interface accepts validated edge records and returns persistence errors.</td></tr>
+      <tr><td>MCP tools do not call repositories.</td><td><code>internal/mcp/tools/graph</code> depends on the graph service interface and member directory only.</td></tr>
+      <tr><td>Missing production wiring is a test failure.</td><td>Composition-root tests exercise RPC registration and MCP <code>graph_query</code> calls through the real server entry point.</td></tr>
+      <tr><td>Dangling edges are visible.</td><td>Node reads return graph warnings with affected type, capped ids, and count.</td></tr>
+      <tr><td><code>contextlink</code> is not a top-level service API.</td><td>Protocol layers import graph RPC or graph MCP packages only.</td></tr>
+      <tr><td>Graph node hydration does not bypass source services.</td><td>Hydrators depend on source service read ports, not source repositories.</td></tr>
+      <tr><td>Graph search partial timeout does not hide non-timeout failures.</td><td>Timeouts produce warnings; other hydrator errors return service errors.</td></tr>
+      <tr><td>Graph writes do not create agent wakeups.</td><td>The graph service returns synchronous results and does not publish message events.</td></tr>
+    </tbody>
+  </table>
+
+  <footer>Architecture · agen8 · Graph service</footer>
+
+</div>
+</body>
+</html>

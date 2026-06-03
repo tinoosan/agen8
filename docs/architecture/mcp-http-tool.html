@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP HTTP tool</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / mcp-http-tool</span>
+  </div>
+</nav>
+
+<div class="page">
+
+<span class="eyebrow">Architecture · MCP HTTP Tool</span>
+<h1>MCP HTTP tool</h1>
+<p class="lede">The agent-facing integration tool for making bounded HTTP requests with host-scoped credentials.</p>
+
+<h2>Purpose</h2>
+
+<p><code>http</code> is an MCP tool, not a generic runtime module. It exposes one product-facing operation: make an outbound HTTP request, optionally injecting credentials resolved by host. The handler owns request decoding, URL validation, credential lookup, HTTP execution, response truncation, and deterministic result shaping.</p>
+
+<div class="callout">
+<strong>Boundary.</strong> HTTP tool behavior lives in <code>internal/mcp/tools/http</code>. The credential service owns stored secrets and metadata. The HTTP client is package-local tool infrastructure. No service accepts raw <code>http(...)</code> tool JSON, no service package defines an HTTP-tool-specific service or port, and no MCP session imports an HTTP client from another runtime package.
+</div>
+
+<h2>Operation</h2>
+
+<table>
+  <tr><th>Tool call</th><th>Handler responsibility</th><th>Dependencies</th><th>Result</th></tr>
+  <tr>
+    <td><code>http(...)</code></td>
+    <td>Validate method and URL, resolve host credentials, inject auth, execute the request with package-local clients, cap response size, and format the response.</td>
+    <td><code>CredentialSvc.Get</code> plus package-local <code>net/http</code> clients.</td>
+    <td>Status, final URL, response headers, text body preview, truncation state, and credential injection metadata.</td>
+  </tr>
+</table>
+
+<h2>Control flow</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 920 390" width="920" height="390" role="img" aria-label="MCP HTTP tool control flow">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="28" y="44" width="150" height="58" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="103" y="68" text-anchor="middle" font-size="13" font-weight="600">Member agent</text>
+  <text x="103" y="87" text-anchor="middle" font-size="11" fill="#555">http(url, method)</text>
+
+  <rect x="228" y="44" width="150" height="58" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="303" y="68" text-anchor="middle" font-size="13" font-weight="600">MCP server</text>
+  <text x="303" y="87" text-anchor="middle" font-size="11" fill="#555">auth + route</text>
+
+  <rect x="428" y="28" width="180" height="90" rx="5" fill="#fff" stroke="#555"/>
+  <text x="518" y="55" text-anchor="middle" font-size="13" font-weight="600">http handler</text>
+  <text x="518" y="76" text-anchor="middle" font-size="11" fill="#555">decode + validate</text>
+  <text x="518" y="94" text-anchor="middle" font-size="11" fill="#555">resolve creds + execute</text>
+
+  <rect x="680" y="24" width="170" height="50" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="765" y="54" text-anchor="middle" font-size="12" font-weight="600">CredentialSvc</text>
+
+  <rect x="680" y="112" width="170" height="66" rx="5" fill="#f0f0f0" stroke="#888"/>
+  <text x="765" y="138" text-anchor="middle" font-size="12" font-weight="600">package-local client</text>
+  <text x="765" y="158" text-anchor="middle" font-size="10.5" fill="#555">net/http + redirect policy</text>
+
+  <rect x="680" y="220" width="170" height="58" rx="5" fill="#fff" stroke="#555"/>
+  <text x="765" y="244" text-anchor="middle" font-size="12" font-weight="600">Remote endpoint</text>
+  <text x="765" y="263" text-anchor="middle" font-size="10.5" fill="#555">bounded response read</text>
+
+  <rect x="428" y="220" width="180" height="72" rx="5" fill="#f0f0f0" stroke="#888"/>
+  <text x="518" y="245" text-anchor="middle" font-size="12" font-weight="600">MCP result</text>
+  <text x="518" y="264" text-anchor="middle" font-size="10.5" fill="#555">semantic structured response</text>
+  <text x="518" y="280" text-anchor="middle" font-size="10.5" fill="#555">no raw fallback</text>
+
+  <line x1="178" y1="73" x2="228" y2="73" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="378" y1="73" x2="428" y2="73" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="608" y1="58" x2="680" y2="49" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="608" y1="84" x2="680" y2="145" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="765" y1="178" x2="765" y2="220" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="680" y1="249" x2="608" y2="256" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="518" y1="118" x2="518" y2="220" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <text x="103" y="355" text-anchor="middle" font-size="11" fill="#666">product-facing tool</text>
+  <text x="518" y="355" text-anchor="middle" font-size="11" fill="#666">protocol + integration boundary</text>
+  <text x="765" y="355" text-anchor="middle" font-size="11" fill="#666">secret lookup + network I/O</text>
+</svg>
+</div>
+
+<h2>Application wiring</h2>
+
+<p>The application composition root constructs <code>CredentialSvc</code> once. When MCP session bootstrap registers a session for a managed harness, it includes that concrete service as the handler's narrow credential resolver. The HTTP clients are not supplied by the session; they are created inside the HTTP tool package.</p>
+
+<pre><code>// MCP session bootstrap
+tokenStore.Register(token, agen8mcp.Session{
+    CredentialResolver: app.CredentialSvc,
+    ProjectID:          strings.TrimSpace(projectID),
+})
+
+// internal/mcp/server.go
+http.NewHandler().Handle(ctx, http.CallContext{
+    Credentials: session.CredentialResolver,
+    ProjectID:   session.ProjectID,
+}, arguments)</code></pre>
+
+<h2>Handler contract</h2>
+
+<p>The handler receives only credential resolution and project identity from the MCP session. Network execution is package-owned infrastructure.</p>
+
+<pre><code>type CredentialResolver interface {
+    Get(ctx context.Context, owner credentialdomain.CredentialOwner) (credentialdomain.CredentialRecord, error)
+}
+
+type CallContext struct {
+    Credentials CredentialResolver
+    ProjectID   string
+}
+
+type Handler struct {
+    client           *http.Client
+    noRedirectClient *http.Client
+    defaultMaxBytes  int
+    maxBytes         int
+}
+
+func NewHandler() Handler
+func (h Handler) Schema() json.RawMessage
+func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMessage) (Result, error)</code></pre>
+
+<h2>Request model</h2>
+
+<table>
+  <tr><th>Field</th><th>Rule</th></tr>
+  <tr><td><code>url</code></td><td>Required absolute HTTP or HTTPS URL.</td></tr>
+  <tr><td><code>method</code></td><td>Required. One of <code>GET</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>, <code>HEAD</code>.</td></tr>
+  <tr><td><code>params_list</code></td><td>Optional key/value query parameters. Omit when there are no extra query parameters.</td></tr>
+  <tr><td><code>headers_list</code></td><td>Optional key/value request headers. Omit when there are no extra headers.</td></tr>
+  <tr><td><code>body</code></td><td>Optional request body. Rejected for <code>GET</code> and <code>HEAD</code>.</td></tr>
+  <tr><td><code>maxBytes</code></td><td>Optional response cap. Zero uses the package default. Values above the package maximum are rejected.</td></tr>
+  <tr><td><code>timeoutMs</code></td><td>Optional per-request timeout. Zero uses the package default client timeout.</td></tr>
+</table>
+
+<h2>Credential lookup</h2>
+
+<p>Credentials are resolved by request host. The handler checks the project-scoped credential first, then the global credential. Anonymous HTTP remains valid when no credential exists; malformed credential records fail loudly.</p>
+
+<table>
+  <tr><th>Lookup order</th><th>Owner type</th><th>Owner id</th><th>Meaning</th></tr>
+  <tr>
+    <td>1</td>
+    <td><code>http_endpoint_project</code></td>
+    <td><code>&lt;project id&gt;:&lt;host&gt;</code></td>
+    <td>Project-specific credential for the endpoint host.</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><code>http_endpoint_global</code></td>
+    <td><code>&lt;host&gt;</code></td>
+    <td>Global credential for the endpoint host.</td>
+  </tr>
+</table>
+
+<p>The handler injects supported auth records into the outbound request. Unsupported auth shapes return a tool error instead of silently sending an unauthenticated request.</p>
+
+<h2>Result rules</h2>
+
+<table>
+  <tr><th>Rule</th><th>Why it exists</th></tr>
+  <tr><td>Result content is structured and deterministic.</td><td>Transcript cards render known fields instead of debug blobs.</td></tr>
+  <tr><td>Text bodies are capped by byte limit.</td><td>Tool output remains bounded and predictable.</td></tr>
+  <tr><td>Binary response bodies are omitted explicitly.</td><td>Agents see <code>bodyOmitted=true</code> and a reason, not corrupted text.</td></tr>
+  <tr><td>Credentials are never echoed.</td><td>Result metadata may say whether credentials were injected, but not their values.</td></tr>
+  <tr><td>Credential lookup failures fail loudly except not-found.</td><td>Missing credentials means anonymous request; broken credential storage means a real error.</td></tr>
+</table>
+
+<h2>Code layout</h2>
+
+<div class="tree">internal/mcp/tools/http/
+  http.go            # schema, validation, package-local clients, execution, result formatting
+  http_test.go       # validation, credential injection, response handling, truncation
+</div>
+
+<h2>Tests</h2>
+
+<table>
+  <tr><th>Test</th><th>Assertion</th></tr>
+  <tr><td>valid request without credentials</td><td>Executes anonymously and returns status, headers, and body preview.</td></tr>
+  <tr><td>project credential injection</td><td>Project host credential is injected into the request.</td></tr>
+  <tr><td>global credential injection</td><td>Global host credential is used when no project credential exists.</td></tr>
+  <tr><td>project wins over global</td><td>Project-scoped credential takes precedence.</td></tr>
+  <tr><td>invalid input</td><td>Missing URL/method, unsupported method, and GET/HEAD body are rejected before network I/O.</td></tr>
+  <tr><td>response truncation</td><td>Responses over the limit set <code>truncated=true</code> and report bytes read.</td></tr>
+  <tr><td>binary response</td><td>Body is omitted with an explicit reason.</td></tr>
+  <tr><td>malformed credential record</td><td>Returns an error and does not retry anonymously.</td></tr>
+</table>
+
+<div class="footnote">Architecture · agen8 · MCP HTTP tool</div>
+
+</div>
+
+</body>
+</html>

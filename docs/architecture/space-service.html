@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Space Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / space-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture &middot; Space Service</span>
+  <h1>Space Service</h1>
+  <p class="lede">
+    The space service owns space CRUD, lifecycle, and the member roster subdomain. A space is either open or closed. Members are registered inside spaces. Messages, runtime sessions, plans, missions, tasks, and decisions remain separate service boundaries. Tools compose services to perform actions.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#what">What a space is</a></li>
+      <li><a href="#layers">Architecture layers</a></li>
+      <li><a href="#lifecycle">Lifecycle &mdash; open &harr; closed</a></li>
+      <li><a href="#service">Service surface</a></li>
+      <li><a href="#rpc">Per-service RPC handler</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+      <li><a href="#layout">Where the code lives</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="what">1. What a space is</h2>
+
+  <p>A space is a bounded coordination context inside a project. It holds a title, a status (open or closed), and timestamps. One project can have many spaces.</p>
+
+  <p>The space record is deliberately minimal. The member roster is a space subdomain with its own repository and service methods, but it is still owned under the space boundary. These things are <em>not</em> part of the space's own state:</p>
+
+  <ul>
+    <li><strong>Messages</strong> &mdash; owned by the message service. Messaging is a separate concern with its own persistence and delivery pipeline.</li>
+    <li><strong>Runtime sessions</strong> &mdash; owned by the runtime service. Whether a coordinator is running is independent of whether the space is open.</li>
+    <li><strong>Plans, missions, tasks, decisions</strong> &mdash; each owned by its respective service.</li>
+  </ul>
+
+  <p>The space service stores and retrieves <code>domain.SpaceRecord</code> records, enforces the open/closed lifecycle, and owns the roster of members registered inside a space. Cross-domain composition happens at the MCP tool layer, where handlers receive services from the <code>Application</code> composition root and call multiple service use cases. The <a href="./mcp-space-tool.html">MCP space tool</a> defines the agent-facing <code>space(action=...)</code> contract.</p>
+
+  <div class="callout">
+    <strong>Service boundary principle.</strong> Space membership is part of the space boundary. The space service owns space CRUD, lifecycle transitions, and the member roster subdomain. An MCP handler that needs to list a space's members calls the space service and its membership use cases. The space service never imports or depends on message, MCP, task, or runtime packages.
+  </div>
+
+  <h2 id="layers">2. Architecture layers</h2>
+
+  <div class="layers">
+    <div class="layer handler"><div class="label">RPC Handler</div><div class="role">Per-service <code>rpc.Handler</code> translates JSON-RPC requests into <code>spaceapp.Service</code> calls. Each service owns its own handler.</div></div>
+    <div class="layer service"><div class="label">Concrete Service</div><div class="role"><code>*spaceapp.Service</code> owns space CRUD, lifecycle transitions, member roster use cases, caller-scoped visibility, harness config validation, and service logging. Dependencies are explicit repositories, <code>Clock</code>, <code>CallerResolver</code>, <code>ConfigValidator</code>, and <code>*slog.Logger</code>.</div></div>
+    <div class="layer domain"><div class="label">Domain</div><div class="role"><code>Space</code> aggregate wraps <code>domain.SpaceRecord</code> with named transition methods. Two transitions, both idempotent, both reversible.</div></div>
+    <div class="layer repo"><div class="label">Repository</div><div class="role">Space-owned repository interfaces. SQLite and Postgres implementations sit behind the same contract, each with native SQL.</div></div>
+  </div>
+
+  <h3>Concrete service</h3>
+  <p>The service struct keeps the space record repository and member roster repository explicit. Harness/model/effort validation is an explicit dependency because the roster must reject member configs that cannot create a valid harness session. Logging is a service-level dependency so space and member lifecycle operations produce consistent structured records.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">spaces</span>  <span class="tok-pkg">domain</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">members</span> <span class="tok-pkg">member</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">clock</span>   <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>
+    <span class="tok-field">caller</span>  <span class="tok-type">CallerResolver</span>
+    <span class="tok-field">configs</span> <span class="tok-type">ConfigValidator</span>
+    <span class="tok-field">logger</span>  *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>
+}</code></pre>
+
+  <p>The application composition root constructs one <code>*spaceapp.Service</code> and passes it to the space RPC handler, MCP session wiring, and services that need a narrow member loader. The service is a concrete struct, not an interface. Consumer packages define narrow interfaces when they need a subset of its methods.</p>
+
+  <h3>Repository shape</h3>
+  <p>The repository is split by capability. SQLite and Postgres implement the same contract; the composition root chooses the implementation. The space domain owns <code>SpaceID</code>, <code>SpaceRecord</code>, <code>SpaceCustomization</code>, and the open/closed status constants.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    Get(ctx context.Context, id domain.SpaceID) (domain.SpaceRecord, error)
+    List(ctx context.Context, filter SpaceFilter) ([]domain.SpaceRecord, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">SpaceFilter</span> <span class="tok-kw">struct</span> {
+    SpaceID   string
+    ProjectID string
+    UserID    string
+    Status    string
+    Limit     int
+    Offset    int
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    Create(ctx context.Context, space domain.SpaceRecord) error
+    Update(ctx context.Context, space domain.SpaceRecord) error
+    Delete(ctx context.Context, id domain.SpaceID) error
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Repository</span> <span class="tok-kw">interface</span> {
+    Reader
+    Writer
+}</code></pre>
+
+  <h3>Member roster subdomain</h3>
+  <p>A member is a space-scoped runtime identity. Users authenticate to agen8; members act inside a specific space as coordinators or workers. The roster stores the member id, owning user id when present, project id, space id, member type, lifecycle state, channel id, display label, and harness preferences. Task assignment, message routing, MCP caller identity, and harness prompt identity all use this roster.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-comment">// internal/services/space/domain/member</span>
+<span class="tok-kw">type</span> <span class="tok-type">ID</span> string
+
+<span class="tok-kw">type</span> <span class="tok-type">Record</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>             <span class="tok-type">ID</span>
+    <span class="tok-field">UserID</span>         string
+    <span class="tok-field">ProjectID</span>      string
+    <span class="tok-field">SpaceID</span>        string
+    <span class="tok-field">ChannelID</span>      string
+    <span class="tok-field">DisplayName</span>    string
+    <span class="tok-field">MemberType</span>     <span class="tok-type">Type</span>
+    <span class="tok-field">LifecycleState</span> <span class="tok-type">LifecycleState</span>
+    <span class="tok-field">HarnessKind</span>    string
+    <span class="tok-field">Model</span>          string
+    <span class="tok-field">Effort</span>         string
+}</code></pre>
+
+  <table>
+    <thead><tr><th>Member field</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>MemberID</code></td><td>Stable space-member identity used by tasks, messages, MCP sessions, and harness prompts.</td></tr>
+      <tr><td><code>UserID</code></td><td>Optional account link for a human-backed member. It is not a replacement for <code>MemberID</code>.</td></tr>
+      <tr><td><code>SpaceID</code> / <code>ProjectID</code></td><td>The roster boundary. A member cannot move across spaces by changing task or message data.</td></tr>
+      <tr><td><code>MemberType</code></td><td>Coordination identity: either <code>coordinator</code> or <code>worker</code>. A coordinator remains a coordinator whether or not workers are currently present.</td></tr>
+      <tr><td><code>LifecycleState</code></td><td>Whether the member is active or retired from the roster.</td></tr>
+      <tr><td><code>ChannelID</code></td><td>Deterministic member channel used by message routing.</td></tr>
+      <tr><td><code>HarnessKind</code>, <code>Model</code>, <code>Effort</code></td><td>Runtime preferences validated by package-owned roster policy before persistence.</td></tr>
+    </tbody>
+  </table>
+
+  <table>
+    <thead><tr><th>Roster operation</th><th>Rule</th><th>Logged event</th></tr></thead>
+    <tbody>
+      <tr><td><code>RegisterMember</code></td><td>Creates an active member in one space, validates the requested coordinator or worker type, validates harness preferences locally, and creates the deterministic member channel id.</td><td><code>space.member.registered</code></td></tr>
+      <tr><td><code>UpdateMemberConfig</code></td><td>Updates harness kind, model, and effort only after <code>ConfigValidator</code> accepts the combination.</td><td><code>space.member.config_updated</code></td></tr>
+      <tr><td><code>RemoveMember</code></td><td>Retires the member from the active roster while keeping durable identity readable for history, messages, and tasks.</td><td><code>space.member.removed</code></td></tr>
+      <tr><td><code>ListMembers</code></td><td>Returns roster records scoped by space, project, lifecycle state, and member type.</td><td>not logged unless the call fails</td></tr>
+    </tbody>
+  </table>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    Get(ctx context.Context, id member.ID) (member.Record, error)
+    List(ctx context.Context, filter Filter) ([]member.Record, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    Create(ctx context.Context, rosterMember member.Record) error
+    Update(ctx context.Context, rosterMember member.Record) error
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Repository</span> <span class="tok-kw">interface</span> {
+    Reader
+    Writer
+}</code></pre>
+
+  <p>Each repository implementation owns its own SQL. SQLite uses <code>?</code> placeholders; Postgres uses <code>$N</code>. There is no shared rebind layer.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 820 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="svc-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5b6471"/></marker>
+    </defs>
+
+    <rect x="30" y="56" width="170" height="68" rx="10" fill="#f7f8fa" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="115" y="82" text-anchor="middle" fill="#1a1d23" font-size="13" font-weight="600">rpc.Handler</text>
+    <text x="115" y="102" text-anchor="middle" fill="#5b6471" font-size="10.5">protocol translation</text>
+
+    <rect x="270" y="56" width="180" height="68" rx="10" fill="#ffffff" stroke="#0d9488" stroke-width="1.7"/>
+    <text x="360" y="82" text-anchor="middle" fill="#1a1d23" font-size="13" font-weight="600">*spaceapp.Service</text>
+    <text x="360" y="102" text-anchor="middle" fill="#5b6471" font-size="10.5">CRUD + lifecycle</text>
+
+    <path d="M 200 90 L 270 90" stroke="#5b6471" stroke-width="1.6" marker-end="url(#svc-arr)"/>
+
+    <rect x="530" y="30" width="160" height="52" rx="8" fill="#f7f8fa" stroke="#8b5cf6" stroke-width="1.2"/>
+    <text x="610" y="52" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">Repository</text>
+    <text x="610" y="68" text-anchor="middle" fill="#5b6471" font-size="10">SQLite or Postgres</text>
+
+    <rect x="530" y="98" width="160" height="52" rx="8" fill="#f7f8fa" stroke="#d97706" stroke-width="1.2"/>
+    <text x="610" y="120" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">Clock</text>
+    <text x="610" y="136" text-anchor="middle" fill="#5b6471" font-size="10">SystemClock or FixedClock</text>
+
+    <rect x="700" y="98" width="110" height="52" rx="8" fill="#f7f8fa" stroke="#6366f1" stroke-width="1.2"/>
+    <text x="755" y="120" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">Caller</text>
+    <text x="755" y="136" text-anchor="middle" fill="#5b6471" font-size="10">ctx identity</text>
+
+    <path d="M 450 80 C 490 80 490 56 530 56" stroke="#5b6471" stroke-width="1.3" marker-end="url(#svc-arr)" fill="none"/>
+    <path d="M 450 100 C 490 100 490 124 530 124" stroke="#5b6471" stroke-width="1.3" marker-end="url(#svc-arr)" fill="none"/>
+    <path d="M 450 112 C 520 112 620 124 700 124" stroke="#5b6471" stroke-width="1.3" marker-end="url(#svc-arr)" fill="none"/>
+  </svg>
+  </div>
+
+  <h3>Wrapping <code>domain.SpaceRecord</code> for state changes</h3>
+  <p>Same pattern as the task and mission services: the domain record is the durable shape and the aggregate is the safe handle for transitions. Service code never mutates <code>domain.SpaceRecord</code> lifecycle fields directly &mdash; every state change is a load-wrap-transition-unwrap-save round trip.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 880 220" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="arr-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#5b6471"/>
+      </marker>
+    </defs>
+
+    <rect x="20"  y="70" width="160" height="80" rx="10" fill="#f4f4f6" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="100" y="98"  text-anchor="middle" fill="#1a1d23" font-size="13" font-weight="600">Repository</text>
+    <text x="100" y="116" text-anchor="middle" fill="#5b6471" font-size="10.5">sqlite / postgres</text>
+    <text x="100" y="134" text-anchor="middle" fill="#8b5cf6" font-size="10.5" font-weight="500">domain.SpaceRecord</text>
+
+    <rect x="320" y="40" width="240" height="140" rx="12" fill="#ffffff" stroke="#d97706" stroke-width="1.8"/>
+    <text x="440" y="68" text-anchor="middle" fill="#1a1d23" font-size="14" font-weight="600">Space</text>
+    <text x="440" y="86" text-anchor="middle" fill="#5b6471" font-size="10.5">domain/space.go</text>
+
+    <line x1="345" y1="100" x2="535" y2="100" stroke="#e6e8ec" stroke-width="1"/>
+    <text x="440" y="118" text-anchor="middle" fill="#d97706" font-size="11" font-weight="500">Close(now) &middot; Reopen(now)</text>
+    <text x="440" y="134" text-anchor="middle" fill="#5b6471" font-size="10">validates &middot; stamps UpdatedAt</text>
+    <text x="440" y="150" text-anchor="middle" fill="#5b6471" font-size="10">returns new Space</text>
+    <text x="440" y="168" text-anchor="middle" fill="#8a93a0" font-size="9.5" font-style="italic">never mutates lifecycle fields directly</text>
+
+    <rect x="700" y="70" width="160" height="80" rx="10" fill="#f4f4f6" stroke="#0d9488" stroke-width="1.5"/>
+    <text x="780" y="98"  text-anchor="middle" fill="#1a1d23" font-size="13" font-weight="600">Service</text>
+    <text x="780" y="116" text-anchor="middle" fill="#5b6471" font-size="10.5">app/service.go</text>
+    <text x="780" y="134" text-anchor="middle" fill="#0d9488" font-size="10.5" font-weight="500">CRUD + lifecycle</text>
+
+    <path d="M 180 100 L 320 100" stroke="#5b6471" stroke-width="1.6" marker-end="url(#arr-data)"/>
+    <text x="250" y="92" text-anchor="middle" fill="#5b6471" font-size="11">WrapSpace(loaded)</text>
+
+    <path d="M 320 130 L 180 130" stroke="#5b6471" stroke-width="1.6" marker-end="url(#arr-data)"/>
+    <text x="250" y="148" text-anchor="middle" fill="#5b6471" font-size="11">Update(next.Inner())</text>
+
+    <path d="M 700 110 L 560 110" stroke="#0d9488" stroke-width="1.6" marker-end="url(#arr-data)" stroke-dasharray="4,3"/>
+    <text x="630" y="100" text-anchor="middle" fill="#0d9488" font-size="11">calls Close / Reopen</text>
+  </svg>
+  </div>
+
+  <h2 id="lifecycle">3. Lifecycle &mdash; open &harr; closed</h2>
+
+  <p>A space is either <strong>open</strong> or <strong>closed</strong>. Both transitions are reversible; closing is not terminal. A closed space is retired from the active set but its history stays readable.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 700 220" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="ar-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/></marker>
+      <marker id="ar-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309"/></marker>
+    </defs>
+
+    <rect x="100" y="80" width="180" height="60" rx="10" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+    <text x="190" y="106" text-anchor="middle" fill="#1a1d23" font-size="15" font-weight="600">Open</text>
+    <text x="190" y="125" text-anchor="middle" fill="#5b6471" font-size="11">default state &middot; active</text>
+
+    <rect x="420" y="80" width="180" height="60" rx="10" fill="#fffbeb" stroke="#b45309" stroke-width="1.5"/>
+    <text x="510" y="106" text-anchor="middle" fill="#1a1d23" font-size="15" font-weight="600">Closed</text>
+    <text x="510" y="125" text-anchor="middle" fill="#5b6471" font-size="11">retired &middot; still readable</text>
+
+    <path d="M 280 100 Q 350 70 420 100" fill="none" stroke="#b45309" stroke-width="2" marker-end="url(#ar-warn)"/>
+    <text x="350" y="65" text-anchor="middle" fill="#b45309" font-size="12" font-weight="500">Close</text>
+
+    <path d="M 420 122 Q 350 155 280 122" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#ar-good)"/>
+    <text x="350" y="178" text-anchor="middle" fill="#059669" font-size="12" font-weight="500">Reopen</text>
+  </svg>
+  </div>
+
+  <h3>Transition table</h3>
+
+  <table>
+    <thead><tr><th>Method</th><th>Source state</th><th>Result</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>Close</code></td><td>Open</td><td>Closed</td><td>Idempotent for already-closed</td></tr>
+      <tr><td><code>Reopen</code></td><td>Closed</td><td>Open</td><td>Idempotent for already-open</td></tr>
+    </tbody>
+  </table>
+
+  <p class="meta">Empty source status normalises to <code>open</code>. Same-state transitions short-circuit so retry loops do not fail on a status the space already holds.</p>
+
+  <h3>The transition code</h3>
+  <p><code>Close</code> and <code>Reopen</code> are thin wrappers around a shared <code>transition</code> core that validates against a <code>validSpaceTransitions</code> table &mdash; adding a third state means adding one table entry, not editing the methods.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-kw">func</span> (a <span class="tok-type">Space</span>) <span class="tok-fn">Close</span>(now time.Time) (<span class="tok-type">Space</span>, error) {
+    return a.transition(domain.SpaceStatusClosed, now)
+}
+
+<span class="tok-kw">func</span> (a <span class="tok-type">Space</span>) <span class="tok-fn">Reopen</span>(now time.Time) (<span class="tok-type">Space</span>, error) {
+    return a.transition(domain.SpaceStatusOpen, now)
+}
+
+<span class="tok-kw">func</span> (a <span class="tok-type">Space</span>) <span class="tok-fn">transition</span>(target string, now time.Time) (<span class="tok-type">Space</span>, error) {
+    current := a.Status()
+    if current == target {
+        return a, nil
+    }
+    allowed, ok := validSpaceTransitions[current]
+    if !ok {
+        return Space{}, fmt.Errorf("space: no transitions defined for status %q", current)
+    }
+    if !allowed[target] {
+        return Space{}, fmt.Errorf("space: cannot transition from %q to %q", current, target)
+    }
+    next := a.inner
+    next.Status = target
+    next.UpdatedAt = now.UTC()
+    return Space{inner: next}, nil
+}</code></pre>
+
+  <h2 id="service">4. Service surface</h2>
+
+  <p>The service exposes space lifecycle methods and member roster methods. Space lifecycle methods read from or write to the space repository through the domain aggregate. Member roster methods read from or write to the member subdomain repository.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-comment">// internal/caller</span>
+<span class="tok-kw">type</span> <span class="tok-type">Caller</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>   string
+    <span class="tok-field">MemberID</span> <span class="tok-pkg">member</span>.<span class="tok-type">ID</span>
+    <span class="tok-field">SpaceID</span>  <span class="tok-pkg">domain</span>.<span class="tok-type">SpaceID</span>
+    <span class="tok-field">Role</span>     string
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">ContextWithCaller</span>(ctx context.Context, caller <span class="tok-type">Caller</span>) context.Context
+
+<span class="tok-kw">type</span> <span class="tok-type">ContextResolver</span> <span class="tok-kw">struct</span>{}
+
+<span class="tok-kw">func</span> (<span class="tok-type">ContextResolver</span>) <span class="tok-fn">ResolveCaller</span>(ctx context.Context) (<span class="tok-type">Caller</span>, error)</code></pre>
+
+  <p>Adapters stamp authenticated caller identity into <code>context.Context</code> before invoking the service through the shared <code>internal/caller</code> contract. RPC stamps the authenticated user id. MCP resolves the active actor member first, then stamps the member id, user id, and current space id. The space service and task service consume the same resolver, so service orchestration does not lose caller identity across package boundaries.</p>
+
+  <p>The logger is owned at service construction time and scoped with <code>service=space</code>. Space lifecycle and member roster writes log the operation, space id, project id, member id when present, caller user id, caller member id, and resulting lifecycle/status. Read methods do not produce success logs; failed reads and rejected writes return errors and may be logged at the adapter boundary.</p>
+
+  <table>
+    <thead><tr><th>Method</th><th>What it does</th><th>Returns</th></tr></thead>
+    <tbody>
+      <tr><td><code>Create</code></td><td>Resolves caller, stamps owner user id and timestamps, persists</td><td><code>domain.SpaceRecord</code></td></tr>
+      <tr><td><code>Get</code></td><td>Loads one space and requires caller visibility by user id or member space id</td><td><code>domain.SpaceRecord</code></td></tr>
+      <tr><td><code>List</code></td><td>Scopes the filter to the caller user id, or to the caller member's space id for member-only callers</td><td><code>[]domain.SpaceRecord</code></td></tr>
+      <tr><td><code>Close</code></td><td>Requires owning user, then load &rarr; wrap &rarr; <code>Close</code> &rarr; unwrap &rarr; update</td><td><code>domain.SpaceRecord</code></td></tr>
+      <tr><td><code>Reopen</code></td><td>Requires owning user, then load &rarr; wrap &rarr; <code>Reopen</code> &rarr; unwrap &rarr; update</td><td><code>domain.SpaceRecord</code></td></tr>
+      <tr><td><code>Delete</code></td><td>Requires owning user, then deletes a space by ID</td><td><code>error</code></td></tr>
+      <tr><td><code>RegisterMember</code></td><td>Requires owning user or coordinator, validates harness config, grants coordinator/worker type, creates deterministic member channel id</td><td><code>member.Record</code></td></tr>
+      <tr><td><code>GetMember</code></td><td>Loads one registered space member</td><td><code>member.Record</code></td></tr>
+      <tr><td><code>ListMembers</code></td><td>Lists members by space, project, type, and lifecycle state</td><td><code>[]member.Record</code></td></tr>
+      <tr><td><code>UpdateMemberConfig</code></td><td>Calls <code>ConfigValidator</code> for model, effort, and harness kind before persisting config changes</td><td><code>member.Record</code></td></tr>
+      <tr><td><code>RemoveMember</code></td><td>Retires a member from the roster without deleting historical identity</td><td><code>member.Record</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>No cross-domain repository access.</strong> The space service owns its member repository because membership is a space subdomain. It does not import message, task, MCP, or runtime packages, and it does not write another service's repository. Tools that need to combine space/member data with message or task data call multiple services through the <code>Application</code> composition root.
+  </div>
+
+  <h2 id="rpc">5. Per-service RPC handler</h2>
+
+  <p>Each service owns its own <code>rpc/handler.go</code>. The handler struct takes the concrete service pointer and translates between the JSON-RPC wire format and typed Go method calls. The top-level <code>RPCServer</code> becomes a thin router that dispatches to per-service handlers.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-comment">// internal/services/space/rpc/handler.go</span>
+<span class="tok-kw">package</span> rpc
+
+<span class="tok-kw">type</span> <span class="tok-type">Handler</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">svc</span> *<span class="tok-pkg">spaceapp</span>.<span class="tok-type">Service</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">NewHandler</span>(svc *<span class="tok-pkg">spaceapp</span>.<span class="tok-type">Service</span>) *<span class="tok-type">Handler</span> {
+    return &Handler{svc: svc}
+}</code></pre>
+
+  <p>The handler owns protocol translation: unmarshalling request params, calling the service, marshalling the response. Business logic stays in the service; wire format stays in the handler.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="rpc-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5b6471"/></marker>
+    </defs>
+
+    <!-- Frontend -->
+    <rect x="30" y="90" width="130" height="60" rx="10" fill="#f7f8fa" stroke="#e6e8ec" stroke-width="1.5"/>
+    <text x="95" y="116" text-anchor="middle" fill="#1a1d23" font-size="13" font-weight="600">Frontend</text>
+    <text x="95" y="134" text-anchor="middle" fill="#5b6471" font-size="10">JSON-RPC calls</text>
+
+    <!-- RPCServer router -->
+    <rect x="220" y="70" width="140" height="100" rx="10" fill="#f7f8fa" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="290" y="96" text-anchor="middle" fill="#1a1d23" font-size="13" font-weight="600">RPCServer</text>
+    <text x="290" y="114" text-anchor="middle" fill="#5b6471" font-size="10">thin router</text>
+    <text x="290" y="130" text-anchor="middle" fill="#5b6471" font-size="10">dispatches to</text>
+    <text x="290" y="146" text-anchor="middle" fill="#5b6471" font-size="10">per-service handlers</text>
+
+    <path d="M 160 120 L 220 120" stroke="#5b6471" stroke-width="1.6" marker-end="url(#rpc-arr)"/>
+
+    <!-- Space handler -->
+    <rect x="430" y="20" width="170" height="52" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+    <text x="515" y="42" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">space rpc.Handler</text>
+    <text x="515" y="58" text-anchor="middle" fill="#5b6471" font-size="10">create, list, close, reopen</text>
+
+    <!-- Member handler -->
+    <rect x="430" y="88" width="170" height="52" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+    <text x="515" y="110" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">space/member rpc.Handler</text>
+    <text x="515" y="126" text-anchor="middle" fill="#5b6471" font-size="10">space.member.list, get, ...</text>
+
+    <!-- Message handler -->
+    <rect x="430" y="156" width="170" height="52" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.5"/>
+    <text x="515" y="178" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">message rpc.Handler</text>
+    <text x="515" y="194" text-anchor="middle" fill="#5b6471" font-size="10">message.send, message.list, ...</text>
+
+    <path d="M 360 100 C 395 100 395 46 430 46" stroke="#5b6471" stroke-width="1.3" marker-end="url(#rpc-arr)" fill="none"/>
+    <path d="M 360 120 L 430 114" stroke="#5b6471" stroke-width="1.3" marker-end="url(#rpc-arr)" fill="none"/>
+    <path d="M 360 140 C 395 140 395 182 430 182" stroke="#5b6471" stroke-width="1.3" marker-end="url(#rpc-arr)" fill="none"/>
+
+    <!-- Services -->
+    <rect x="670" y="20" width="160" height="52" rx="8" fill="#f7f8fa" stroke="#8b5cf6" stroke-width="1.2"/>
+    <text x="750" y="42" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">*spaceapp.Service</text>
+    <text x="750" y="58" text-anchor="middle" fill="#5b6471" font-size="10">CRUD + lifecycle</text>
+
+    <rect x="670" y="88" width="160" height="52" rx="8" fill="#f7f8fa" stroke="#8b5cf6" stroke-width="1.2"/>
+    <text x="750" y="110" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">*spaceapp.Service</text>
+    <text x="750" y="126" text-anchor="middle" fill="#5b6471" font-size="10">member roster</text>
+
+    <rect x="670" y="156" width="160" height="52" rx="8" fill="#f7f8fa" stroke="#8b5cf6" stroke-width="1.2"/>
+    <text x="750" y="178" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">*messageapp.Service</text>
+    <text x="750" y="194" text-anchor="middle" fill="#5b6471" font-size="10">send + deliver</text>
+
+    <path d="M 600 46 L 670 46" stroke="#5b6471" stroke-width="1.3" marker-end="url(#rpc-arr)" fill="none"/>
+    <path d="M 600 114 L 670 114" stroke="#5b6471" stroke-width="1.3" marker-end="url(#rpc-arr)" fill="none"/>
+    <path d="M 600 182 L 670 182" stroke="#5b6471" stroke-width="1.3" marker-end="url(#rpc-arr)" fill="none"/>
+  </svg>
+  </div>
+
+  <p class="meta">Each handler depends on exactly one concrete service. The RPC server owns protocol dispatch; the service owns business behavior.</p>
+
+  <h3>Composition root wiring</h3>
+  <p>The <code>Application</code> struct is a pure composition root &mdash; only fields, only <code>NewApplication</code>. It holds all service pointers. Both <code>RPCServer</code> and <code>MCPServer</code> depend on it.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-comment">// Application (composition root) — simplified</span>
+<span class="tok-kw">type</span> <span class="tok-type">Application</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">SpaceSvc</span>   *<span class="tok-pkg">spaceapp</span>.<span class="tok-type">Service</span>
+    <span class="tok-field">MessageSvc</span> *<span class="tok-pkg">messageapp</span>.<span class="tok-type">Service</span>
+    // ... other services
+}
+
+<span class="tok-comment">// RPC registration creates service-owned handlers from Application.</span>
+<span class="tok-comment">// The space handler owns both space.* and space.member.* RPC methods.</span>
+spacerpc.<span class="tok-fn">NewHandler</span>(app.SpaceSvc)
+messagerpc.<span class="tok-fn">NewHandler</span>(app.MessageSvc)</code></pre>
+
+  <h2 id="invariants">6. Invariants &mdash; what cannot happen</h2>
+
+  <table>
+    <thead><tr><th>State that cannot occur</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>Space transitioning to an unknown status</td><td>Only <code>Close</code> and <code>Reopen</code> exist; both target one of two declared values</td></tr>
+      <tr><td>Transition from an unknown source status</td><td><code>Space.transition</code> rejects unknown sources with a precise error</td></tr>
+      <tr><td>Idempotent retry causing duplicate work</td><td>Same-state transitions short-circuit before persisting</td></tr>
+      <tr><td>Older records with empty status causing undefined behaviour</td><td>Empty normalises to <code>open</code> in <code>WrapSpace</code></td></tr>
+      <tr><td>Read without caller identity</td><td><code>caller.ContextResolver</code> requires a user id or member id before any service method runs</td></tr>
+      <tr><td>Member-only caller listing every space</td><td><code>List</code> scopes member-only callers to their own <code>SpaceID</code></td></tr>
+      <tr><td>Member-only caller mutating space lifecycle</td><td><code>Close</code>, <code>Reopen</code>, <code>Update</code>, and <code>Delete</code> require the owning user id</td></tr>
+      <tr><td>Space service importing message/task/MCP/runtime packages</td><td>Membership is a space subdomain; all other domains stay outside the service struct.</td></tr>
+      <tr><td>Direct <code>domain.SpaceRecord</code> mutation in service code</td><td>All state changes go through the domain aggregate's transition methods</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="layout">7. Where the code lives</h2>
+
+  <div class="tree">
+<span class="dir">internal/services/space/</span>
+  <span class="dir">domain/</span>           <span class="note"># pure rules, no side effects</span>
+    <span class="file">space.go</span>             <span class="note"># Space aggregate + Close / Reopen / transition</span>
+    <span class="file">space_test.go</span>        <span class="note"># aggregate transition tests</span>
+    <span class="file">repository.go</span>        <span class="note"># Reader / Writer / Repository + SpaceFilter</span>
+    <span class="dir">member/</span>             <span class="note"># member roster subdomain</span>
+      <span class="file">member.go</span>          <span class="note"># member aggregate and lifecycle</span>
+      <span class="file">repository.go</span>      <span class="note"># member.Reader / Writer / Repository</span>
+      <span class="file">filter.go</span>          <span class="note"># member.Filter</span>
+    <span class="file">clock.go</span>             <span class="note"># Clock interface + SystemClock / FixedClock</span>
+  <span class="dir">app/</span>              <span class="note"># application service — space lifecycle + member roster</span>
+    <span class="file">service.go</span>           <span class="note"># concrete Service: Create, Get, List, Close, Reopen, Delete</span>
+    <span class="file">member_service.go</span>    <span class="note"># RegisterMember, GetMember, ListMembers, UpdateMemberConfig, RemoveMember</span>
+    <span class="file">service.go</span>           <span class="note"># consumes internal/caller resolver for service authorization</span>
+    <span class="file">service_test.go</span>      <span class="note"># caller scoping and ownership tests</span>
+  <span class="dir">infra/</span>            <span class="note"># persistence — each implementation owns its own SQL</span>
+    <span class="file">sqlite_repository.go</span>         <span class="note"># SQLite spaces with ? placeholders</span>
+    <span class="file">postgres_repository.go</span>       <span class="note"># Postgres spaces with $N placeholders</span>
+    <span class="file">member_sqlite_repository.go</span>  <span class="note"># SQLite members table</span>
+    <span class="file">member_postgres_repository.go</span><span class="note"># Postgres members table</span>
+  <span class="dir">rpc/</span>              <span class="note"># per-service RPC handler</span>
+    <span class="file">handler.go</span>           <span class="note"># Handler struct with *spaceapp.Service dependency for space.* and space.member.*</span>
+  </div>
+
+  <p class="meta">The space service has no tool service files and no repository access outside its own boundary. Tools that compose space/member data with other services live at the tool layer and reach into the <code>Application</code> composition root.</p>
+
+</div>
+</body>
+</html>

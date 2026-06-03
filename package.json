@@ -1,0 +1,7 @@
+{
+  "name": "agen8-mcp-server-workspace",
+  "private": true,
+  "devDependencies": {
+    "shadcn": "^4.2.0"
+  }
+}

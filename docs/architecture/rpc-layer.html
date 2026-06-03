@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RPC Layer — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / rpc-layer</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · RPC</span>
+  <h1>RPC layer</h1>
+  <p class="lede">
+    <code>internal/rpc</code> is the transport-agnostic JSON-RPC adapter. It owns envelopes, method registration, dispatch, error mapping, and request identity context. It does not listen on sockets, run HTTP, construct services, or own business rules.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#boundary">Boundary</a></li>
+      <li><a href="#flow">Request flow</a></li>
+      <li><a href="#layout">Code layout</a></li>
+      <li><a href="#dto">DTO ownership</a></li>
+      <li><a href="#read-scoping">Task read scoping</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="boundary">1. Boundary</h2>
+
+  <p>The daemon owns listeners and web serving. RPC owns JSON-RPC. Services own use cases. The same <code>rpc.Server</code> is called by local IPC and HTTP listener strategies, so transport changes never create a second RPC semantic model.</p>
+
+  <p>Development web proxying is outside the RPC layer. When <code>AGEN8_DEV_WEB_URL</code> is set, the daemon reverse-proxies SPA assets and Vite hot-reload traffic after protocol routes are claimed. <code>/rpc</code>, <code>/events</code>, <code>/healthz</code>, and setup routes still terminate in the daemon and never pass through Vite.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">internal/daemon</div>
+      <div class="role">Runs local IPC and HTTP listener strategies, authenticates transport identity, and calls <code>rpc.Server</code>.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">internal/rpc</div>
+      <div class="role">Decodes JSON-RPC, resolves methods, binds params, dispatches handlers, and encodes protocol responses.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">internal/services/&lt;service&gt;/rpc</div>
+      <div class="role">Owns service-specific RPC DTOs and maps them to typed service calls.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">internal/services/&lt;service&gt;/app</div>
+      <div class="role">Executes business orchestration, authorization, persistence, and service-to-service side effects.</div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>Concern</th><th>Owner</th></tr></thead>
+    <tbody>
+      <tr><td>Local socket, named pipe, HTTP, setup routes, CLI-selected strategy</td><td><code>internal/daemon</code></td></tr>
+      <tr><td>Dev web reverse proxy for SPA assets and Vite hot reload</td><td><code>internal/daemon</code></td></tr>
+      <tr><td>JSON-RPC envelope, request id, method lookup, protocol errors</td><td><code>internal/rpc</code></td></tr>
+      <tr><td>Authenticated transport identity</td><td><code>internal/rpc.Identity</code>, stamped by the daemon before JSON-RPC dispatch</td></tr>
+      <tr><td>Service caller context shape</td><td><code>internal/caller.Caller</code>, stamped by RPC method registration before service handlers run</td></tr>
+      <tr><td>Service-specific RPC params/results/view DTOs</td><td><code>internal/services/&lt;service&gt;/rpc</code></td></tr>
+      <tr><td>Service construction</td><td><code>internal/app.NewApplication</code></td></tr>
+      <tr><td>Agent-facing tool schemas and actions</td><td><code>internal/mcp</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="flow">2. Request flow</h2>
+
+  <p>This diagram uses <code>task.create</code> as an example. Both listeners enter the same RPC server; transport authentication happens before dispatch.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 940 470" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+
+    <rect x="34" y="34" width="872" height="392" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
+    <text x="470" y="68" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">JSON-RPC dispatch is shared by local IPC and HTTP</text>
+    <text x="470" y="88" text-anchor="middle" font-size="11" fill="var(--text-muted)">Listener strategies authenticate and stamp identity; RPC dispatch remains transport-agnostic.</text>
+
+    <rect x="76" y="132" width="142" height="58" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="147" y="154" text-anchor="middle" font-weight="700" fill="var(--text)">Local client</text>
+    <text x="147" y="173" text-anchor="middle" fill="var(--text-muted)">socket / pipe</text>
+
+    <rect x="76" y="226" width="142" height="58" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="147" y="248" text-anchor="middle" font-weight="700" fill="var(--text)">HTTP client</text>
+    <text x="147" y="267" text-anchor="middle" fill="var(--text-muted)">POST /rpc</text>
+
+    <rect x="292" y="132" width="154" height="58" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="369" y="154" text-anchor="middle" font-weight="700" fill="var(--text)">LocalStrategy</text>
+    <text x="369" y="173" text-anchor="middle" fill="var(--text-muted)">resolve local user</text>
+
+    <rect x="292" y="226" width="154" height="58" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="369" y="248" text-anchor="middle" font-weight="700" fill="var(--text)">HTTPStrategy</text>
+    <text x="369" y="267" text-anchor="middle" fill="var(--text-muted)">validate bearer token</text>
+
+    <rect x="512" y="178" width="154" height="74" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+    <text x="589" y="202" text-anchor="middle" font-weight="700" fill="var(--text)">rpc.Server</text>
+    <text x="589" y="221" text-anchor="middle" fill="var(--text-muted)">decode + dispatch</text>
+    <text x="589" y="238" text-anchor="middle" fill="var(--text-faint)">context has Identity</text>
+
+    <rect x="724" y="178" width="150" height="74" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+    <text x="799" y="202" text-anchor="middle" font-weight="700" fill="var(--text)">Task RPC handler</text>
+    <text x="799" y="221" text-anchor="middle" fill="var(--text-muted)">stamp Caller</text>
+    <text x="799" y="238" text-anchor="middle" fill="var(--text-faint)">DTO → service call</text>
+
+    <rect x="724" y="314" width="150" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="799" y="337" text-anchor="middle" font-weight="700" fill="var(--text)">Task service</text>
+    <text x="799" y="356" text-anchor="middle" fill="var(--text-muted)">orchestration</text>
+
+    <line x1="218" y1="161" x2="292" y2="161" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="218" y1="255" x2="292" y2="255" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M 446 161 C 488 161 482 206 512 206" fill="none" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M 446 255 C 488 255 482 224 512 224" fill="none" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="666" y1="215" x2="724" y2="215" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="799" y1="252" x2="799" y2="314" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <path d="M 724 343 C 514 406 266 360 147 284" fill="none" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M 724 326 C 514 392 266 332 147 190" fill="none" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="430" y="382" text-anchor="middle" fill="var(--text-muted)">JSON-RPC response returns through the same listener that received the request</text>
+  </svg>
+  </div>
+
+  <ol>
+    <li>The selected daemon listener receives a request from local IPC or HTTP.</li>
+    <li>The listener authenticates through its own transport rules and stamps <code>rpc.Identity</code> into <code>context.Context</code>.</li>
+    <li><code>rpc.Server</code> decodes the JSON-RPC envelope and asks the registry for the named method.</li>
+    <li>The RPC method registration maps <code>rpc.Identity</code> to the shared <code>caller.Caller</code> context contract.</li>
+    <li>The service-owned RPC handler validates DTOs and calls a service method.</li>
+    <li>The service owns business rules, persistence, and service-to-service side effects.</li>
+    <li>The handler projects the service result into a result DTO and <code>rpc.Server</code> writes the JSON-RPC response.</li>
+  </ol>
+
+  <h2 id="layout">3. Code layout</h2>
+
+  <div class="tree"><pre>internal/
+  daemon/
+    daemon.go              # process host and selected listener strategy
+    local.go               # local socket / named-pipe listener
+    http.go                # HTTP listener, /healthz, /rpc, /events, setup routes, web UI/proxy
+    config.go              # listener, endpoint, HTTP address, setup token config
+
+  web/
+    server.go              # embedded SPA handler used when no dev web URL is configured
+    dist/                  # compiled frontend assets
+
+  rpc/
+    server.go              # transport-agnostic JSON-RPC server and dispatcher
+    registry.go            # method registry, duplicate checks, typed binding
+    errors.go              # JSON-RPC error mapping
+    identity.go            # request identity context shape
+    auth.go                # auth.status registration
+    space.go               # space service method registration
+    task.go                # task service method registration example
+    mission.go             # mission service method registration
+
+  caller/
+    caller.go              # shared service caller context contract
+
+  services/
+    auth/
+      rpc/
+        handler.go         # auth.status adapter
+        types.go           # auth RPC status/result views
+    space/
+      rpc/
+        handler.go         # space.* and space.member.* adapter
+        types.go           # space and member roster RPC params/results/views
+    task/
+      rpc/
+        handler.go         # task.create/get/list/update adapter
+        types.go           # task RPC params/results/views
+    mission/
+      rpc/
+        handler.go         # mission.* and mission.kr.* adapter
+        types.go           # mission and KR RPC params/results/views</pre></div>
+
+  <p>The RPC server does not live under <code>internal/app</code>. Service-specific RPC adapters and DTOs live next to their service. The daemon wires <code>app.NewApplication</code>, <code>rpc.NewRegistry</code>, service registrations, and the selected listener.</p>
+
+  <h2 id="dto">4. DTO ownership</h2>
+
+  <p>DTOs are transport shapes. They are intentionally separate from service command structs and domain types.</p>
+
+  <table>
+    <thead><tr><th>Type kind</th><th>Example</th><th>Owner</th></tr></thead>
+    <tbody>
+      <tr><td>JSON-RPC params</td><td><code>TaskCreateParams</code></td><td><code>internal/services/task/rpc</code></td></tr>
+      <tr><td>JSON-RPC result</td><td><code>TaskCreateResult</code></td><td><code>internal/services/task/rpc</code></td></tr>
+      <tr><td>Read view</td><td><code>TaskView</code></td><td><code>internal/services/task/rpc</code></td></tr>
+      <tr><td>Service command</td><td><code>taskapp.CreateTaskParams</code></td><td><code>internal/services/task/app</code></td></tr>
+      <tr><td>Domain aggregate</td><td><code>domain.Task</code></td><td><code>internal/services/task/domain</code></td></tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-go"><span class="tok-comment">// internal/services/task/rpc/types.go</span>
+<span class="tok-kw">type</span> <span class="tok-type">TaskCreateParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">SpaceID</span>     string   <span class="tok-string">`json:"spaceId"`</span>
+    <span class="tok-field">AssignedTo</span>  string   <span class="tok-string">`json:"assignedTo"`</span>
+    <span class="tok-field">Description</span> string   <span class="tok-string">`json:"description"`</span>
+    <span class="tok-field">Title</span>       string   <span class="tok-string">`json:"title,omitempty"`</span>
+}
+
+<span class="tok-comment">// internal/services/task/app/service.go</span>
+<span class="tok-kw">type</span> <span class="tok-type">CreateTaskParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">SpaceID</span>     <span class="tok-pkg">types</span>.<span class="tok-type">SpaceID</span>
+    <span class="tok-field">AssignedTo</span>  <span class="tok-pkg">types</span>.<span class="tok-type">MemberID</span>
+    <span class="tok-field">Description</span> string
+    <span class="tok-field">Title</span>       string
+}</code></pre>
+
+  <p>The handler performs the transport-to-service mapping. The service never receives raw JSON, method names, listener state, or bearer tokens.</p>
+
+  <h2 id="read-scoping">5. Task read scoping</h2>
+
+  <p>Task reads are scoped by the task service contract. RPC supplies authenticated caller identity and request filters; it does not bypass the service or query task storage directly.</p>
+
+  <table>
+    <thead><tr><th>Read case</th><th>RPC responsibility</th><th>Service responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>task.get</code></td><td>Validate <code>taskId</code>, stamp caller identity into context, call <code>TaskSvc.Get</code>, project <code>TaskView</code></td><td>Load the task through <code>TaskRepository</code> and enforce task access rules</td></tr>
+      <tr><td><code>task.list</code></td><td>Validate paging and filter DTOs, map filters to <code>domain.TaskFilter</code>, call <code>TaskSvc.List</code> and <code>TaskSvc.Count</code></td><td>Own canonical task filtering, counting, repository access, and user/member scoping rules</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="invariants">6. Invariants</h2>
+
+  <table>
+    <thead><tr><th>Invariant</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td><code>Application</code> has no RPC methods and no registry fields</td><td>RPC server construction lives in <code>internal/daemon</code> and <code>internal/rpc</code></td></tr>
+      <tr><td>RPC has no listener-specific branches</td><td>Listener strategies call the same <code>rpc.Server</code></td></tr>
+      <tr><td>Repositories are never constructed by RPC handlers</td><td>Handlers receive services from the daemon wiring</td></tr>
+      <tr><td>Service RPC DTOs do not live in <code>pkg/protocol</code></td><td>Request/result/view structs live under <code>internal/services/&lt;service&gt;/rpc</code></td></tr>
+      <tr><td>Services do not parse JSON-RPC</td><td>Handlers map RPC DTOs to typed service command structs</td></tr>
+      <tr><td>Unknown methods fail loudly</td><td>Registry lookup returns JSON-RPC method-not-found</td></tr>
+      <tr><td>Duplicate method registration fails at startup</td><td><code>Registry.Add</code> rejects existing method names</td></tr>
+      <tr><td>Agent-facing action semantics do not move into RPC</td><td>MCP owns tool actions; RPC owns browser and local control-plane service calls</td></tr>
+      <tr><td>Service read scoping is not implemented by repository shortcuts in RPC</td><td>RPC handlers call service methods only</td></tr>
+    </tbody>
+  </table>
+
+  <p class="footnote">
+    Architecture · agen8 · This document is the source of truth for the JSON-RPC adapter shape.
+  </p>
+
+</div>
+</body>
+</html>

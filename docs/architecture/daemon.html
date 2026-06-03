@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daemon — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / daemon</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Daemon</span>
+  <h1>Daemon process host</h1>
+  <p class="lede">
+    The daemon is the process host for agen8 services. It builds the application once, wires JSON-RPC registrations, selects a listener strategy, handles first-run onboarding, and stamps secure request identity before calling the transport-agnostic RPC server.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#responsibility">Responsibility</a></li>
+      <li><a href="#strategies">Listener strategies</a></li>
+      <li><a href="#cli">CLI surface</a></li>
+      <li><a href="#identity">Identity and auth</a></li>
+      <li><a href="#setup">First-run setup</a></li>
+      <li><a href="#dev-web">Dev web proxy</a></li>
+      <li><a href="#layout">Code layout</a></li>
+      <li><a href="#tests">Tests</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="responsibility">1. Responsibility</h2>
+
+  <p><code>internal/daemon</code> owns process orchestration. It is the only layer that knows whether the process is serving local IPC or HTTP. It never changes RPC method semantics based on the listener strategy.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">CLI</div>
+      <div class="role"><code>agen8 daemon start</code> chooses listener strategy, endpoint, and HTTP address from flags and environment.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">internal/daemon</div>
+      <div class="role">Builds <code>Application</code>, registers RPC methods, runs listener strategy, serves setup, and stamps identity.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">internal/rpc</div>
+      <div class="role">Receives already-authenticated requests and dispatches JSON-RPC methods.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Services</div>
+      <div class="role">Own business rules. They do not know whether the caller arrived through HTTP or local IPC.</div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>The daemon owns</th><th>The daemon does not own</th></tr></thead>
+    <tbody>
+      <tr><td>Listener strategy selection</td><td>Task, message, member, or space domain rules</td></tr>
+      <tr><td>HTTP routes <code>/healthz</code>, <code>/rpc</code>, <code>/events</code>, first-run setup routes, and web UI serving/proxying</td><td>RPC method DTOs or service command structs</td></tr>
+      <tr><td>Bearer-token validation for HTTP requests</td><td>Agent-facing MCP tool actions</td></tr>
+      <tr><td>Local user resolution for local IPC requests</td><td>Repository construction outside <code>app.NewApplication</code></td></tr>
+      <tr><td>Context identity stamping</td><td>Application methods; <code>Application</code> remains a field-only struct</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="strategies">2. Listener strategies</h2>
+
+  <p>Local IPC and HTTP are first-class daemon modes. Local is the default for native workflows. HTTP is explicit for Docker and hosted-shaped workflows.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 940 500" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+
+    <rect x="32" y="34" width="876" height="414" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
+    <text x="470" y="70" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Daemon listener strategy</text>
+    <text x="470" y="91" text-anchor="middle" fill="var(--text-muted)">Strategy changes transport and authentication only; both paths call the same RPC server.</text>
+
+    <rect x="70" y="132" width="170" height="86" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="155" y="158" text-anchor="middle" font-weight="700" fill="var(--text)">agen8 daemon start</text>
+    <text x="155" y="178" text-anchor="middle" fill="var(--text-muted)">--listener local|http</text>
+    <text x="155" y="196" text-anchor="middle" fill="var(--text-faint)">env mirrors flags</text>
+
+    <rect x="314" y="112" width="172" height="86" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="400" y="138" text-anchor="middle" font-weight="700" fill="var(--text)">LocalStrategy</text>
+    <text x="400" y="158" text-anchor="middle" fill="var(--text-muted)">Unix socket / pipe</text>
+    <text x="400" y="176" text-anchor="middle" fill="var(--text-faint)">local resolved identity</text>
+
+    <rect x="314" y="242" width="172" height="86" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="400" y="268" text-anchor="middle" font-weight="700" fill="var(--text)">HTTPStrategy</text>
+    <text x="400" y="288" text-anchor="middle" fill="var(--text-muted)">GET /healthz · POST /rpc</text>
+    <text x="400" y="306" text-anchor="middle" fill="var(--text-faint)">serves or proxies web UI</text>
+    <text x="400" y="324" text-anchor="middle" fill="var(--text-faint)">bearer token identity</text>
+
+    <rect x="570" y="160" width="158" height="92" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+    <text x="649" y="190" text-anchor="middle" font-weight="700" fill="var(--text)">rpc.Server</text>
+    <text x="649" y="211" text-anchor="middle" fill="var(--text-muted)">shared JSON-RPC</text>
+    <text x="649" y="230" text-anchor="middle" fill="var(--text-faint)">same registry</text>
+
+    <rect x="570" y="306" width="158" height="72" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="649" y="333" text-anchor="middle" font-weight="700" fill="var(--text)">Setup routes</text>
+    <text x="649" y="353" text-anchor="middle" fill="var(--text-muted)">zero users only</text>
+
+    <rect x="774" y="160" width="96" height="92" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="822" y="191" text-anchor="middle" font-weight="700" fill="var(--text)">Services</text>
+    <text x="822" y="212" text-anchor="middle" fill="var(--text-muted)">business</text>
+    <text x="822" y="231" text-anchor="middle" fill="var(--text-faint)">rules</text>
+
+    <line x1="240" y1="175" x2="314" y2="155" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="240" y1="175" x2="314" y2="285" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M 486 155 C 532 155 528 190 570 190" fill="none" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M 486 285 C 532 285 528 230 570 230" fill="none" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="728" y1="206" x2="774" y2="206" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="486" y1="317" x2="570" y2="342" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+  </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Strategy</th><th>Endpoint</th><th>Authentication</th><th>Use case</th></tr></thead>
+    <tbody>
+      <tr><td><code>local</code></td><td><code>--endpoint</code> / <code>AGEN8_RPC_ENDPOINT</code></td><td>Resolved local user identity; no spoofable identity headers</td><td>Native desktop and local development</td></tr>
+      <tr><td><code>http</code></td><td><code>--http-addr</code> / <code>AGEN8_HTTP_ADDR</code></td><td><code>Authorization: Bearer &lt;session-token&gt;</code> for browser requests after setup</td><td>Docker and hosted-shaped operation</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="cli">3. CLI surface</h2>
+
+<pre><code class="lang-shell">agen8 daemon start
+agen8 daemon start --listener local --endpoint unix:///tmp/agen8.sock
+agen8 daemon start --listener http --http-addr 127.0.0.1:7777</code></pre>
+
+  <table>
+    <thead><tr><th>Flag</th><th>Environment</th><th>Default</th></tr></thead>
+    <tbody>
+      <tr><td><code>--listener local|http</code></td><td><code>AGEN8_DAEMON_LISTENER</code></td><td><code>local</code></td></tr>
+      <tr><td><code>--endpoint</code></td><td><code>AGEN8_RPC_ENDPOINT</code></td><td>Existing local RPC endpoint</td></tr>
+      <tr><td><code>--http-addr</code></td><td><code>AGEN8_HTTP_ADDR</code></td><td><code>127.0.0.1:7777</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>Invalid listener values fail at startup. The CLI does not infer listener strategy from endpoint shape.</p>
+
+  <h2 id="identity">4. Identity and auth</h2>
+
+  <p>The daemon stamps <code>rpc.Identity</code> into request context before calling the RPC server.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Identity</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>   string
+    <span class="tok-field">MemberID</span> string
+    <span class="tok-field">Role</span>     string
+}</code></pre>
+
+  <table>
+    <thead><tr><th>Mode</th><th>Identity source</th><th>Security rule</th></tr></thead>
+    <tbody>
+      <tr><td>Local IPC</td><td>Local process/user resolution</td><td>The daemon ignores client-supplied identity headers or params.</td></tr>
+      <tr><td>HTTP</td><td>User service session validation</td><td><code>/rpc</code> rejects missing, invalid, or expired bearer tokens once setup is complete.</td></tr>
+      <tr><td>Setup</td><td>One-time setup token held by daemon and omitted from startup logs</td><td>Setup routes fail closed after the first user exists.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The account role is a hosted account role. <code>admin</code> and <code>user</code> are not space coordinator or worker roles.</p>
+
+  <h2 id="setup">5. First-run setup</h2>
+
+  <p>When the user service reports zero users, the HTTP daemon exposes first-run setup and prints a setup entrypoint without the one-time setup token. The setup token stays out of process logs while the setup routes continue to validate it before creating the first account user as <code>admin</code> and returning a real browser session token. Setup does not create a project, space, member, task, agent, or API key.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 900 340" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="setup-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+
+    <rect x="40" y="44" width="820" height="244" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
+    <rect x="82" y="116" width="130" height="58" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="147" y="141" text-anchor="middle" font-weight="700" fill="var(--text)">Daemon boot</text>
+    <text x="147" y="159" text-anchor="middle" fill="var(--text-muted)">zero users?</text>
+
+    <rect x="286" y="116" width="154" height="58" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="363" y="141" text-anchor="middle" font-weight="700" fill="var(--text)">Setup URL</text>
+    <text x="363" y="159" text-anchor="middle" fill="var(--text-muted)">one-time token</text>
+
+    <rect x="514" y="116" width="154" height="58" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="591" y="141" text-anchor="middle" font-weight="700" fill="var(--text)">User service</text>
+    <text x="591" y="159" text-anchor="middle" fill="var(--text-muted)">role = admin</text>
+
+    <rect x="720" y="116" width="98" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="769" y="141" text-anchor="middle" font-weight="700" fill="var(--text)">Session</text>
+    <text x="769" y="159" text-anchor="middle" fill="var(--text-muted)">browser token</text>
+
+    <rect x="514" y="218" width="154" height="44" rx="8" fill="var(--bad-soft)" stroke="var(--border-strong)"/>
+    <text x="591" y="244" text-anchor="middle" font-weight="700" fill="var(--text)">Setup disabled</text>
+
+    <line x1="212" y1="145" x2="286" y2="145" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#setup-arrow)"/>
+    <line x1="440" y1="145" x2="514" y2="145" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#setup-arrow)"/>
+    <line x1="668" y1="145" x2="720" y2="145" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#setup-arrow)"/>
+    <path d="M 591 174 L 591 218" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#setup-arrow)"/>
+    <text x="450" y="312" text-anchor="middle" fill="var(--text-muted)">After one user exists, setup routes return closed responses and cannot create another admin.</text>
+  </svg>
+  </div>
+
+  <h2 id="dev-web">6. Dev web proxy</h2>
+
+  <p>The daemon is the only browser entry point in development and production. Vite exists only as a hot-reload asset server. When <code>AGEN8_DEV_WEB_URL</code> is set, the daemon keeps protocol routes for itself and reverse-proxies the remaining web UI requests to Vite. When the variable is unset, the daemon serves the embedded frontend from <code>internal/web/dist</code>.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 940 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="web-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+
+    <rect x="40" y="42" width="860" height="260" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
+    <text x="470" y="76" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Single browser URL, hot-reload frontend</text>
+    <text x="470" y="97" text-anchor="middle" fill="var(--text-muted)">The developer opens the daemon on :7777; Vite stays behind the daemon.</text>
+
+    <rect x="84" y="142" width="144" height="64" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="156" y="166" text-anchor="middle" font-weight="700" fill="var(--text)">Browser</text>
+    <text x="156" y="185" text-anchor="middle" fill="var(--text-muted)">http://127.0.0.1:7777</text>
+
+    <rect x="306" y="126" width="184" height="96" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="398" y="153" text-anchor="middle" font-weight="700" fill="var(--text)">Daemon HTTP</text>
+    <text x="398" y="174" text-anchor="middle" fill="var(--text-muted)">setup · auth · RPC · events</text>
+    <text x="398" y="194" text-anchor="middle" fill="var(--text-faint)">web entrypoint</text>
+
+    <rect x="590" y="86" width="196" height="78" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="688" y="114" text-anchor="middle" font-weight="700" fill="var(--text)">Daemon routes</text>
+    <text x="688" y="134" text-anchor="middle" fill="var(--text-muted)">/setup /rpc /events /healthz</text>
+    <text x="688" y="151" text-anchor="middle" fill="var(--text-faint)">never proxied</text>
+
+    <rect x="590" y="204" width="196" height="78" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="688" y="232" text-anchor="middle" font-weight="700" fill="var(--text)">Vite dev server</text>
+    <text x="688" y="252" text-anchor="middle" fill="var(--text-muted)">AGEN8_DEV_WEB_URL</text>
+    <text x="688" y="269" text-anchor="middle" fill="var(--text-faint)">SPA assets + HMR</text>
+
+    <line x1="228" y1="174" x2="306" y2="174" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#web-arrow)"/>
+    <path d="M 490 154 C 536 130 538 125 590 125" fill="none" stroke="var(--good)" stroke-width="1.5" marker-end="url(#web-arrow)"/>
+    <path d="M 490 194 C 536 226 538 243 590 243" fill="none" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#web-arrow)"/>
+  </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Request</th><th>Dev owner</th><th>Production owner</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /setup</code>, <code>POST /setup</code></td><td>Daemon</td><td>Daemon</td></tr>
+      <tr><td><code>POST /rpc</code></td><td>Daemon</td><td>Daemon</td></tr>
+      <tr><td><code>GET /events</code></td><td>Daemon</td><td>Daemon</td></tr>
+      <tr><td><code>GET /healthz</code></td><td>Daemon</td><td>Daemon</td></tr>
+      <tr><td><code>GET /</code>, <code>/assets/*</code>, Vite client/HMR paths</td><td>Daemon reverse proxy to Vite</td><td>Daemon embedded frontend</td></tr>
+    </tbody>
+  </table>
+
+  <p><code>make dev</code> and <code>make dev remote</code> start the HTTP daemon under Air and start the Vite server. The browser opens the daemon HTTP URL. Vite provides hot-reload assets, and Air rebuilds and restarts the daemon after Go source changes.</p>
+
+<pre><code class="lang-shell">make dev
+make dev remote
+
+# daemon browser/RPC URL: http://127.0.0.1:7777
+# Vite asset server: http://127.0.0.1:5173</code></pre>
+
+  <p>First-run setup stays seamless in dev mode. The setup URL opens on the daemon, form submission creates the first account user and stores the session token, and the redirect to <code>/</code> returns through the daemon into the Vite-backed React app. React still calls <code>/rpc</code> on the daemon.</p>
+
+  <h2 id="layout">7. Code layout</h2>
+
+  <div class="tree"><pre>cmd/
+  main.go                  # cobra root and daemon start command
+
+internal/
+  daemon/
+    config.go              # listener config, env defaults, validation
+    daemon.go              # Application + RPC registry + strategy selection
+    local.go               # local IPC listener strategy
+    http.go                # HTTP listener strategy, /healthz, /rpc, /events, setup, web UI/proxy
+    daemon_test.go         # listener and setup tests
+
+  web/
+    server.go              # embedded SPA handler used when no dev web URL is configured
+    dist/                  # compiled frontend assets
+
+  app/
+    application.go          # field-only Application and NewApplication
+
+  rpc/
+    server.go              # shared JSON-RPC server
+    registry.go            # method registry
+    identity.go            # request identity context</pre></div>
+
+  <h2 id="tests">8. Tests</h2>
+
+  <table>
+    <thead><tr><th>Package</th><th>Coverage</th></tr></thead>
+    <tbody>
+      <tr><td><code>internal/daemon</code></td><td>Local one-request dispatch, HTTP health, HTTP auth rejection, bearer-token dispatch, setup can run once only</td></tr>
+      <tr><td><code>internal/rpc</code></td><td>Registry duplicate checks, request dispatch, task method registration</td></tr>
+      <tr><td><code>internal/services/auth</code></td><td>First user admin, API-key validation, invalid bearer failure</td></tr>
+      <tr><td><code>cmd</code></td><td>Default local listener, explicit HTTP listener, invalid listener failure</td></tr>
+    </tbody>
+  </table>
+
+  <p class="footnote">
+    Architecture · agen8 · This document is the source of truth for daemon listener strategy and first-run onboarding.
+  </p>
+
+</div>
+</body>
+</html>

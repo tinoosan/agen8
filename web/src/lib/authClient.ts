@@ -1,0 +1,142 @@
+import { clearStoredSessionToken, getStoredSessionToken, rpcCall, setStoredSessionToken } from './rpc'
+import type { AuthAPIKey, AuthStatus, AuthUser } from './types'
+
+export interface LoginInput {
+  email: string
+  password: string
+}
+
+export interface AuthResult {
+  user: AuthUser
+  token?: string
+}
+
+export interface UpdateProfileInput {
+  email: string
+  name: string
+}
+
+export interface CreateAPIKeyResult {
+  key: AuthAPIKey
+  secret: string
+}
+
+interface AuthStatusResult {
+  authenticated: boolean
+  userId?: string
+  role?: string
+  user?: {
+    id: string
+    role?: string
+  }
+}
+
+interface UserStatusResult {
+  setupOpen: boolean
+  user?: AuthUser | null
+}
+
+interface LoginResult {
+  userId: string
+  role: string
+  token: string
+  expiresAt: string
+}
+
+interface UserResult {
+  user: AuthUser
+}
+
+interface CreateAPIKeyRPCResult {
+  id: string
+  name: string
+  prefix: string
+  token: string
+  expiresAt?: string
+}
+
+export async function getAuthStatus(): Promise<AuthStatus> {
+  let auth: AuthStatusResult
+  try {
+    auth = await rpcCall<AuthStatusResult>('auth.status', {})
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('HTTP 401')) {
+      clearStoredSessionToken()
+      auth = await rpcCall<AuthStatusResult>('auth.status', {})
+    } else {
+      throw err
+    }
+  }
+  if (!auth.authenticated) {
+    return {
+      enabled: true,
+      hostedMode: true,
+      authenticated: false,
+      user: null,
+      bridge: null,
+    }
+  }
+
+  const userStatus = await rpcCall<UserStatusResult>('user.status', {})
+  return {
+    enabled: true,
+    hostedMode: true,
+    authenticated: true,
+    user: userStatus.user ?? {
+      id: auth.user?.id ?? auth.userId ?? '',
+      email: '',
+      name: '',
+      role: auth.role ?? auth.user?.role,
+      createdAt: '',
+    },
+    bridge: null,
+  }
+}
+
+export async function login(input: LoginInput): Promise<AuthResult> {
+  const result = await rpcCall<LoginResult>('auth.login', input)
+  setStoredSessionToken(result.token)
+  return {
+    token: result.token,
+    user: {
+      id: result.userId,
+      email: input.email,
+      name: '',
+      role: result.role,
+      createdAt: '',
+    },
+  }
+}
+
+export async function logout(): Promise<void> {
+  const token = getStoredSessionToken()
+  try {
+    if (token) {
+      await rpcCall('auth.logout', { token })
+    }
+  } finally {
+    clearStoredSessionToken()
+  }
+}
+
+export async function updateProfile(input: UpdateProfileInput): Promise<AuthResult> {
+  const result = await rpcCall<UserResult>('user.updateProfile', input)
+  return { user: result.user }
+}
+
+export async function createAPIKey(name: string): Promise<CreateAPIKeyResult> {
+  const result = await rpcCall<CreateAPIKeyRPCResult>('auth.apiKey.create', { name })
+  return {
+    secret: result.token,
+    key: {
+      id: result.id,
+      name: result.name,
+      prefix: result.prefix,
+      createdAt: '',
+    },
+  }
+}
+
+export async function revokeAPIKey(keyId: string): Promise<void> {
+  await rpcCall('auth.apiKey.revoke', { id: keyId })
+}

@@ -1,0 +1,449 @@
+package infra
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
+	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+)
+
+type SQLiteRepository struct {
+	db *sql.DB
+}
+
+func NewSQLiteRepository(handle *storagedb.Handle) (*SQLiteRepository, error) {
+	if handle == nil || handle.DB() == nil {
+		return nil, fmt.Errorf("mission sqlite repository: db handle is required")
+	}
+	if handle.Driver() != storagedb.DriverSQLite {
+		return nil, fmt.Errorf("mission sqlite repository: storage driver must be sqlite, got %q", handle.Driver())
+	}
+	repo := &SQLiteRepository{db: handle.DB()}
+	if err := repo.ensureSchema(context.Background()); err != nil {
+		return nil, err
+	}
+	return repo, nil
+}
+
+func (r *SQLiteRepository) GetMission(ctx context.Context, missionID mission.MissionID) (mission.Mission, error) {
+	missionID = mission.MissionID(strings.TrimSpace(string(missionID)))
+	if missionID == "" {
+		return mission.Mission{}, fmt.Errorf("mission id is required")
+	}
+	var raw []byte
+	err := r.db.QueryRowContext(ctx, `SELECT mission_json FROM missions WHERE mission_id = ?`, string(missionID)).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return mission.Mission{}, fmt.Errorf("mission %s not found", missionID)
+		}
+		return mission.Mission{}, fmt.Errorf("get mission %s: %w", missionID, err)
+	}
+	out, err := unmarshalMission(raw)
+	if err != nil {
+		return mission.Mission{}, fmt.Errorf("unmarshal mission %s: %w", missionID, err)
+	}
+	return out, nil
+}
+
+func (r *SQLiteRepository) ListMissions(ctx context.Context, filter mission.MissionFilter) ([]mission.Mission, error) {
+	where, args := missionWhere(filter)
+	query := "SELECT mission_json FROM missions" + where + " ORDER BY created_at DESC, mission_id ASC"
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+	}
+	if filter.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, filter.Offset)
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list missions: %w", err)
+	}
+	defer rows.Close()
+	return scanMissions(rows)
+}
+
+func (r *SQLiteRepository) CreateMission(ctx context.Context, mission mission.Mission) error {
+	return r.saveMission(ctx, mission)
+}
+
+func (r *SQLiteRepository) UpdateMission(ctx context.Context, mission mission.Mission) error {
+	if strings.TrimSpace(string(mission.ID)) == "" {
+		return fmt.Errorf("mission id is required")
+	}
+	if _, err := r.GetMission(ctx, mission.ID); err != nil {
+		return err
+	}
+	return r.saveMission(ctx, mission)
+}
+
+func (r *SQLiteRepository) GetKeyResult(ctx context.Context, keyResultID kr.KeyResultID) (kr.KeyResult, error) {
+	keyResultID = kr.KeyResultID(strings.TrimSpace(string(keyResultID)))
+	if keyResultID == "" {
+		return kr.KeyResult{}, fmt.Errorf("key result id is required")
+	}
+	var raw []byte
+	err := r.db.QueryRowContext(ctx, `SELECT key_result_json FROM key_results WHERE key_result_id = ?`, string(keyResultID)).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kr.KeyResult{}, fmt.Errorf("key result %s not found", keyResultID)
+		}
+		return kr.KeyResult{}, fmt.Errorf("get key result %s: %w", keyResultID, err)
+	}
+	out, err := unmarshalKeyResult(raw)
+	if err != nil {
+		return kr.KeyResult{}, fmt.Errorf("unmarshal key result %s: %w", keyResultID, err)
+	}
+	return out, nil
+}
+
+func (r *SQLiteRepository) ListKeyResults(ctx context.Context, missionID mission.MissionID) ([]kr.KeyResult, error) {
+	missionID = mission.MissionID(strings.TrimSpace(string(missionID)))
+	if missionID == "" {
+		return nil, fmt.Errorf("mission id is required")
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT key_result_json
+		FROM key_results
+		WHERE mission_id = ?
+		ORDER BY created_at ASC, key_result_id ASC
+	`, string(missionID))
+	if err != nil {
+		return nil, fmt.Errorf("list key results: %w", err)
+	}
+	defer rows.Close()
+	return scanKeyResults(rows)
+}
+
+func (r *SQLiteRepository) CreateKeyResult(ctx context.Context, keyResult kr.KeyResult) error {
+	return r.saveKeyResult(ctx, keyResult)
+}
+
+func (r *SQLiteRepository) UpdateKeyResult(ctx context.Context, keyResult kr.KeyResult) error {
+	if strings.TrimSpace(string(keyResult.ID)) == "" {
+		return fmt.Errorf("key result id is required")
+	}
+	if _, err := r.GetKeyResult(ctx, keyResult.ID); err != nil {
+		return err
+	}
+	return r.saveKeyResult(ctx, keyResult)
+}
+
+func (r *SQLiteRepository) AppendProgressEntry(ctx context.Context, entry kr.ProgressEntry) error {
+	if strings.TrimSpace(entry.ID) == "" {
+		return fmt.Errorf("progress entry id is required")
+	}
+	if strings.TrimSpace(string(entry.KeyResultID)) == "" {
+		return fmt.Errorf("progress entry key result id is required")
+	}
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshal progress entry: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO key_result_progress_entries (
+			progress_entry_id, key_result_id, created_at, progress_entry_json
+		) VALUES (?, ?, ?, ?)
+	`, entry.ID, string(entry.KeyResultID), timeString(entry.CreatedAt), string(payload))
+	if err != nil {
+		return fmt.Errorf("append progress entry %s: %w", entry.ID, err)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) ListProgressEntries(ctx context.Context, keyResultID kr.KeyResultID) ([]kr.ProgressEntry, error) {
+	keyResultID = kr.KeyResultID(strings.TrimSpace(string(keyResultID)))
+	if keyResultID == "" {
+		return nil, fmt.Errorf("key result id is required")
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT progress_entry_json
+		FROM key_result_progress_entries
+		WHERE key_result_id = ?
+		ORDER BY created_at ASC, progress_entry_id ASC
+	`, string(keyResultID))
+	if err != nil {
+		return nil, fmt.Errorf("list progress entries: %w", err)
+	}
+	defer rows.Close()
+	var out []kr.ProgressEntry
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan progress entry: %w", err)
+		}
+		var entry kr.ProgressEntry
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			return nil, fmt.Errorf("unmarshal progress entry: %w", err)
+		}
+		out = append(out, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate progress entries: %w", err)
+	}
+	return out, nil
+}
+
+func (r *SQLiteRepository) saveMission(ctx context.Context, item mission.Mission) error {
+	item.ID = mission.MissionID(strings.TrimSpace(string(item.ID)))
+	if item.ID == "" {
+		return fmt.Errorf("mission id is required")
+	}
+	item.ProjectID = strings.TrimSpace(item.ProjectID)
+	if item.ProjectID == "" {
+		return fmt.Errorf("mission project id is required")
+	}
+	item.Status = mission.MissionStatus(strings.TrimSpace(string(item.Status)))
+	if item.Status == "" {
+		return fmt.Errorf("mission status is required")
+	}
+	payload, err := json.Marshal(item)
+	if err != nil {
+		return fmt.Errorf("marshal mission: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO missions (
+			mission_id, project_id, status, created_at, updated_at, completed_at, mission_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(mission_id) DO UPDATE SET
+			project_id = excluded.project_id,
+			status = excluded.status,
+			updated_at = excluded.updated_at,
+			completed_at = excluded.completed_at,
+			mission_json = excluded.mission_json
+	`, string(item.ID), item.ProjectID, string(item.Status), timeString(item.CreatedAt), timeString(item.UpdatedAt), optionalTimeString(item.CompletedAt), string(payload))
+	if err != nil {
+		return fmt.Errorf("save mission %s: %w", item.ID, err)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) saveKeyResult(ctx context.Context, keyResult kr.KeyResult) error {
+	keyResult.ID = kr.KeyResultID(strings.TrimSpace(string(keyResult.ID)))
+	if keyResult.ID == "" {
+		return fmt.Errorf("key result id is required")
+	}
+	keyResult.MissionID = mission.MissionID(strings.TrimSpace(string(keyResult.MissionID)))
+	if keyResult.MissionID == "" {
+		return fmt.Errorf("key result mission id is required")
+	}
+	keyResult.Status = kr.KeyResultStatus(strings.TrimSpace(string(keyResult.Status)))
+	if keyResult.Status == "" {
+		return fmt.Errorf("key result status is required")
+	}
+	payload, err := json.Marshal(keyResult)
+	if err != nil {
+		return fmt.Errorf("marshal key result: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO key_results (
+			key_result_id, mission_id, status, space_id, created_at, updated_at, completed_at, key_result_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(key_result_id) DO UPDATE SET
+			mission_id = excluded.mission_id,
+			status = excluded.status,
+			space_id = excluded.space_id,
+			updated_at = excluded.updated_at,
+			completed_at = excluded.completed_at,
+			key_result_json = excluded.key_result_json
+	`, string(keyResult.ID), string(keyResult.MissionID), string(keyResult.Status), strings.TrimSpace(keyResult.SpaceID), timeString(keyResult.CreatedAt), timeString(keyResult.UpdatedAt), optionalTimeString(keyResult.CompletedAt), string(payload))
+	if err != nil {
+		return fmt.Errorf("save key result %s: %w", keyResult.ID, err)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
+	if err := r.cutOverLegacyTable(ctx, "missions", "mission_json"); err != nil {
+		return err
+	}
+	if err := r.cutOverLegacyTable(ctx, "key_results", "key_result_json"); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE IF NOT EXISTS missions (
+			mission_id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			created_at TEXT,
+			updated_at TEXT,
+			completed_at TEXT,
+			mission_json TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_missions_project ON missions(project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_missions_created_at ON missions(created_at)`,
+		`CREATE TABLE IF NOT EXISTS key_results (
+			key_result_id TEXT PRIMARY KEY,
+			mission_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			space_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT,
+			updated_at TEXT,
+			completed_at TEXT,
+			key_result_json TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_key_results_mission ON key_results(mission_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_key_results_status ON key_results(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_key_results_space ON key_results(space_id)`,
+		`CREATE TABLE IF NOT EXISTS key_result_progress_entries (
+			progress_entry_id TEXT PRIMARY KEY,
+			key_result_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT,
+			progress_entry_json TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_key_result_progress_key_result ON key_result_progress_entries(key_result_id)`,
+		`CREATE TABLE IF NOT EXISTS mission_lifecycle_events (
+			event_id TEXT PRIMARY KEY,
+			mission_id TEXT NOT NULL DEFAULT '',
+			key_result_id TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL DEFAULT '',
+			created_at TEXT,
+			event_json TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mission_lifecycle_events_mission ON mission_lifecycle_events(mission_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_mission_lifecycle_events_type ON mission_lifecycle_events(event_type)`,
+	} {
+		if _, err := r.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("ensure mission schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) cutOverLegacyTable(ctx context.Context, table string, requiredColumn string) error {
+	exists, err := r.tableExists(ctx, table)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	hasColumn, err := r.tableHasColumn(ctx, table, requiredColumn)
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+	if err := r.dropIndexesForTable(ctx, table); err != nil {
+		return err
+	}
+	legacyName := fmt.Sprintf("%s_legacy_%d", table, time.Now().UnixNano())
+	if _, err := r.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", table, legacyName)); err != nil {
+		return fmt.Errorf("cut over legacy mission table %s: %w", table, err)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) tableExists(ctx context.Context, table string) (bool, error) {
+	var name string
+	err := r.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check table %s: %w", table, err)
+	}
+	return true, nil
+}
+
+func (r *SQLiteRepository) tableHasColumn(ctx context.Context, table string, column string) (bool, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, fmt.Errorf("inspect table %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, fmt.Errorf("scan table info %s: %w", table, err)
+		}
+		if strings.EqualFold(name, column) {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("iterate table info %s: %w", table, err)
+	}
+	return false, nil
+}
+
+func (r *SQLiteRepository) dropIndexesForTable(ctx context.Context, table string) error {
+	rows, err := r.db.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`, table)
+	if err != nil {
+		return fmt.Errorf("list indexes for %s: %w", table, err)
+	}
+	defer rows.Close()
+	var indexes []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("scan index for %s: %w", table, err)
+		}
+		if strings.HasPrefix(name, "sqlite_autoindex_") {
+			continue
+		}
+		indexes = append(indexes, name)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate indexes for %s: %w", table, err)
+	}
+	for _, name := range indexes {
+		if _, err := r.db.ExecContext(ctx, fmt.Sprintf("DROP INDEX IF EXISTS %s", name)); err != nil {
+			return fmt.Errorf("drop index %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func scanMissions(rows *sql.Rows) ([]mission.Mission, error) {
+	var out []mission.Mission
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan mission: %w", err)
+		}
+		mission, err := unmarshalMission(raw)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal mission: %w", err)
+		}
+		out = append(out, mission)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate missions: %w", err)
+	}
+	return out, nil
+}
+
+func scanKeyResults(rows *sql.Rows) ([]kr.KeyResult, error) {
+	var out []kr.KeyResult
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan key result: %w", err)
+		}
+		keyResult, err := unmarshalKeyResult(raw)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal key result: %w", err)
+		}
+		out = append(out, keyResult)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate key results: %w", err)
+	}
+	return out, nil
+}

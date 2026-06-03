@@ -1,0 +1,277 @@
+package infra
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+	"time"
+
+	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
+	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8-mcp-server/pkg/types"
+)
+
+var infraTestNow = time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+
+func TestSQLiteRepositoryPersistsMission(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	mission := infraMission(t, "mission-1", "project-1")
+
+	if err := repo.CreateMission(context.Background(), mission); err != nil {
+		t.Fatalf("CreateMission: %v", err)
+	}
+	loaded, err := repo.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission: %v", err)
+	}
+	if loaded.ID != mission.ID || loaded.Title != mission.Title {
+		t.Fatalf("loaded mission=%+v want %+v", loaded, mission)
+	}
+
+	updated, err := loaded.UpdateDetails("Updated", "Updated scope", infraTestNow.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("UpdateDetails: %v", err)
+	}
+	if err := repo.UpdateMission(context.Background(), updated); err != nil {
+		t.Fatalf("UpdateMission: %v", err)
+	}
+	loaded, err = repo.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission updated: %v", err)
+	}
+	if loaded.Title != "Updated" {
+		t.Fatalf("Title=%q want Updated", loaded.Title)
+	}
+}
+
+func TestSQLiteRepositoryListsMissionsByProjectAndStatus(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	first := infraMission(t, "mission-1", "project-1")
+	second := infraMission(t, "mission-2", "project-2")
+	if err := repo.CreateMission(context.Background(), first); err != nil {
+		t.Fatalf("CreateMission first: %v", err)
+	}
+	if err := repo.CreateMission(context.Background(), second); err != nil {
+		t.Fatalf("CreateMission second: %v", err)
+	}
+
+	listed, err := repo.ListMissions(context.Background(), mission.MissionFilter{
+		ProjectID: "project-1",
+		Statuses:  []mission.MissionStatus{mission.MissionStatusDraft},
+	})
+	if err != nil {
+		t.Fatalf("ListMissions: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != first.ID {
+		t.Fatalf("listed=%+v want %s", listed, first.ID)
+	}
+}
+
+func TestSQLiteRepositoryCutsOverLegacyMissionTables(t *testing.T) {
+	handle, err := storagedb.Open(context.Background(), storagedb.Config{
+		Driver:  storagedb.DriverSQLite,
+		DataDir: t.TempDir(),
+		Migrate: func(ctx context.Context, db *sql.DB, driver storagedb.Driver) error {
+			if driver != storagedb.DriverSQLite {
+				t.Fatalf("driver=%q", driver)
+			}
+			for _, stmt := range []string{
+				`CREATE TABLE missions (
+					id TEXT PRIMARY KEY,
+					project_id TEXT NOT NULL,
+					title TEXT NOT NULL,
+					status TEXT NOT NULL DEFAULT 'draft',
+					created_at TEXT NOT NULL,
+					updated_at TEXT NOT NULL
+				)`,
+				`CREATE INDEX idx_missions_project ON missions(project_id)`,
+				`CREATE TABLE key_results (
+					id TEXT PRIMARY KEY,
+					mission_id TEXT NOT NULL,
+					title TEXT NOT NULL,
+					status TEXT NOT NULL DEFAULT 'open',
+					created_at TEXT NOT NULL,
+					updated_at TEXT NOT NULL
+				)`,
+				`CREATE INDEX idx_key_results_mission ON key_results(mission_id)`,
+			} {
+				if _, err := db.ExecContext(ctx, stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	repo, err := NewSQLiteRepository(handle)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	listed, err := repo.ListMissions(context.Background(), mission.MissionFilter{ProjectID: "project-1"})
+	if err != nil {
+		t.Fatalf("ListMissions: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("listed=%+v want empty rebuilt table", listed)
+	}
+	mission := infraMission(t, "mission-1", "project-1")
+	if err := repo.CreateMission(context.Background(), mission); err != nil {
+		t.Fatalf("CreateMission: %v", err)
+	}
+}
+
+func TestSQLiteRepositoryPersistsKeyResultAndProgress(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	mission := infraMission(t, "mission-1", "project-1")
+	if err := repo.CreateMission(context.Background(), mission); err != nil {
+		t.Fatalf("CreateMission: %v", err)
+	}
+	keyResult := infraKeyResult(t, "kr-1", mission.ID)
+	if err := repo.CreateKeyResult(context.Background(), keyResult); err != nil {
+		t.Fatalf("CreateKeyResult: %v", err)
+	}
+	loaded, err := repo.GetKeyResult(context.Background(), keyResult.ID)
+	if err != nil {
+		t.Fatalf("GetKeyResult: %v", err)
+	}
+	if loaded.ID != keyResult.ID || loaded.MissionID != mission.ID {
+		t.Fatalf("loaded key result=%+v want %+v", loaded, keyResult)
+	}
+	listed, err := repo.ListKeyResults(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("ListKeyResults: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != keyResult.ID {
+		t.Fatalf("listed=%+v want %s", listed, keyResult.ID)
+	}
+
+	entry := kr.ProgressEntry{
+		ID:              "progress-1",
+		KeyResultID:     keyResult.ID,
+		PreviousValue:   0,
+		NewValue:        50,
+		ProgressPercent: 50,
+		UpdatedBy:       "member-1",
+		Note:            "halfway",
+		CreatedAt:       infraTestNow,
+	}
+	if err := repo.AppendProgressEntry(context.Background(), entry); err != nil {
+		t.Fatalf("AppendProgressEntry: %v", err)
+	}
+	entries, err := repo.ListProgressEntries(context.Background(), keyResult.ID)
+	if err != nil {
+		t.Fatalf("ListProgressEntries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != entry.ID {
+		t.Fatalf("entries=%+v want %s", entries, entry.ID)
+	}
+}
+
+func TestSQLiteRepositoryPersistsLifecycleEvents(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	mission := infraMission(t, "mission-1", "project-1")
+	if err := repo.CreateMission(context.Background(), mission); err != nil {
+		t.Fatalf("CreateMission: %v", err)
+	}
+	first := types.EventRecord{
+		EventID:   "event-1",
+		RunID:     types.RunID(mission.ID),
+		Timestamp: infraTestNow,
+		Type:      string(missionapp.MissionEventActivated),
+		Message:   string(missionapp.MissionEventActivated),
+		Origin:    "mission",
+		Data: map[string]string{
+			"missionId": string(mission.ID),
+			"status":    "active",
+			"note":      "ready",
+		},
+	}
+	if err := repo.AppendLifecycleEvent(context.Background(), first); err != nil {
+		t.Fatalf("AppendLifecycleEvent first: %v", err)
+	}
+	second := types.EventRecord{
+		EventID:   "event-2",
+		RunID:     types.RunID(mission.ID),
+		Timestamp: infraTestNow.Add(time.Minute),
+		Type:      string(missionapp.KREventDropped),
+		Message:   string(missionapp.KREventDropped),
+		Origin:    "mission",
+		Data: map[string]string{
+			"missionId":   string(mission.ID),
+			"keyResultId": "kr-1",
+			"status":      string(kr.KeyResultStatusDropped),
+			"note":        "out of scope",
+		},
+	}
+	if err := repo.AppendLifecycleEvent(context.Background(), second); err != nil {
+		t.Fatalf("AppendLifecycleEvent second: %v", err)
+	}
+
+	events, count, err := repo.ListLifecycleEvents(context.Background(), mission.ID, missionapp.LifecycleHistoryFilter{
+		Limit: 1,
+		Types: []string{string(missionapp.KREventDropped)},
+	})
+	if err != nil {
+		t.Fatalf("ListLifecycleEvents: %v", err)
+	}
+	if count != 1 || len(events) != 1 {
+		t.Fatalf("events=%+v count=%d want one dropped event", events, count)
+	}
+	if events[0].Data["note"] != "out of scope" || events[0].Data["keyResultId"] != "kr-1" {
+		t.Fatalf("event=%+v", events[0])
+	}
+}
+
+func newSQLiteRepositoryForTest(t *testing.T) *SQLiteRepository {
+	t.Helper()
+	handle, err := storagedb.Open(context.Background(), storagedb.Config{
+		Driver:  storagedb.DriverSQLite,
+		DataDir: t.TempDir(),
+		Migrate: func(ctx context.Context, db *sql.DB, driver storagedb.Driver) error {
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	repo, err := NewSQLiteRepository(handle)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	return repo
+}
+
+func infraMission(t *testing.T, id string, projectID string) mission.Mission {
+	t.Helper()
+	out, err := mission.NewMission(mission.NewMissionInput{
+		ID:        mission.MissionID(id),
+		ProjectID: projectID,
+		Title:     "Mission " + id,
+		Now:       infraTestNow,
+	})
+	if err != nil {
+		t.Fatalf("NewMission: %v", err)
+	}
+	return out
+}
+
+func infraKeyResult(t *testing.T, id string, missionID mission.MissionID) kr.KeyResult {
+	t.Helper()
+	out, err := kr.NewKeyResult(kr.NewKeyResultInput{
+		ID:              kr.KeyResultID(id),
+		MissionID:       missionID,
+		Title:           "KR " + id,
+		MeasurementType: kr.MeasurementNumber,
+		Direction:       kr.DirectionIncrease,
+		TargetValue:     100,
+		Now:             infraTestNow,
+	})
+	if err != nil {
+		t.Fatalf("NewKeyResult: %v", err)
+	}
+	return out
+}

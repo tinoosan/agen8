@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Space-First Runtime Contracts — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .contract-map {
+    width: 100%;
+    max-width: 980px;
+    margin: 28px 0;
+  }
+  .contract-map text {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .contract-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin: 22px 0;
+  }
+  .contract-card {
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--bg-elevated);
+  }
+  .contract-card .label {
+    color: var(--text-faint);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+  .contract-card .title {
+    margin-top: 8px;
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .contract-card .meta {
+    margin-top: 8px;
+    max-width: none;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+  @media (max-width: 760px) {
+    .contract-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / space-first-runtime-contracts</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture &middot; Runtime Model</span>
+  <h1>Space-First Runtime Contracts</h1>
+  <p class="lede">Agen8 coordinates work through spaces and space members. A space is the live context boundary. A member is the actor identity inside that boundary. Harness sessions and runs are execution details owned by managed members, not the product identity.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#model">Runtime model</a></li>
+      <li><a href="#hierarchy">Hierarchy</a></li>
+      <li><a href="#contracts">Core contracts</a></li>
+      <li><a href="#registration">Registration contract</a></li>
+      <li><a href="#briefing">Briefing contract</a></li>
+      <li><a href="#cross-space">Cross-space communication</a></li>
+      <li><a href="#ownership">Service ownership</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="model">1. Runtime model</h2>
+  <p>Agen8 uses a space-first, managed-member model. <code>Space</code> is the durable coordination boundary. <code>SpaceMember</code> is the live actor registered into a space. <code>MemberType</code> is structural and contains <code>coordinator</code> or <code>worker</code>. A transitional <code>reviewer</code> type may exist only as a dedicated review member while review policy moves into capabilities.</p>
+
+  <div class="callout">
+    <strong>Identity rule.</strong> A coordinator remains a <code>coordinator</code> whether or not workers are currently present. Agen8 does not derive a separate lone-coordinator runtime identity.
+  </div>
+
+  <div class="contract-grid">
+    <div class="contract-card">
+      <div class="label">Live boundary</div>
+      <div class="title">Space</div>
+      <div class="meta">Owns coordination scope, lifecycle, member roster, and links to structured work context.</div>
+    </div>
+    <div class="contract-card">
+      <div class="label">Actor identity</div>
+      <div class="title">SpaceMember</div>
+      <div class="meta">Owns member id, channel id, display name, member type, lifecycle, and harness preferences.</div>
+    </div>
+    <div class="contract-card">
+      <div class="label">Execution detail</div>
+      <div class="title">Harness Session / Run</div>
+      <div class="meta">Stores the managed harness address, runtime settings, usage evidence, and lifecycle observations.</div>
+    </div>
+    <div class="contract-card">
+      <div class="label">Optional setup</div>
+      <div class="title">Template and Role</div>
+      <div class="meta">Provide defaults, persona, capability preferences, and provenance without becoming runtime ownership.</div>
+    </div>
+  </div>
+
+  <h2 id="hierarchy">2. Hierarchy</h2>
+  <svg class="contract-map" viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Space-first hierarchy">
+    <defs>
+      <style>
+        .box { fill: var(--bg-elevated); stroke: var(--border); stroke-width: 1.5; }
+        .primary { fill: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated)); stroke: var(--accent); }
+        .txt { fill: var(--text); font-size: 14px; font-weight: 700; }
+        .muted { fill: var(--text-muted); font-size: 11px; }
+        .line { stroke: var(--border-strong, var(--border)); stroke-width: 1.6; fill: none; }
+        .dash { stroke-dasharray: 6 5; }
+      </style>
+    </defs>
+    <rect class="box primary" x="40" y="132" width="150" height="72" rx="12"/>
+    <text class="txt" x="115" y="162" text-anchor="middle">Project</text>
+    <text class="muted" x="115" y="184" text-anchor="middle">owns spaces</text>
+
+    <rect class="box primary" x="270" y="132" width="150" height="72" rx="12"/>
+    <text class="txt" x="345" y="162" text-anchor="middle">Space</text>
+    <text class="muted" x="345" y="184" text-anchor="middle">context boundary</text>
+
+    <rect class="box" x="500" y="40" width="160" height="72" rx="12"/>
+    <text class="txt" x="580" y="70" text-anchor="middle">Template</text>
+    <text class="muted" x="580" y="92" text-anchor="middle">optional blueprint</text>
+
+    <rect class="box primary" x="500" y="132" width="160" height="72" rx="12"/>
+    <text class="txt" x="580" y="162" text-anchor="middle">SpaceMember</text>
+    <text class="muted" x="580" y="184" text-anchor="middle">live actor</text>
+
+    <rect class="box" x="730" y="40" width="170" height="72" rx="12"/>
+    <text class="txt" x="815" y="70" text-anchor="middle">Role</text>
+    <text class="muted" x="815" y="92" text-anchor="middle">optional persona</text>
+
+    <rect class="box" x="730" y="132" width="170" height="72" rx="12"/>
+    <text class="txt" x="815" y="162" text-anchor="middle">MemberType</text>
+    <text class="muted" x="815" y="184" text-anchor="middle">coordinator / worker</text>
+
+    <rect class="box" x="730" y="242" width="170" height="72" rx="12"/>
+    <text class="txt" x="815" y="272" text-anchor="middle">Managed Run</text>
+    <text class="muted" x="815" y="294" text-anchor="middle">harness session</text>
+
+    <rect class="box" x="270" y="242" width="390" height="72" rx="12"/>
+    <text class="txt" x="465" y="272" text-anchor="middle">Work Graph</text>
+    <text class="muted" x="465" y="294" text-anchor="middle">tasks, plans, decisions, requests, files, strategy links</text>
+
+    <path class="line" d="M190 168H270"/>
+    <path class="line" d="M420 168H500"/>
+    <path class="line dash" d="M500 76C430 76 430 132 420 145"/>
+    <path class="line dash" d="M660 76H730"/>
+    <path class="line" d="M660 168H730"/>
+    <path class="line" d="M625 204C670 236 690 278 730 278"/>
+    <path class="line" d="M345 204V242"/>
+  </svg>
+
+  <h2 id="contracts">3. Core contracts</h2>
+  <table>
+    <thead><tr><th>Contract</th><th>Owns</th><th>Does not own</th></tr></thead>
+    <tbody>
+      <tr><td><code>Space</code></td><td>Identity, lifecycle, project/user ownership, policy scope, member roster, structured context links, and default execution preferences for new members.</td><td>Harness process control or managed run state.</td></tr>
+      <tr><td><code>SpaceMember</code></td><td>Durable actor identity, deterministic channel id, member type, lifecycle state, display name, harness preferences, managed run binding, and actor attribution.</td><td>Reusable persona definitions or global user account identity.</td></tr>
+      <tr><td><code>MemberType</code></td><td>Structural behavior: coordination authority, task eligibility, default tool visibility, topology visibility, and message routing eligibility.</td><td>Domain capability such as backend engineer, market analyst, or artist manager.</td></tr>
+      <tr><td><code>Role</code></td><td>Optional capability/persona instructions, skill preferences, model defaults, heartbeat preferences, and review/planning preferences.</td><td>Coordinator/worker structural authorization.</td></tr>
+      <tr><td><code>SpaceTemplate</code></td><td>Reusable setup defaults, member slots, optional role bindings, desired settings defaults, review/planning policy defaults, and provenance.</td><td>Live runtime ownership.</td></tr>
+      <tr><td><code>HarnessSession</code></td><td>Harness kind, workspace/session identifiers, actual runtime settings, capability snapshot, lifecycle observations, and cost/usage evidence.</td><td>Primary Agen8 actor identity.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="registration">4. Registration contract</h2>
+  <p>Registration is the boundary where Agen8 creates a managed member in a space. The caller supplies an existing <code>space_id</code>, requested member type, display name, harness kind, optional role or ad hoc capability declaration, and desired execution settings.</p>
+
+  <table>
+    <thead><tr><th>Registration output</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Member id and channel id</td><td>Stable actor identity and routing address.</td></tr>
+      <tr><td>Granted member type</td><td>Validated structural behavior. Coordinator requests store <code>coordinator</code> directly.</td></tr>
+      <tr><td>Granted permissions and tool scopes</td><td>Runtime and MCP authorization context.</td></tr>
+      <tr><td>Briefing artifact/version</td><td>Traceable per-member coordination contract.</td></tr>
+      <tr><td>Managed run binding</td><td>Harness delivery address once provisioned.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Coordinator admission.</strong> A space has at most one active coordinator member. If an active coordinator already exists, another coordinator registration fails by policy. Type changes go through the member service rather than direct record mutation.
+  </div>
+
+  <h2 id="briefing">5. Briefing contract</h2>
+  <p>A briefing is per member and per space. It includes member identity and type, role/profile snapshot summary, granted and denied capabilities, coordination rules, task/decision/plan/request conventions, message routing rules, ask-user/escalation rules, context bootstrap links, and cross-space constraints.</p>
+
+  <p>Briefing versions are persisted for traceability. Prompt/system instruction injection is the managed harness startup mechanism, not an attached-session fallback strategy.</p>
+
+  <h2 id="cross-space">6. Cross-space communication</h2>
+  <p>Cross-space communication routes between spaces through active coordinator members. Each message carries source space/member, target space/coordinator member, kind, correlation id, causation id, optional structured context links, and delivery/ack state.</p>
+
+  <p>Channels remain UI presentation lanes. Routing authority comes from space identity and coordinator member identity. Raw chat is allowed, but messages should link to tasks, requests, decisions, plans, files, or handoffs when coordination produces structured work.</p>
+
+  <h2 id="ownership">7. Service ownership</h2>
+  <table>
+    <thead><tr><th>Service</th><th>Owns</th></tr></thead>
+    <tbody>
+      <tr><td>Space service</td><td>Space records and space membership/lifecycle records.</td></tr>
+      <tr><td>Task service</td><td>Task state and task messages.</td></tr>
+      <tr><td>Message/channel service</td><td>Message/channel persistence, read state, and delivery.</td></tr>
+      <tr><td>Decision service</td><td>Decisions and decision events.</td></tr>
+      <tr><td>Harness service</td><td>Managed runtime context, harness sessions, prompt construction, and runtime adapters.</td></tr>
+      <tr><td>Graph service</td><td>Typed context links and graph queries.</td></tr>
+    </tbody>
+  </table>
+</div>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caller Identity — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / caller-identity</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture · Identity</span>
+  <h1>Caller Identity</h1>
+  <p class="lede">Every adapter stamps one authenticated caller shape into context. Services consume that shared caller through a small resolver interface and enforce their own authorization rules.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#contract">Shared contract</a></li>
+      <li><a href="#flow">Control flow</a></li>
+      <li><a href="#boundaries">Service boundaries</a></li>
+      <li><a href="#storage">Member storage</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="contract">1. Shared contract</h2>
+  <p><code>internal/caller</code> is the one process-local caller identity package. It is not an auth service and it is not a permission engine. It is the typed context contract shared by protocol adapters and service application layers.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">package</span> caller
+
+<span class="tok-kw">type</span> <span class="tok-type">Caller</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>   string
+    <span class="tok-field">MemberID</span> <span class="tok-pkg">types</span>.<span class="tok-type">MemberID</span>
+    <span class="tok-field">SpaceID</span>  <span class="tok-pkg">types</span>.<span class="tok-type">SpaceID</span>
+    <span class="tok-field">Role</span>     string
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Resolver</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">ResolveCaller</span>(ctx context.Context) (<span class="tok-type">Caller</span>, error)
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">ContextWithCaller</span>(ctx context.Context, caller <span class="tok-type">Caller</span>) context.Context
+
+<span class="tok-kw">type</span> <span class="tok-type">ContextResolver</span> <span class="tok-kw">struct</span>{}</code></pre>
+
+  <p>The resolver trims fields and fails when both <code>UserID</code> and <code>MemberID</code> are empty. A user-only caller is valid for user-owned RPC flows. A member caller is valid for agent/member flows. A caller may carry both when an adapter can authenticate the user and resolve the acting member.</p>
+
+  <h2 id="flow">2. Control flow</h2>
+  <div class="diagram">
+  <svg viewBox="0 0 900 390" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+    <rect x="36" y="42" width="828" height="292" rx="14" fill="var(--bg-elevated)" stroke="var(--border)"/>
+
+    <rect x="78" y="92" width="150" height="66" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="153" y="118" text-anchor="middle" font-weight="700" fill="var(--text)">RPC / MCP</text>
+    <text x="153" y="138" text-anchor="middle" fill="var(--text-muted)">authenticate request</text>
+
+    <rect x="286" y="92" width="160" height="66" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="366" y="116" text-anchor="middle" font-weight="700" fill="var(--text)">caller package</text>
+    <text x="366" y="136" text-anchor="middle" fill="var(--text-muted)">stamp shared Caller</text>
+
+    <rect x="504" y="92" width="150" height="66" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="579" y="116" text-anchor="middle" font-weight="700" fill="var(--text)">Service</text>
+    <text x="579" y="136" text-anchor="middle" fill="var(--text-muted)">resolve caller</text>
+
+    <rect x="712" y="92" width="112" height="66" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+    <text x="768" y="116" text-anchor="middle" font-weight="700" fill="var(--text)">Rules</text>
+    <text x="768" y="136" text-anchor="middle" fill="var(--text-muted)">authorize</text>
+
+    <line x1="228" y1="125" x2="286" y2="125" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="446" y1="125" x2="504" y2="125" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <line x1="654" y1="125" x2="712" y2="125" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <rect x="110" y="224" width="252" height="56" rx="8" fill="var(--bg-subtle)" stroke="var(--border)"/>
+    <text x="236" y="247" text-anchor="middle" font-weight="700" fill="var(--text)">HTTP user caller</text>
+    <text x="236" y="266" text-anchor="middle" fill="var(--text-muted)">UserID + account Role</text>
+
+    <rect x="390" y="224" width="252" height="56" rx="8" fill="var(--bg-subtle)" stroke="var(--border)"/>
+    <text x="516" y="247" text-anchor="middle" font-weight="700" fill="var(--text)">MCP member caller</text>
+    <text x="516" y="266" text-anchor="middle" fill="var(--text-muted)">MemberID + SpaceID + UserID</text>
+
+    <text x="450" y="316" text-anchor="middle" fill="var(--text-muted)">Adapters authenticate. Services authorize. Context carries one caller shape across service boundaries.</text>
+  </svg>
+  </div>
+
+  <h2 id="boundaries">3. Service boundaries</h2>
+  <p>Services depend on <code>caller.Resolver</code>, not on protocol packages. This lets the same service run behind JSON-RPC, MCP, local IPC, HTTP, tests, and future daemon strategies without changing the service constructor.</p>
+
+  <table>
+    <thead><tr><th>Layer</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td>Daemon / RPC / MCP</td><td>Authenticate the request, resolve any actor member when the protocol has one, and stamp <code>caller.Caller</code>.</td></tr>
+      <tr><td>Service app layer</td><td>Resolve the shared caller and enforce service-specific authorization before state changes.</td></tr>
+      <tr><td>Domain layer</td><td>Validate state transitions and inputs. It does not read context and does not know users or transport.</td></tr>
+      <tr><td>Repository layer</td><td>Persist and load records. It does not authorize callers.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="storage">4. Member storage</h2>
+  <p>The canonical durable member table is <code>members</code>. A member belongs to a space, but the table name reflects the domain record, not one relationship. This is a hard-cutover schema: new local databases create <code>members</code>; old <code>space_members</code> databases are not kept alive through compatibility views or fallback reads.</p>
+
+<pre><code class="lang-sql"><span class="tok-kw">CREATE TABLE</span> members (
+    member_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'local',
+    project_id TEXT DEFAULT '',
+    space_id TEXT NOT NULL,
+    member_type TEXT NOT NULL,
+    lifecycle_state TEXT NOT NULL,
+    harness_kind TEXT DEFAULT '',
+    member_json TEXT NOT NULL,
+    registered_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_seen_at TEXT DEFAULT ''
+);</code></pre>
+
+  <h2 id="invariants">5. Invariants</h2>
+  <table>
+    <thead><tr><th>Invariant</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>There is one caller context shape for process-local service calls.</td><td><code>internal/caller</code></td></tr>
+      <tr><td>Services do not import RPC or MCP to learn who called them.</td><td>Service constructors depend on <code>caller.Resolver</code>.</td></tr>
+      <tr><td>Adapters authenticate; services authorize.</td><td>RPC/MCP stamp caller identity; service methods validate ownership, membership, and role rules.</td></tr>
+      <tr><td>Member storage is canonical as <code>members</code>.</td><td>Schema validation requires <code>members</code> and the member repository reads/writes it.</td></tr>
+      <tr><td>No compatibility fallback reads old member tables.</td><td>Hard-cutover schema validation fails old databases loudly.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

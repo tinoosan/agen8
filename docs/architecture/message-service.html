@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Message Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / message-service</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture · Message Service</span>
+  <h1>Message Service</h1>
+  <p class="lede">The message service owns member-addressed channels, durable agent inbox messages, member conversation rows, conversation attachments, channel read state, and wake signals. Push wakes reduce polling, while persisted rows remain the delivery and timeline source of truth.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#layers">Architecture layers</a></li>
+      <li><a href="#domains">Domain packages</a></li>
+      <li><a href="#delivery">Delivery flow</a></li>
+      <li><a href="#agent-delivery">Agent-directed messages</a></li>
+      <li><a href="#conversation">Member conversations</a></li>
+      <li><a href="#attachments">Conversation attachments</a></li>
+      <li><a href="#rpc">RPC surface</a></li>
+      <li><a href="#channels">Channels</a></li>
+      <li><a href="#repositories">Repositories</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="layers">1. Architecture layers</h2>
+  <p>The service follows the same structural shape as the task service: shared persisted DTOs live in <code>pkg/types</code>, domain aggregates own rules, app services orchestrate, and infra adapters persist through typed repository interfaces.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">Protocol</div>
+      <div class="role">RPC and MCP adapters validate transport DTOs and call the app service. They do not construct domain records directly.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">App</div>
+      <div class="role"><code>app.Service</code> publishes agent messages, stores conversation input, manages channels, marks reads, and emits member wake signals after persistence succeeds.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain</div>
+      <div class="role"><code>domain.Message</code> owns queued-to-consumed inbox rules. <code>channel.Channel</code> owns member channel address and activity state. <code>conversation.Message</code> owns user/harness timeline state.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Infra</div>
+      <div class="role"><code>SQLiteRepository</code>, <code>PostgresRepository</code>, and conversation repositories persist agent messages, channels, read markers, and conversation rows through domain repository contracts.</div>
+    </div>
+    <div class="layer events">
+      <div class="label">Wake</div>
+      <div class="role">A typed wake payload is emitted after a queued message is durable. The wake nudges runtime delivery, which pushes the message to the agent.</div>
+    </div>
+  </div>
+
+  <h2 id="domains">2. Domain packages</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="label">Agent inbox</div>
+      <div class="title"><code>internal/services/message/domain</code></div>
+      <div class="meta"><code>NewMessage</code> creates valid queued <code>types.AgentMessage</code> records. <code>Message.Consume</code> enforces the only delivery transition: queued to consumed.</div>
+    </div>
+    <div class="card">
+      <div class="label">Channels</div>
+      <div class="title"><code>internal/services/message/domain/channel</code></div>
+      <div class="meta"><code>NewMemberChannel</code> creates member-addressed channels. <code>MemberChannelID</code> deterministically derives <code>channel:&lt;spaceID&gt;:member:&lt;memberID&gt;</code>.</div>
+    </div>
+    <div class="card">
+      <div class="label">Member conversations</div>
+      <div class="title"><code>internal/services/message/domain/conversation</code></div>
+      <div class="meta">Conversation rows store user/operator inputs, typed attachments, and harness-authored responses for member channels. Delivery state is separate from render state so queued, steered, failed, and visible UI states do not collapse into one field.</div>
+    </div>
+  </div>
+
+<pre><code class="lang-go">type AgentMessage struct {
+    ID                  AgentMessageID
+    IntentID            IntentID
+    CorrelationID       CorrelationID
+    CausationID         CausationID
+    SpaceID             SpaceID
+    SourceMemberID      MemberID
+    DestinationMemberID MemberID
+    ChannelID           ChannelID
+    Kind                AgentMessageKind
+    Subject             string
+    Body                map[string]any
+    TaskRef             TaskID
+    Status              MessageStatus
+    VisibleAt           time.Time
+    CreatedAt           time.Time
+    UpdatedAt           time.Time
+    ConsumedAt          *time.Time
+    ConsumedBy          MemberID
+}</code></pre>
+
+  <h2 id="delivery">3. Delivery flow</h2>
+  <p>Publishing commits the queued row before notifying subscribers. If a process misses the wake, the durable inbox still contains the work. Publishing also ensures the destination member has a delivery loop when the production harness sender is wired, so system messages and agent messages can wake a newly registered member without waiting for a browser chat turn. Runtime delivery workers use wake signals to avoid hot polling, receive the queued message from the inbox, push it to the agent harness, and mark it consumed after handoff. If the destination harness is already running a turn, the queued row remains unconsumed and the worker retries after a short backoff instead of waiting for another message to trigger delivery.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 980 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Durable message delivery flow">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+      <rect x="35" y="76" width="145" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="107" y="106" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Publisher</text>
+      <text x="107" y="127" text-anchor="middle" fill="var(--text-muted)" font-size="11">task/service/agent</text>
+
+      <rect x="230" y="56" width="155" height="110" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="307" y="93" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">App Service</text>
+      <text x="307" y="116" text-anchor="middle" fill="var(--text-muted)" font-size="11">orchestrates</text>
+      <text x="307" y="135" text-anchor="middle" fill="var(--text-muted)" font-size="11">calls domain</text>
+
+      <rect x="435" y="56" width="155" height="110" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="512" y="93" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Domain</text>
+      <text x="512" y="116" text-anchor="middle" fill="var(--text-muted)" font-size="11">valid queued row</text>
+      <text x="512" y="135" text-anchor="middle" fill="var(--text-muted)" font-size="11">lifecycle rules</text>
+
+      <rect x="640" y="56" width="155" height="110" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="717" y="93" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Repository</text>
+      <text x="717" y="116" text-anchor="middle" fill="var(--text-muted)" font-size="11">durable commit</text>
+      <text x="717" y="135" text-anchor="middle" fill="var(--text-muted)" font-size="11">source of truth</text>
+
+      <rect x="640" y="204" width="155" height="50" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="717" y="234" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Wake</text>
+
+      <rect x="845" y="76" width="105" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="897" y="106" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Agent</text>
+      <text x="897" y="127" text-anchor="middle" fill="var(--text-muted)" font-size="11">receives push</text>
+
+      <line x1="180" y1="111" x2="230" y2="111" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#arrow)"/>
+      <line x1="385" y1="111" x2="435" y2="111" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#arrow)"/>
+      <line x1="590" y1="111" x2="640" y2="111" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#arrow)"/>
+      <line x1="717" y1="166" x2="717" y2="204" stroke="var(--warn)" stroke-width="1.7" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+      <line x1="795" y1="229" x2="872" y2="146" stroke="var(--warn)" stroke-width="1.7" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+      <line x1="845" y1="111" x2="795" y2="111" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#arrow)"/>
+      <text x="829" y="97" text-anchor="middle" fill="var(--text-muted)" font-size="11">delivery receive</text>
+    </svg>
+  </div>
+
+  <h2 id="agent-delivery">4. Agent-directed messages</h2>
+  <p>Agent-directed messages are durable inbox items addressed to a destination member. They are used for agent-to-agent communication and system-to-agent notifications. They are not browser chat rows. A publisher records intent, route, content, producer, and correlation; the message service persists the row as <code>queued</code>, starts the destination member delivery loop when production harness delivery is available, schedules a wake on an internal delivery queue, and returns to the caller. The runtime delivery path injects the message into the destination member's active harness context out of band, retrying queued delivery when the harness is temporarily busy.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 980 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agent-directed message sources and runtime delivery">
+      <defs>
+        <marker id="agent-msg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+        <marker id="agent-msg-wake" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--warn)"/>
+        </marker>
+      </defs>
+
+      <rect x="32" y="42" width="170" height="76" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="117" y="71" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Agent sender</text>
+      <text x="117" y="92" text-anchor="middle" fill="var(--text-muted)" font-size="11">message MCP tool</text>
+
+      <rect x="32" y="164" width="170" height="76" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="117" y="193" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">System publisher</text>
+      <text x="117" y="214" text-anchor="middle" fill="var(--text-muted)" font-size="11">task/operator/service</text>
+
+      <rect x="270" y="82" width="190" height="118" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="365" y="115" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Message app service</text>
+      <text x="365" y="138" text-anchor="middle" fill="var(--text-muted)" font-size="11">PublishAgentMessage</text>
+      <text x="365" y="157" text-anchor="middle" fill="var(--text-muted)" font-size="11">validate envelope</text>
+      <text x="365" y="176" text-anchor="middle" fill="var(--text-muted)" font-size="11">ensure member channel</text>
+
+      <rect x="528" y="82" width="170" height="118" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="613" y="115" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Agent inbox row</text>
+      <text x="613" y="138" text-anchor="middle" fill="var(--text-muted)" font-size="11">status = queued</text>
+      <text x="613" y="157" text-anchor="middle" fill="var(--text-muted)" font-size="11">destination member</text>
+      <text x="613" y="176" text-anchor="middle" fill="var(--text-muted)" font-size="11">correlation + producer</text>
+
+      <rect x="768" y="46" width="165" height="70" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="850" y="76" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Member wake</text>
+      <text x="850" y="97" text-anchor="middle" fill="var(--text-muted)" font-size="11">best-effort nudge</text>
+
+      <rect x="768" y="162" width="165" height="92" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="850" y="192" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Delivery worker</text>
+      <text x="850" y="214" text-anchor="middle" fill="var(--text-muted)" font-size="11">ReceiveNextForDelivery</text>
+      <text x="850" y="233" text-anchor="middle" fill="var(--text-muted)" font-size="11">format runtime prompt</text>
+
+      <rect x="528" y="306" width="170" height="82" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="613" y="337" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Member runtime</text>
+      <text x="613" y="359" text-anchor="middle" fill="var(--text-muted)" font-size="11">active harness session</text>
+      <text x="613" y="378" text-anchor="middle" fill="var(--text-muted)" font-size="11">agent sees message</text>
+
+      <rect x="270" y="306" width="190" height="82" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="365" y="337" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Consumed row</text>
+      <text x="365" y="359" text-anchor="middle" fill="var(--text-muted)" font-size="11">RecordDelivered</text>
+      <text x="365" y="378" text-anchor="middle" fill="var(--text-muted)" font-size="11">consumedBy + consumedAt</text>
+
+      <line x1="202" y1="80" x2="270" y2="124" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#agent-msg-arrow)"/>
+      <line x1="202" y1="202" x2="270" y2="158" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#agent-msg-arrow)"/>
+      <line x1="460" y1="141" x2="528" y2="141" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#agent-msg-arrow)"/>
+      <line x1="698" y1="121" x2="768" y2="86" stroke="var(--warn)" stroke-width="1.7" stroke-dasharray="5 5" marker-end="url(#agent-msg-wake)"/>
+      <line x1="850" y1="116" x2="850" y2="162" stroke="var(--warn)" stroke-width="1.7" stroke-dasharray="5 5" marker-end="url(#agent-msg-wake)"/>
+      <line x1="768" y1="208" x2="698" y2="172" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#agent-msg-arrow)"/>
+      <line x1="850" y1="254" x2="698" y2="331" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#agent-msg-arrow)"/>
+      <line x1="528" y1="347" x2="460" y2="347" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#agent-msg-arrow)"/>
+    </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Source</th><th>Producer</th><th>Kind</th><th>Delivery meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Agent to agent</td><td><code>mcp.message</code></td><td><code>inform</code>, <code>query</code>, <code>ack</code>, <code>response</code></td><td>A member sends a durable message to another active member in the same space through the <code>message</code> MCP tool.</td></tr>
+      <tr><td>Task assignment and lifecycle</td><td><code>task</code> service</td><td><code>task</code>, <code>system</code>, or <code>inform</code></td><td>A service publishes work or lifecycle context to the affected member after the domain transition persists.</td></tr>
+      <tr><td>Operator outcome</td><td><code>operator</code> service</td><td><code>system</code> or <code>inform</code></td><td>An operator action, escalation update, completion, or block notification reaches the member that needs to react.</td></tr>
+      <tr><td>System notice</td><td>service-specific producer name</td><td><code>system</code></td><td>A runtime-relevant state change is delivered to the member without pretending a human typed a chat message.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The delivery worker converts an inbox row into a concise runtime message with source member id, source member label, producer, kind, subject, body, correlation id, causation id, and task reference. Agent-to-agent delivery is rendered as an Agen8 member message, not as a user chat turn. The destination agent sees who sent it and why it exists before it sees the body. <code>query</code> messages ask the destination agent to respond later with <code>response</code> using the same correlation id. <code>ack</code> records receipt or completion acknowledgement. <code>system</code> and <code>task</code> messages are service-authored instructions or facts, not peer chat.</p>
+
+  <table>
+    <thead><tr><th>Delivered field</th><th>Required for</th><th>Meaning to the destination agent</th></tr></thead>
+    <tbody>
+      <tr><td><code>sourceMemberId</code></td><td>agent-to-agent messages</td><td>The sending Agen8 member. This is never inferred from body text.</td></tr>
+      <tr><td><code>sourceMemberLabel</code></td><td>agent-to-agent messages</td><td>Human-readable sender label shown with the member id.</td></tr>
+      <tr><td><code>producer</code></td><td>all inbox messages</td><td>The subsystem that created the envelope, such as <code>mcp.message</code>, <code>task</code>, or <code>operator</code>.</td></tr>
+      <tr><td><code>kind</code></td><td>all inbox messages</td><td>Whether the destination should treat the body as information, a query, a response, an acknowledgement, system context, or task work.</td></tr>
+      <tr><td><code>correlationId</code></td><td>query/response/ack threads</td><td>The durable thread id agents use when replying or acknowledging.</td></tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-text">Agen8 member message
+from: Sarah (member-sarah)
+producer: mcp.message
+kind: query
+correlationId: corr-123
+subject: Check resolver failures
+
+Can you inspect the resolver logs and respond with the current blocker?</code></pre>
+
+  <p>Receiving a durable inbox message also creates a visible conversation activity in the destination member's channel. The activity renders as a message-received card in the chat timeline, so users can audit what woke the agent and distinguish it from user-authored conversation input. The activity is render state; the agent inbox row remains the source of truth for queued/consumed delivery.</p>
+
+  <table>
+    <thead><tr><th>Activity field</th><th>Value</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>kind</code></td><td><code>agent_message_received</code></td><td>Lets the frontend render a dedicated received-message card instead of a generic tool call.</td></tr>
+      <tr><td><code>title</code></td><td><code>Message from &lt;source label&gt;</code> or <code>System message</code></td><td>Makes authorship obvious in the destination member's conversation.</td></tr>
+      <tr><td><code>status</code></td><td><code>pending</code> before harness handoff, then <code>completed</code> or <code>error</code></td><td>Makes receipt visible immediately while still separating delivery handoff from later agent action.</td></tr>
+      <tr><td><code>data.messageId</code></td><td>Agent inbox id</td><td>Links the render card back to the durable inbox row.</td></tr>
+      <tr><td><code>data.sourceMemberId</code>, <code>data.sourceMemberLabel</code></td><td>Sender member identity when present</td><td>Prevents the destination agent or user from mistaking peer messages for user input.</td></tr>
+      <tr><td><code>data.producer</code>, <code>data.kind</code>, <code>data.correlationId</code>, <code>data.subject</code></td><td>Envelope metadata</td><td>Shows why the message exists and how replies should correlate.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="diagram">
+    <svg viewBox="0 0 960 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Message kind semantics">
+      <defs>
+        <marker id="kind-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+      <rect x="40" y="42" width="135" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="107" y="76" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">inform</text>
+      <rect x="245" y="42" width="135" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="312" y="76" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">query</text>
+      <rect x="450" y="42" width="135" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="517" y="76" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">response</text>
+      <rect x="655" y="42" width="135" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="722" y="76" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">ack</text>
+      <rect x="820" y="42" width="100" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="870" y="76" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">done</text>
+
+      <line x1="175" y1="71" x2="245" y2="71" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#kind-arr)"/>
+      <line x1="380" y1="71" x2="450" y2="71" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#kind-arr)"/>
+      <line x1="585" y1="71" x2="655" y2="71" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#kind-arr)"/>
+      <line x1="790" y1="71" x2="820" y2="71" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#kind-arr)"/>
+
+      <rect x="90" y="158" width="180" height="64" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="180" y="184" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">system</text>
+      <text x="180" y="205" text-anchor="middle" fill="var(--text-muted)" font-size="11">service-authored fact</text>
+      <rect x="390" y="158" width="180" height="64" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="480" y="184" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">task</text>
+      <text x="480" y="205" text-anchor="middle" fill="var(--text-muted)" font-size="11">work item with taskRef</text>
+      <rect x="690" y="158" width="180" height="64" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="780" y="184" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">correlation</text>
+      <text x="780" y="205" text-anchor="middle" fill="var(--text-muted)" font-size="11">threads query/response/ack</text>
+    </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Invariant</th><th>Design rule</th></tr></thead>
+    <tbody>
+      <tr><td>Wakes are hints.</td><td>The durable inbox row is the source of truth. Missing a wake cannot lose a message.</td></tr>
+      <tr><td>Publish is not delivery.</td><td><code>PublishAgentMessage</code> saves the row and enqueues a wake. It does not wait for destination harness processing.</td></tr>
+      <tr><td>Delivery is handoff, not completion.</td><td><code>RecordDelivered</code> means the runtime received the message. It does not mean the agent acted on it.</td></tr>
+      <tr><td>Agent-to-agent delivery identifies the sender.</td><td>Runtime formatting includes <code>sourceMemberId</code>, <code>sourceMemberLabel</code>, and <code>producer</code>; the body alone never carries sender identity.</td></tr>
+      <tr><td>Responses are new messages.</td><td>An agent answers with <code>message(action="send", kind="response", correlation_id=...)</code>; the original message remains consumed.</td></tr>
+      <tr><td>System messages are not user conversation rows.</td><td>Service-authored facts enter through <code>PublishAgentMessage</code> so the destination agent can act without a human appearing as sender.</td></tr>
+      <tr><td>Agent messages route to members.</td><td>Runtime selection, model, effort, and session refs are resolved by harness delivery from the destination member id.</td></tr>
+    </tbody>
+  </table>
+
+  <table>
+    <thead><tr><th>Log event</th><th>When emitted</th><th>Key fields</th></tr></thead>
+    <tbody>
+      <tr><td><code>agent message queued</code></td><td>After the inbox row persists and the wake is emitted.</td><td><code>message_id</code>, <code>space_id</code>, <code>source_member_id</code>, <code>destination_member_id</code>, <code>channel_id</code>, <code>kind</code>, <code>producer</code>, <code>correlation_id</code></td></tr>
+      <tr><td><code>agent message delivery starting</code></td><td>Before the delivery worker hands the message to the destination harness.</td><td>Route, kind, producer, and correlation fields; no body text.</td></tr>
+      <tr><td><code>agent message delivery failed</code></td><td>When harness handoff fails before the row can be marked consumed.</td><td>Route fields plus <code>error</code>.</td></tr>
+      <tr><td><code>agent message delivered to harness</code></td><td>After harness handoff, activity-card persistence, and <code>RecordDelivered</code>.</td><td>Route fields plus <code>session_id</code>, <code>turn_id</code>, and <code>delivery</code>.</td></tr>
+      <tr><td><code>agent message consumed</code></td><td>When the durable inbox row transitions from queued to consumed.</td><td><code>message_id</code>, route fields, and <code>consumed_by</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="conversation">5. Member conversations</h2>
+  <p>Member conversations are member-scoped chat lanes. The message service owns durable conversation rows, channel activity updates, read-side history, and the send RPC. The harness service owns runtime handoff through a small consumer-side chat interface. A user send resolves the channel to <code>spaceID</code> and <code>memberID</code>, persists one inbound conversation row, then asks the harness service to send that same row to the member's active harness session.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 980 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Member-scoped chat lane flow">
+      <defs>
+        <marker id="chat-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+      <rect x="35" y="74" width="130" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="100" y="104" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Browser</text>
+      <text x="100" y="125" text-anchor="middle" fill="var(--text-muted)" font-size="11">member channel</text>
+
+      <rect x="220" y="54" width="175" height="110" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="307" y="92" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Message service</text>
+      <text x="307" y="115" text-anchor="middle" fill="var(--text-muted)" font-size="11">resolve channel</text>
+      <text x="307" y="134" text-anchor="middle" fill="var(--text-muted)" font-size="11">persist conversation row</text>
+
+      <rect x="455" y="54" width="170" height="110" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="540" y="92" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Harness chat sender</text>
+      <text x="540" y="115" text-anchor="middle" fill="var(--text-muted)" font-size="11">consumer-side interface</text>
+      <text x="540" y="134" text-anchor="middle" fill="var(--text-muted)" font-size="11">SendMessage</text>
+
+      <rect x="685" y="54" width="135" height="110" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="752" y="92" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Active session</text>
+      <text x="752" y="115" text-anchor="middle" fill="var(--text-muted)" font-size="11">memberID lookup</text>
+      <text x="752" y="134" text-anchor="middle" fill="var(--text-muted)" font-size="11">member runtime context</text>
+
+      <rect x="870" y="74" width="80" height="70" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="910" y="104" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Runtime</text>
+      <text x="910" y="125" text-anchor="middle" fill="var(--text-muted)" font-size="11">Codex/Claude</text>
+
+      <line x1="165" y1="109" x2="220" y2="109" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#chat-arrow)"/>
+      <line x1="395" y1="109" x2="455" y2="109" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#chat-arrow)"/>
+      <line x1="625" y1="109" x2="685" y2="109" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#chat-arrow)"/>
+      <line x1="820" y1="109" x2="870" y2="109" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#chat-arrow)"/>
+
+      <text x="307" y="204" text-anchor="middle" fill="var(--text-muted)" font-size="11">channel:&lt;spaceID&gt;:member:&lt;memberID&gt;</text>
+      <text x="752" y="204" text-anchor="middle" fill="var(--text-muted)" font-size="11">memberID → active harness session</text>
+    </svg>
+  </div>
+
+<pre><code class="lang-go">type Message struct {
+    ID         string
+    ChannelID  string
+    SpaceID    string
+    MemberID   string
+    SessionID  string
+    TurnID     string
+    Direction  Direction
+    SenderType string
+    SenderID   string
+    Text       string
+    Attachments []Attachment
+    Delivery   DeliveryState
+    Render     RenderState
+    CreatedAt  time.Time
+    UpdatedAt  time.Time
+    Error      string
+}</code></pre>
+
+  <p><code>Direction</code> and <code>Delivery</code> are separate. Inbound user input has delivery state because the harness still has to hand it to a runtime. Outbound harness text is already observed output, so it normally has no delivery state and renders as visible member output. <code>SessionID</code> and <code>TurnID</code> are empty when a user input is first saved and are bound when harness delivery claims the row.</p>
+
+  <p>Multiple harnesses are routed by member identity. The browser sends to a member channel, the message service resolves that channel to a member, and the harness service decides which runtime receives the text from the member's active session. A Codex-backed member and a Claude-backed member use the same conversation API; only the active managed-member runtime context behind the member differs.</p>
+
+  <p>The message service does not provision harness identity or tools. The harness service is responsible for turning <code>spaceID</code> and <code>memberID</code> into a managed-member runtime context: active session, member identity prompt, runtime-specific Agen8 MCP config, model, effort, and external session ref. The message service only persists the chat row, calls the consumer-side interface, and stores the returned delivery/output.</p>
+
+<pre><code class="lang-go">type HarnessChatSender interface {
+    SendMessage(ctx context.Context, input HarnessChatMessage) (HarnessChatResult, error)
+}
+
+type HarnessChatMessage struct {
+    SpaceID               string
+    MemberID              string
+    ChannelID             string
+    ConversationMessageID string
+    SenderType            string
+    SenderID              string
+    Text                  string
+    Attachments           []Attachment
+}
+
+type HarnessChatResult struct {
+    SessionID string
+    TurnID    string
+    Delivery  string
+    Text      string
+}</code></pre>
+
+  <p>The interface is owned by the message app package because message is the caller and harness is the consumer. The concrete adapter is wired in the application composition root. This keeps the message service independent from runtime details while still making chat handoff synchronous and testable through <code>message.conversation.send</code>.</p>
+
+  <h2 id="attachments">6. Conversation attachments</h2>
+  <p>Conversation attachments are first-class message-owned records. The browser uploads pasted, dropped, or selected files before sending the chat row, including the route project id and member channel id, then passes stable attachment ids to <code>message.conversation.send</code>. Upload validates the project and channel, stores the bytes in the daemon data directory, and records the attachment against the project, space, and channel. The send handler validates that every attachment belongs to the same project, space, and caller-visible channel before the inbound row is persisted or delivered to harness. The conversation renderer lazy-loads stored image bytes through <code>message.attachment.get</code> so historical messages show previews after reload. Remote harness sessions receive runtime-local staged copies from the harness service rather than daemon-local file paths.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 980 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Conversation attachment flow">
+      <defs>
+        <marker id="attachment-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+
+      <rect x="35" y="70" width="145" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="108" y="99" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Composer</text>
+      <text x="108" y="119" text-anchor="middle" fill="var(--text-muted)" font-size="11">paste, drop, select</text>
+
+      <rect x="235" y="70" width="160" height="70" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="315" y="99" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Attachment upload</text>
+      <text x="315" y="119" text-anchor="middle" fill="var(--text-muted)" font-size="11">message.attachment.upload</text>
+
+      <rect x="450" y="70" width="160" height="70" rx="8" fill="var(--bg-subtle)" stroke="var(--border)"/>
+      <text x="530" y="99" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Attachment store</text>
+      <text x="530" y="119" text-anchor="middle" fill="var(--text-muted)" font-size="11">daemon data-dir URI</text>
+
+      <rect x="665" y="70" width="160" height="70" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="745" y="99" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Conversation send</text>
+      <text x="745" y="119" text-anchor="middle" fill="var(--text-muted)" font-size="11">text + attachment ids</text>
+
+      <rect x="450" y="205" width="160" height="60" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="530" y="230" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Harness handoff</text>
+      <text x="530" y="249" text-anchor="middle" fill="var(--text-muted)" font-size="11">typed attachment refs</text>
+
+      <line x1="180" y1="105" x2="235" y2="105" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#attachment-arrow)"/>
+      <line x1="395" y1="105" x2="450" y2="105" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#attachment-arrow)"/>
+      <line x1="610" y1="105" x2="665" y2="105" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#attachment-arrow)"/>
+      <line x1="745" y1="140" x2="610" y2="214" stroke="var(--warn)" stroke-width="1.6" marker-end="url(#attachment-arrow)"/>
+    </svg>
+  </div>
+
+<pre><code class="lang-go">type Attachment struct {
+    ID        string
+    ProjectID string
+    SpaceID   string
+    ChannelID string
+    Name      string
+    MediaType string
+    SizeBytes int64
+    URI       string
+    CreatedAt time.Time
+}
+
+type ConversationSendParams struct {
+    ChannelID     string   `json:"channelId"`
+    Text          string   `json:"text,omitempty"`
+    AttachmentIDs []string `json:"attachmentIds,omitempty"`
+}
+
+type AttachmentUploadParams struct {
+    ChannelID  string `json:"channelId"`
+    ProjectID  string `json:"projectId,omitempty"`
+    Name       string `json:"name"`
+    MediaType  string `json:"mediaType"`
+    DataBase64 string `json:"dataBase64"`
+}
+
+type AttachmentGetParams struct {
+    AttachmentID string `json:"attachmentId"`
+}</code></pre>
+
+  <p>Text is required only when the message has no attachments. Attachment-only sends are valid for image inspection workflows. Empty sends remain invalid. Upload validates file name, media type, decoded size, project existence, and channel ownership at the RPC boundary. Preview fetch validates the stable attachment id, reads the stored bytes, and returns base64 image data to the authenticated browser session. Image media types are explicit, such as <code>image/png</code>, <code>image/jpeg</code>, and <code>image/webp</code>; unsupported or oversized files fail before persistence and preview rendering.</p>
+
+  <table>
+    <thead><tr><th>Field</th><th>Meaning</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>ID</code></td><td>Stable attachment reference used by conversation rows and harness handoff.</td><td>Generated by the message service.</td></tr>
+      <tr><td><code>URI</code></td><td>Local or bridge-addressable file location.</td><td>Never derived from the client-supplied file name alone.</td></tr>
+      <tr><td><code>MediaType</code></td><td>Validated MIME type used by frontend previews and harness adapters.</td><td>Must match the accepted attachment allow-list.</td></tr>
+      <tr><td><code>ChannelID</code></td><td>The conversation lane the attachment belongs to.</td><td>Must match the send channel before delivery.</td></tr>
+      <tr><td><code>AttachmentIDs</code></td><td>The ordered set of attachments included in a user turn.</td><td>Resolved to full attachment records before persistence and harness handoff.</td></tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-go">type Reader interface {
+    ListByChannel(ctx context.Context, channelID string, limit int) ([]Message, error)
+    NextQueuedForSession(ctx context.Context, sessionID string) (*Message, error)
+}
+
+type Writer interface {
+    Save(ctx context.Context, message Message) error
+    UpdateDelivery(ctx context.Context, id string, state DeliveryState, errText string, updatedAt time.Time) (Message, error)
+    UpdateDeliveryBinding(ctx context.Context, id string, state DeliveryState, sessionID string, turnID string, errText string, updatedAt time.Time) (Message, error)
+    UpdateRender(ctx context.Context, id string, state RenderState, errText string, updatedAt time.Time) (Message, error)
+}
+
+type Repository interface {
+    Reader
+    Writer
+}</code></pre>
+
+  <table>
+    <thead><tr><th>State</th><th>Meaning</th><th>Owner</th></tr></thead>
+    <tbody>
+      <tr><td><code>queued</code></td><td>Inbound user input is durable and waiting for harness delivery.</td><td>Message service creates it; harness may leave it queued.</td></tr>
+      <tr><td><code>delivered</code></td><td>Harness accepted the input as a new turn.</td><td>Harness delivery updates it.</td></tr>
+      <tr><td><code>steered</code></td><td>Harness accepted the input into an active steerable turn.</td><td>Harness delivery updates it.</td></tr>
+      <tr><td><code>failed</code></td><td>Runtime handoff failed and the row remains visible with an error.</td><td>Harness delivery updates it.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="rpc">7. RPC surface</h2>
+  <p>The RPC adapter exposes the service as a small command/query surface. Handlers validate transport params, resolve caller identity, call <code>app.Service</code>, and return frontend-ready views. They do not construct <code>types.AgentMessage</code> or channel rows directly.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">Frontend clients</div>
+      <div class="title">Read channels and render timelines</div>
+      <div class="meta">The browser needs channel lists, paged message history, unread counts, read markers, and a push wake that tells it when to refresh a member or space view.</div>
+    </div>
+    <div class="card">
+      <div class="label">Runtime delivery</div>
+      <div class="title">Push messages to agents</div>
+      <div class="meta">Agents do not poll or claim over RPC. The daemon subscribes to wakes, receives the durable inbox item internally, pushes it to the harness, and records consumption after handoff.</div>
+    </div>
+    <div class="card">
+      <div class="label">Service clients</div>
+      <div class="title">Publish member-addressed messages</div>
+      <div class="meta">Internal services publish through the app interface. RPC exposes <code>message.send</code> for agent inbox messages and <code>message.conversation.send</code> for user-to-member chat.</div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>Method</th><th>Client need</th><th>App call</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>message.channel.list</code></td><td>Render the left rail or member inbox list for a space.</td><td><code>ListChannelsBySpace</code></td><td>Returns channel views with resolved member labels, last activity, status, and unread count.</td></tr>
+      <tr><td><code>message.channel.get</code></td><td>Open one channel from a route or URL.</td><td><code>LoadChannel</code></td><td>Returns the channel view plus resolved participant display data.</td></tr>
+      <tr><td><code>message.channel.ensureMember</code></td><td>Open the deterministic member channel before sending or navigating.</td><td><code>EnsureMemberChannel</code></td><td>Uses <code>channel.MemberChannelID(spaceID, memberID)</code>; clients do not invent channel ids.</td></tr>
+      <tr><td><code>message.channel.markRead</code></td><td>Clear unread state after the user views a channel.</td><td><code>MarkChannelRead</code></td><td>Read state is caller/member scoped.</td></tr>
+      <tr><td><code>message.channel.unreadCounts</code></td><td>Render badges without loading every message.</td><td><code>UnreadCountsByChannel</code></td><td>Accepts channel ids and returns count by channel id.</td></tr>
+      <tr><td><code>message.get</code></td><td>Hydrate a canonical message card from a tool receipt.</td><td><code>GetMessage</code></td><td>Accepts <code>messageId</code> and returns the same frontend-ready <code>MessageView</code> shape used by lists.</td></tr>
+      <tr><td><code>message.list</code></td><td>Render paged timeline/history for a channel or member inbox.</td><td><code>ListMessages</code></td><td>Supports channel, member, status, limit, offset, and sort filters.</td></tr>
+      <tr><td><code>message.count</code></td><td>Support pagination and summaries.</td><td><code>CountMessages</code></td><td>Uses the same filter shape as <code>message.list</code>.</td></tr>
+      <tr><td><code>message.delivery.receiveNext</code></td><td>Let the daemon delivery worker read the next queued item after a wake.</td><td><code>ReceiveNextForDelivery</code></td><td>Runtime-facing method, not a frontend or agent-facing polling API. It does not consume the row before harness handoff.</td></tr>
+      <tr><td><code>message.delivery.recordDelivered</code></td><td>Record successful handoff to the destination agent.</td><td><code>RecordDelivered</code></td><td>Marks the message consumed after the runtime has pushed it to the harness.</td></tr>
+      <tr><td><code>message.send</code></td><td>Send a durable agent inbox message.</td><td><code>PublishAgentMessage</code></td><td>Used for system, task, and agent-to-agent communication.</td></tr>
+      <tr><td><code>message.attachment.upload</code></td><td>Persist a pasted, dropped, or selected chat attachment.</td><td><code>UploadConversationAttachment</code></td><td>Validates channel ownership, media type, size, and bytes, then returns an attachment id and frontend preview metadata.</td></tr>
+      <tr><td><code>message.attachment.get</code></td><td>Load stored attachment bytes for conversation previews.</td><td><code>GetConversationAttachment</code></td><td>Validates the attachment id, reads the daemon attachment store, and returns the attachment view plus base64 image bytes.</td></tr>
+      <tr><td><code>message.conversation.send</code></td><td>Send user/operator text and attachments to a member channel.</td><td><code>SendConversationMessage</code></td><td>Persists an inbound conversation row, attaches validated attachment records, calls the harness chat sender, records delivered, steered, or failed state on the same row, and stores returned harness text as outbound conversation rows.</td></tr>
+      <tr><td><code>message.conversation.list</code></td><td>Render the conversation timeline for a member channel.</td><td><code>ListByChannel</code></td><td>Reads message-owned conversation rows, including harness-authored outbound responses.</td></tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-go">const (
+    MethodMessageChannelList         = "message.channel.list"
+    MethodMessageChannelGet          = "message.channel.get"
+    MethodMessageChannelEnsureMember = "message.channel.ensureMember"
+    MethodMessageChannelMarkRead     = "message.channel.markRead"
+    MethodMessageChannelUnreadCounts = "message.channel.unreadCounts"
+    MethodMessageGet                 = "message.get"
+    MethodMessageList                = "message.list"
+    MethodMessageCount               = "message.count"
+    MethodMessageDeliveryReceiveNext = "message.delivery.receiveNext"
+    MethodMessageDeliveryRecordDelivered = "message.delivery.recordDelivered"
+    MethodMessageSend                = "message.send"
+    MethodMessageAttachmentUpload    = "message.attachment.upload"
+    MethodMessageAttachmentGet       = "message.attachment.get"
+    MethodMessageConversationSend    = "message.conversation.send"
+    MethodMessageConversationList    = "message.conversation.list"
+)</code></pre>
+
+  <p>View DTOs are deliberately separate from persisted DTOs. Persisted records keep strongly typed ids and domain fields; RPC views add labels and render hints that clients need without making channel ownership depend on member labels.</p>
+
+<pre><code class="lang-go">type ChannelView struct {
+    ID                     string
+    SpaceID                string
+    MemberID               string
+    MemberLabel            string
+    Status                 string
+    LastActivityAt         *time.Time
+    UnreadCount            int
+}
+
+type MessageView struct {
+    MessageID              string
+    SpaceID                string
+    ChannelID              string
+    SourceMemberID         string
+    SourceMemberLabel      string
+    DestinationMemberID    string
+    DestinationMemberLabel string
+    Kind                   string
+    Subject                string
+    Body                   map[string]any
+    Attachments            []AttachmentView
+    TaskRef                string
+    Status                 string
+    CreatedAt              time.Time
+    ConsumedAt             *time.Time
+}</code></pre>
+
+  <div class="diagram">
+    <svg viewBox="0 0 980 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RPC handlers for frontend and agent clients">
+      <defs>
+        <marker id="rpc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+      <rect x="35" y="50" width="150" height="62" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="110" y="78" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Frontend</text>
+      <text x="110" y="98" text-anchor="middle" fill="var(--text-muted)" font-size="11">list, read, badges</text>
+
+      <rect x="35" y="150" width="150" height="62" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="110" y="178" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Agent</text>
+      <text x="110" y="198" text-anchor="middle" fill="var(--text-muted)" font-size="11">wake, consume</text>
+
+      <rect x="255" y="70" width="150" height="122" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="330" y="112" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">RPC Handler</text>
+      <text x="330" y="136" text-anchor="middle" fill="var(--text-muted)" font-size="11">validate params</text>
+      <text x="330" y="155" text-anchor="middle" fill="var(--text-muted)" font-size="11">resolve identity</text>
+
+      <rect x="475" y="70" width="150" height="122" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
+      <text x="550" y="112" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">App Service</text>
+      <text x="550" y="136" text-anchor="middle" fill="var(--text-muted)" font-size="11">orchestrates</text>
+      <text x="550" y="155" text-anchor="middle" fill="var(--text-muted)" font-size="11">maps use case</text>
+
+      <rect x="695" y="70" width="120" height="122" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="755" y="112" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Domain</text>
+      <text x="755" y="136" text-anchor="middle" fill="var(--text-muted)" font-size="11">rules</text>
+      <text x="755" y="155" text-anchor="middle" fill="var(--text-muted)" font-size="11">invariants</text>
+
+      <rect x="865" y="70" width="90" height="122" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="910" y="122" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Store</text>
+      <text x="910" y="145" text-anchor="middle" fill="var(--text-muted)" font-size="11">SQL</text>
+
+      <line x1="185" y1="82" x2="255" y2="112" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#rpc-arrow)"/>
+      <line x1="185" y1="181" x2="255" y2="150" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#rpc-arrow)"/>
+      <line x1="405" y1="131" x2="475" y2="131" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#rpc-arrow)"/>
+      <line x1="625" y1="131" x2="695" y2="131" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#rpc-arrow)"/>
+      <line x1="815" y1="131" x2="865" y2="131" stroke="var(--teal)" stroke-width="1.7" marker-end="url(#rpc-arrow)"/>
+    </svg>
+  </div>
+
+  <h2 id="channels">8. Channels</h2>
+  <p>A channel is a durable member-facing address and read-state lane. It is not a harness run and it does not own member display labels. Labels are resolved into read models from member identity.</p>
+
+<pre><code class="lang-go">func MemberChannelID(spaceID spacedomain.SpaceID, memberID member.ID) types.ChannelID {
+    return "channel:" + spaceID + ":member:" + memberID
+}</code></pre>
+
+  <table>
+    <thead><tr><th>Owned by channel</th><th>Not owned by channel</th></tr></thead>
+    <tbody>
+      <tr><td><code>ChannelID</code>, <code>SpaceID</code>, <code>MemberID</code></td><td>Member display label and member lifecycle</td></tr>
+      <tr><td>Open/closed channel status</td><td>Harness run id or runtime execution state</td></tr>
+      <tr><td>Last activity timestamp and read markers</td><td>Tool call events and harness turn lifecycle</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="repositories">9. Repositories</h2>
+  <p>The domain exposes Reader, Writer, and Repository contracts. Infrastructure provides SQL-backed adapters for agent inbox/channel storage and separate SQL-backed conversation repositories. Shared SQL mechanics stay private to infra.</p>
+
+  <div class="tree">internal/services/message/
+  domain/
+    message.go              # Message aggregate and Consume transition
+    new_message.go          # NewMessage constructor and validation
+    repository.go           # message Reader, Writer, Repository
+    channel/
+      channel.go            # Channel aggregate
+      new_channel.go        # NewMemberChannel and MemberChannelID
+      repository.go         # channel Reader, Writer, Repository
+    conversation/
+      message.go            # conversation row, attachments, and direction/delivery/render state
+      repository.go         # conversation Reader, Writer, Repository
+  app/
+    service.go              # publish, consume, wake subscriptions
+    channel_service.go      # channel app methods
+  infra/
+    sqlite_repository.go    # SQLite adapter
+    postgres_repository.go  # Postgres adapter
+    conversation_repository.go # SQL conversation adapter
+    sql_store.go            # private shared SQL mechanics
+    sql_helpers.go          # private schema, scan, filter helpers
+  rpc/
+    doc.go                  # protocol adapter package
+  </div>
+
+  <h2 id="invariants">10. Invariants</h2>
+  <table>
+    <thead><tr><th>Invariant</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>Agent inbox messages require intent, producer, space, destination member, kind, body, and timestamps.</td><td><code>domain.NewMessage</code>, repository save validation</td></tr>
+      <tr><td><code>ack</code> and <code>response</code> messages require correlation.</td><td><code>domain.NewMessage</code></td></tr>
+      <tr><td><code>task</code> messages require a task reference.</td><td><code>domain.NewMessage</code></td></tr>
+      <tr><td>Only queued messages can become consumed.</td><td><code>domain.Message.Consume</code>, repository consumed update guard</td></tr>
+      <tr><td>Channels are addressed by deterministic space/member ids and never by run id.</td><td><code>channel.MemberChannelID</code>, <code>channel.Channel</code> normalization</td></tr>
+      <tr><td>Channel labels are read-model projections from member identity.</td><td>App/RPC read projection</td></tr>
+      <tr><td>Wake signals are emitted only after durable queue persistence succeeds.</td><td><code>app.Service.PublishAgentMessage</code></td></tr>
+      <tr><td>Agent-to-agent and system-to-agent messages are delivered through the durable agent inbox.</td><td><code>PublishAgentMessage</code>, <code>ReceiveNextForDelivery</code>, and <code>RecordDelivered</code></td></tr>
+      <tr><td>Agent inbox delivery is runtime handoff, not agent completion.</td><td><code>RecordDelivered</code> records <code>consumedBy</code> and <code>consumedAt</code>; follow-up action is represented by later messages, task transitions, or service state.</td></tr>
+      <tr><td>User-to-member chat is stored as conversation rows, not agent inbox messages.</td><td><code>conversation.Message</code>, <code>SendConversationMessage</code>, and <code>message.conversation.send</code></td></tr>
+      <tr><td>Conversation attachments are first-class records, not prompt text decorations.</td><td><code>Attachment</code>, <code>message.attachment.upload</code>, conversation row attachment joins, and <code>HarnessChatMessage.Attachments</code></td></tr>
+      <tr><td>Attachment-only sends are valid, but empty sends are not.</td><td><code>message.conversation.send</code> requires non-empty text or at least one validated attachment id.</td></tr>
+      <tr><td>Attachments cannot cross channel boundaries.</td><td>Upload and send validation require matching project, space, and channel ownership before persistence and harness handoff.</td></tr>
+      <tr><td>Chat routing targets members, not runtime kinds or session ids.</td><td><code>channel.MemberChannelID</code>, <code>HarnessChatSender.SendMessage</code>, and active harness session lookup by member id.</td></tr>
+      <tr><td>Message does not provision managed-member runtime context.</td><td>Harness service owns member identity prompt construction, Agen8 MCP configuration, runtime selection, and session refs.</td></tr>
+      <tr><td>Conversation rows preserve both delivery state and render state.</td><td>The conversation repository exposes explicit delivery and render update methods.</td></tr>
+      <tr><td>Harness-authored responses render through the same channel timeline as user input.</td><td><code>message.conversation.list</code> reads inbound and outbound rows by channel.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="footnote">Architecture · agen8 · Message Service</div>
+</div>
+
+</body>
+</html>

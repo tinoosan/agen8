@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Space-First Terminology Map — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .term-note {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .avoid-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .avoid-grid .card {
+    min-height: 0;
+  }
+  @media (max-width: 760px) {
+    .avoid-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / space-first-terminology-map</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture &middot; Naming</span>
+  <h1>Space-First Terminology Map</h1>
+  <p class="lede">This document defines the naming contract for Agen8's space-first coordination model. Runtime, API, schema, and UI language use <code>space</code> and <code>member</code> for coordination identity. External harness vocabulary remains isolated to harness-specific surfaces.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#canonical">Canonical terms</a></li>
+      <li><a href="#run-ownership">Run ownership</a></li>
+      <li><a href="#member-types">Member types</a></li>
+      <li><a href="#roles">Roles</a></li>
+      <li><a href="#configuration">Configuration terms</a></li>
+      <li><a href="#lifecycle">Lifecycle terms</a></li>
+      <li><a href="#rules">Naming rules</a></li>
+      <li><a href="#aliases">Aliases and avoided terms</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="canonical">1. Canonical terms</h2>
+  <table>
+    <thead><tr><th>Canonical term</th><th>Meaning</th><th>Required distinction</th></tr></thead>
+    <tbody>
+      <tr><td><code>Space</code></td><td>Live coordination and durable context boundary.</td><td>Not merely chat and not a template instance.</td></tr>
+      <tr><td><code>SpaceMember</code></td><td>Live Agen8-managed actor registered into a space.</td><td>Not a role and not an already-running external session.</td></tr>
+      <tr><td><code>MemberType</code></td><td>Structural behavior category.</td><td>Not a persona or domain capability.</td></tr>
+      <tr><td><code>Role</code></td><td>Optional reusable capability/persona definition.</td><td>Not coordinator or worker status.</td></tr>
+      <tr><td><code>RoleSnapshot</code></td><td>Immutable snapshot of effective member instructions and capabilities.</td><td>Preserves traceability when role definitions change.</td></tr>
+      <tr><td><code>Template</code></td><td>Optional blueprint and provenance for creating spaces.</td><td>Not the live runtime owner.</td></tr>
+      <tr><td><code>HarnessSession</code></td><td>Execution backend/session metadata.</td><td>Not the primary Agen8 actor identity.</td></tr>
+      <tr><td><code>Run</code></td><td>Agen8 execution address for a managed member harness.</td><td>Owned by the member's harness session, not by the space.</td></tr>
+      <tr><td><code>DesiredExecutionSettings</code></td><td>Settings Agen8 or the user wants.</td><td>Compared against actual managed harness settings.</td></tr>
+      <tr><td><code>ActualExecutionSettings</code></td><td>Settings the harness is actually using.</td><td>Recorded with source/evidence where possible.</td></tr>
+      <tr><td><code>HarnessCapabilities</code></td><td>Operations Agen8 can perform or observe for a harness/session.</td><td>Session id alone grants no control.</td></tr>
+      <tr><td><code>MemberBriefing</code></td><td>Per-member, per-space coordination contract.</td><td>Not the same as a reusable skill.</td></tr>
+      <tr><td><code>CrossSpaceMessage</code></td><td>Traceable space-to-space coordination object.</td><td>Links to structured work context where relevant.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="run-ownership">2. Run ownership</h2>
+  <p>A space is the coordination and context boundary. A <code>SpaceMember</code> is the live actor. When Agen8 provisions a managed member, the member receives a run because the harness delivery layer needs a concrete execution/session address. That run belongs to the member's managed harness session.</p>
+
+  <div class="callout">
+    <strong>Do not introduce run-backed spaces.</strong> Managed member behavior derives from the <code>SpaceMember</code> record, <code>MemberType</code>, harness kind, and execution settings. It does not derive from hidden space containers or role-owned runs.
+  </div>
+
+  <h2 id="member-types">3. Member types</h2>
+  <p>Member type answers: what structural behavior is this member allowed to perform inside a space?</p>
+
+  <table>
+    <thead><tr><th>Type</th><th>Structural meaning</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>coordinator</code></td><td>Active coordinator for a space.</td><td>At most one active coordinator per space. A coordinator remains a coordinator even when no workers are present.</td></tr>
+      <tr><td><code>worker</code></td><td>Member that can receive, claim, and submit work.</td><td>May have any optional role.</td></tr>
+      <tr><td><code>reviewer</code></td><td>Transitional dedicated review member.</td><td>Prefer migration to review policy or review capability.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Member type influences structural permissions and default tool exposure. It does not imply a domain role such as backend engineer or market analyst.</p>
+
+  <h2 id="roles">4. Roles</h2>
+  <p>Role answers: what capability, persona, or domain expertise does this member bring?</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">Examples</div>
+      <div class="title">Domain capability</div>
+      <div class="meta">Backend engineer, market analyst, product strategist, artist manager, macro researcher.</div>
+    </div>
+    <div class="card">
+      <div class="label">Sources</div>
+      <div class="title">Managed or ad hoc</div>
+      <div class="meta">A role can come from an Agen8-managed role definition, an ad hoc capability declaration, or no role at all.</div>
+    </div>
+  </div>
+
+  <p>When a role exists, registration captures an effective snapshot and preserves source metadata.</p>
+
+  <h2 id="configuration">5. Configuration terms</h2>
+  <p>Member-facing contracts avoid ambiguous <code>model</code> or <code>reasoning</code> fields. They identify whether settings are defaults, desired settings, actual runtime settings, or harness constraints.</p>
+
+  <table>
+    <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>template_default_settings</code></td><td>Reusable settings from a space template.</td></tr>
+      <tr><td><code>space_default_settings</code></td><td>Defaults for new members in a space.</td></tr>
+      <tr><td><code>role_default_settings</code></td><td>Persona or capability preferences from a role.</td></tr>
+      <tr><td><code>member_desired_settings</code></td><td>Settings Agen8 or the user wants for this member.</td></tr>
+      <tr><td><code>harness_actual_settings</code></td><td>Settings the managed harness is actually using.</td></tr>
+      <tr><td><code>harness_capabilities</code></td><td>Controls and observations supported by the selected harness.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="lifecycle">6. Lifecycle terms</h2>
+  <table>
+    <thead><tr><th>Lifecycle</th><th>States</th></tr></thead>
+    <tbody>
+      <tr><td>Space</td><td><code>draft</code>, <code>open</code>, <code>paused</code>, <code>closed</code>, <code>archived</code>, <code>deleting</code></td></tr>
+      <tr><td>SpaceMember</td><td><code>pending</code>, <code>active</code>, <code>inactive</code>, <code>disconnected</code>, <code>left</code>, <code>removed</code>, <code>expired</code></td></tr>
+      <tr><td>Harness session</td><td><code>not_started</code>, <code>starting</code>, <code>running</code>, <code>suspended</code>, <code>stopped</code>, <code>failed</code>, <code>unknown</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>SpaceMember lifecycle and harness lifecycle are related but not identical. A managed member can remain registered while its harness run is starting, stopped, failed, or disconnected.</p>
+
+  <h2 id="rules">7. Naming rules</h2>
+  <ol>
+    <li>Use <code>member_type</code> for <code>coordinator</code>, <code>worker</code>, and transitional <code>reviewer</code>.</li>
+    <li>Use <code>role</code> only for capability, persona, or domain function.</li>
+    <li>Use <code>space_template</code> for reusable space setup.</li>
+    <li>Use <code>space</code> for the live coordination/context boundary.</li>
+    <li>Use <code>member</code> for actor attribution.</li>
+    <li>Use <code>harness_session</code> for external execution metadata.</li>
+    <li>Use <code>desired_*</code> and <code>actual_*</code> prefixes for execution settings.</li>
+    <li>Avoid introducing <code>agent</code> as the primary domain noun unless it means a broad product actor. Prefer <code>member</code> in space coordination APIs.</li>
+    <li>Do not expose <code>run_id</code> as the main actor identity in new APIs.</li>
+  </ol>
+
+  <h2 id="aliases">8. Aliases and avoided terms</h2>
+  <table>
+    <thead><tr><th>Transitional alias</th><th>Canonical target</th><th>Allowed during migration?</th></tr></thead>
+    <tbody>
+      <tr><td><code>thread</code></td><td><code>space</code></td><td>No for new Agen8 contracts. Only external harness vocabulary may remain where the harness itself says thread.</td></tr>
+      <tr><td><code>template_id</code></td><td><code>template_id</code></td><td>Only for setup/template provenance.</td></tr>
+      <tr><td><code>coordinator_run</code></td><td><code>coordinator_member</code></td><td>Replace as route authority.</td></tr>
+      <tr><td><code>role_run</code></td><td><code>harness_session</code> or execution attempt</td><td>Only as execution detail.</td></tr>
+      <tr><td><code>space instance</code></td><td>space created from template</td><td>Avoid in new docs unless describing legacy code.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="avoid-grid">
+    <div class="card">
+      <div class="label">Avoid</div>
+      <div class="title">Coordinator role</div>
+      <div class="meta">Use <span class="term-note">coordinator member</span></div>
+    </div>
+    <div class="card">
+      <div class="label">Avoid</div>
+      <div class="title">Worker role</div>
+      <div class="meta">Use <span class="term-note">worker member</span></div>
+    </div>
+    <div class="card">
+      <div class="label">Avoid</div>
+      <div class="title">External session as actor</div>
+      <div class="meta">Use <span class="term-note">member plus harness session</span></div>
+    </div>
+    <div class="card">
+      <div class="label">Avoid</div>
+      <div class="title">Model setting</div>
+      <div class="meta">Use <span class="term-note">desired model</span> or <span class="term-note">actual model</span></div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>Naming decision.</strong> Use <code>SpaceMember</code> for the aggregate and <code>member</code> for short field names where the surrounding scope is already a space.
+  </div>
+</div>
+</body>
+</html>

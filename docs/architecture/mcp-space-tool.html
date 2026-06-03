@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP space tool</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / mcp-space-tool</span>
+  </div>
+</nav>
+
+<div class="page">
+
+<span class="eyebrow">Architecture · MCP Space Tool</span>
+<h1>MCP space tool</h1>
+<p class="lede">The agent-facing coordination tool for spaces and the members registered inside them.</p>
+
+<h2>Purpose</h2>
+
+<p><code>space</code> is an MCP tool, not a service API. It exposes one product-facing coordination contract to member harnesses and maps each action to typed application service calls. The handler owns request decoding, role-aware tool policy, cross-service orchestration, and deterministic result shaping.</p>
+
+<div class="callout">
+<strong>Boundary.</strong> Space tool behavior lives in <code>internal/mcp/tools/space</code>. The space tool lists spaces and exposes member roster CRUD through composite actions. Message sending belongs to the separate <code>message</code> MCP tool. The space service owns space records, lifecycle, and the member roster subdomain. No service accepts raw <code>space(...)</code> tool JSON, and no service package defines a space-tool-specific service or port.
+</div>
+
+<h2>Actions</h2>
+
+<table>
+  <tr><th>Action</th><th>Handler responsibility</th><th>Service calls</th><th>Result</th></tr>
+  <tr>
+    <td><code>list</code></td>
+    <td>Resolve the active actor member, stamp caller context, and request open visible spaces.</td>
+    <td><code>SpaceSvc.GetMember</code>, <code>SpaceSvc.List</code>.</td>
+    <td>List of spaces with stable ids, project ids, titles, status, and lifecycle state.</td>
+  </tr>
+  <tr>
+    <td><code>member_list</code></td>
+    <td>Resolve the active actor member, stamp caller context, resolve the visible target space, list active members, and expose routable channel ids.</td>
+    <td><code>SpaceSvc.GetMember</code>, <code>SpaceSvc.Get</code>, <code>SpaceSvc.ListMembers</code>.</td>
+    <td>Member list with member id, display label, member type, lifecycle state, and channel id.</td>
+  </tr>
+  <tr>
+    <td><code>member_create</code></td>
+    <td>Resolve the active coordinator member, stamp caller context, validate the requested runtime config, load the target space, and delegate worker registration to the space service.</td>
+    <td><code>SpaceSvc.GetMember</code>, <code>SpaceSvc.Get</code>, <code>SpaceSvc.RegisterMember</code>.</td>
+    <td>Created member with member id, display label, granted member type, lifecycle state, and channel id.</td>
+  </tr>
+  <tr>
+    <td><code>member_get</code></td>
+    <td>Resolve the active actor member, stamp caller context, and read one visible member.</td>
+    <td><code>SpaceSvc.GetMember</code>.</td>
+    <td>Member record with stable id, display label, member type, lifecycle state, and channel id.</td>
+  </tr>
+  <tr>
+    <td><code>member_update_config</code></td>
+    <td>Resolve the active actor member, stamp caller context, validate runtime config, and delegate roster update to the space service.</td>
+    <td><code>SpaceSvc.GetMember</code>, <code>SpaceSvc.UpdateMemberConfig</code>.</td>
+    <td>Updated member record.</td>
+  </tr>
+  <tr>
+    <td><code>member_remove</code></td>
+    <td>Resolve the active actor member, stamp caller context, and delegate member removal to the space service.</td>
+    <td><code>SpaceSvc.GetMember</code>, <code>SpaceSvc.RemoveMember</code>.</td>
+    <td>Removed member record with terminal lifecycle state.</td>
+  </tr>
+</table>
+
+<h2>Control flow</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 880 340" width="880" height="340" role="img" aria-label="MCP space tool control flow">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="30" y="40" width="150" height="58" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="105" y="64" text-anchor="middle" font-size="13" font-weight="600">Member agent</text>
+  <text x="105" y="84" text-anchor="middle" font-size="11" fill="#555">space(action=...)</text>
+
+  <rect x="230" y="40" width="150" height="58" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="305" y="64" text-anchor="middle" font-size="13" font-weight="600">MCP server</text>
+  <text x="305" y="84" text-anchor="middle" font-size="11" fill="#555">auth + route</text>
+
+  <rect x="430" y="26" width="170" height="86" rx="5" fill="#fff" stroke="#555"/>
+  <text x="515" y="53" text-anchor="middle" font-size="13" font-weight="600">space handler</text>
+  <text x="515" y="73" text-anchor="middle" font-size="11" fill="#555">decode + policy</text>
+  <text x="515" y="91" text-anchor="middle" font-size="11" fill="#555">orchestrate + format</text>
+
+  <rect x="680" y="20" width="160" height="48" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="760" y="49" text-anchor="middle" font-size="12" font-weight="600">SpaceSvc</text>
+
+  <rect x="680" y="92" width="160" height="48" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="760" y="121" text-anchor="middle" font-size="12" font-weight="600">Space members</text>
+
+  <line x1="180" y1="69" x2="230" y2="69" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="380" y1="69" x2="430" y2="69" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="600" y1="58" x2="680" y2="44" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="600" y1="74" x2="680" y2="116" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <rect x="430" y="210" width="170" height="72" rx="5" fill="#f0f0f0" stroke="#888"/>
+  <text x="515" y="235" text-anchor="middle" font-size="12" font-weight="600">MCP result</text>
+  <text x="515" y="254" text-anchor="middle" font-size="10.5" fill="#555">semantic text + structured</text>
+  <text x="515" y="270" text-anchor="middle" font-size="10.5" fill="#555">content, no raw fallback</text>
+
+  <line x1="515" y1="112" x2="515" y2="210" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <text x="105" y="318" text-anchor="middle" font-size="11" fill="#666">product-facing tool</text>
+  <text x="515" y="318" text-anchor="middle" font-size="11" fill="#666">protocol translation boundary</text>
+  <text x="760" y="318" text-anchor="middle" font-size="11" fill="#666">typed service use cases</text>
+</svg>
+</div>
+
+<h2>Application wiring</h2>
+
+<p>The application composition root constructs <code>SpaceSvc</code> once. The same concrete service exposes space lifecycle methods and member roster methods. When the runtime supervisor spawns a managed harness, it registers an MCP session token that carries that concrete service as narrow handler-owned interfaces. The MCP server stores the session and supplies those interfaces to the native <code>space</code> handler when the agent calls <code>space(...)</code>.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 920 360" width="920" height="360" role="img" aria-label="Application to MCP space handler wiring">
+  <defs>
+    <marker id="wire-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="30" y="34" width="200" height="78" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="130" y="58" text-anchor="middle" font-size="13" font-weight="600">Application</text>
+  <text x="130" y="80" text-anchor="middle" font-size="11" fill="#555">SpaceSvc</text>
+  <text x="130" y="98" text-anchor="middle" font-size="11" fill="#555">member roster</text>
+
+  <rect x="285" y="34" width="205" height="78" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="387" y="58" text-anchor="middle" font-size="13" font-weight="600">MCP bootstrap</text>
+  <text x="387" y="80" text-anchor="middle" font-size="11" fill="#555">constructs server</text>
+  <text x="387" y="98" text-anchor="middle" font-size="11" fill="#555">registers session token</text>
+
+  <rect x="545" y="34" width="170" height="78" rx="5" fill="#f0f0f0" stroke="#888"/>
+  <text x="630" y="58" text-anchor="middle" font-size="13" font-weight="600">MCP Session</text>
+  <text x="630" y="80" text-anchor="middle" font-size="11" fill="#555">SpaceService</text>
+  <text x="630" y="98" text-anchor="middle" font-size="11" fill="#555">MemberService</text>
+
+  <rect x="760" y="34" width="130" height="78" rx="5" fill="#fff" stroke="#555"/>
+  <text x="825" y="66" text-anchor="middle" font-size="13" font-weight="600">TokenStore</text>
+  <text x="825" y="88" text-anchor="middle" font-size="11" fill="#555">session lookup</text>
+
+  <rect x="545" y="210" width="170" height="76" rx="5" fill="#fff" stroke="#555"/>
+  <text x="630" y="236" text-anchor="middle" font-size="13" font-weight="600">space.Handler</text>
+  <text x="630" y="256" text-anchor="middle" font-size="11" fill="#555">CallContext.Spaces</text>
+  <text x="630" y="274" text-anchor="middle" font-size="11" fill="#555">CallContext.Members</text>
+
+  <rect x="285" y="210" width="205" height="76" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="387" y="236" text-anchor="middle" font-size="13" font-weight="600">MCP server</text>
+  <text x="387" y="256" text-anchor="middle" font-size="11" fill="#555">tools/call</text>
+  <text x="387" y="274" text-anchor="middle" font-size="11" fill="#555">executeNativeMCPTool</text>
+
+  <line x1="230" y1="73" x2="285" y2="73" stroke="#555" stroke-width="1.5" marker-end="url(#wire-arr)"/>
+  <line x1="490" y1="73" x2="545" y2="73" stroke="#555" stroke-width="1.5" marker-end="url(#wire-arr)"/>
+  <line x1="715" y1="73" x2="760" y2="73" stroke="#555" stroke-width="1.5" marker-end="url(#wire-arr)"/>
+  <line x1="825" y1="112" x2="825" y2="170" stroke="#555" stroke-width="1.5"/>
+  <line x1="825" y1="170" x2="490" y2="248" stroke="#555" stroke-width="1.5" marker-end="url(#wire-arr)"/>
+  <line x1="490" y1="248" x2="545" y2="248" stroke="#555" stroke-width="1.5" marker-end="url(#wire-arr)"/>
+
+  <text x="130" y="150" text-anchor="middle" font-size="11" fill="#666">concrete services</text>
+  <text x="630" y="150" text-anchor="middle" font-size="11" fill="#666">typed session deps</text>
+  <text x="630" y="324" text-anchor="middle" font-size="11" fill="#666">Session carries typed services; handler owns tool orchestration.</text>
+</svg>
+</div>
+
+<pre><code>// MCP session bootstrap
+tokenStore.Register(token, agen8mcp.Session{
+    SpaceID:         spacedomain.SpaceID(spaceID),
+    MemberID:        memberID,
+    SpaceReader:     app.SpaceSvc,  // typed as space.SpaceService
+    MemberDirectory: app.SpaceSvc,  // typed as space.MemberService
+    MemberRegistrar: app.SpaceSvc,  // typed as space.MemberRegistrar
+    ProjectID:       strings.TrimSpace(projectID),
+})
+
+// internal/mcp/server.go
+space.NewHandler().Handle(ctx, space.CallContext{
+    Spaces:        session.SpaceReader,
+    Members:       session.MemberDirectory,
+    Registrar:     session.MemberRegistrar,
+    ProjectID:     session.ProjectID,
+    SpaceID:       string(session.SpaceID),
+    ActorMemberID: session.MemberID,
+}, arguments)</code></pre>
+
+<h2>Handler contract</h2>
+
+<p>The handler interface is MCP-owned. Service interfaces are consumer-owned and narrow: the handler declares only the methods it needs for <code>list</code> and the <code>member_*</code> composite actions. The MCP session token is already bound to a member id and space id, so the handler first stamps a provisional member-scoped <code>caller.Caller</code> into <code>context.Context</code>. It then resolves <code>ActorMemberID</code> through the member roster interface, requires an active member, and restamps the shared caller with the resolved member id, user id, and space id before service calls.</p>
+
+<p>Caller bootstrapping happens before actor lookup. Member roster reads are space-service methods and require caller identity themselves; calling <code>GetMember</code> on an unstamped context is a capture bug, not an authorization fallback. MCP tools may seed context from the authenticated session token, but they must still resolve the actor record and let service authorization enforce visibility.</p>
+
+<h2>Runtime-resolved identity</h2>
+
+<p>The agent supplies discovery intent. Agen8 supplies runtime identity. The MCP session token already binds the call to a project, space, member, and channel, so those values are not agent-required request fields. The handler uses them to stamp caller context, resolve the active actor member, and authorize service calls.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 900 300" width="900" height="300" role="img" aria-label="Space tool runtime identity resolution">
+  <defs>
+    <marker id="identity-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="40" y="50" width="210" height="92" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="145" y="78" text-anchor="middle" font-size="13" font-weight="600">Agent request</text>
+  <text x="145" y="102" text-anchor="middle" font-size="11" fill="#555">action = member_*</text>
+  <text x="145" y="122" text-anchor="middle" font-size="11" fill="#555">optional space_id override</text>
+
+  <rect x="345" y="36" width="210" height="120" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="450" y="64" text-anchor="middle" font-size="13" font-weight="600">MCP session</text>
+  <text x="450" y="88" text-anchor="middle" font-size="11" fill="#555">project id</text>
+  <text x="450" y="108" text-anchor="middle" font-size="11" fill="#555">current space id</text>
+  <text x="450" y="128" text-anchor="middle" font-size="11" fill="#555">actor member id + channel id</text>
+
+  <rect x="650" y="50" width="210" height="92" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="755" y="78" text-anchor="middle" font-size="13" font-weight="600">Service call</text>
+  <text x="755" y="102" text-anchor="middle" font-size="11" fill="#555">caller stamped in ctx</text>
+  <text x="755" y="122" text-anchor="middle" font-size="11" fill="#555">ListMembers(current or visible space)</text>
+
+  <line x1="250" y1="96" x2="345" y2="96" stroke="#555" stroke-width="1.5" marker-end="url(#identity-arr)"/>
+  <line x1="555" y1="96" x2="650" y2="96" stroke="#555" stroke-width="1.5" marker-end="url(#identity-arr)"/>
+
+  <rect x="120" y="210" width="660" height="52" rx="5" fill="#fff" stroke="#888"/>
+  <text x="450" y="232" text-anchor="middle" font-size="12" font-weight="600">Default behavior</text>
+  <text x="450" y="252" text-anchor="middle" font-size="11" fill="#555">No space_id means "show members in my current space"; a supplied space_id means "show members in this other visible space."</text>
+</svg>
+</div>
+
+<table>
+  <tr><th>Value</th><th>Source</th><th>Agent supplies it?</th></tr>
+  <tr><td><code>project_id</code></td><td>MCP session</td><td>No.</td></tr>
+  <tr><td>current <code>space_id</code></td><td>MCP session</td><td>No. It is only supplied as an explicit visible-space override.</td></tr>
+  <tr><td>caller <code>member_id</code></td><td>MCP session, then active member lookup</td><td>No.</td></tr>
+  <tr><td>caller <code>channel_id</code></td><td>MCP session and member roster</td><td>No.</td></tr>
+</table>
+
+<h2>Request model</h2>
+
+<table>
+  <tr><th>Field</th><th>Used by</th><th>Rule</th></tr>
+  <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>list</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update_config</code>, <code>member_remove</code>.</td></tr>
+  <tr><td><code>space_id</code></td><td><code>member_list</code>, <code>member_create</code></td><td>Optional. Defaults to the caller's current space. When supplied, it must resolve to a visible space.</td></tr>
+  <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
+  <tr><td><code>display_name</code></td><td><code>member_create</code></td><td>Optional display label. Created members are workers; coordinators cannot mint another coordinator through the tool.</td></tr>
+  <tr><td><code>harness_kind</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime harness kind passed to service config validation.</td></tr>
+  <tr><td><code>model</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime model passed to service config validation.</td></tr>
+  <tr><td><code>effort</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime reasoning effort passed to service config validation.</td></tr>
+  <tr><td>permission mode</td><td><code>member_create</code>, <code>member_update_config</code></td><td>Not accepted by the MCP tool. The space service uses the loosest default for the harness kind when a member is created.</td></tr>
+</table>
+
+<h2>Role policy</h2>
+
+<table>
+  <tr><th>Member type</th><th>Visible actions</th><th>Reason</th></tr>
+  <tr><td><code>coordinator</code></td><td><code>list</code>, <code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Discovers spaces, sees routable peers, and manages the roster when coordination requires another member.</td></tr>
+  <tr><td><code>worker</code></td><td><code>list</code>, <code>member_get</code>, <code>member_list</code></td><td>Discovers the current space and routable peer identities. If a worker calls roster mutation actions, the tool rejects the request before mutation.</td></tr>
+</table>
+
+<p>Visibility is prompt/tool-surface policy. Authorization remains enforced by the handler and the underlying services using caller identity from <code>ctx</code>. The handler rejects missing, removed, or space-less actor members before it calls <code>SpaceSvc</code>.</p>
+
+<h2>Result rules</h2>
+
+<table>
+  <tr><th>Rule</th><th>Why it exists</th></tr>
+  <tr><td>Results include stable ids and display labels.</td><td>Agents can reference members and spaces without guessing from raw ids.</td></tr>
+  <tr><td>List actions render actual entries.</td><td>Catalog/list operations are product surfaces, not debug metadata.</td></tr>
+  <tr><td>Missing labels are explicit errors.</td><td>Generic placeholders and raw ids hide capture or lookup bugs.</td></tr>
+  <tr><td>No raw payload fallback.</td><td>Transcript cards and tool results remain deterministic and semantic.</td></tr>
+</table>
+
+<h2>Code layout</h2>
+
+<div class="tree">internal/mcp/tools/space/
+  space.go            # schema, action routing, service orchestration, result formatting
+  space_test.go       # list and member CRUD success and boundary error paths
+  service_assertions_test.go # compile-time checks for service-shaped interfaces
+</div>
+
+<h2>Tests</h2>
+
+<table>
+  <tr><th>Test</th><th>Assertion</th></tr>
+  <tr><td><code>list</code> success</td><td>Calls the project/space read path and returns actual space entries.</td></tr>
+  <tr><td><code>member_list</code> success</td><td>Resolves the actor member, calls space/member read paths, and returns routable member labels and channel ids.</td></tr>
+  <tr><td><code>member_create</code> success</td><td>Executes through the MCP server session, stamps caller identity, calls the registrar, and returns the created member payload.</td></tr>
+  <tr><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code> success</td><td>Call the same production session path and delegate to the space service roster methods.</td></tr>
+  <tr><td>member mutation validation</td><td>Rejects missing ids or runtime fields before calling the registrar.</td></tr>
+  <tr><td>missing actor</td><td>Fails loudly before calling the space service.</td></tr>
+  <tr><td>invalid space</td><td>Fails loudly before listing members.</td></tr>
+  <tr><td>missing structured payload</td><td>Returns an explicit capture/decode error.</td></tr>
+  <tr><td>missing label</td><td>Returns an unresolved-label error, not a placeholder.</td></tr>
+  <tr><td>role policy</td><td>Every member role receives the same discovery actions; handler rejects unsupported actions defensively.</td></tr>
+</table>
+
+<div class="footnote">Architecture · agen8 · MCP space tool</div>
+
+</div>
+
+</body>
+</html>

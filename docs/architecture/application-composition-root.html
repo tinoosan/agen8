@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Application composition root</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / application-composition-root</span>
+  </div>
+</nav>
+
+<div class="page">
+
+<span class="eyebrow">Architecture · Composition Root</span>
+<h1>Application composition root</h1>
+<p class="lede">How services are owned, wired, and reached. The single mental model for adding, finding, or replacing any dependency.</p>
+
+<h2>The flow, in one diagram</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 820 440" width="820" height="440">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- Clients row -->
+  <rect x="80" y="20" width="280" height="48" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="220" y="42" text-anchor="middle" font-size="13" font-weight="600">CLI / web UI</text>
+  <text x="220" y="60" text-anchor="middle" font-size="11" fill="#555">speaks JSON-RPC</text>
+
+  <rect x="460" y="20" width="280" height="48" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="600" y="42" text-anchor="middle" font-size="13" font-weight="600">Member harness (Codex, Claude Code, …)</text>
+  <text x="600" y="60" text-anchor="middle" font-size="11" fill="#555">speaks MCP</text>
+
+  <!-- protocol arrows -->
+  <line x1="220" y1="72" x2="220" y2="104" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="600" y1="72" x2="600" y2="104" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- Protocol adapters row -->
+  <rect x="80" y="108" width="280" height="54" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="220" y="132" text-anchor="middle" font-size="14" font-weight="600">RPCServer</text>
+  <text x="220" y="150" text-anchor="middle" font-size="11" fill="#555">JSON-RPC ↔ Application calls</text>
+
+  <rect x="460" y="108" width="280" height="54" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="600" y="132" text-anchor="middle" font-size="14" font-weight="600">MCPServer (external harness MCP)</text>
+  <text x="600" y="150" text-anchor="middle" font-size="11" fill="#555">MCP tools ↔ Application orchestration</text>
+
+  <!-- merge to Application -->
+  <line x1="220" y1="164" x2="320" y2="208" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="600" y1="164" x2="500" y2="208" stroke="#555" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="410" y="194" text-anchor="middle" font-size="11" fill="#666">goroutine per request · identity in ctx</text>
+
+  <!-- Application -->
+  <rect x="220" y="212" width="380" height="56" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="410" y="236" text-anchor="middle" font-size="14" font-weight="600">Application</text>
+  <text x="410" y="256" text-anchor="middle" font-size="11" fill="#555">pure struct · only fields · only NewApplication</text>
+
+  <!-- arrows to services -->
+  <line x1="320" y1="270" x2="180" y2="308" stroke="#555" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="410" y1="270" x2="410" y2="308" stroke="#555" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="500" y1="270" x2="640" y2="308" stroke="#555" stroke-width="1.4" marker-end="url(#arr)"/>
+
+  <!-- services -->
+  <rect x="80" y="310" width="200" height="42" rx="5" fill="#fff" stroke="#555"/>
+  <text x="180" y="336" text-anchor="middle" font-size="13" font-weight="600">ChannelSvc</text>
+  <rect x="310" y="310" width="200" height="42" rx="5" fill="#fff" stroke="#555"/>
+  <text x="410" y="336" text-anchor="middle" font-size="13" font-weight="600">MessageSvc, SpaceSvc, …</text>
+  <rect x="540" y="310" width="200" height="42" rx="5" fill="#fff" stroke="#555"/>
+  <text x="640" y="336" text-anchor="middle" font-size="13" font-weight="600">EventBusSvc, LLMSvc, …</text>
+
+  <!-- repository layer -->
+  <line x1="180" y1="352" x2="180" y2="376" stroke="#555" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="410" y1="352" x2="410" y2="376" stroke="#555" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="640" y1="352" x2="640" y2="376" stroke="#555" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <text x="180" y="390" text-anchor="middle" font-size="11" fill="#666">XRepository (Reader/Writer)</text>
+  <text x="410" y="390" text-anchor="middle" font-size="11" fill="#666">XRepository (Reader/Writer)</text>
+  <text x="640" y="390" text-anchor="middle" font-size="11" fill="#666">XRepository (Reader/Writer)</text>
+
+  <text x="180" y="420" text-anchor="middle" font-size="11" fill="#666" font-style="italic">sqlite | postgres</text>
+  <text x="410" y="420" text-anchor="middle" font-size="11" fill="#666" font-style="italic">sqlite | postgres</text>
+  <text x="640" y="420" text-anchor="middle" font-size="11" fill="#666" font-style="italic">sqlite | postgres</text>
+</svg>
+</div>
+
+<p>Different clients speak different protocols suited to them. Each protocol has its own adapter. All adapters converge on one <code>Application</code>. From there, one direction down: service → repository → backend.</p>
+
+<p>The composition root also wires cross-service runtime boundaries that are not user-facing protocols. The harness service receives a project workdir resolver backed by the project service and a command-runner resolver backed by the location service. That wiring makes harness sessions start in the project's selected location and root instead of inheriting the daemon process directory.</p>
+
+<h2>The rules</h2>
+
+<div class="callout">
+<strong>R1 — Every dependency is a service.</strong> The LLM client, the event bus, the harness registry, the broadcaster — they all live on <code>Application</code> as services. Not "shared infrastructure," not "passed via cfg," not "global." A service. The shape is uniform; callers learn one access pattern (<code>app.X</code>) and apply it everywhere.
+</div>
+
+<div class="callout">
+<strong>R2 — Application has zero methods.</strong> Only <code>NewApplication</code> and field access. <code>Application</code> is a composition root, not a behavior owner. If logic feels like it wants to live on <code>Application</code>, that logic belongs inside one of the services <code>Application</code> holds.
+</div>
+
+<div class="callout">
+<strong>R3 — Services are stateless. Per-tenant state lives in repositories.</strong> A service is a process singleton. User identity travels via <code>ctx</code>. Repositories filter by <code>user_id</code> from <code>ctx</code>. No closure-captured user context, no per-tenant service rebuilds, no scope juggling. This is what lets one <code>Application</code> serve N concurrent users with goroutine-per-request.
+</div>
+
+<div class="callout">
+<strong>R4 — No <code>DBHandle</code> outside infra packages.</strong> The database is an implementation detail of each repository. Storage backends are selected behind repository interfaces. Nothing above the repository layer knows or cares which backend is in use. Repositories are constructed once in <code>NewApplication</code>, the chosen backend selected from config.
+</div>
+
+<div class="callout">
+<strong>R5 — Repository interfaces split by capability.</strong> <code>XReader</code>, <code>XWriter</code>, <code>XReaderWriter</code> (which embeds both). Consumers depend on the smallest interface they need — a query handler takes <code>XReader</code>, a mutation handler takes <code>XWriter</code>, the service itself takes <code>XReaderWriter</code>. Massive god interfaces are forbidden; they leak implementation across consumers and make mocking painful.
+</div>
+
+<div class="callout">
+<strong>R6 — Outside callers reach services through <code>Application</code>, never via <code>internal/services/&lt;svc&gt;/{app,infra}</code> directly.</strong> Importing the service's domain types (e.g. <code>messagedomain.MessageFilter</code>, the <code>Message</code> struct) is fine — those are the service's public contract. Importing <code>messageinfra.NewSQLiteRepository</code> from outside the message service is a boundary violation: someone else is constructing your service's storage.
+</div>
+
+<h2>Protocol adapters</h2>
+
+<p>Two protocols exist: JSON-RPC and MCP. They are peers, not stacked. RPC is a transport adapter for the UI and CLI. MCP is an agent-facing tool surface that orchestrates one or more application services behind each tool action. Neither adapter routes through the other.</p>
+
+<table>
+  <tr><th>Adapter</th><th>Protocol</th><th>Clients</th><th>How identity arrives</th></tr>
+  <tr>
+    <td><code>RPCServer</code></td>
+    <td>JSON-RPC 2.0 over stdio or HTTP</td>
+    <td>CLI (<code>cmd/agen8</code>), web UI</td>
+    <td>User identity from the connection / session</td>
+  </tr>
+  <tr>
+    <td><code>MCPServer</code><br><span style="color:var(--text-faint);font-size:.85em">(external harness MCP)</span></td>
+    <td>MCP over HTTP</td>
+    <td>Member harnesses (Codex, Claude Code, etc.) running as space members</td>
+    <td>Member identity from a session token registered when the harness is spawned</td>
+  </tr>
+</table>
+
+<p>Both adapters hold a <code>*Application</code> and inject identity into <code>ctx</code> using their own auth mechanism. RPC handlers usually dispatch straight to one service. MCP tool handlers interpret the product-facing tool action, compose service dependencies supplied from <code>Application</code>, and return one agent-facing result. From the service's perspective, both are still typed method calls with a <code>ctx</code> that carries identity.</p>
+
+<h3>MCP tool composition</h3>
+
+<p>MCP tools are organized around product concepts, not backend package names. A single tool action may coordinate multiple services behind one coherent agent-facing operation.</p>
+
+<table>
+  <tr><th>Tool call</th><th>Service composition</th><th>Meaning</th></tr>
+  <tr>
+    <td><code>space(action="list")</code></td>
+    <td><code>SpaceSvc</code></td>
+    <td>List the spaces visible in the caller's current project scope.</td>
+  </tr>
+  <tr>
+    <td><code>space(action="members")</code></td>
+    <td><code>SpaceSvc</code> space lifecycle + member roster methods</td>
+    <td>List the members registered in a space.</td>
+  </tr>
+  <tr>
+    <td><code>message(action="send")</code></td>
+    <td><code>SpaceSvc</code> + <code>ChannelSvc</code> + <code>MessageSvc</code></td>
+    <td>Resolve the destination, authorize the route, persist the message, and trigger delivery.</td>
+  </tr>
+  <tr>
+    <td><code>http(...)</code></td>
+    <td><code>CredentialSvc</code> + package-local HTTP clients</td>
+    <td>Make a bounded HTTP request with host-scoped credential injection.</td>
+  </tr>
+  <tr>
+    <td><code>task(action="create")</code></td>
+    <td><code>TaskSvc</code> + <code>SpaceSvc</code> member loader + context readers</td>
+    <td>Create a member-routed task, validate linked context, and let the task service publish the assignment message.</td>
+  </tr>
+  <tr>
+    <td><code>mission.kr_list</code></td>
+    <td><code>MissionSvc</code> + mission read-side collaborators</td>
+    <td>List key results for a mission without exposing internal read-model boundaries to the agent.</td>
+  </tr>
+</table>
+
+<p>The MCP server owns cross-service composition. Services do not reach into each other's repositories, and services do not expose tool-shaped methods such as <code>Execute(action, rawJSON)</code>. Tool handlers coordinate through <code>Application</code>; each service still reads and writes through its own repository boundary.</p>
+
+<h3>Native MCP wiring</h3>
+
+<p>Native MCP tools receive typed dependencies from the application composition root through the MCP session. The MCP bootstrap registers each session with the services it is allowed to use. The native tool handler receives a narrow call context and owns tool-specific orchestration.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 860 320" width="860" height="320" role="img" aria-label="Native MCP tool wiring from Application to handler">
+  <defs>
+    <marker id="native-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="30" y="34" width="180" height="74" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="120" y="58" text-anchor="middle" font-size="13" font-weight="600">Application</text>
+  <text x="120" y="79" text-anchor="middle" font-size="11" fill="#555">SpaceSvc,</text>
+  <text x="120" y="96" text-anchor="middle" font-size="11" fill="#555">ChannelSvc, MessageSvc, CredentialSvc</text>
+
+  <rect x="260" y="34" width="190" height="74" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="355" y="58" text-anchor="middle" font-size="13" font-weight="600">MCP bootstrap</text>
+  <text x="355" y="79" text-anchor="middle" font-size="11" fill="#555">registers MCP session</text>
+  <text x="355" y="96" text-anchor="middle" font-size="11" fill="#555">for harness token</text>
+
+  <rect x="500" y="34" width="170" height="74" rx="5" fill="#f0f0f0" stroke="#888"/>
+  <text x="585" y="58" text-anchor="middle" font-size="13" font-weight="600">MCP Session</text>
+  <text x="585" y="79" text-anchor="middle" font-size="11" fill="#555">typed handler deps</text>
+  <text x="585" y="96" text-anchor="middle" font-size="11" fill="#555">plus member identity</text>
+
+  <rect x="500" y="190" width="170" height="74" rx="5" fill="#fff" stroke="#555"/>
+  <text x="585" y="214" text-anchor="middle" font-size="13" font-weight="600">Native handler</text>
+  <text x="585" y="235" text-anchor="middle" font-size="11" fill="#555">decode action</text>
+  <text x="585" y="252" text-anchor="middle" font-size="11" fill="#555">orchestrate services</text>
+
+  <rect x="260" y="190" width="190" height="74" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="355" y="214" text-anchor="middle" font-size="13" font-weight="600">MCP server</text>
+  <text x="355" y="235" text-anchor="middle" font-size="11" fill="#555">authenticates token</text>
+  <text x="355" y="252" text-anchor="middle" font-size="11" fill="#555">dispatches tools/call</text>
+
+  <line x1="210" y1="71" x2="260" y2="71" stroke="#555" stroke-width="1.5" marker-end="url(#native-arr)"/>
+  <line x1="450" y1="71" x2="500" y2="71" stroke="#555" stroke-width="1.5" marker-end="url(#native-arr)"/>
+  <line x1="585" y1="108" x2="585" y2="150" stroke="#555" stroke-width="1.5"/>
+  <line x1="585" y1="150" x2="450" y2="227" stroke="#555" stroke-width="1.5" marker-end="url(#native-arr)"/>
+  <line x1="450" y1="227" x2="500" y2="227" stroke="#555" stroke-width="1.5" marker-end="url(#native-arr)"/>
+
+  <text x="120" y="146" text-anchor="middle" font-size="11" fill="#666">service ownership</text>
+  <text x="585" y="146" text-anchor="middle" font-size="11" fill="#666">session-scoped access</text>
+  <text x="585" y="298" text-anchor="middle" font-size="11" fill="#666">MCP handlers receive typed session dependencies.</text>
+</svg>
+</div>
+
+<pre><code>// MCP session bootstrap
+tokenStore.Register(token, Session{
+    SpaceReader:     app.SpaceSvc,  // space.SpaceService
+    MemberDirectory: app.SpaceSvc,  // space.MemberService
+    ChannelReader:   app.ChannelSvc,
+    MessagePublisher: app.MessageSvc,
+    CredentialResolver: app.CredentialSvc,
+    TaskService:     app.TaskSvc,
+    TaskMembers:     app.SpaceSvc,
+    ProjectID:       projectID,
+    SpaceID:         spacedomain.SpaceID(spaceID),
+    MemberID:        memberID,
+})
+
+// internal/mcp/server.go
+space.Handler.Handle(ctx, space.CallContext{
+    Spaces:        session.SpaceReader,
+    Members:       session.MemberDirectory,
+    ProjectID:     session.ProjectID,
+    SpaceID:       string(session.SpaceID),
+    ActorMemberID: session.MemberID,
+}, args)</code></pre>
+
+<p>The <a href="./mcp-task-tool.html">MCP task tool</a> follows the same native shape, with a larger dependency set. Its handler owns task tool actions and cross-service lookups. The task service owns lifecycle state transitions, persistence, and task-originated assignment messages through the message service boundary.</p>
+
+<h3>MCP call flow</h3>
+
+<p>An MCP tool call is a protocol request that enters one handler. The handler owns the tool contract and maps it to service use cases. The service receives a typed command, not the original tool payload.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 860 300" width="860" height="300" role="img" aria-label="MCP task create control flow">
+  <defs>
+    <marker id="flow-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="25" y="44" width="140" height="58" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="95" y="68" text-anchor="middle" font-size="13" font-weight="600">Agent</text>
+  <text x="95" y="87" text-anchor="middle" font-size="11" fill="#555">task(action=create)</text>
+
+  <rect x="215" y="44" width="150" height="58" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="290" y="67" text-anchor="middle" font-size="13" font-weight="600">MCP server</text>
+  <text x="290" y="87" text-anchor="middle" font-size="11" fill="#555">auth + handler lookup</text>
+
+  <rect x="415" y="32" width="165" height="82" rx="5" fill="#fff" stroke="#555"/>
+  <text x="497" y="58" text-anchor="middle" font-size="13" font-weight="600">task handler</text>
+  <text x="497" y="78" text-anchor="middle" font-size="11" fill="#555">decode, validate, policy</text>
+  <text x="497" y="96" text-anchor="middle" font-size="11" fill="#555">format result</text>
+
+  <rect x="630" y="44" width="170" height="58" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="715" y="67" text-anchor="middle" font-size="13" font-weight="600">Task service</text>
+  <text x="715" y="87" text-anchor="middle" font-size="11" fill="#555">typed use case command</text>
+
+  <line x1="165" y1="73" x2="215" y2="73" stroke="#555" stroke-width="1.5" marker-end="url(#flow-arr)"/>
+  <line x1="365" y1="73" x2="415" y2="73" stroke="#555" stroke-width="1.5" marker-end="url(#flow-arr)"/>
+  <line x1="580" y1="73" x2="630" y2="73" stroke="#555" stroke-width="1.5" marker-end="url(#flow-arr)"/>
+
+  <rect x="415" y="164" width="165" height="70" rx="5" fill="#f0f0f0" stroke="#888"/>
+  <text x="497" y="189" text-anchor="middle" font-size="12" font-weight="600">CreateTaskCommand</text>
+  <text x="497" y="208" text-anchor="middle" font-size="10.5" fill="#555">title, goal, assignee,</text>
+  <text x="497" y="224" text-anchor="middle" font-size="10.5" fill="#555">dependencies, metadata</text>
+
+  <line x1="497" y1="114" x2="497" y2="164" stroke="#555" stroke-width="1.3" marker-end="url(#flow-arr)"/>
+  <line x1="580" y1="199" x2="715" y2="102" stroke="#555" stroke-width="1.3" marker-end="url(#flow-arr)"/>
+
+  <text x="95" y="148" text-anchor="middle" font-size="11" fill="#666">product-facing contract</text>
+  <text x="497" y="148" text-anchor="middle" font-size="11" fill="#666">protocol translation boundary</text>
+  <text x="715" y="148" text-anchor="middle" font-size="11" fill="#666">domain/app behavior</text>
+
+  <text x="430" y="276" font-size="11" fill="#c62828" text-anchor="middle">No raw tool JSON crosses into the task service.</text>
+</svg>
+</div>
+
+<table>
+  <tr><th>Step</th><th>Owner</th><th>Responsibility</th></tr>
+  <tr>
+    <td><code>tools/call</code></td>
+    <td><code>internal/mcp/server.go</code></td>
+    <td>Authenticate the session, resolve the named handler, and pass the raw MCP arguments to that handler.</td>
+  </tr>
+  <tr>
+    <td><code>task(action="create")</code></td>
+    <td><code>internal/mcp/tools/task/handler.go</code></td>
+    <td>Decode the MCP payload, validate required fields, enforce member-facing tool policy, and build a typed service command.</td>
+  </tr>
+  <tr>
+    <td><code>CreateTaskCommand</code></td>
+    <td><code>internal/services/task/app</code></td>
+    <td>Authorize the caller, create the task, persist it, publish events/messages, and return a domain result.</td>
+  </tr>
+  <tr>
+    <td>MCP result</td>
+    <td><code>internal/mcp/tools/task/format.go</code></td>
+    <td>Shape the service result into deterministic MCP text and structured content. No raw payload fallback.</td>
+  </tr>
+</table>
+
+<h3>MCP package layout</h3>
+
+<p>The MCP adapter lives in its own package tree. It is a peer of the RPC adapter, not a helper hidden inside <code>internal/app</code> and not a global registry rooted in <code>pkg/</code>.</p>
+
+<pre>internal/mcp/
+  server.go               // MCP HTTP endpoint, session auth, tools/list, tools/call routing
+  context.go              // member/session identity injection into ctx
+  registry.go             // local handler registry for this adapter
+  toolset.go              // builds and registers product-facing handlers
+  tools/
+    domain/
+      definition.go       // ToolDefinition and ToolFunctionDefinition
+      handler.go          // shared handler contracts
+      result.go           // shared result envelope helpers
+    task/
+      definition.go       // task(...) schema and callable definition
+      handler.go          // decode task(...) actions and call typed task use cases
+      types.go            // MCP request shapes and command mapping
+      format.go           // deterministic MCP text and structured content
+      handler_test.go     // success, validation, policy, and formatting coverage
+    space/
+      definition.go       // space(...) schema and callable definition
+      handler.go          // decode space(...) actions and compose service use cases
+      types.go            // MCP request shapes
+      format.go           // deterministic MCP result shaping
+    mission/
+    plan/
+    decision/
+    operator/
+    heartbeat/
+    http/
+</pre>
+
+<p><code>internal/mcp/tools/&lt;tool&gt;</code> is the canonical home for MCP tool behavior. Product-facing tool names live here, request/response decoding lives here, tool-action policy lives here, and cross-service orchestration lives here. Service packages remain transport-agnostic and do not define MCP tool schemas, tool actions, or raw JSON tool request envelopes. The <a href="./mcp-space-tool.html">MCP space tool</a> is the reference shape for handler-owned orchestration.</p>
+
+<p>The <a href="./mcp-message-tool.html">MCP message tool</a> owns agent-facing message sending. Space discovery remains in <code>space(action="list")</code> and <code>space(action="members")</code>; message delivery remains in <code>message(action="send")</code>.</p>
+
+<p>The MCP adapter does not load tools through side-effect imports or a process-global module registry. The composition root builds the handler set from application services, the MCP server registers those handlers in a local registry, and the server exposes one member-authenticated MCP surface. The registry stores handlers, not domain services and not generic runtime modules.</p>
+
+<p>Adding a new protocol (anything that wants to expose agen8's capabilities under different rules) means writing a new peer adapter at this layer. It does not mean tunneling through an existing adapter.</p>
+
+<h2>The Application struct</h2>
+
+<pre>// internal/app/application.go
+
+// Application is the process composition root. Every service the
+// running system reaches for lives here as a field. Construction
+// happens exactly once, in NewApplication.
+//
+// Hard rule: Application has no methods. If you find yourself wanting
+// to add one, the logic belongs in a service.
+type Application struct {
+    ChannelSvc     *channelapp.Service
+    MessageSvc     *messageapp.Service
+    SpaceSvc       *spaceapp.Service
+    CredentialSvc  *credentialapp.Service
+    ContextLinkSvc *contextlinkapp.Service
+    DecisionSvc    *decisionapp.Service
+    MissionSvc     *missionapp.Service
+    // ... remaining services
+}
+
+func NewApplication(cfg config.Config) (*Application, error) {
+    // 1. Open the storage backend chosen by cfg (SQLite or Postgres).
+    // 2. Construct each service's repository against that backend.
+    // 3. Construct each service against its repository.
+    // 4. Return a fully wired *Application.
+    //
+    // Order matters only when services depend on each other; document
+    // those dependencies inline and keep the graph shallow.
+}</pre>
+
+<p><code>Application</code> does not own protocol behavior. It owns services. The composition root constructs protocol adapters separately and gives each adapter the same <code>*Application</code>.</p>
+
+<h2>Adding a service</h2>
+
+<p>The same five steps apply for every service. Each step is small enough to ship as a single commit.</p>
+
+<table>
+  <tr><th style="width:30px">#</th><th>Step</th><th>What it touches</th></tr>
+  <tr>
+    <td>1</td>
+    <td>Define / verify repository interfaces in <code>internal/services/&lt;svc&gt;/domain/</code></td>
+    <td>Split into <code>XReader</code>, <code>XWriter</code>, <code>XReaderWriter</code>. Keep them small.</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Concrete repository implementation(s) in <code>internal/services/&lt;svc&gt;/infra/</code></td>
+    <td>One per backend. SQLite required. Postgres added when storage abstraction work lands.</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>Add field to <code>Application</code>; construct in <code>NewApplication</code></td>
+    <td><code>internal/app/application.go</code></td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>Register protocol handlers from <code>Application</code> services</td>
+    <td><code>internal/rpc</code> and <code>internal/mcp</code> receive service fields from the composition root.</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>Repoint callers from local variables / config fields to <code>app.XSvc</code></td>
+    <td>RPC handlers, MCP handlers, hosted scope, tests. Boundary violations (cross-service imports of <code>infra/</code>) get fixed in this step too.</td>
+  </tr>
+</table>
+
+<h2>Adding an MCP tool</h2>
+
+<table>
+  <tr><th style="width:30px">#</th><th>Step</th><th>What it touches</th></tr>
+  <tr>
+    <td>1</td>
+    <td>Create <code>internal/mcp/tools/&lt;tool&gt;/</code></td>
+    <td><code>definition.go</code>, <code>handler.go</code>, <code>types.go</code></td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Define typed request and response shapes for each action</td>
+    <td>No stringly "action bag" structs and no raw JSON service request. Decode into concrete command types.</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>Inject service dependencies from <code>*Application</code> into the tool handler</td>
+    <td>The composition root supplies concrete app services; the handler calls typed service methods.</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>Register the tool in <code>internal/mcp/toolset.go</code></td>
+    <td>Local MCP adapter registration only; no global module registry</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>Keep one product-facing tool path</td>
+    <td>The MCP catalog registers the native handler once, and <code>internal/mcp/server.go</code> dispatches to that handler.</td>
+  </tr>
+</table>
+
+<div class="callout">
+<strong>R7 — MCP tool ownership lives under <code>internal/mcp/tools</code>.</strong> Tool orchestration does not live in service packages, and it does not live in a shared global <code>pkg/tools</code> runtime. The MCP adapter owns tool registration, request decoding, service composition, and response shaping.
+</div>
+
+<div class="callout">
+<strong>R8 — Product-facing tool grouping is allowed to span services.</strong> A <code>space</code> tool may call <code>ProjectSvc</code>, <code>SpaceSvc</code> space lifecycle methods, <code>SpaceSvc</code> member roster methods, and <code>MessageSvc</code>. The grouping is a product decision at the MCP layer, not a permission for services to cross repository boundaries.
+</div>
+
+<div class="callout">
+<strong>R9 — Services do not know about tools.</strong> Service packages do not define <code>ToolService</code> interfaces, parse MCP action strings, or accept raw tool JSON. They expose typed use cases. MCP handlers translate tool payloads into those use cases.
+</div>
+
+<h2>What's a boundary violation, exactly</h2>
+
+<table>
+  <tr><th>Import</th><th>From outside the service</th></tr>
+  <tr><td><code>messagedomain.MessageFilter</code></td><td class="good">OK — domain types are the public contract</td></tr>
+  <tr><td><code>messagedomain.ErrMessageConsumed</code></td><td class="good">OK — sentinel errors are part of the contract</td></tr>
+  <tr><td><code>messagedomain.MessageRepository</code></td><td class="bad">NO — only the service implements/depends on its own repository</td></tr>
+  <tr><td><code>messageinfra.NewSQLiteRepository(...)</code></td><td class="bad">NO — building someone else's storage</td></tr>
+  <tr><td><code>messageapp.NewService(...)</code></td><td class="bad">NO — only <code>NewApplication</code> constructs services</td></tr>
+  <tr><td><code>app.MessageSvc.ListMessages(ctx, filter)</code></td><td class="good">OK — calling through the composition root</td></tr>
+</table>
+
+<h2>The hosted vs local question</h2>
+
+<p>There is no architectural fork. Both run the same <code>Application</code>. The difference is which storage backend the repositories were built against (SQLite for local, Postgres for hosted) and how the RPC server is exposed (stdio for local, HTTP for hosted). Per-tenant isolation lives entirely in the repository layer via <code>user_id</code> from <code>ctx</code>.</p>
+
+<p>There is no per-tenant service rebuild. Services are process singletons constructed once in <code>NewApplication</code> (R3). Every method receives the tenant's identity through <code>ctx</code> and every repository query scopes to <code>user_id</code> extracted from that context. The hosted adapter authenticates the inbound HTTP request, injects the tenant identity into <code>ctx</code>, and forwards to the same <code>RPCServer</code> that local mode uses.</p>
+
+<h2>Process entry, one paragraph</h2>
+
+<p>The active process entrypoint opens the storage backend chosen by config, constructs <code>Application</code> once, constructs peer adapters such as <code>RPCServer</code> and <code>MCPServer</code> from the same <code>*Application</code>, and starts each adapter on its own listener. Every incoming request enters through an adapter. RPC handlers usually dispatch straight to one service. MCP handlers decode a product-facing tool action, map it to typed service commands using dependencies supplied from <code>Application</code>, and return one agent-facing result. No daemon supervisor owns service semantics.</p>
+
+<div class="footnote">
+The composition root owns service construction once. Protocol adapters and background processes reach the system through the same <code>*Application</code>.
+</div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .operator-svg text {
+    fill: var(--text);
+  }
+  .operator-svg .muted {
+    fill: var(--text-muted);
+  }
+  .operator-svg .box {
+    fill: var(--bg-elevated);
+    stroke: var(--border-strong);
+    stroke-width: 1.4;
+  }
+  .operator-svg .service {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+  }
+  .operator-svg .decision {
+    fill: var(--good-soft);
+    stroke: var(--good);
+  }
+  .operator-svg .warn {
+    fill: var(--warn-soft);
+    stroke: var(--warn);
+  }
+  .operator-svg .bad {
+    fill: var(--bad-soft);
+    stroke: var(--bad);
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / operator-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Operator Service</span>
+  <h1>Operator Service</h1>
+  <p class="lede">The operator service is the durable boundary for work that leaves autonomous agent execution and requires human/operator attention. It owns the action and escalation subdomains, their lifecycle, task blocking side effects, decision creation, graph relationships, and operator-facing RPC state.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#purpose">Purpose and ownership</a></li>
+      <li><a href="#model">Subdomain model</a></li>
+      <li><a href="#layers">Architecture layers</a></li>
+      <li><a href="#lifecycles">Lifecycle state machines</a></li>
+      <li><a href="#service">Service boundary</a></li>
+      <li><a href="#graph">Graph relationships</a></li>
+      <li><a href="#rpc">RPC surface</a></li>
+      <li><a href="#mcp">MCP tool</a></li>
+      <li><a href="#persistence">Persistence</a></li>
+      <li><a href="#wiring">Production wiring</a></li>
+      <li><a href="#tests">Verification</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="purpose">1. Purpose and ownership</h2>
+
+  <p>The operator service has two subdomains. The action subdomain models work the operator must do outside the agent runtime. The escalation subdomain models a decision gate that needs operator attention. Both subdomains are durable product state, not transient tool output.</p>
+
+  <table>
+    <thead><tr><th>The operator service owns</th><th>The operator service does not own</th></tr></thead>
+    <tbody>
+      <tr><td>Canonical records for the <code>action</code> and <code>escalation</code> subdomains.</td><td>Task lifecycle rules or task persistence.</td></tr>
+      <tr><td>Operator lifecycle transitions, validation, deduplication, and escalation urgency changes.</td><td>Decision domain validation or decision persistence.</td></tr>
+      <tr><td>Task block/unblock orchestration through task service ports.</td><td>Direct task row mutation.</td></tr>
+      <tr><td>Decision creation requests for operator completions and escalation resolutions.</td><td>Direct decision row mutation.</td></tr>
+      <tr><td>Graph edge intent for operator-owned relationships.</td><td>Contextlink row construction or graph storage.</td></tr>
+      <tr><td>Operator-facing RPC state and lifecycle commands.</td><td>Frontend rendering, notification storage, or MCP transport schemas.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Protocol adapters call the operator service with typed app commands. Tool-specific request and result DTOs live in the MCP tool layer. The app service does not import MCP packages.</p>
+
+  <h2 id="model">2. Subdomain model</h2>
+
+  <p>The subdomains stay separate because the operator's job is different in each case. An escalation is a decision gate that resolves with an approve/reject verdict. An action is a work request that can stay in progress, collect notes, attach evidence, block, unblock, and optionally require agent verification.</p>
+
+  <div class="diagram">
+  <svg class="operator-svg" viewBox="0 0 920 330" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Operator action and escalation subdomains">
+    <defs>
+      <marker id="arrow-model" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--text-faint)"></path>
+      </marker>
+    </defs>
+    <rect x="44" y="58" width="220" height="210" rx="8" class="warn"></rect>
+    <text x="154" y="92" text-anchor="middle" font-size="18" font-weight="800">Escalation</text>
+    <text x="154" y="126" text-anchor="middle" font-size="13" class="muted">Decision gate</text>
+    <text x="154" y="158" text-anchor="middle" font-size="12">Agent asks: may I proceed?</text>
+    <text x="154" y="184" text-anchor="middle" font-size="12">Operator returns approve/reject</text>
+    <text x="154" y="210" text-anchor="middle" font-size="12">Resolution creates a decision</text>
+    <text x="154" y="236" text-anchor="middle" font-size="12">Task is blocked while pending</text>
+
+    <rect x="350" y="58" width="220" height="210" rx="8" class="service"></rect>
+    <text x="460" y="92" text-anchor="middle" font-size="18" font-weight="800">Operator Action</text>
+    <text x="460" y="126" text-anchor="middle" font-size="13" class="muted">Human work item</text>
+    <text x="460" y="158" text-anchor="middle" font-size="12">Agent asks: please do work</text>
+    <text x="460" y="184" text-anchor="middle" font-size="12">Operator starts, notes, blocks</text>
+    <text x="460" y="210" text-anchor="middle" font-size="12">Completion creates a decision</text>
+    <text x="460" y="236" text-anchor="middle" font-size="12">Verification can send it back</text>
+
+    <rect x="656" y="58" width="220" height="210" rx="8" class="decision"></rect>
+    <text x="766" y="92" text-anchor="middle" font-size="18" font-weight="800">Decision</text>
+    <text x="766" y="126" text-anchor="middle" font-size="13" class="muted">Audit record</text>
+    <text x="766" y="158" text-anchor="middle" font-size="12">Source is operator</text>
+    <text x="766" y="184" text-anchor="middle" font-size="12">References action/escalation</text>
+    <text x="766" y="210" text-anchor="middle" font-size="12">Linked into graph recall</text>
+    <text x="766" y="236" text-anchor="middle" font-size="12">Visible from task/KR/mission</text>
+
+    <path d="M264 144 H350" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-model)"></path>
+    <text x="307" y="132" text-anchor="middle" font-size="11" class="muted">can spawn</text>
+    <path d="M570 164 H656" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-model)"></path>
+    <text x="613" y="152" text-anchor="middle" font-size="11" class="muted">completed_by</text>
+    <path d="M264 206 C390 306 610 306 656 218" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-model)"></path>
+    <text x="460" y="298" text-anchor="middle" font-size="11" class="muted">resolved_by</text>
+  </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Primitive</th><th>Question it answers</th><th>Primary actor</th><th>Terminal outcome</th></tr></thead>
+    <tbody>
+      <tr><td><code>operator/action</code></td><td>What work must a human/operator perform outside the agent runtime?</td><td>Operator as doer.</td><td><code>completed</code> or <code>canceled</code>.</td></tr>
+      <tr><td><code>operator/escalation</code></td><td>Can the agent proceed, and under what instruction?</td><td>Operator as decider.</td><td><code>resolved</code> or <code>canceled</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="layers">3. Architecture layers</h2>
+
+  <p>The operator service follows the same service shape as task, decision, and graph. Domain packages own state rules. The app service orchestrates side effects. Adapters translate transport payloads and never own lifecycle semantics.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">RPC and MCP adapters</div>
+      <div class="role">Translate <code>opAction.*</code>, <code>escalation.*</code>, and operator tool payloads into typed app commands. Tool request schemas live here, not in the app service.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Application service</div>
+      <div class="role">Create and transition operator records, resolve work refs, call task/decision/graph ports, publish lifecycle events, and send operator-result messages.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain</div>
+      <div class="role">Owns <code>action.Action</code>, <code>escalation.Escalation</code>, statuses, urgency, category, validation, and transition rules.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Repository</div>
+      <div class="role">Persists and queries <code>op_actions</code> and <code>escalations</code>. It does not block tasks, create decisions, publish events, or write graph links.</div>
+    </div>
+    <div class="layer events">
+      <div class="label">Events and messages</div>
+      <div class="role">Lifecycle events feed notifications and UI invalidation. Message ports notify affected members after operator resolution, completion, comments, or blocking.</div>
+    </div>
+  </div>
+
+  <h2 id="lifecycles">4. Lifecycle state machines</h2>
+
+  <h3>Escalation lifecycle</h3>
+  <p>An escalation stays pending until the operator resolves it, cancels it, or a deadline worker marks it expired. Resolution creates a decision and unblocks the task when a task is referenced.</p>
+
+  <div class="diagram">
+  <svg class="operator-svg" viewBox="0 0 880 260" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Escalation lifecycle">
+    <defs>
+      <marker id="arrow-esc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--text-faint)"></path>
+      </marker>
+    </defs>
+    <rect x="70" y="96" width="150" height="58" rx="8" class="warn"></rect>
+    <text x="145" y="121" text-anchor="middle" font-size="15" font-weight="800">pending</text>
+    <text x="145" y="141" text-anchor="middle" font-size="11" class="muted">operator decision</text>
+
+    <rect x="365" y="36" width="150" height="58" rx="8" class="decision"></rect>
+    <text x="440" y="61" text-anchor="middle" font-size="15" font-weight="800">resolved</text>
+    <text x="440" y="81" text-anchor="middle" font-size="11" class="muted">creates decision</text>
+
+    <rect x="365" y="166" width="150" height="58" rx="8" class="box"></rect>
+    <text x="440" y="191" text-anchor="middle" font-size="15" font-weight="800">canceled</text>
+    <text x="440" y="211" text-anchor="middle" font-size="11" class="muted">unblocks task</text>
+
+    <rect x="650" y="96" width="150" height="58" rx="8" class="bad"></rect>
+    <text x="725" y="121" text-anchor="middle" font-size="15" font-weight="800">expired</text>
+    <text x="725" y="141" text-anchor="middle" font-size="11" class="muted">deadline worker</text>
+
+    <path d="M220 112 L365 70" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-esc)"></path>
+    <text x="290" y="78" text-anchor="middle" font-size="11" class="muted">resolve</text>
+    <path d="M220 138 L365 188" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-esc)"></path>
+    <text x="286" y="178" text-anchor="middle" font-size="11" class="muted">cancel</text>
+    <path d="M220 125 H650" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-esc)"></path>
+    <text x="435" y="117" text-anchor="middle" font-size="11" class="muted">deadline passes</text>
+    <path d="M650 145 C560 236 420 236 365 212" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-esc)"></path>
+    <text x="540" y="236" text-anchor="middle" font-size="11" class="muted">operator can still cancel/resolve by reopening command</text>
+  </svg>
+  </div>
+
+  <h3>Operator action lifecycle</h3>
+  <p>An operator action is an asynchronous work item. Pending actions are acknowledged when an operator opens them or explicitly acknowledges them. Completion either finishes the item or moves it into verification when the requesting agent must accept the result.</p>
+
+  <div class="diagram">
+  <svg class="operator-svg" viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Operator action lifecycle">
+    <defs>
+      <marker id="arrow-oa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--text-faint)"></path>
+      </marker>
+    </defs>
+    <rect x="45" y="150" width="130" height="56" rx="8" class="box"></rect>
+    <text x="110" y="174" text-anchor="middle" font-size="14" font-weight="800">pending</text>
+    <text x="110" y="194" text-anchor="middle" font-size="11" class="muted">queued</text>
+
+    <rect x="235" y="150" width="150" height="56" rx="8" class="box"></rect>
+    <text x="310" y="174" text-anchor="middle" font-size="14" font-weight="800">acknowledged</text>
+    <text x="310" y="194" text-anchor="middle" font-size="11" class="muted">operator saw it</text>
+
+    <rect x="445" y="150" width="130" height="56" rx="8" class="service"></rect>
+    <text x="510" y="174" text-anchor="middle" font-size="14" font-weight="800">in_progress</text>
+    <text x="510" y="194" text-anchor="middle" font-size="11" class="muted">work underway</text>
+
+    <rect x="655" y="52" width="160" height="56" rx="8" class="warn"></rect>
+    <text x="735" y="76" text-anchor="middle" font-size="14" font-weight="800">pending_verification</text>
+    <text x="735" y="96" text-anchor="middle" font-size="11" class="muted">agent reviews</text>
+
+    <rect x="655" y="150" width="130" height="56" rx="8" class="decision"></rect>
+    <text x="720" y="174" text-anchor="middle" font-size="14" font-weight="800">completed</text>
+    <text x="720" y="194" text-anchor="middle" font-size="11" class="muted">creates decision</text>
+
+    <rect x="655" y="252" width="130" height="56" rx="8" class="bad"></rect>
+    <text x="720" y="276" text-anchor="middle" font-size="14" font-weight="800">blocked</text>
+    <text x="720" y="296" text-anchor="middle" font-size="11" class="muted">operator paused</text>
+
+    <rect x="845" y="252" width="105" height="56" rx="8" class="box"></rect>
+    <text x="897" y="276" text-anchor="middle" font-size="14" font-weight="800">canceled</text>
+    <text x="897" y="296" text-anchor="middle" font-size="11" class="muted">terminal</text>
+
+    <path d="M175 178 H235" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <text x="205" y="168" text-anchor="middle" font-size="11" class="muted">ack</text>
+    <path d="M385 178 H445" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <text x="415" y="168" text-anchor="middle" font-size="11" class="muted">start</text>
+    <path d="M575 164 L655 94" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <text x="598" y="112" font-size="11" class="muted">complete with verification</text>
+    <path d="M575 178 H655" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <text x="615" y="168" text-anchor="middle" font-size="11" class="muted">complete</text>
+    <path d="M735 108 V150" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <text x="756" y="132" font-size="11" class="muted">accept</text>
+    <path d="M655 75 C545 60 500 96 500 150" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <text x="562" y="62" text-anchor="middle" font-size="11" class="muted">request changes</text>
+    <path d="M575 194 L655 260" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <text x="596" y="242" font-size="11" class="muted">block</text>
+    <path d="M655 280 C555 318 500 272 500 206" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <text x="566" y="322" text-anchor="middle" font-size="11" class="muted">unblock</text>
+    <path d="M785 280 H845" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+    <path d="M785 178 C870 178 897 218 897 252" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-oa)"></path>
+  </svg>
+  </div>
+
+  <h2 id="service">5. Service boundary</h2>
+
+  <p>The app service constructor lists explicit dependencies. It does not accept anonymous callbacks and it does not import MCP tool packages. Required dependencies fail startup when absent.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(
+    actions action.<span class="tok-type">Writer</span>,
+    actionReader action.<span class="tok-type">Reader</span>,
+    escalations escalation.<span class="tok-type">Writer</span>,
+    escalationReader escalation.<span class="tok-type">Reader</span>,
+    clock domain.<span class="tok-type">Clock</span>,
+    tasks <span class="tok-type">TaskPort</span>,
+    decisions <span class="tok-type">DecisionPort</span>,
+    graph <span class="tok-type">GraphPort</span>,
+    events <span class="tok-type">EventPublisher</span>,
+    messages <span class="tok-type">MessagePublisher</span>,
+    refs <span class="tok-type">RefResolver</span>,
+    logger *slog.<span class="tok-type">Logger</span>,
+) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+  <table>
+    <thead><tr><th>Port</th><th>Used for</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>TaskPort</code></td><td>Block and unblock referenced tasks.</td><td>Operator service never writes task rows directly.</td></tr>
+      <tr><td><code>DecisionPort</code></td><td>Create operator-sourced decision records after resolution or completion.</td><td>Decision service owns decision validation and persistence.</td></tr>
+      <tr><td><code>GraphPort</code></td><td>Create and delete operator graph edges.</td><td>Graph service owns edge vocabulary, endpoint hydration, duplicate handling, and contextlink persistence.</td></tr>
+      <tr><td><code>EventPublisher</code></td><td>Publish <code>oa.*</code> and <code>escalation.*</code> lifecycle facts.</td><td>Mutation fails when required lifecycle publication fails.</td></tr>
+      <tr><td><code>MessagePublisher</code></td><td>Notify affected members about operator outcomes, comments, and blocked action updates.</td><td>Messages are emitted after persistence succeeds.</td></tr>
+      <tr><td><code>RefResolver</code></td><td>Resolve task → key result → mission and validate explicit mission refs.</td><td>Conflicting refs fail at the service boundary.</td></tr>
+      <tr><td><code>*slog.Logger</code></td><td>Record failed side effects, duplicate suppression, deadline escalation, and retention activity.</td><td>The logger is required at construction and never masks returned errors.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Reference resolution follows the same rule as decision service link fan-out. A request with only <code>taskRef</code> can derive its key result and mission. A request with conflicting explicit refs fails instead of silently choosing one.</p>
+
+  <h2 id="graph">6. Graph relationships</h2>
+
+  <p>The operator service expresses relationship intent through the graph service. It never imports <code>contextlink</code>, never creates contextlink ids, and never writes graph rows directly. The graph service validates source and target visibility before storing each edge.</p>
+
+  <div class="diagram">
+  <svg class="operator-svg" viewBox="0 0 980 430" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Operator graph relationships">
+    <defs>
+      <marker id="arrow-graph-op" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path>
+      </marker>
+    </defs>
+    <rect x="60" y="72" width="140" height="60" rx="8" class="box"></rect>
+    <text x="130" y="100" text-anchor="middle" font-size="15" font-weight="800">Task</text>
+    <text x="130" y="120" text-anchor="middle" font-size="11" class="muted">work node</text>
+
+    <rect x="60" y="185" width="140" height="60" rx="8" class="box"></rect>
+    <text x="130" y="213" text-anchor="middle" font-size="15" font-weight="800">Key Result</text>
+    <text x="130" y="233" text-anchor="middle" font-size="11" class="muted">objective node</text>
+
+    <rect x="60" y="298" width="140" height="60" rx="8" class="box"></rect>
+    <text x="130" y="326" text-anchor="middle" font-size="15" font-weight="800">Mission</text>
+    <text x="130" y="346" text-anchor="middle" font-size="11" class="muted">strategy node</text>
+
+    <rect x="405" y="78" width="170" height="64" rx="8" class="warn"></rect>
+    <text x="490" y="106" text-anchor="middle" font-size="15" font-weight="800">Escalation</text>
+    <text x="490" y="126" text-anchor="middle" font-size="11" class="muted">operator decision gate</text>
+
+    <rect x="405" y="270" width="170" height="64" rx="8" class="service"></rect>
+    <text x="490" y="298" text-anchor="middle" font-size="15" font-weight="800">Operator Action</text>
+    <text x="490" y="318" text-anchor="middle" font-size="11" class="muted">human work item</text>
+
+    <rect x="755" y="174" width="160" height="64" rx="8" class="decision"></rect>
+    <text x="835" y="202" text-anchor="middle" font-size="15" font-weight="800">Decision</text>
+    <text x="835" y="222" text-anchor="middle" font-size="11" class="muted">operator source</text>
+
+    <path d="M200 102 H405" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow-graph-op)"></path>
+    <text x="300" y="91" text-anchor="middle" font-size="11" fill="var(--accent)">blocked_by</text>
+    <path d="M200 215 C278 215 315 117 405 110" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow-graph-op)"></path>
+    <text x="300" y="188" text-anchor="middle" font-size="11" fill="var(--accent)">blocked_by</text>
+    <path d="M200 328 C304 328 315 125 405 116" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow-graph-op)"></path>
+    <text x="306" y="300" text-anchor="middle" font-size="11" fill="var(--accent)">blocked_by</text>
+
+    <path d="M200 116 C296 150 318 287 405 302" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow-graph-op)"></path>
+    <text x="303" y="154" text-anchor="middle" font-size="11" fill="var(--accent)">blocked_by</text>
+
+    <path d="M575 110 C660 120 690 186 755 196" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow-graph-op)"></path>
+    <text x="665" y="151" text-anchor="middle" font-size="11" fill="var(--accent)">resolved_by</text>
+    <path d="M575 302 C660 292 688 224 755 214" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow-graph-op)"></path>
+    <text x="665" y="286" text-anchor="middle" font-size="11" fill="var(--accent)">completed_by</text>
+    <path d="M575 318 C650 372 755 308 755 238" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow-graph-op)"></path>
+    <text x="688" y="350" text-anchor="middle" font-size="11" fill="var(--accent)">relates_to shortcut</text>
+  </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Moment</th><th>Graph edge</th><th>Why it exists</th></tr></thead>
+    <tbody>
+      <tr><td>Escalation created with a task ref.</td><td><code>task --blocked_by--&gt; escalation</code></td><td>The task cannot progress until the gate resolves.</td></tr>
+      <tr><td>Escalation created with only KR or mission context.</td><td><code>key_result|mission --blocked_by--&gt; escalation</code></td><td>Operators and agents can recall the gate from the strategic context.</td></tr>
+      <tr><td>Operator action created as a blocking work request.</td><td><code>task|key_result|mission --blocked_by--&gt; operator_action</code></td><td>The work item explains why progress is waiting on a human/operator.</td></tr>
+      <tr><td>Escalation resolved.</td><td><code>escalation --resolved_by--&gt; decision</code></td><td>The operator verdict becomes a durable decision artifact.</td></tr>
+      <tr><td>Operator action completed and accepted.</td><td><code>operator_action --completed_by--&gt; decision</code></td><td>The operator outcome becomes a durable decision artifact.</td></tr>
+      <tr><td>Operator action should appear near mission recall.</td><td><code>operator_action --relates_to--&gt; mission</code></td><td>Shortcut memory lets graph search find active human work without requiring task/KR traversal.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="rpc">7. RPC surface</h2>
+
+  <p>The RPC handler is a thin adapter over the app service. It validates transport-required fields, converts protocol DTOs into domain/app commands, and returns frontend-ready views.</p>
+
+  <table>
+    <thead><tr><th>RPC method</th><th>Service action</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td><code>escalation.create</code></td><td>Create pending escalation and apply block/graph side effects.</td><td><code>EscalationView</code></td></tr>
+      <tr><td><code>escalation.get</code></td><td>Load one escalation.</td><td><code>EscalationView</code></td></tr>
+      <tr><td><code>escalation.list</code></td><td>List project escalations by status, urgency, category, space, limit, and offset.</td><td><code>[]EscalationView</code></td></tr>
+      <tr><td><code>escalation.listPending</code></td><td>List pending escalation gates for operator dashboards.</td><td><code>[]EscalationView</code></td></tr>
+      <tr><td><code>escalation.resolve</code></td><td>Resolve gate, unblock task, create decision, link graph, publish lifecycle event, notify requester.</td><td><code>EscalationView</code></td></tr>
+      <tr><td><code>escalation.cancel</code></td><td>Cancel gate and unblock referenced task.</td><td><code>EscalationView</code></td></tr>
+      <tr><td><code>escalation.countPending</code></td><td>Count pending gates for project summary UI.</td><td><code>count</code></td></tr>
+      <tr><td><code>opAction.create</code></td><td>Create operator action and apply block/graph side effects.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.get</code></td><td>Load one action; acknowledgement is an explicit lifecycle transition.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.list</code></td><td>List actions by project filters.</td><td><code>[]OpActionView</code></td></tr>
+      <tr><td><code>opAction.listPending</code></td><td>List non-terminal operator work.</td><td><code>[]OpActionView</code></td></tr>
+      <tr><td><code>opAction.acknowledge</code></td><td>Move pending action to acknowledged.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.start</code></td><td>Move acknowledged or blocked action to in progress.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.complete</code></td><td>Persist outcome and either complete or enter verification.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.verify</code></td><td>Accept completion or request changes.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.block</code></td><td>Pause action and notify requester.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.unblock</code></td><td>Resume blocked action.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.cancel</code></td><td>Cancel action and release task block when present.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.addNote</code></td><td>Add operator progress note.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.addComment</code></td><td>Add bidirectional comment and notify when operator-authored.</td><td><code>OpActionView</code></td></tr>
+      <tr><td><code>opAction.countStatus</code></td><td>Count project actions grouped by lifecycle status.</td><td><code>map[string]int</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="mcp">8. MCP tool</h2>
+
+  <p>The <code>operator</code> MCP tool is the agent-facing adapter for the operator service. It supports two write actions and maps the session project, space, and member identity into typed app commands. The tool does not own lifecycle rules, graph writes, task blocking, or decision creation.</p>
+
+  <table>
+    <thead><tr><th>Tool action</th><th>Creates</th><th>Required input</th><th>Service path</th></tr></thead>
+    <tbody>
+      <tr><td><code>request</code></td><td><code>operator_action</code></td><td><code>title</code>, <code>description</code>, <code>category</code>, <code>urgency</code></td><td><code>operatorapp.Service.Create</code></td></tr>
+      <tr><td><code>escalate</code></td><td><code>escalation</code></td><td><code>title</code>, <code>description</code>, <code>category</code>, <code>urgency</code>, <code>recommendation</code></td><td><code>operatorapp.Service.CreateEscalation</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="diagram">
+  <svg class="operator-svg" viewBox="0 0 900 270" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Operator MCP tool adapter">
+    <defs>
+      <marker id="arrow-mcp-op" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 Z" fill="var(--accent)"></path>
+      </marker>
+    </defs>
+    <rect x="45" y="72" width="150" height="92" rx="8" fill="var(--panel)" stroke="var(--border)"></rect>
+    <text x="120" y="106" text-anchor="middle" font-size="16" font-weight="800">Agent</text>
+    <text x="120" y="132" text-anchor="middle" font-size="12" class="muted">operator tool call</text>
+    <rect x="280" y="55" width="180" height="126" rx="8" fill="var(--panel-2)" stroke="var(--accent)"></rect>
+    <text x="370" y="90" text-anchor="middle" font-size="16" font-weight="800">MCP adapter</text>
+    <text x="370" y="116" text-anchor="middle" font-size="12" class="muted">decode schema</text>
+    <text x="370" y="137" text-anchor="middle" font-size="12" class="muted">stamp caller</text>
+    <text x="370" y="158" text-anchor="middle" font-size="12" class="muted">map command</text>
+    <rect x="545" y="55" width="180" height="126" rx="8" fill="var(--panel)" stroke="var(--border)"></rect>
+    <text x="635" y="90" text-anchor="middle" font-size="16" font-weight="800">Operator service</text>
+    <text x="635" y="116" text-anchor="middle" font-size="12" class="muted">domain lifecycle</text>
+    <text x="635" y="137" text-anchor="middle" font-size="12" class="muted">task/graph ports</text>
+    <text x="635" y="158" text-anchor="middle" font-size="12" class="muted">events/messages</text>
+    <rect x="765" y="78" width="92" height="78" rx="8" fill="#f7fbff" stroke="var(--border)"></rect>
+    <text x="811" y="109" text-anchor="middle" font-size="14" font-weight="800">JSON</text>
+    <text x="811" y="132" text-anchor="middle" font-size="12" class="muted">result</text>
+    <path d="M195 118 H280" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-mcp-op)"></path>
+    <path d="M460 118 H545" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-mcp-op)"></path>
+    <path d="M725 118 H765" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-mcp-op)"></path>
+  </svg>
+  </div>
+
+  <p>The MCP response is structured JSON with <code>ok</code>, <code>tool</code>, <code>action</code>, and either <code>operator</code> or <code>escalation</code>. Error responses stay visible to the agent; the tool never retries with fallback values for missing required fields.</p>
+
+  <p>The tool schema requires the fields shared by both actions: <code>action</code>, <code>title</code>, <code>description</code>, <code>category</code>, and <code>urgency</code>. Action-specific fields are included only when used: <code>recommendation</code> and <code>confidence</code> belong to <code>escalate</code>; <code>run_id</code>, <code>blocking</code>, and <code>requires_verification</code> belong to <code>request</code>. Explicit <code>null</code> values are rejected before service calls.</p>
+
+  <p><code>metadata</code> is optional and accepts only a string-valued object: <code>{"origin":"tool_smoke_test","test":"true"}</code>. Boolean, numeric, array, nested-object, or JSON-string metadata values are rejected at the MCP boundary with a structured validation error.</p>
+
+  <h2 id="persistence">9. Persistence</h2>
+
+  <p>The operator service persists one table per subdomain. Repository contracts are split by package namespace and role, so callers import <code>action.Reader</code>, <code>action.Writer</code>, <code>escalation.Reader</code>, or <code>escalation.Writer</code> instead of stuttered names such as <code>OperatorActionRepository</code>.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">package</span> action
+
+<span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Get</span>(ctx context.Context, id <span class="tok-type">ID</span>) (<span class="tok-type">Action</span>, error)
+    <span class="tok-fn">List</span>(ctx context.Context, projectID string, filter <span class="tok-type">Filter</span>) ([]<span class="tok-type">Action</span>, error)
+    <span class="tok-fn">ListPending</span>(ctx context.Context, projectID string) ([]<span class="tok-type">Action</span>, error)
+    <span class="tok-fn">CountByStatus</span>(ctx context.Context, projectID string) (map[<span class="tok-type">Status</span>]int, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Save</span>(ctx context.Context, action <span class="tok-type">Action</span>) error
+}
+
+<span class="tok-kw">package</span> escalation
+
+<span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Get</span>(ctx context.Context, id <span class="tok-type">ID</span>) (<span class="tok-type">Escalation</span>, error)
+    <span class="tok-fn">List</span>(ctx context.Context, projectID string, filter <span class="tok-type">Filter</span>) ([]<span class="tok-type">Escalation</span>, error)
+    <span class="tok-fn">CountPending</span>(ctx context.Context, projectID string) (int, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Save</span>(ctx context.Context, escalation <span class="tok-type">Escalation</span>) error
+}</code></pre>
+
+  <div class="filetree">
+internal/services/operator/
+  app/
+    service.go
+    completion_message.go
+    comment_message.go
+    blocked_message.go
+    escalation_evaluator.go
+    oa_evaluator.go
+  domain/
+    action/
+      action.go
+      repository.go
+    escalation/
+      escalation.go
+      repository.go
+    shared/
+      category.go
+      urgency.go
+  infra/
+    sqlite_store.go
+  rpc/
+    handler.go
+internal/mcp/tools/operator/
+  handler.go
+  schema.go
+  response.go
+  </div>
+
+  <table>
+    <thead><tr><th>Table</th><th>Meaning</th><th>Important indexes</th></tr></thead>
+    <tbody>
+      <tr><td><code>escalations</code></td><td>Decision gates raised by agents or members.</td><td><code>project_id,status</code>, <code>task_ref</code>, <code>deadline</code>, <code>space_id</code></td></tr>
+      <tr><td><code>op_actions</code></td><td>Human/operator work requests and outcomes.</td><td><code>project_id,status</code>, <code>project_id,urgency</code>, <code>task_ref</code>, <code>space_id</code>, <code>created_at</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="wiring">10. Production wiring</h2>
+
+  <p><code>internal/app.NewApplication</code> constructs the operator repositories from the shared database handle, constructs one operator service, passes it graph, task, decision, event, and message ports, and stores it on <code>Application</code>. RPC registration and graph hydrators receive that same process-owned service.</p>
+
+  <div class="diagram">
+  <svg class="operator-svg" viewBox="0 0 940 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" role="img" aria-label="Operator service production wiring">
+    <defs>
+      <marker id="arrow-wire-op" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--text-faint)"></path>
+      </marker>
+    </defs>
+    <rect x="54" y="50" width="190" height="70" rx="8" class="box"></rect>
+    <text x="149" y="80" text-anchor="middle" font-size="15" font-weight="800">RPC registry</text>
+    <text x="149" y="100" text-anchor="middle" font-size="11" class="muted">opAction.* escalation.*</text>
+
+    <rect x="54" y="155" width="190" height="70" rx="8" class="box"></rect>
+    <text x="149" y="185" text-anchor="middle" font-size="15" font-weight="800">MCP operator tool</text>
+    <text x="149" y="205" text-anchor="middle" font-size="11" class="muted">request / escalate</text>
+
+    <rect x="360" y="96" width="220" height="92" rx="8" class="service"></rect>
+    <text x="470" y="126" text-anchor="middle" font-size="17" font-weight="800">Operator Service</text>
+    <text x="470" y="148" text-anchor="middle" font-size="12" class="muted">lifecycle orchestration</text>
+    <text x="470" y="168" text-anchor="middle" font-size="12" class="muted">task + decision + graph ports</text>
+
+    <rect x="705" y="28" width="170" height="54" rx="8" class="box"></rect>
+    <text x="790" y="60" text-anchor="middle" font-size="14" font-weight="800">Task Service</text>
+    <rect x="705" y="105" width="170" height="54" rx="8" class="decision"></rect>
+    <text x="790" y="137" text-anchor="middle" font-size="14" font-weight="800">Decision Service</text>
+    <rect x="705" y="182" width="170" height="54" rx="8" class="box"></rect>
+    <text x="790" y="214" text-anchor="middle" font-size="14" font-weight="800">Graph Service</text>
+    <rect x="705" y="259" width="170" height="54" rx="8" class="box"></rect>
+    <text x="790" y="291" text-anchor="middle" font-size="14" font-weight="800">Message/Event</text>
+
+    <path d="M244 84 C290 84 312 122 360 132" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-wire-op)"></path>
+    <path d="M244 190 C296 190 312 158 360 150" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-wire-op)"></path>
+    <path d="M580 128 C638 98 646 60 705 55" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-wire-op)"></path>
+    <path d="M580 140 H705" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-wire-op)"></path>
+    <path d="M580 156 C636 174 646 204 705 209" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-wire-op)"></path>
+    <path d="M580 174 C636 226 646 280 705 286" stroke="var(--text-faint)" stroke-width="2" fill="none" marker-end="url(#arrow-wire-op)"></path>
+  </svg>
+  </div>
+
+  <p>The graph service hydrator list includes the process operator service so <code>operator_action</code> and <code>escalation</code> subdomain nodes are queryable through <code>graph_query</code>, graph RPC, and frontend graph reads.</p>
+
+  <h2 id="tests">11. Verification</h2>
+
+  <p>Operator service tests exercise the same entry points production uses. Leaf tests cover domain transition errors, but backend completion requires production wiring and RPC/tool-path integration tests.</p>
+
+  <table>
+    <thead><tr><th>Behavior</th><th>Test shape</th><th>Proof</th></tr></thead>
+    <tbody>
+      <tr><td>Create escalation from RPC.</td><td>RPC server with production-registered handler.</td><td>Escalation row exists, task is blocked, <code>blocked_by</code> edge exists, lifecycle event published.</td></tr>
+      <tr><td>Resolve escalation.</td><td>RPC resolve call against existing pending escalation.</td><td>Escalation is resolved, task is unblocked, operator-sourced decision exists, <code>resolved_by</code> edge exists.</td></tr>
+      <tr><td>Create and complete operator action.</td><td>RPC lifecycle calls through create/start/complete or create/start/complete/verify.</td><td>Action reaches correct status, task block state is released, decision and <code>completed_by</code> edge exist.</td></tr>
+      <tr><td>Graph recall.</td><td>Call <code>GraphSvc.Node</code> or graph RPC for task/mission/operator nodes.</td><td>Edges and neighbours include the operator nodes and resulting decisions.</td></tr>
+      <tr><td>Invalid request.</td><td>Missing project id, title, invalid status, or conflicting refs.</td><td>Structured RPC error; no rows, no task mutation, no graph edge.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="invariants">11. Invariants</h2>
+
+  <table>
+    <thead><tr><th>Invariant</th><th>Enforced by</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>The app service does not import MCP tool packages.</td><td>Package dependency direction and tests.</td><td>Tool schema churn must not change domain orchestration.</td></tr>
+      <tr><td>Operator service does not import <code>contextlink</code> or <code>pkg/types.ContextLink</code>.</td><td>Graph ports and import checks.</td><td>Graph service remains the edge boundary.</td></tr>
+      <tr><td>Task block/unblock happens through task service ports.</td><td>Constructor dependencies and integration tests.</td><td>Task lifecycle rules stay in the task service.</td></tr>
+      <tr><td>Operator completions and escalation resolutions create decisions through decision service.</td><td><code>DecisionPort</code> and RPC integration tests.</td><td>Decision audit records stay canonical and queryable.</td></tr>
+      <tr><td>Conflicting task/KR/mission refs fail loudly.</td><td><code>RefResolver</code> in the app service.</td><td>Graph memory cannot encode contradictory work context.</td></tr>
+      <tr><td>Mutation side effects run after persistence and return errors when required side effects fail.</td><td>Service orchestration tests.</td><td>Product state does not claim an operator workflow exists when the rest of the app cannot observe it.</td></tr>
+      <tr><td>Expired or archived records remain queryable.</td><td>Repository filters and graph hydrators.</td><td>Operator history is part of durable work memory.</td></tr>
+    </tbody>
+  </table>
+
+</div>
+</body>
+</html>

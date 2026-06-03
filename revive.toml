@@ -1,0 +1,51 @@
+# Revive configuration for agen8.
+#
+# Rules are enabled incrementally. Add new rules in PRs that also clean the
+# resulting violations. Architectural-scope findings that propagate across
+# many files should be tracked in docs/audit/deslop-followups.md rather than
+# silenced here.
+
+# Default severity; override per-rule with severity = "warning" or "error".
+severity = "error"
+
+# Confidence threshold (0.0–1.0). Lower = more lints.
+confidence = 0.8
+
+# Don't error on warnings.
+warningCode = 0
+errorCode = 1
+
+# Enabled rules. Each block is one rule.
+
+# Stuttering: package + type repeating (e.g. notification.NotificationService).
+# Note: rule.package-comments is intentionally disabled. Adding a one-line
+# `// Package X provides X` doc to every file (or even one file per
+# package) just to satisfy the tool would add ~140 boilerplate comments
+# that don't carry useful information. We re-enable this when packages
+# get real, useful prose docs as part of natural feature work.
+
+# Catch the canonical stutter pattern (package-name prefix on type names).
+[rule.var-naming]
+  # arguments = [allowList, blockList]; left empty so the default Go style
+  # checks fire (initialisms, stutter, snake_case identifiers).
+  arguments = [[], []]
+
+# Common style issues.
+[rule.indent-error-flow]
+[rule.error-naming]    # error variables must end in 'Err' or be 'err'
+[rule.error-return]    # error returns should be the last value
+[rule.error-strings]   # error strings should be lowercase, no trailing punctuation
+[rule.if-return]       # `if err != nil { return err } return nil` simplification
+[rule.range-val-in-closure]
+[rule.superfluous-else]
+[rule.unreachable-code]
+# Note: rule.unused-parameter is intentionally disabled.
+# CLAUDE.md requires test doubles (mocks/stubs/spies) to KEEP named
+# parameters so they capture the args being passed. revive's
+# unused-parameter rule pushes the opposite direction (rename to `_`).
+# The two are incompatible, and the project policy wins.
+[rule.unnecessary-stmt]
+[rule.context-as-argument]   # ctx must be the first parameter
+[rule.context-keys-type]     # don't use built-in types as context keys
+[rule.empty-block]
+[rule.redundant-import-alias]

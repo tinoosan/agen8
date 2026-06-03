@@ -1,0 +1,1008 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
+
+	"github.com/google/uuid"
+	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
+	messagedomain "github.com/tinoosan/agen8-mcp-server/internal/services/message/domain"
+	messagechannel "github.com/tinoosan/agen8-mcp-server/internal/services/message/domain/channel"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
+	"github.com/tinoosan/agen8-mcp-server/pkg/types"
+)
+
+type Service struct {
+	tasks    domain.TaskRepository
+	clock    domain.Clock
+	caller   caller.Resolver
+	members  MemberLoader
+	spaces   SpaceLoader
+	messages MessagePublisher
+	links    GraphLinkWriter
+	missions KeyResultMissionReader
+	logger   *slog.Logger
+}
+
+type Caller = caller.Caller
+
+type MemberLoader interface {
+	GetMember(ctx context.Context, memberID member.ID) (member.Record, error)
+}
+
+type SpaceLoader interface {
+	Get(ctx context.Context, spaceID spacedomain.SpaceID) (spacedomain.SpaceRecord, error)
+}
+
+type MessagePublisher interface {
+	PublishAgentMessage(ctx context.Context, input messagedomain.NewMessageInput) (types.AgentMessage, error)
+}
+
+type GraphLinkWriter interface {
+	Link(ctx context.Context, req graphdomain.GraphLinkRequest) (graphdomain.GraphEdge, []graphdomain.GraphWarning, error)
+}
+
+type KeyResultMissionReader interface {
+	KeyResultMission(ctx context.Context, keyResultID string) (string, error)
+}
+
+type TaskMessageKind string
+
+const (
+	TaskMessageAssigned        TaskMessageKind = "assigned"
+	TaskMessageReviewRequested TaskMessageKind = "review_requested"
+	TaskMessageRetryRequested  TaskMessageKind = "retry_requested"
+	TaskMessageReleased        TaskMessageKind = "released"
+	TaskMessageBlocked         TaskMessageKind = "blocked"
+	TaskMessageUnblocked       TaskMessageKind = "unblocked"
+	TaskMessageCanceled        TaskMessageKind = "canceled"
+)
+
+type CreateTaskParams struct {
+	SpaceID            spacedomain.SpaceID
+	AssignedTo         member.ID
+	Description        string
+	AcceptanceCriteria []string
+	Title              string
+	KeyResultRef       string
+	MissionRef         string
+	PlanPhaseID        *uuid.UUID
+	PlanTodoID         *uuid.UUID
+	Metadata           map[string]any
+	TaskKind           string
+}
+
+type CompleteTaskParams struct {
+	TaskID    domain.TaskID
+	Summary   string
+	Artifacts []string
+}
+
+type AssignTaskParams struct {
+	TaskID     domain.TaskID
+	AssignedTo member.ID
+}
+
+type ReviewTaskParams struct {
+	TaskID   domain.TaskID
+	Reason   string
+	Criteria []domain.CriterionReview
+}
+
+type UpdateTaskParams struct {
+	TaskID             domain.TaskID
+	Title              *string
+	Description        *string
+	AcceptanceCriteria *[]domain.AcceptanceCriterion
+	TaskKind           *string
+	KeyResultRef       *string
+	PlanPhaseID        *uuid.UUID
+	PlanTodoID         *uuid.UUID
+	Metadata           map[string]any
+}
+
+func NewService(
+	tasks domain.TaskRepository,
+	clock domain.Clock,
+	caller caller.Resolver,
+	members MemberLoader,
+	spaces SpaceLoader,
+	messages MessagePublisher,
+	logger *slog.Logger,
+) (*Service, error) {
+	switch {
+	case tasks == nil:
+		return nil, fmt.Errorf("task service: tasks repository is required")
+	case clock == nil:
+		return nil, fmt.Errorf("task service: clock is required")
+	case caller == nil:
+		return nil, fmt.Errorf("task service: caller resolver is required")
+	case members == nil:
+		return nil, fmt.Errorf("task service: member reader is required")
+	case spaces == nil:
+		return nil, fmt.Errorf("task service: space reader is required")
+	case messages == nil:
+		return nil, fmt.Errorf("task service: message publisher is required")
+	}
+	if logger == nil {
+		logger = slog.Default().With("service", "task")
+	}
+	return &Service{
+		tasks:    tasks,
+		clock:    clock,
+		caller:   caller,
+		members:  members,
+		spaces:   spaces,
+		messages: messages,
+		logger:   logger,
+	}, nil
+}
+
+func (s *Service) SetGraphLinkWriter(links GraphLinkWriter) {
+	s.links = links
+}
+
+func (s *Service) SetKeyResultMissionReader(missions KeyResultMissionReader) {
+	s.missions = missions
+}
+
+func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, params.SpaceID); err != nil {
+		return domain.Task{}, err
+	}
+	assigned, err := s.memberInSpace(ctx, params.AssignedTo, params.SpaceID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+
+	missionRef, err := s.resolveCreationMissionRef(ctx, params.KeyResultRef, params.MissionRef)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	metadata, err := metadataWithMissionRef(params.Metadata, missionRef)
+	if err != nil {
+		return domain.Task{}, err
+	}
+
+	task, err := domain.NewTask(domain.NewTaskInput{
+		SpaceID:            params.SpaceID,
+		CreatedBy:          caller.ActorID(),
+		AssignedTo:         assigned.ID,
+		Description:        params.Description,
+		AcceptanceCriteria: params.AcceptanceCriteria,
+		Title:              params.Title,
+		KeyResultRef:       params.KeyResultRef,
+		PlanPhaseID:        params.PlanPhaseID,
+		PlanTodoID:         params.PlanTodoID,
+		Metadata:           metadata,
+		TaskKind:           params.TaskKind,
+	}, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	next := task
+	if err := s.tasks.CreateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("create task: %w", err)
+	}
+	if err := s.emitContextLinks(ctx, next); err != nil {
+		return domain.Task{}, err
+	}
+	s.logTaskTransition("create", next, caller)
+	if err := s.publishTaskMessage(ctx, TaskMessageAssigned, next, caller.MemberID, assigned.ID); err != nil {
+		return next, fmt.Errorf("publish task assignment: %w", err)
+	}
+	return next, nil
+}
+
+func (s *Service) Get(ctx context.Context, taskID domain.TaskID) (domain.Task, error) {
+	taskID = trimTaskID(taskID)
+	if taskID == "" {
+		return domain.Task{}, fmt.Errorf("taskId is required")
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return domain.Task{}, fmt.Errorf("load task: %w", err)
+	}
+	return task, nil
+}
+
+func (s *Service) List(ctx context.Context, filter domain.TaskFilter) ([]domain.Task, error) {
+	filter.SpaceID = spacedomain.SpaceID(strings.TrimSpace(string(filter.SpaceID)))
+	filter.AssignedTo = member.ID(strings.TrimSpace(string(filter.AssignedTo)))
+	filter.ClaimedBy = member.ID(strings.TrimSpace(string(filter.ClaimedBy)))
+	filter.TaskKind = strings.TrimSpace(filter.TaskKind)
+	filter.SortBy = strings.TrimSpace(filter.SortBy)
+	if filter.Limit < 0 {
+		return nil, fmt.Errorf("task list limit must be non-negative")
+	}
+	if filter.Offset < 0 {
+		return nil, fmt.Errorf("task list offset must be non-negative")
+	}
+	return s.tasks.ListTasks(ctx, filter)
+}
+
+func (s *Service) Count(ctx context.Context, filter domain.TaskFilter) (int, error) {
+	if filter.Limit < 0 {
+		return 0, fmt.Errorf("task count limit must be non-negative")
+	}
+	if filter.Offset < 0 {
+		return 0, fmt.Errorf("task count offset must be non-negative")
+	}
+	return s.tasks.CountTasks(ctx, filter)
+}
+
+func (s *Service) emitContextLinks(ctx context.Context, task domain.Task) error {
+	keyResultRef := strings.TrimSpace(task.KeyResultRef)
+	metadataMissionRef, err := missionRefFromMetadata(task.Metadata)
+	if err != nil {
+		return err
+	}
+	missionRef := metadataMissionRef
+	if keyResultRef != "" {
+		if s.missions == nil {
+			return fmt.Errorf("task service: key result mission reader is required")
+		}
+		resolvedMissionRef, err := s.missions.KeyResultMission(ctx, keyResultRef)
+		if err != nil {
+			return fmt.Errorf("resolve task key result %s mission: %w", keyResultRef, err)
+		}
+		resolvedMissionRef = strings.TrimSpace(resolvedMissionRef)
+		if resolvedMissionRef == "" {
+			return fmt.Errorf("task service: key result %s is missing mission linkage", keyResultRef)
+		}
+		if missionRef != "" && !strings.EqualFold(missionRef, resolvedMissionRef) {
+			return fmt.Errorf("task service: key result %s belongs to mission %s, but metadata provided %s", keyResultRef, resolvedMissionRef, missionRef)
+		}
+		missionRef = resolvedMissionRef
+	}
+	if keyResultRef == "" && missionRef == "" {
+		return nil
+	}
+	if s.links == nil {
+		return fmt.Errorf("task service: graph link writer is required")
+	}
+	space, err := s.spaces.Get(ctx, task.SpaceID)
+	if err != nil {
+		return fmt.Errorf("load task space for context links: %w", err)
+	}
+	projectID := strings.TrimSpace(space.ProjectID)
+	if projectID == "" {
+		return fmt.Errorf("task service: space %s is missing project id", task.SpaceID)
+	}
+	specs := []struct {
+		targetID, targetType, edge string
+	}{
+		{keyResultRef, graphdomain.NodeTypeKeyResult, graphdomain.EdgeTypeServes},
+		{missionRef, graphdomain.NodeTypeMission, graphdomain.EdgeTypeServes},
+	}
+	for _, spec := range specs {
+		if strings.TrimSpace(spec.targetID) == "" {
+			continue
+		}
+		confidence := 1.0
+		if _, _, err := s.links.Link(ctx, graphdomain.GraphLinkRequest{
+			ProjectID:  projectID,
+			SourceType: graphdomain.NodeTypeTask,
+			SourceID:   string(task.ID),
+			TargetType: spec.targetType,
+			TargetID:   spec.targetID,
+			EdgeType:   spec.edge,
+			Confidence: &confidence,
+			Rationale:  "Task references this work item.",
+			Origin:     "reference",
+			CreatedBy:  "task_service",
+		}); err != nil {
+			return fmt.Errorf("create %s link for task %s: %w", spec.targetType, task.ID, err)
+		}
+	}
+	return nil
+}
+
+func missionRefFromMetadata(metadata map[string]any) (string, error) {
+	for _, key := range []string{"mission_ref", "missionRef", "mission_id", "missionId"} {
+		raw, ok := metadata[key]
+		if !ok {
+			continue
+		}
+		value, ok := raw.(string)
+		if !ok {
+			return "", fmt.Errorf("task metadata %q must be a string", key)
+		}
+		return strings.TrimSpace(value), nil
+	}
+	return "", nil
+}
+
+func metadataWithMissionRef(metadata map[string]any, missionRef string) (map[string]any, error) {
+	next := cloneMap(metadata)
+	missionRef = strings.TrimSpace(missionRef)
+	if missionRef == "" {
+		return next, nil
+	}
+	existing, err := missionRefFromMetadata(next)
+	if err != nil {
+		return nil, err
+	}
+	if existing != "" && !strings.EqualFold(existing, missionRef) {
+		return nil, fmt.Errorf("task metadata mission ref %s conflicts with mission ref %s", existing, missionRef)
+	}
+	if next == nil {
+		next = map[string]any{}
+	}
+	next["missionRef"] = missionRef
+	return next, nil
+}
+
+func (s *Service) resolveCreationMissionRef(ctx context.Context, keyResultRef, missionRef string) (string, error) {
+	keyResultRef = strings.TrimSpace(keyResultRef)
+	missionRef = strings.TrimSpace(missionRef)
+	if keyResultRef == "" {
+		return missionRef, nil
+	}
+	if s.missions == nil {
+		return "", fmt.Errorf("task service: key result mission reader is required")
+	}
+	resolvedMissionRef, err := s.missions.KeyResultMission(ctx, keyResultRef)
+	if err != nil {
+		return "", fmt.Errorf("resolve task key result %s mission: %w", keyResultRef, err)
+	}
+	resolvedMissionRef = strings.TrimSpace(resolvedMissionRef)
+	if resolvedMissionRef == "" {
+		return "", fmt.Errorf("task service: key result %s is missing mission linkage", keyResultRef)
+	}
+	if missionRef != "" && !strings.EqualFold(missionRef, resolvedMissionRef) {
+		return "", fmt.Errorf("task service: key result %s belongs to mission %s, but mission ref %s was provided", keyResultRef, resolvedMissionRef, missionRef)
+	}
+	return resolvedMissionRef, nil
+}
+
+func (s *Service) Update(ctx context.Context, params UpdateTaskParams) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, params.TaskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+		return domain.Task{}, err
+	}
+	if params.Title != nil {
+		loaded.Title = strings.TrimSpace(*params.Title)
+	}
+	if params.Description != nil {
+		description := strings.TrimSpace(*params.Description)
+		if description == "" {
+			return domain.Task{}, fmt.Errorf("task description is required")
+		}
+		loaded.Description = description
+	}
+	if params.AcceptanceCriteria != nil {
+		criteria := make([]domain.AcceptanceCriterion, 0, len(*params.AcceptanceCriteria))
+		seen := map[string]struct{}{}
+		for _, criterion := range *params.AcceptanceCriteria {
+			criterion.ID = strings.TrimSpace(criterion.ID)
+			criterion.Text = strings.TrimSpace(criterion.Text)
+			if criterion.ID == "" {
+				return domain.Task{}, fmt.Errorf("acceptance criterion id is required")
+			}
+			if criterion.Text == "" {
+				return domain.Task{}, fmt.Errorf("acceptance criterion text is required")
+			}
+			if _, ok := seen[criterion.ID]; ok {
+				return domain.Task{}, fmt.Errorf("duplicate acceptance criterion id %q", criterion.ID)
+			}
+			seen[criterion.ID] = struct{}{}
+			criteria = append(criteria, criterion)
+		}
+		loaded.AcceptanceCriteria = criteria
+	}
+	if params.TaskKind != nil {
+		loaded.TaskKind = strings.TrimSpace(*params.TaskKind)
+	}
+	if params.KeyResultRef != nil {
+		loaded.KeyResultRef = strings.TrimSpace(*params.KeyResultRef)
+	}
+	if params.PlanPhaseID != nil {
+		loaded.PlanPhaseID = params.PlanPhaseID
+	}
+	if params.PlanTodoID != nil {
+		loaded.PlanTodoID = params.PlanTodoID
+	}
+	if params.Metadata != nil {
+		loaded.Metadata = cloneMap(params.Metadata)
+	}
+	now := s.clock.Now().UTC()
+	loaded.UpdatedAt = &now
+	if err := s.tasks.UpdateTask(ctx, loaded); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("update", loaded, caller)
+	return loaded, nil
+}
+
+func (s *Service) Claim(ctx context.Context, taskID domain.TaskID) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := requireMemberCaller(caller); err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, taskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireAssignedCaller(loaded, caller.MemberID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.Claim(caller.MemberID, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("claim", next, caller)
+	return next, nil
+}
+
+func (s *Service) Assign(ctx context.Context, params AssignTaskParams) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, params.TaskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+		return domain.Task{}, err
+	}
+	assigned, err := s.memberInSpace(ctx, params.AssignedTo, loaded.SpaceID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.Assign(assigned.ID, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("assign", next, caller)
+	if err := s.publishTaskMessage(ctx, TaskMessageAssigned, next, caller.MemberID, assigned.ID); err != nil {
+		return next, fmt.Errorf("publish task assignment: %w", err)
+	}
+	return next, nil
+}
+
+func (s *Service) Complete(ctx context.Context, params CompleteTaskParams) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := requireMemberCaller(caller); err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, params.TaskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.Complete(params.Summary, params.Artifacts, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("complete", next, caller)
+	if creator, ok := s.reviewRecipient(ctx, next); ok {
+		if err := s.publishTaskMessage(ctx, TaskMessageReviewRequested, next, caller.MemberID, creator); err != nil {
+			return next, fmt.Errorf("publish task review request: %w", err)
+		}
+	}
+	return next, nil
+}
+
+func (s *Service) ApproveReview(ctx context.Context, params ReviewTaskParams) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, params.TaskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.ApproveReview(params.Criteria, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("approve_review", next, caller)
+	return next, nil
+}
+
+func (s *Service) RetryReview(ctx context.Context, params ReviewTaskParams) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, params.TaskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.RetryReview(params.Reason, params.Criteria, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("retry_review", next, caller)
+	if assigned := next.AssignedTo; assigned != "" {
+		if err := s.publishTaskMessage(ctx, TaskMessageRetryRequested, next, caller.MemberID, assigned); err != nil {
+			return next, fmt.Errorf("publish task review result: %w", err)
+		}
+	}
+	return next, nil
+}
+
+func (s *Service) FailReview(ctx context.Context, params ReviewTaskParams) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, params.TaskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.FailReview(params.Reason, params.Criteria, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("fail_review", next, caller)
+	return next, nil
+}
+
+func (s *Service) Block(ctx context.Context, taskID domain.TaskID, reason string) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := requireMemberCaller(caller); err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, taskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.Block(reason, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("block", next, caller)
+	if creator := member.ID(strings.TrimSpace(next.CreatedBy)); creator != "" {
+		if err := s.publishTaskMessage(ctx, TaskMessageBlocked, next, caller.MemberID, creator); err != nil {
+			return next, fmt.Errorf("publish task blocker: %w", err)
+		}
+	}
+	return next, nil
+}
+
+func (s *Service) Unblock(ctx context.Context, taskID domain.TaskID, note string) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := requireMemberCaller(caller); err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, taskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireUnblockCaller(ctx, loaded, caller.MemberID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.Unblock(note, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("unblock", next, caller)
+	if assigned := next.AssignedTo; assigned != "" {
+		if err := s.publishTaskMessage(ctx, TaskMessageUnblocked, next, caller.MemberID, assigned); err != nil {
+			return next, fmt.Errorf("publish task unblock: %w", err)
+		}
+	}
+	return next, nil
+}
+
+func (s *Service) Release(ctx context.Context, taskID domain.TaskID) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := requireMemberCaller(caller); err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, taskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.Release(s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("release", next, caller)
+	if creator := member.ID(strings.TrimSpace(next.CreatedBy)); creator != "" {
+		if err := s.publishTaskMessage(ctx, TaskMessageReleased, next, caller.MemberID, creator); err != nil {
+			return next, fmt.Errorf("publish task release: %w", err)
+		}
+	}
+	return next, nil
+}
+
+func (s *Service) Cancel(ctx context.Context, taskID domain.TaskID, reason string) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, taskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.Cancel(reason, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("cancel", next, caller)
+	target := loaded.ClaimedByMemberID
+	if target == "" {
+		target = loaded.AssignedTo
+	}
+	if target != "" {
+		if err := s.publishTaskMessage(ctx, TaskMessageCanceled, next, caller.MemberID, target); err != nil {
+			return next, fmt.Errorf("publish task cancel: %w", err)
+		}
+	}
+	return next, nil
+}
+
+func (s *Service) resolveCaller(ctx context.Context) (Caller, error) {
+	caller, err := s.caller.ResolveCaller(ctx)
+	if err != nil {
+		return Caller{}, fmt.Errorf("resolve task caller: %w", err)
+	}
+	caller = caller.Normalize()
+	if caller.UserID == "" && caller.MemberID == "" {
+		return Caller{}, fmt.Errorf("task caller user id or member id is required")
+	}
+	return caller, nil
+}
+
+func requireMemberCaller(caller Caller) error {
+	if caller.MemberID == "" {
+		return fmt.Errorf("task caller member id is required")
+	}
+	return nil
+}
+
+func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Caller, spaceID spacedomain.SpaceID) error {
+	if caller.MemberID != "" {
+		return s.requireCoordinator(ctx, caller.MemberID, spaceID)
+	}
+	userID := strings.TrimSpace(caller.UserID)
+	if userID == "" {
+		return fmt.Errorf("task caller user id is required")
+	}
+	space, err := s.spaces.Get(ctx, spaceID)
+	if err != nil {
+		return fmt.Errorf("load task space: %w", err)
+	}
+	if strings.TrimSpace(space.UserID) != userID {
+		return fmt.Errorf("user %s does not own space %s", userID, spaceID)
+	}
+	return nil
+}
+
+func (s *Service) reviewRecipient(ctx context.Context, task domain.Task) (member.ID, bool) {
+	createdBy := member.ID(strings.TrimSpace(task.CreatedBy))
+	if createdBy == "" {
+		return "", false
+	}
+	member, err := s.memberInSpace(ctx, createdBy, task.SpaceID)
+	if err != nil {
+		return "", false
+	}
+	if !isCoordinatorType(member.MemberType) {
+		return "", false
+	}
+	return member.ID, true
+}
+
+func (s *Service) requireCoordinator(ctx context.Context, memberID member.ID, spaceID spacedomain.SpaceID) error {
+	member, err := s.memberInSpace(ctx, memberID, spaceID)
+	if err != nil {
+		return err
+	}
+	if !isCoordinatorType(member.MemberType) {
+		return fmt.Errorf("member %s is not a coordinator", memberID)
+	}
+	return nil
+}
+
+func (s *Service) memberInSpace(ctx context.Context, memberID member.ID, spaceID spacedomain.SpaceID) (member.Record, error) {
+	memberID = member.ID(strings.TrimSpace(string(memberID)))
+	spaceID = spacedomain.SpaceID(strings.TrimSpace(string(spaceID)))
+	if memberID == "" {
+		return member.Record{}, fmt.Errorf("memberId is required")
+	}
+	if spaceID == "" {
+		return member.Record{}, fmt.Errorf("spaceId is required")
+	}
+	rosterMember, err := s.members.GetMember(ctx, memberID)
+	if err != nil {
+		return member.Record{}, fmt.Errorf("load member: %w", err)
+	}
+	if spacedomain.SpaceID(rosterMember.SpaceID) != spaceID {
+		return member.Record{}, fmt.Errorf("member %s is not in space %s", memberID, spaceID)
+	}
+	if strings.TrimSpace(rosterMember.LifecycleState) != "" && rosterMember.LifecycleState != member.LifecycleActive {
+		return member.Record{}, fmt.Errorf("member %s is not active", memberID)
+	}
+	return rosterMember, nil
+}
+
+func (s *Service) requireAssignedCaller(task domain.Task, memberID member.ID) error {
+	memberID = member.ID(strings.TrimSpace(string(memberID)))
+	if memberID == "" {
+		return fmt.Errorf("caller member id is required")
+	}
+	if task.AssignedTo != memberID {
+		return fmt.Errorf("task %s is assigned to %s, not %s", task.ID, task.AssignedTo, memberID)
+	}
+	return nil
+}
+
+func (s *Service) requireClaimedCaller(task domain.Task, memberID member.ID) error {
+	memberID = member.ID(strings.TrimSpace(string(memberID)))
+	if memberID == "" {
+		return fmt.Errorf("caller member id is required")
+	}
+	if task.ClaimedByMemberID != memberID {
+		return fmt.Errorf("task %s is claimed by %s, not %s", task.ID, task.ClaimedByMemberID, memberID)
+	}
+	return nil
+}
+
+func (s *Service) requireUnblockCaller(ctx context.Context, task domain.Task, memberID member.ID) error {
+	memberID = member.ID(strings.TrimSpace(string(memberID)))
+	if memberID == "" {
+		return fmt.Errorf("caller member id is required")
+	}
+	if task.ClaimedByMemberID == memberID {
+		return nil
+	}
+	return s.requireCoordinator(ctx, memberID, task.SpaceID)
+}
+
+func (s *Service) publishTaskMessage(ctx context.Context, kind TaskMessageKind, task domain.Task, actor, target member.ID) error {
+	spec, err := taskMessageSpec(kind)
+	if err != nil {
+		return err
+	}
+	actor = member.ID(strings.TrimSpace(string(actor)))
+	target = member.ID(strings.TrimSpace(string(target)))
+	if task.ID == "" {
+		return fmt.Errorf("task id is required")
+	}
+	if task.SpaceID == "" {
+		return fmt.Errorf("task space id is required")
+	}
+	if target == "" {
+		return fmt.Errorf("target member id is required")
+	}
+	body := map[string]any{
+		"event":          string(kind),
+		"taskId":         string(task.ID),
+		"spaceId":        string(task.SpaceID),
+		"actorMemberId":  string(actor),
+		"targetMemberId": string(target),
+		"nextAction":     spec.NextAction,
+		"guidance":       spec.Guidance,
+		"message":        taskMessageBody(task, spec),
+		"taskStatus":     string(task.Status),
+	}
+	if task.UpdatedAt != nil {
+		body["taskUpdatedAt"] = task.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		body["taskVersion"] = task.UpdatedAt.UTC().UnixNano()
+	}
+	if summary := strings.TrimSpace(task.Summary); summary != "" && kind == TaskMessageReviewRequested {
+		body["summary"] = summary
+	}
+	if note := strings.TrimSpace(task.Error); note != "" {
+		switch kind {
+		case TaskMessageRetryRequested, TaskMessageBlocked, TaskMessageCanceled:
+			body["reason"] = note
+		case TaskMessageUnblocked:
+			body["note"] = note
+		}
+	}
+	_, err = s.messages.PublishAgentMessage(ctx, messagedomain.NewMessageInput{
+		Route: messagedomain.MessageRoute{
+			SpaceID:             task.SpaceID,
+			DestinationMemberID: target,
+			ChannelID:           messagechannel.MemberChannelID(task.SpaceID, target),
+		},
+		Content: messagedomain.MessageContent{
+			Kind:    types.AgentMessageKindSystem,
+			Subject: spec.Subject,
+			Body:    body,
+			TaskRef: task.ID,
+		},
+		Producer: messagedomain.MessageProducer{
+			IntentID:      types.IntentID("task:" + string(task.ID) + ":" + string(kind)),
+			CorrelationID: types.CorrelationID("task:" + string(task.ID)),
+			Producer:      "task-service",
+		},
+	})
+	if err == nil {
+		s.logger.Debug("task message published",
+			"message_kind", string(kind),
+			"task_id", string(task.ID),
+			"space_id", string(task.SpaceID),
+			"actor_member_id", string(actor),
+			"target_member_id", string(target),
+			"next_action", spec.NextAction,
+		)
+	}
+	return err
+}
+
+func (s *Service) logTaskTransition(action string, task domain.Task, caller Caller) {
+	s.logger.Info("task transition",
+		"action", action,
+		"task_id", string(task.ID),
+		"space_id", string(task.SpaceID),
+		"status", string(task.Status),
+		"assigned_to", string(task.AssignedTo),
+		"claimed_by_member_id", string(task.ClaimedByMemberID),
+		"caller_user_id", caller.UserID,
+		"caller_member_id", string(caller.MemberID),
+	)
+}
+
+type taskMessageTemplate struct {
+	Subject    string
+	NextAction string
+	Guidance   string
+}
+
+func taskMessageSpec(kind TaskMessageKind) (taskMessageTemplate, error) {
+	switch kind {
+	case TaskMessageAssigned:
+		return taskMessageTemplate{
+			Subject:    "Task assigned",
+			NextAction: "claim",
+			Guidance:   "Claim the task before starting work. Fetch the task when you need the full description and acceptance criteria.",
+		}, nil
+	case TaskMessageReviewRequested:
+		return taskMessageTemplate{
+			Subject:    "Task ready for review",
+			NextAction: "review",
+			Guidance:   "Fetch the task, inspect the submitted work against the acceptance criteria, then approve, retry, or fail the review.",
+		}, nil
+	case TaskMessageRetryRequested:
+		return taskMessageTemplate{
+			Subject:    "Task needs changes",
+			NextAction: "submit",
+			Guidance:   "Fetch the task, address the review feedback and unsatisfied acceptance criteria, then submit again when complete.",
+		}, nil
+	case TaskMessageReleased:
+		return taskMessageTemplate{
+			Subject:    "Task released",
+			NextAction: "assign",
+			Guidance:   "The worker returned the task without completing it. Fetch the task, then assign it again, update its direction, or cancel it.",
+		}, nil
+	case TaskMessageBlocked:
+		return taskMessageTemplate{
+			Subject:    "Task blocked",
+			NextAction: "unblock",
+			Guidance:   "The worker cannot continue without intervention. Fetch the task, resolve or escalate the blocker, then unblock it when work can resume.",
+		}, nil
+	case TaskMessageUnblocked:
+		return taskMessageTemplate{
+			Subject:    "Task unblocked",
+			NextAction: "submit",
+			Guidance:   "The blocker has been cleared. Fetch the task if you need context, continue the work, then submit when complete.",
+		}, nil
+	case TaskMessageCanceled:
+		return taskMessageTemplate{
+			Subject:    "Task canceled",
+			NextAction: "stop",
+			Guidance:   "Stop working on this task. Do not claim, continue, or submit it unless a coordinator creates or assigns a new task.",
+		}, nil
+	default:
+		return taskMessageTemplate{}, fmt.Errorf("unknown task message kind %q", kind)
+	}
+}
+
+func taskMessageBody(task domain.Task, spec taskMessageTemplate) string {
+	return fmt.Sprintf("%s\n\nThis task notification is addressed to you as the assigned Agen8 member. Treat it as work for this runtime identity; do not ask the human for permission unless you are genuinely blocked.\n\nTask %s in space %s.\n\nNext action: %s.\n\n%s",
+		spec.Subject,
+		task.ID,
+		task.SpaceID,
+		spec.NextAction,
+		spec.Guidance,
+	)
+}
+
+func trimTaskID(taskID domain.TaskID) domain.TaskID {
+	return domain.TaskID(strings.TrimSpace(string(taskID)))
+}
+
+func isCoordinatorType(memberType string) bool {
+	return strings.TrimSpace(memberType) == member.TypeCoordinator
+}
+
+func cloneMap(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}

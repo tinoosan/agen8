@@ -1,0 +1,10 @@
+package infra
+
+import (
+	credentialdomain "github.com/tinoosan/agen8-mcp-server/internal/services/credential/domain"
+	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+)
+
+func NewSQLiteRepository(handle *storagedb.Handle, dataDir string) (credentialdomain.Repository, error) {
+	return newSQLStore(handle, dataDir), nil
+}

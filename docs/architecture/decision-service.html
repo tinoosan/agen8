@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .flow-svg {
+    color: var(--text);
+  }
+  .flow-svg .flow-box {
+    fill: var(--bg-elevated);
+    stroke: currentColor;
+    stroke-width: 1.5;
+  }
+  .flow-svg text {
+    fill: currentColor;
+    stroke: none;
+    font-size: 16px;
+    font-weight: 650;
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / decision-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Decision Service</span>
+  <h1>Decision Service</h1>
+  <p class="lede">
+    The decision service is the durable work-memory boundary for consequential choices. It records what was decided, who made or requested the decision, what context made it necessary, what human answer resolved it when human judgment was required, and how that record connects to tasks, key results, missions, and plans.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#purpose">Purpose and ownership</a></li>
+      <li><a href="#human-input">Human input model</a></li>
+      <li><a href="#service">Service boundary</a></li>
+      <li><a href="#domain">Domain model</a></li>
+      <li><a href="#persistence">Persistence and queries</a></li>
+      <li><a href="#events">Links, events, and notifications</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="purpose">1. Purpose and ownership</h2>
+
+  <p>A decision is a product artifact, not a log line. It explains a branch in the work: an agent selected an approach, an operator resolved an escalation, or a human answered a structured question that unblocked the next step. The service makes that artifact durable, queryable, and linked into the work graph.</p>
+
+  <table>
+    <thead>
+      <tr><th>The decision service owns</th><th>The decision service does not own</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Canonical <code>Decision</code> records and payload validation.</td><td>Prompt instructions or model behavior.</td></tr>
+      <tr><td>The resolved audit entry for <code>log</code> and <code>ask_user</code> decisions.</td><td>The blocking wait loop that collects human input.</td></tr>
+      <tr><td>Context links from decisions to tasks, key results, missions, and plans.</td><td>Task lifecycle, mission lifecycle, or plan review state.</td></tr>
+      <tr><td>Project-scoped decision queries, counts, exports, and graph hydration.</td><td>Transcript card rendering or activity-feed formatting.</td></tr>
+      <tr><td><code>decision.logged</code> publication after persistence.</td><td>Notification storage, delivery, or inbox read state.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The service follows the same architectural rule as the task service: protocol adapters translate payloads, the application service orchestrates side effects, the domain validates the record, and the repository persists canonical state.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">MCP and RPC adapters</div>
+      <div class="role">Translate tool or JSON-RPC payloads into typed service calls. The MCP decision tool owns <code>action="log"</code> and <code>action="ask_user"</code> semantics.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Application service</div>
+      <div class="role">Build or accept a decision, resolve related refs, deduplicate retry storms, persist, write graph links, and publish the decision event.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain</div>
+      <div class="role">Owns <code>Decision</code>, <code>DecisionKind</code>, <code>DecisionSource</code>, <code>LogPayload</code>, <code>AskUserPayload</code>, constructors, filters, and validation.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Repository</div>
+      <div class="role">Stores and loads decision records. Query methods take <code>DecisionFilter</code> so project scope and filter semantics stay in one contract.</div>
+    </div>
+  </div>
+
+  <h2 id="human-input">2. Human input model</h2>
+
+  <p><code>ask_user</code> is a decision because the human answer becomes part of the reasoning trail. The question itself is not enough; the durable artifact is the resolved question, including whether the user answered or cancelled.</p>
+
+  <svg class="flow-svg" viewBox="0 0 980 250" role="img" aria-labelledby="ask-flow-title ask-flow-desc">
+    <title id="ask-flow-title">Human input flow</title>
+    <desc id="ask-flow-desc">The MCP decision tool declares human input, waits for the operator result, then records the resolved decision.</desc>
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+      </marker>
+    </defs>
+    <g fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M140 112 H240"></path>
+      <path d="M350 112 H450"></path>
+      <path d="M560 112 H660"></path>
+      <path d="M770 112 H870"></path>
+    </g>
+    <g>
+      <rect class="flow-box" x="24" y="58" width="116" height="108" rx="8"></rect>
+      <text x="82" y="94" text-anchor="middle">Agent calls</text>
+      <text x="82" y="120" text-anchor="middle">decision</text>
+      <text x="82" y="146" text-anchor="middle">ask_user</text>
+
+      <rect class="flow-box" x="240" y="58" width="110" height="108" rx="8"></rect>
+      <text x="295" y="94" text-anchor="middle">MCP tool</text>
+      <text x="295" y="120" text-anchor="middle">declares</text>
+      <text x="295" y="146" text-anchor="middle">input</text>
+
+      <rect class="flow-box" x="450" y="58" width="110" height="108" rx="8"></rect>
+      <text x="505" y="94" text-anchor="middle">Human</text>
+      <text x="505" y="120" text-anchor="middle">answers or</text>
+      <text x="505" y="146" text-anchor="middle">cancels</text>
+
+      <rect class="flow-box" x="660" y="58" width="110" height="108" rx="8"></rect>
+      <text x="715" y="94" text-anchor="middle">Tool calls</text>
+      <text x="715" y="120" text-anchor="middle">Complete</text>
+      <text x="715" y="146" text-anchor="middle">AskUser</text>
+
+      <rect class="flow-box" x="870" y="58" width="86" height="108" rx="8"></rect>
+      <text x="913" y="94" text-anchor="middle">Decision</text>
+      <text x="913" y="120" text-anchor="middle">row +</text>
+      <text x="913" y="146" text-anchor="middle">event</text>
+    </g>
+  </svg>
+
+  <p>The human-input primitives live outside the decision service. They define the shape of a question and answer:</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Question</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>             <span class="tok-type">string</span>
+    <span class="tok-field">Text</span>           <span class="tok-type">string</span>
+    <span class="tok-field">Type</span>           <span class="tok-type">string</span>
+    <span class="tok-field">Options</span>        []<span class="tok-type">string</span>
+    <span class="tok-field">AllowFreeForm</span>  <span class="tok-type">bool</span>
+    <span class="tok-field">Recommendation</span> <span class="tok-type">string</span>
+    <span class="tok-field">Blocking</span>       <span class="tok-type">bool</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">QuestionsResult</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Cancelled</span> <span class="tok-type">bool</span>
+    <span class="tok-field">Answers</span>   []<span class="tok-type">Answer</span>
+}</code></pre>
+
+  <p>The MCP layer delegates the active interaction to the <a href="./humaninput-service.html">human input service</a>: <code>DeclareHumanInput</code> parks the tool call and exposes the questions to the operator; <code>ResolveHumanInput</code> receives the answers or cancellation. The decision service is called after resolution through <code>CompleteAskUser</code>, and it persists the final audit record.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">CompleteAskUser</span>(
+    ctx context.Context,
+    req <span class="tok-type">AskUserRequest</span>,
+    result humaninput.<span class="tok-type">QuestionsResult</span>,
+) (<span class="tok-type">Result</span>, error)</code></pre>
+
+  <p>The decision row stores the original questions, the returned answers, and <code>cancelled=true</code> when the operator cancels. Agents treat returned answers as authoritative: they do not ask the same question again unless they need a genuinely new, narrower decision.</p>
+
+  <h3>MCP tool schema</h3>
+
+  <p>The MCP <code>decision</code> tool schema requires only <code>action</code> at the top level because the active model tool runtime does not accept top-level schema combinators. Callers provide <code>action</code> and only the fields used by that action. The handler enforces the action-specific field contract, rejects unknown fields, rejects fields that belong to a different action, and rejects explicit <code>null</code> values before any service call.</p>
+
+  <table>
+    <thead>
+      <tr><th>Action</th><th>Required fields</th><th>Optional fields</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>log</code></td>
+        <td><code>action</code>, <code>title</code>, <code>rationale</code></td>
+        <td><code>alternatives_rejected</code>, <code>invalidation_conditions</code>, <code>confidence</code>, <code>task_ref</code>, <code>key_result_ref</code>, <code>mission_ref</code>, <code>plan_ref</code></td>
+      </tr>
+      <tr>
+        <td><code>ask_user</code></td>
+        <td><code>action</code>, <code>title</code>, <code>questions</code></td>
+        <td><code>context</code>, <code>task_ref</code>, <code>key_result_ref</code>, <code>mission_ref</code>, <code>plan_ref</code>, <code>answers</code>, <code>cancelled</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="service">3. Service boundary</h2>
+
+  <p>The application service has an explicit constructor. It does not accept a dependency bag. Required production dependencies fail startup when absent.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(
+    repo domain.<span class="tok-type">Repository</span>,
+    clock domain.<span class="tok-type">Clock</span>,
+    links <span class="tok-type">GraphLinkWriter</span>,
+    linkDeleter <span class="tok-type">GraphLinkDeleter</span>,
+    events <span class="tok-type">EventPublisher</span>,
+    tasks <span class="tok-type">TaskKeyResultReader</span>,
+    missions <span class="tok-type">KeyResultMissionReader</span>,
+    members <span class="tok-type">MemberDisplayLookup</span>,
+    logger *slog.<span class="tok-type">Logger</span>,
+) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+  <p><code>repo</code>, <code>clock</code>, <code>links</code>, <code>linkDeleter</code>, and <code>events</code> are mandatory. Task and mission readers enrich references: a decision linked to a task can also link to the task's key result and mission. Member display lookup enriches event payloads for notification text; failures there are presentation-only and do not block persistence.</p>
+
+  <h2 id="domain">4. Domain model</h2>
+
+  <p><code>Decision</code> is a discriminated record. Exactly one payload pointer is set, and that pointer determines the kind.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Decision</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>             <span class="tok-type">DecisionID</span>
+    <span class="tok-field">ProjectID</span>      <span class="tok-type">string</span>
+    <span class="tok-field">SpaceID</span>        <span class="tok-type">string</span>
+    <span class="tok-field">Source</span>         <span class="tok-type">DecisionSource</span>
+    <span class="tok-field">SourceIdentity</span> <span class="tok-type">string</span>
+    <span class="tok-field">Title</span>          <span class="tok-type">string</span>
+    <span class="tok-field">Confidence</span>     <span class="tok-type">float64</span>
+    <span class="tok-field">TaskRef</span>        <span class="tok-type">string</span>
+    <span class="tok-field">KeyResultRef</span>   <span class="tok-type">string</span>
+    <span class="tok-field">MissionRef</span>     <span class="tok-type">string</span>
+    <span class="tok-field">PlanRef</span>        <span class="tok-type">string</span>
+    <span class="tok-field">CreatedAt</span>      time.<span class="tok-type">Time</span>
+    <span class="tok-field">Log</span>            *<span class="tok-type">LogPayload</span>
+    <span class="tok-field">AskUser</span>        *<span class="tok-type">AskUserPayload</span>
+}</code></pre>
+
+  <table>
+    <thead>
+      <tr><th>Kind</th><th>Meaning</th><th>Required payload</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>log</code></td><td>An agent or operator records a decision already made.</td><td><code>LogPayload.Rationale</code></td></tr>
+      <tr><td><code>ask_user</code></td><td>A structured human question is resolved and recorded.</td><td>At least one <code>Question</code>; answers or cancellation come from <code>QuestionsResult</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <p><code>Source</code> records who produced the decision: <code>agent</code> for agent tool calls and <code>operator</code> for operator-owned resolutions. It is separate from <code>Kind</code>; an agent can ask a human question, and an operator can resolve an escalation by creating a log decision.</p>
+
+  <h2 id="persistence">5. Persistence and queries</h2>
+
+  <p>The repository is split into reader and writer contracts. Service methods use domain names instead of storage-era names: <code>CreateDecision</code>, <code>GetDecision</code>, <code>ListDecisions</code>, <code>CountDecisions</code>, <code>ExportDecisions</code>, and <code>DeleteDecision</code>.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">DecisionFilter</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> <span class="tok-type">string</span>
+    <span class="tok-field">Sources</span>   []<span class="tok-type">DecisionSource</span>
+    <span class="tok-field">SpaceID</span>   <span class="tok-type">string</span>
+    <span class="tok-field">Tags</span>      []<span class="tok-type">string</span>
+    <span class="tok-field">Query</span>     <span class="tok-type">string</span>
+    <span class="tok-field">Since</span>     *time.<span class="tok-type">Time</span>
+    <span class="tok-field">Until</span>     *time.<span class="tok-type">Time</span>
+    <span class="tok-field">SortDesc</span>  <span class="tok-type">bool</span>
+    <span class="tok-field">Limit</span>     <span class="tok-type">int</span>
+    <span class="tok-field">Offset</span>    <span class="tok-type">int</span>
+}</code></pre>
+
+  <p>Project scope is part of <code>DecisionFilter</code>. List, count, and export use the same filter contract, which keeps project scoping, text search, tags, space filtering, sort order, and pagination in one place.</p>
+
+  <h2 id="events">6. Links, events, and notifications</h2>
+
+  <p>Decision creation is ordered: validate, resolve refs, deduplicate, persist, write context links, publish event.</p>
+
+  <svg class="flow-svg" viewBox="0 0 900 190" role="img" aria-labelledby="create-flow-title create-flow-desc">
+    <title id="create-flow-title">Decision create flow</title>
+    <desc id="create-flow-desc">A decision is validated, enriched, deduplicated, persisted, linked, and published.</desc>
+    <defs>
+      <marker id="arrow-create" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+      </marker>
+    </defs>
+    <g fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#arrow-create)">
+      <path d="M116 95 H210"></path>
+      <path d="M302 95 H396"></path>
+      <path d="M488 95 H582"></path>
+      <path d="M674 95 H768"></path>
+    </g>
+    <g>
+      <rect class="flow-box" x="24" y="52" width="92" height="86" rx="8"></rect>
+      <text x="70" y="89" text-anchor="middle">Validate</text>
+      <text x="70" y="112" text-anchor="middle">domain</text>
+      <rect class="flow-box" x="210" y="52" width="92" height="86" rx="8"></rect>
+      <text x="256" y="89" text-anchor="middle">Resolve</text>
+      <text x="256" y="112" text-anchor="middle">refs</text>
+      <rect class="flow-box" x="396" y="52" width="92" height="86" rx="8"></rect>
+      <text x="442" y="89" text-anchor="middle">Dedup</text>
+      <text x="442" y="112" text-anchor="middle">retry</text>
+      <rect class="flow-box" x="582" y="52" width="92" height="86" rx="8"></rect>
+      <text x="628" y="89" text-anchor="middle">Persist</text>
+      <text x="628" y="112" text-anchor="middle">row</text>
+      <rect class="flow-box" x="768" y="52" width="108" height="86" rx="8"></rect>
+      <text x="822" y="84" text-anchor="middle">Links +</text>
+      <text x="822" y="109" text-anchor="middle">event</text>
+    </g>
+  </svg>
+
+  <p>Context links are emitted from the decision to each referenced key result, mission, task, and plan. <code>decision.logged</code> is published after link creation. Publish failure returns an error because a missing decision event hides a product-visible state transition from notification evaluators and wake-signal consumers.</p>
+
+  <h2 id="invariants">7. Invariants</h2>
+
+  <table>
+    <thead>
+      <tr><th>Invariant</th><th>Enforced by</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>A decision is a durable explanation of a work branch.</td><td>The service persists <code>Decision</code> records; transient runner text is not the source of truth.</td></tr>
+      <tr><td>A decision has exactly one payload.</td><td><code>Decision.Validate</code> and repository save checks.</td></tr>
+      <tr><td><code>ask_user</code> records resolved human input, not an untracked chat exchange.</td><td>MCP human-input declaration and <code>Service.CompleteAskUser</code>.</td></tr>
+      <tr><td>Project-scoped reads require a project ID.</td><td><code>Service.List</code>, <code>Service.Count</code>, <code>Service.Export</code>, and RPC validation.</td></tr>
+      <tr><td>Retry storms do not create duplicate decision rows.</td><td><code>DecisionExistsByFingerprint</code> within the service deduplication window.</td></tr>
+      <tr><td>Deleted decisions do not leave graph edges behind.</td><td><code>Service.Delete</code> deletes context links before deleting the row.</td></tr>
+      <tr><td>Production constructs the service once.</td><td><code>internal/app.NewApplication</code> wires the repository, context-link service, event bus, clock, and logger.</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+</body>
+</html>

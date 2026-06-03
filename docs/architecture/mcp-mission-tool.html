@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP mission tool</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / mcp-mission-tool</span>
+  </div>
+</nav>
+
+<div class="page">
+
+<span class="eyebrow">Architecture · MCP Mission Tool</span>
+<h1>MCP mission tool</h1>
+<p class="lede">The agent-facing strategy tool. It exposes missions and key results through one native MCP handler backed by the mission service.</p>
+
+<h2>1. Boundary</h2>
+
+<p><code>mission</code> is an MCP adapter. It owns tool action names, JSON decoding, session caller resolution, context stamping, and deterministic MCP output. The mission service owns mission lifecycle, KR lifecycle, measurement rules, progress persistence, and mission events.</p>
+
+<div class="callout">
+  <strong>Service rule.</strong> The handler calls service methods only. It never imports mission infra, repositories, RPC DTOs, or a generic tool runtime.
+</div>
+
+<h2>2. Wiring</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 980 380" width="980" height="380" role="img" aria-label="MCP mission tool wiring">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/>
+    </marker>
+  </defs>
+
+  <rect x="38" y="54" width="150" height="64" rx="8" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="113" y="80" text-anchor="middle" font-size="14" font-weight="700">MCP client</text>
+  <text x="113" y="100" text-anchor="middle" font-size="12" fill="#555">tools/call mission</text>
+
+  <rect x="248" y="54" width="150" height="64" rx="8" fill="#fff4d6" stroke="#b58820"/>
+  <text x="323" y="80" text-anchor="middle" font-size="14" font-weight="700">MCP server</text>
+  <text x="323" y="100" text-anchor="middle" font-size="12" fill="#555">token → Session</text>
+
+  <rect x="458" y="54" width="150" height="64" rx="8" fill="#f7fbff" stroke="#769cc5"/>
+  <text x="533" y="80" text-anchor="middle" font-size="14" font-weight="700">native dispatch</text>
+  <text x="533" y="100" text-anchor="middle" font-size="12" fill="#555">mission.Name</text>
+
+  <rect x="668" y="54" width="164" height="84" rx="8" fill="#fff" stroke="#555"/>
+  <text x="750" y="80" text-anchor="middle" font-size="14" font-weight="700">mission handler</text>
+  <text x="750" y="102" text-anchor="middle" font-size="12" fill="#555">decode action</text>
+  <text x="750" y="120" text-anchor="middle" font-size="12" fill="#555">stamp caller</text>
+
+  <rect x="668" y="214" width="164" height="74" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="750" y="242" text-anchor="middle" font-size="14" font-weight="700">mission service</text>
+  <text x="750" y="263" text-anchor="middle" font-size="12" fill="#555">lifecycle + KR rules</text>
+
+  <rect x="248" y="214" width="150" height="64" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="323" y="240" text-anchor="middle" font-size="14" font-weight="700">space members</text>
+  <text x="323" y="260" text-anchor="middle" font-size="12" fill="#555">caller identity</text>
+
+  <rect x="458" y="214" width="150" height="64" rx="8" fill="#f2f2f2" stroke="#888"/>
+  <text x="533" y="240" text-anchor="middle" font-size="14" font-weight="700">MCP result</text>
+  <text x="533" y="260" text-anchor="middle" font-size="12" fill="#555">text + structured</text>
+
+  <line x1="188" y1="86" x2="248" y2="86" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="398" y1="86" x2="458" y2="86" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="608" y1="86" x2="668" y2="86" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="750" y1="138" x2="750" y2="214" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M668 110 C520 160, 454 224, 398 244" fill="none" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M668 246 C624 246, 626 246, 608 246" fill="none" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="323" y="326" text-anchor="middle" font-size="12" fill="#666">Session.MemberDirectory</text>
+  <text x="750" y="326" text-anchor="middle" font-size="12" fill="#666">Session.MissionService / MissionKRs / MissionProgress</text>
+  <text x="533" y="326" text-anchor="middle" font-size="12" fill="#666">agent-facing strategy payload</text>
+</svg>
+</div>
+
+<p><code>internal/mcp/toolset.go</code> registers <code>mission.NewHandler().Schema()</code>. <code>internal/mcp/server.go</code> resolves the token into a <code>Session</code>, dispatches native <code>mission</code> calls, and passes the mission service through narrow handler-owned interfaces.</p>
+
+<h2>3. Handler interfaces</h2>
+
+<pre><code class="lang-go">type MissionLifecycleService interface {
+    CreateMission(context.Context, missionapp.CreateMissionParams) (mission.Mission, error)
+    GetMission(context.Context, mission.MissionID) (mission.Mission, error)
+    ListMissions(context.Context, string, mission.MissionFilter) ([]mission.Mission, error)
+    UpdateMission(context.Context, missionapp.UpdateMissionParams) (mission.Mission, error)
+    DeleteMission(context.Context, missionapp.DeleteMissionParams) (mission.Mission, error)
+}
+
+type KeyResultService interface {
+    CreateKeyResult(context.Context, missionapp.CreateKeyResultParams) (kr.KeyResult, error)
+    GetKeyResult(context.Context, kr.KeyResultID) (kr.KeyResult, error)
+    ListKeyResults(context.Context, mission.MissionID) ([]kr.KeyResult, error)
+    UpdateKeyResult(context.Context, missionapp.UpdateKeyResultParams) (kr.KeyResult, error)
+    AssignKeyResultSpace(context.Context, kr.KeyResultID, string) (kr.KeyResult, error)
+    DeleteKeyResult(context.Context, missionapp.DeleteKeyResultParams) (kr.KeyResult, error)
+    ReopenKeyResult(context.Context, missionapp.ReopenKeyResultParams) (kr.KeyResult, error)
+}
+
+type ProgressService interface {
+    UpdateProgress(context.Context, missionapp.UpdateProgressParams) (kr.KeyResult, error)
+    GetProgressHistory(context.Context, kr.KeyResultID) ([]kr.ProgressEntry, error)
+    ComputeMissionProgress(context.Context, mission.MissionID) (missionapp.MissionProgress, error)
+}</code></pre>
+
+<p>The interfaces are intentionally small. They are defined where the handler consumes them, and <code>*missionapp.Service</code> satisfies them without an adapter.</p>
+
+<h2>4. Actions</h2>
+
+<table>
+  <tr><th>MCP action</th><th>Service method</th><th>Purpose</th></tr>
+  <tr><td><code>create</code></td><td><code>CreateMission</code></td><td>Create a draft mission in the session project.</td></tr>
+  <tr><td><code>get</code></td><td><code>GetMission</code></td><td>Read one mission.</td></tr>
+  <tr><td><code>list</code></td><td><code>ListMissions</code></td><td>List missions for the session project.</td></tr>
+  <tr><td><code>update</code></td><td><code>UpdateMission</code></td><td>Patch mission descriptive or schedule fields.</td></tr>
+  <tr><td><code>activate</code></td><td><code>UpdateMission</code></td><td>Request mission activation; accepts an optional lifecycle <code>note</code>.</td></tr>
+  <tr><td><code>pause</code></td><td><code>UpdateMission</code></td><td>Pause an active mission; accepts an optional lifecycle <code>note</code>.</td></tr>
+  <tr><td><code>complete</code></td><td><code>UpdateMission</code></td><td>Complete a mission after KR gates pass; accepts an optional lifecycle <code>note</code>.</td></tr>
+  <tr><td><code>archive</code></td><td><code>DeleteMission</code></td><td>Archive a mission; accepts an optional lifecycle <code>note</code>.</td></tr>
+  <tr><td><code>history</code></td><td><code>GetLifecycleHistory</code></td><td>Read mission and KR lifecycle events for a mission, including persisted lifecycle notes.</td></tr>
+  <tr><td><code>kr_create</code></td><td><code>CreateKeyResult</code></td><td>Create a key result under a mission.</td></tr>
+  <tr><td><code>kr_get</code></td><td><code>GetKeyResult</code></td><td>Read one key result.</td></tr>
+  <tr><td><code>kr_list</code></td><td><code>ListKeyResults</code></td><td>List key results for a mission; supports <code>limit</code> and <code>offset</code>.</td></tr>
+  <tr><td><code>kr_update</code></td><td><code>UpdateKeyResult</code></td><td>Patch KR fields.</td></tr>
+  <tr><td><code>kr_assign_space</code></td><td><code>AssignKeyResultSpace</code></td><td>Assign an open owning space.</td></tr>
+  <tr><td><code>kr_drop</code></td><td><code>DeleteKeyResult</code></td><td>Drop a key result while preserving history; accepts an optional rationale <code>note</code>.</td></tr>
+  <tr><td><code>kr_reopen</code></td><td><code>ReopenKeyResult</code></td><td>Reopen completed or dropped KR scope, resetting progress to its starting value; accepts an optional rationale <code>note</code>.</td></tr>
+  <tr><td><code>kr_progress</code></td><td><code>UpdateProgress</code></td><td>Record KR progress.</td></tr>
+  <tr><td><code>kr_history</code></td><td><code>GetProgressHistory</code></td><td>Read KR progress history.</td></tr>
+  <tr><td><code>progress</code></td><td><code>ComputeMissionProgress</code></td><td>Read aggregate mission progress, status counts, and blocking non-completed KRs.</td></tr>
+</table>
+
+<p>Lifecycle actions are idempotent when the target state is already present. Repeating <code>activate</code> on an active mission, <code>complete</code> on a completed mission, <code>archive</code> on an archived mission, or <code>kr_drop</code> on a dropped KR returns the current record without publishing duplicate bus events. When an accepted action includes <code>note</code>, the MCP response echoes it at the top level and the service includes it in lifecycle history; state-changing actions also publish the lifecycle event. The <code>history</code> action reads those persisted lifecycle event payloads with <code>limit</code> and <code>offset</code>.</p>
+
+<h2>5. Hard rules</h2>
+
+<table>
+  <tr><th>Rule</th><th>Enforced by</th></tr>
+  <tr><td>The mission tool never calls repositories.</td><td>Handler imports only mission app/domain and member domain packages.</td></tr>
+  <tr><td>The mission service never knows MCP action names.</td><td>Actions live under <code>internal/mcp/tools/mission</code>.</td></tr>
+  <tr><td>Unknown fields fail before service calls.</td><td>Decoder uses <code>DisallowUnknownFields</code>.</td></tr>
+  <tr><td>Callers include only fields used by the selected action.</td><td>The schema requires only <code>action</code>; the decoder rejects fields that belong to a different action and rejects explicit <code>null</code> values.</td></tr>
+  <tr><td>The MCP result is structured and deterministic.</td><td>Formatter maps mission/KR domain records into canonical result objects.</td></tr>
+  <tr><td>Session caller identity is stamped before service calls.</td><td>Handler resolves <code>MemberDirectory.GetMember</code> and writes <code>caller.Caller</code> to context.</td></tr>
+</table>
+
+<footer>Architecture · agen8 · This document describes the current MCP mission tool shape.</footer>
+
+</div>
+</body>
+</html>

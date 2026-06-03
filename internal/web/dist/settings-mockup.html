@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agen8 — Settings (mockup)</title>
+<style>
+  :root {
+    --bg-app: #1a1a1c;
+    --bg-panel: #1f1f22;
+    --bg-surface: #26262a;
+    --bg-elevated: #2e2e33;
+    --bg-hover: rgba(255, 255, 255, 0.05);
+    --bg-active: rgba(255, 255, 255, 0.08);
+    --border: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --text-1: #f0f0f4;
+    --text-2: #9898a8;
+    --text-3: #636378;
+    --accent: #3b82f6;
+    --accent-dim: rgba(59, 130, 246, 0.14);
+    --accent-border: rgba(59, 130, 246, 0.45);
+    --green: #22c55e;
+    --green-dim: rgba(34, 197, 94, 0.12);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245, 158, 11, 0.12);
+    --danger: #ef4444;
+    --r-sm: 5px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-xl: 16px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg-app);
+    color: var(--text-1);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  svg { display: block; }
+
+  .app { display: flex; height: 100vh; overflow: hidden; }
+
+  /* ── Sidebar ─────────────────────────────── */
+  .sidebar {
+    width: 252px;
+    flex-shrink: 0;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 14px 12px;
+    gap: 4px;
+    position: relative;
+  }
+  .sidebar::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 160px;
+    background: radial-gradient(120% 80% at 0% 0%, var(--accent-dim), transparent 70%);
+    pointer-events: none;
+  }
+  .back {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-2);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: var(--r-md);
+    cursor: pointer;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .back:hover { background: var(--bg-hover); color: var(--text-1); }
+
+  .nav-group-label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+    padding: 8px 10px 4px;
+    font-weight: 600;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: var(--r-md);
+    color: var(--text-2);
+    cursor: pointer;
+    font-size: 13.5px;
+    position: relative;
+    border: 1px solid transparent;
+    transition: background .12s, color .12s;
+  }
+  .nav-item:hover { background: var(--bg-hover); color: var(--text-1); }
+  .nav-item svg { width: 16px; height: 16px; opacity: .85; }
+  .nav-item.active {
+    background: var(--accent-dim);
+    color: var(--text-1);
+    border-color: var(--accent-border);
+  }
+  .nav-item.active svg { opacity: 1; color: var(--accent); }
+
+  .sidebar-foot {
+    margin-top: auto;
+    padding: 10px;
+    font-size: 11px;
+    color: var(--text-3);
+    border-top: 1px solid var(--border);
+  }
+
+  /* ── Content ─────────────────────────────── */
+  .content { flex: 1; overflow-y: auto; }
+  .content-inner {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 40px 80px;
+  }
+  .page { display: none; }
+  .page.active { display: block; animation: fade .18s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .page-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .page-title { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .page-sub { color: var(--text-3); font-size: 13px; margin: 0 0 28px; }
+  .pill-mock {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-dim); border: 1px solid var(--accent-border);
+    padding: 2px 7px; border-radius: 999px;
+  }
+
+  .group-label {
+    font-size: 12px; font-weight: 600; color: var(--text-2);
+    text-transform: uppercase; letter-spacing: .05em;
+    margin: 28px 0 10px;
+  }
+  .group-label:first-of-type { margin-top: 0; }
+
+  .card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 24px;
+    align-items: center;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .row:last-child { border-bottom: none; }
+  .row.stack { grid-template-columns: 1fr; align-items: stretch; }
+  .row-title { font-size: 13.5px; font-weight: 600; margin: 0; }
+  .row-desc { font-size: 12px; color: var(--text-3); margin: 3px 0 0; line-height: 1.5; max-width: 46ch; }
+  .row-control { justify-self: end; }
+
+  /* ── Controls ────────────────────────────── */
+  .switch {
+    width: 38px; height: 22px; border-radius: 999px;
+    background: var(--bg-elevated); border: 1px solid var(--border-strong);
+    position: relative; cursor: pointer; transition: background .15s, border-color .15s; flex-shrink: 0;
+  }
+  .switch .knob {
+    position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--text-2); transition: transform .15s, background .15s;
+  }
+  .switch.on { background: var(--accent); border-color: var(--accent); }
+  .switch.on .knob { transform: translateX(16px); background: #fff; }
+
+  .input, .select {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-1);
+    border-radius: var(--r-md);
+    padding: 8px 11px;
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+    outline: none;
+  }
+  .input:focus, .select:focus { border-color: var(--accent-border); }
+  .input.mono { font-family: var(--mono); font-size: 12px; }
+  .select {
+    appearance: none;
+    min-width: 200px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239898a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+    background-repeat: no-repeat; background-position: right 9px center; padding-right: 30px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 12px; color: var(--text-2); font-weight: 500; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .help { font-size: 11.5px; color: var(--text-3); margin: 8px 0 0; line-height: 1.5; }
+
+  /* Segmented selector cards (Codex "Work mode" style) */
+  .selector { display: grid; grid-template-columns: repeat(var(--cols, 2), 1fr); gap: 12px; }
+  .opt {
+    display: flex; align-items: flex-start; gap: 10px;
+    border: 1px solid var(--border); background: var(--bg-surface);
+    border-radius: var(--r-md); padding: 13px 14px; cursor: pointer; transition: border-color .12s, background .12s;
+  }
+  .opt:hover { border-color: var(--border-strong); }
+  .opt.selected { border-color: var(--accent-border); background: var(--accent-dim); }
+  .opt .ico { color: var(--text-2); margin-top: 1px; }
+  .opt.selected .ico { color: var(--accent); }
+  .opt .meta { flex: 1; min-width: 0; }
+  .opt .meta b { font-size: 13px; font-weight: 600; display: block; }
+  .opt .meta span { font-size: 11.5px; color: var(--text-3); display: block; margin-top: 2px; line-height: 1.4; }
+  .radio { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--border-strong); flex-shrink: 0; margin-top: 1px; position: relative; }
+  .opt.selected .radio { border-color: var(--accent); }
+  .opt.selected .radio::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-1);
+    border-radius: var(--r-md); padding: 7px 13px; font-size: 13px; font-weight: 500;
+    cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { background: var(--bg-elevated); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.ghost { background: transparent; }
+  .btn.danger { color: var(--danger); border-color: transparent; background: transparent; }
+  .btn.danger:hover { background: rgba(239, 68, 68, 0.1); }
+  .btn.sm { padding: 5px 10px; font-size: 12px; }
+  .icon-btn { display: inline-flex; padding: 6px; border-radius: var(--r-sm); color: var(--text-3); cursor: pointer; border: none; background: none; }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text-1); }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    background: var(--bg-elevated); color: var(--text-2); border: 1px solid var(--border);
+  }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .badge.green { background: var(--green-dim); color: var(--green); border-color: transparent; }
+  .badge.amber { background: var(--amber-dim); color: var(--amber); border-color: transparent; }
+  .badge.accent { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
+
+  .meta-grid { display: flex; gap: 40px; }
+  .meta-grid .k { font-size: 11px; color: var(--text-3); }
+  .meta-grid .v { font-size: 13px; color: var(--text-1); margin-top: 2px; }
+
+  /* list rows for credentials / locations */
+  .list-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+  }
+  .list-row:last-child { border-bottom: none; }
+  .list-row .lead { width: 34px; height: 34px; border-radius: var(--r-md); background: var(--bg-elevated); display: flex; align-items: center; justify-content: center; color: var(--text-2); flex-shrink: 0; }
+  .list-row .body { flex: 1; min-width: 0; }
+  .list-row .name { font-size: 13.5px; font-weight: 600; }
+  .list-row .sub { font-size: 12px; color: var(--text-3); margin-top: 2px; font-family: var(--mono); }
+  .list-row .caps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+
+  /* notification matrix */
+  table.matrix { width: 100%; border-collapse: collapse; }
+  table.matrix th { text-align: left; font-size: 11px; color: var(--text-3); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: .04em; }
+  table.matrix th.center, table.matrix td.center { text-align: center; }
+  table.matrix td { padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  table.matrix tr:last-child td { border-bottom: none; }
+  .mini-switch { width: 30px; height: 18px; border-radius: 999px; background: var(--bg-elevated); border: 1px solid var(--border-strong); position: relative; display: inline-block; cursor: pointer; vertical-align: middle; }
+  .mini-switch .knob { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-2); transition: transform .15s; }
+  .mini-switch.on { background: var(--accent); border-color: var(--accent); }
+  .mini-switch.on .knob { transform: translateX(12px); background: #fff; }
+
+  .section-head-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .restart-note { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--amber); background: var(--amber-dim); border: 1px solid transparent; padding: 9px 12px; border-radius: var(--r-md); margin-top: 14px; }
+
+  /* appearance: theme mode + named themes */
+  .seg { display: inline-flex; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 3px; gap: 2px; }
+  .seg button { border: none; background: none; color: var(--text-3); font-family: inherit; font-size: 12.5px; padding: 5px 11px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .seg button:hover { color: var(--text-1); }
+  .seg button.active { background: var(--bg-elevated); color: var(--text-1); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .seg button svg { width: 14px; height: 14px; }
+
+  .theme-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .swatch-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .swatch-row:last-child { border-bottom: none; }
+  .swatch-row .lbl { font-size: 13px; color: var(--text-2); }
+  .chip { display: inline-flex; align-items: center; gap: 8px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px 4px 5px; font-family: var(--mono); font-size: 12px; color: var(--text-1); }
+  .chip .dot { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); }
+
+  .theme-preview { display: flex; align-items: stretch; border-radius: var(--r-md); border: 1px solid var(--border); overflow: hidden; }
+  .theme-preview .pv-side { width: 92px; padding: 12px 10px; display: flex; flex-direction: column; gap: 7px; }
+  .theme-preview .pv-side .pv-line { height: 7px; border-radius: 3px; opacity: .55; }
+  .theme-preview .pv-main { flex: 1; padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; }
+  .theme-preview .pv-title { font-size: 13px; font-weight: 600; }
+  .theme-preview .pv-body { height: 7px; border-radius: 3px; width: 78%; opacity: .4; }
+  .theme-preview .pv-body.short { width: 52%; }
+  .theme-preview .pv-btn { align-self: flex-start; font-size: 11px; font-weight: 600; color: #fff; padding: 5px 13px; border-radius: 6px; margin-top: 2px; }
+
+  .tag-soon { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; margin-left: 8px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="back">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+      Back to app
+    </div>
+
+    <div class="nav-group-label">You</div>
+    <div class="nav-item active" data-target="account">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Account
+    </div>
+    <div class="nav-item" data-target="appearance">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      Appearance
+    </div>
+    <div class="nav-item" data-target="notifications">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      Notifications
+    </div>
+
+    <div class="nav-group-label">Runtime</div>
+    <div class="nav-item" data-target="credentials">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+      Credentials
+    </div>
+    <div class="nav-item" data-target="locations">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>
+      Locations
+    </div>
+    <div class="nav-item" data-target="advanced">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/></svg>
+      Advanced
+    </div>
+
+    <div class="sidebar-foot">Mockup · real settings only</div>
+  </aside>
+
+  <!-- ── Content ── -->
+  <main class="content">
+    <div class="content-inner">
+
+      <!-- ACCOUNT -->
+      <section class="page active" id="account">
+        <div class="page-head"><h1 class="page-title">Account</h1><span class="pill-mock">Mockup</span></div>
+        <p class="page-sub">Your profile and sign-in details for this Agen8 instance.</p>
+
+        <div class="group-label">Profile</div>
+        <div class="card">
+          <div class="row stack">
+            <div class="grid2">
+              <div class="field"><label>Name</label><input class="input" value="Santino Onyeme" /></div>
+              <div class="field"><label>Email</label><input class="input" value="santino.onyeme@gmail.com" /></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;">
+              <span class="help" style="margin:0;">Shown as Santino Onyeme</span>
+              <button class="btn primary sm">Save profile</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="group-label">Access</div>
+        <div class="card">
+          <div class="row">
+            <div class="meta-grid">
+              <div><div class="k">Type</div><div class="v">Email account</div></div>
+              <div><div class="k">Joined</div><div class="v">Jun 2, 2026</div></div>
+            </div>
+            <div class="row-control"><button class="btn danger sm">Sign out</button></div>
+          </div>
+          <div class="row">
+            <div class="row-text">
+              <p class="row-title">Active session</p>
+              <p class="row-desc">This browser is currently signed in as Santino Onyeme.</p>
+            </div>
+            <div class="row-control"><span class="badge green"><span class="dot" style="background:var(--green)"></span>Active</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- APPEARANCE -->
+      <section class="page" id="appearance">
+        <div class="page-head"><h1 class="page-title">Appearance</h1><span class="pill-mock">Mockup</span></div>
+        <p class="page-sub">Theme and start view — saved locally in this browser.</p>
+
+        <div class="group-label">Theme</div>
+        <div class="card">
+          <div class="row stack">
+            <div class="theme-head">
+              <div class="row-text">
+                <p class="row-title">Mode</p>
+                <p class="row-desc">Use light or dark. Each mode has named themes you can switch between.</p>
+              </div>
+              <div class="seg" id="modeSeg">
+                <button data-mode="light"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>Light</button>
+                <button data-mode="dark" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>Dark</button>
+              </div>
+            </div>
+          </div>
+          <div class="row stack">
+            <div class="theme-head" style="margin-bottom:12px;">
+              <label id="themeModeLabel" style="font-size:13px;color:var(--text-2);font-weight:500;">Dark theme</label>
+              <select class="select" id="themeSelect" style="min-width:200px;"></select>
+            </div>
+            <div class="theme-preview" id="themePreview"></div>
+            <div style="margin-top:14px;">
+              <div class="swatch-row"><span class="lbl">Accent</span><span class="chip"><span class="dot" id="sw-accent"></span><span id="hx-accent"></span></span></div>
+              <div class="swatch-row"><span class="lbl">Background</span><span class="chip"><span class="dot" id="sw-bg"></span><span id="hx-bg"></span></span></div>
+              <div class="swatch-row"><span class="lbl">Foreground</span><span class="chip"><span class="dot" id="sw-fg"></span><span id="hx-fg"></span></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="group-label">Display <span class="tag-soon">Proposed</span></div>
+        <div class="card">
+          <div class="row">
+            <div class="row-text"><p class="row-title">UI font size</p><p class="row-desc">Base text size used across the app.</p></div>
+            <div class="row-control"><div style="display:flex;align-items:center;gap:8px;"><input class="input" style="width:80px;text-align:right;" value="14" /><span style="color:var(--text-3);font-size:13px;">px</span></div></div>
+          </div>
+          <div class="row">
+            <div class="row-text"><p class="row-title">Reduce motion</p><p class="row-desc">Reduce animations or match your system.</p></div>
+            <div class="row-control"><div class="seg motionSeg"><button class="active">System</button><button>On</button><button>Off</button></div></div>
+          </div>
+          <div class="row">
+            <div class="row-text"><p class="row-title">Translucent sidebar</p><p class="row-desc">Blur the panel background over content.</p></div>
+            <div class="row-control"><div class="switch"><div class="knob"></div></div></div>
+          </div>
+        </div>
+
+        <div class="group-label">Project start view</div>
+        <div class="selector" style="--cols:2;">
+          <div class="opt selected">
+            <svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+            <div class="meta"><b>Dashboard</b><span>Project health, missions, and actions.</span></div>
+            <div class="radio"></div>
+          </div>
+          <div class="opt">
+            <svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M9 6h6M6 9v6a3 3 0 0 0 3 3h6"/></svg>
+            <div class="meta"><b>Strategy map</b><span>Mission and context graph.</span></div>
+            <div class="radio"></div>
+          </div>
+        </div>
+        <p class="help">Theme and start view are stored locally. Items tagged <b>Proposed</b> are design placeholders — not wired to the daemon yet.</p>
+      </section>
+
+      <!-- NOTIFICATIONS -->
+      <section class="page" id="notifications">
+        <div class="page-head"><h1 class="page-title">Notifications</h1><span class="pill-mock">Mockup</span></div>
+        <p class="page-sub">Choose how operator-attention events reach you.</p>
+
+        <div class="group-label">General</div>
+        <div class="card">
+          <div class="row">
+            <div class="row-text">
+              <p class="row-title">Sound alerts</p>
+              <p class="row-desc">Play a chime for critical and high urgency items.</p>
+            </div>
+            <div class="row-control"><div class="switch on"><div class="knob"></div></div></div>
+          </div>
+        </div>
+
+        <div class="group-label">Rules</div>
+        <div class="card">
+          <table class="matrix">
+            <thead>
+              <tr><th>Source</th><th>Trigger</th><th>Min severity</th><th class="center">Bell</th><th class="center">Webhook</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="font-weight:600;">Heartbeat</td>
+                <td>Schedule expiring</td>
+                <td><select class="select" style="min-width:120px;padding:5px 28px 5px 9px;"><option>warning</option><option>info</option><option>critical</option></select></td>
+                <td class="center"><span class="mini-switch on"><span class="knob"></span></span></td>
+                <td class="center"><span class="mini-switch"><span class="knob"></span></span></td>
+                <td class="center"><button class="btn danger sm">Remove</button></td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;">Heartbeat</td>
+                <td>Schedule completed</td>
+                <td><select class="select" style="min-width:120px;padding:5px 28px 5px 9px;"><option>info</option><option>warning</option><option>critical</option></select></td>
+                <td class="center"><span class="mini-switch on"><span class="knob"></span></span></td>
+                <td class="center"><span class="mini-switch on"><span class="knob"></span></span></td>
+                <td class="center"><button class="btn danger sm">Remove</button></td>
+              </tr>
+              <tr>
+                <td style="font-weight:600;">Task</td>
+                <td>All triggers</td>
+                <td><select class="select" style="min-width:120px;padding:5px 28px 5px 9px;"><option>critical</option><option>warning</option><option>info</option></select></td>
+                <td class="center"><span class="mini-switch on"><span class="knob"></span></span></td>
+                <td class="center"><span class="mini-switch"><span class="knob"></span></span></td>
+                <td class="center"><button class="btn danger sm">Remove</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="help">Rows are auto-populated from registered evaluators via <code style="font-family:var(--mono)">notifications.sources.list</code>. Webhook URL appears inline when the Webhook channel is enabled.</p>
+      </section>
+
+      <!-- CREDENTIALS -->
+      <section class="page" id="credentials">
+        <div class="page-head"><h1 class="page-title">Credentials</h1><span class="pill-mock">Mockup</span></div>
+        <p class="page-sub">Store SSH and API credentials for runtime use. Secret values are write-only from the browser.</p>
+
+        <div class="section-head-actions">
+          <div class="group-label" style="margin:0;">Stored credentials</div>
+          <button class="btn sm"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>Add</button>
+        </div>
+        <div class="card">
+          <div class="list-row">
+            <div class="lead"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg></div>
+            <div class="body">
+              <div class="name">prod-deploy-key</div>
+              <div class="sub">Added Jun 1, 2026</div>
+            </div>
+            <span class="badge accent">SSH key</span>
+            <button class="icon-btn" title="Rotate"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+            <button class="icon-btn" title="Remove"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+          <div class="list-row">
+            <div class="lead"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg></div>
+            <div class="body">
+              <div class="name">openai-api</div>
+              <div class="sub">Added May 24, 2026</div>
+            </div>
+            <span class="badge">API key</span>
+            <button class="icon-btn" title="Rotate"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+            <button class="icon-btn" title="Remove"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+        <p class="help">Kinds: SSH agent · SSH key · SSH password · API key. Non-secret defaults only — API keys use the OS keychain.</p>
+      </section>
+
+      <!-- LOCATIONS -->
+      <section class="page" id="locations">
+        <div class="page-head"><h1 class="page-title">Locations</h1><span class="pill-mock">Mockup</span></div>
+        <p class="page-sub">Where agents execute — the local daemon and any SSH targets.</p>
+
+        <div class="section-head-actions">
+          <div class="group-label" style="margin:0;">Execution locations</div>
+          <button class="btn sm"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>Add location</button>
+        </div>
+        <div class="card">
+          <div class="list-row" style="align-items:flex-start;">
+            <div class="lead"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg></div>
+            <div class="body">
+              <div class="name">This machine <span class="badge" style="margin-left:6px;">local</span></div>
+              <div class="sub">Local daemon host</div>
+              <div class="caps">
+                <span class="badge green"><span class="dot" style="background:var(--green)"></span>Reachable</span>
+                <span class="badge">Files</span><span class="badge">Shell</span>
+                <span class="badge accent">Claude</span><span class="badge accent">Codex</span>
+              </div>
+            </div>
+          </div>
+          <div class="list-row" style="align-items:flex-start;">
+            <div class="lead"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></div>
+            <div class="body">
+              <div class="name">build-box</div>
+              <div class="sub">deploy@10.0.4.12:22</div>
+              <div class="caps">
+                <span class="badge green"><span class="dot" style="background:var(--green)"></span>Reachable</span>
+                <span class="badge">Files</span><span class="badge">Shell</span>
+                <span class="badge amber">Claude — login required</span>
+                <span class="badge">Credential attached</span>
+              </div>
+            </div>
+            <button class="btn ghost sm">Probe</button>
+          </div>
+        </div>
+        <p class="help">Per-location capabilities are detected by probing: Files, Shell, Claude, Codex, Reachable. SSH locations attach a stored credential and can sign in to Claude / Codex.</p>
+      </section>
+
+      <!-- ADVANCED -->
+      <section class="page" id="advanced">
+        <div class="page-head"><h1 class="page-title">Advanced</h1><span class="pill-mock">Mockup</span></div>
+        <p class="page-sub">Daemon runtime configuration. Some changes require a restart to take effect.</p>
+
+        <div class="group-label">Logging</div>
+        <div class="card">
+          <div class="row">
+            <div class="row-text">
+              <p class="row-title">Log file path</p>
+              <p class="row-desc">Where the daemon writes its log file.</p>
+            </div>
+            <div class="row-control" style="min-width:300px;"><input class="input mono" value="~/.agen8/logs/daemon.log" /></div>
+          </div>
+          <div class="row">
+            <div class="row-text">
+              <p class="row-title">Max log size</p>
+              <p class="row-desc">Rotate the log file once it exceeds this size.</p>
+            </div>
+            <div class="row-control"><div style="display:flex;align-items:center;gap:8px;"><input class="input" style="width:90px;text-align:right;" value="50" /><span style="color:var(--text-3);font-size:13px;">MB</span></div></div>
+          </div>
+        </div>
+
+        <div class="group-label">Space messaging</div>
+        <div class="card">
+          <div class="row">
+            <div class="row-text">
+              <p class="row-title">Query timeout</p>
+              <p class="row-desc">Maximum time a space message query may run before timing out.</p>
+            </div>
+            <div class="row-control"><div style="display:flex;align-items:center;gap:8px;"><input class="input" style="width:90px;text-align:right;" value="30" /><span style="color:var(--text-3);font-size:13px;">sec</span></div></div>
+          </div>
+        </div>
+
+        <div class="restart-note">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+          Changing the log file path requires a daemon restart.
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:16px;"><button class="btn primary">Apply changes</button></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  // nav switching
+  const items = document.querySelectorAll('.nav-item');
+  const pages = document.querySelectorAll('.page');
+  items.forEach(item => {
+    item.addEventListener('click', () => {
+      const target = item.dataset.target;
+      items.forEach(i => i.classList.toggle('active', i === item));
+      pages.forEach(p => p.classList.toggle('active', p.id === target));
+      document.querySelector('.content').scrollTop = 0;
+    });
+  });
+  // toggle demo
+  document.querySelectorAll('.switch, .mini-switch').forEach(sw => {
+    sw.addEventListener('click', () => sw.classList.toggle('on'));
+  });
+  // selector demo
+  document.querySelectorAll('.selector').forEach(group => {
+    group.querySelectorAll('.opt').forEach(opt => {
+      opt.addEventListener('click', () => {
+        group.querySelectorAll('.opt').forEach(o => o.classList.toggle('selected', o === opt));
+      });
+    });
+  });
+
+  // appearance: light/dark mode + named themes (mapped to real agen8 tokens)
+  const THEMES = {
+    light: [
+      { id: 'daylight', name: 'Daylight', accent: '#2563eb', bg: '#ffffff', surface: '#f5f5f7', fg: '#1d1d1f' },
+    ],
+    dark: [
+      { id: 'graphite', name: 'Graphite', accent: '#3b82f6', bg: '#1a1a1c', surface: '#26262a', fg: '#f0f0f4' },
+      { id: 'dusk',     name: 'Dusk',     accent: '#1d9bf0', bg: '#151d2d', surface: '#213046', fg: '#e7e9ea' },
+    ],
+  };
+  let mode = 'dark';
+  const sel = document.getElementById('themeSelect');
+  function renderTheme(t) {
+    document.getElementById('sw-accent').style.background = t.accent;
+    document.getElementById('hx-accent').textContent = t.accent.toUpperCase();
+    document.getElementById('sw-bg').style.background = t.bg;
+    document.getElementById('hx-bg').textContent = t.bg.toUpperCase();
+    document.getElementById('sw-fg').style.background = t.fg;
+    document.getElementById('hx-fg').textContent = t.fg.toUpperCase();
+    document.getElementById('themePreview').innerHTML =
+      '<div class="pv-side" style="background:' + t.surface + ';">' +
+        '<div class="pv-line" style="background:' + t.accent + ';opacity:1;"></div>' +
+        '<div class="pv-line" style="background:' + t.fg + ';"></div>' +
+        '<div class="pv-line" style="background:' + t.fg + ';"></div>' +
+        '<div class="pv-line" style="background:' + t.fg + ';"></div>' +
+      '</div>' +
+      '<div class="pv-main" style="background:' + t.bg + ';color:' + t.fg + ';">' +
+        '<div class="pv-title">' + t.name + '</div>' +
+        '<div class="pv-body" style="background:' + t.fg + ';"></div>' +
+        '<div class="pv-body short" style="background:' + t.fg + ';"></div>' +
+        '<div class="pv-btn" style="background:' + t.accent + ';">Primary</div>' +
+      '</div>';
+  }
+  function renderMode() {
+    const list = THEMES[mode];
+    sel.innerHTML = list.map(t => '<option value="' + t.id + '">' + t.name + '</option>').join('');
+    document.getElementById('themeModeLabel').textContent = (mode === 'dark' ? 'Dark' : 'Light') + ' theme';
+    renderTheme(list[0]);
+  }
+  document.querySelectorAll('#modeSeg button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('active', x === b));
+      mode = b.dataset.mode;
+      renderMode();
+    });
+  });
+  sel.addEventListener('change', () => {
+    const t = THEMES[mode].find(x => x.id === sel.value);
+    if (t) renderTheme(t);
+  });
+  renderMode();
+
+  // segmented toggles (reduce motion)
+  document.querySelectorAll('.seg.motionSeg').forEach(group => {
+    group.querySelectorAll('button').forEach(b => {
+      b.addEventListener('click', () => {
+        group.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      });
+    });
+  });
+</script>
+</body>
+</html>

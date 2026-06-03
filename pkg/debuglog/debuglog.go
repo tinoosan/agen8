@@ -1,0 +1,94 @@
+package debuglog
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/tinoosan/agen8-mcp-server/internal/config"
+)
+
+const (
+	spaceID         = "debug-space"
+	envDebugLogPath = "AGEN8_DEBUG_LOG_PATH"
+)
+
+type payload struct {
+	SpaceID      string         `json:"spaceId"`
+	RunID        string         `json:"runId"`
+	HypothesisID string         `json:"hypothesisId"`
+	Location     string         `json:"location"`
+	Message      string         `json:"message"`
+	Data         map[string]any `json:"data,omitempty"`
+	Timestamp    int64          `json:"timestamp"`
+}
+
+func Log(runID, hypothesisID, location, message string, data map[string]any) {
+	p := payload{
+		SpaceID:      spaceID,
+		RunID:        runID,
+		HypothesisID: hypothesisID,
+		Location:     location,
+		Message:      message,
+		Data:         data,
+		Timestamp:    time.Now().UnixMilli(),
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		return
+	}
+	f, err := OpenLogFile()
+	if err != nil {
+		return
+	}
+	f.Write(append(b, '\n'))
+	f.Close()
+}
+
+func resolveDebugLogPath() (string, error) {
+	if override := strings.TrimSpace(os.Getenv(envDebugLogPath)); override != "" {
+		expanded, err := expandTilde(override)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Clean(expanded), nil
+	}
+
+	dataDir, err := config.ResolveDataDir("", false)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "debug.log"), nil
+}
+
+// OpenLogFile opens the debug log file for append.
+func OpenLogFile() (*os.File, error) {
+	path, err := resolveDebugLogPath()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+}
+
+func expandTilde(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return "", os.ErrInvalid
+	}
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if p == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, strings.TrimPrefix(p, "~/")), nil
+}

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>File Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / file-service</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture · File Service</span>
+  <h1>File Service</h1>
+  <p class="lede">The file service owns native file browsing and preview for project-scoped files. The browser uses virtual paths, and the service resolves those paths through the saved project record and execution location before touching storage.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#boundary">Service boundary</a></li>
+      <li><a href="#paths">Virtual paths</a></li>
+      <li><a href="#flow">Preview flow</a></li>
+      <li><a href="#rpc">RPC surface</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="boundary">1. Service boundary</h2>
+  <p>The file service is the production entry point for file operations used by the Files page, context panel, inline file cards, and native document viewers. It does not own projects, spaces, harness sessions, or artifact history. It loads the saved project by <code>projectId</code>, resolves a virtual file path against that project's location, performs the filesystem operation, and returns a UI-ready result.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">File owns</div>
+      <div class="title">Native browsing</div>
+      <div class="meta">Directory entries, previews, binary metadata, uploads, creates, moves, copies, and deletes.</div>
+    </div>
+    <div class="card">
+      <div class="label">Project owns</div>
+      <div class="title">Root registration</div>
+      <div class="meta">The project service remains the source of truth for the root and location behind each project ID.</div>
+    </div>
+    <div class="card">
+      <div class="label">Harness owns</div>
+      <div class="title">Execution</div>
+      <div class="meta">Members create or modify files through runtime tools; the file service only exposes the resulting filesystem state.</div>
+    </div>
+  </div>
+
+  <p>The app service depends on <code>file.Repository</code>. The repository is composed from <code>file.Reader</code> and <code>file.Writer</code> so read-only surfaces can be tested independently from mutating operations. Repository methods receive a location-aware file reference. The production repository loads the project location and routes local projects through the local filesystem and SSH projects through the location transport's SFTP implementation.</p>
+
+  <h2 id="paths">2. Virtual paths</h2>
+  <p>Clients never send raw storage paths for selected files. They send <code>projectId</code> plus a virtual path. The virtual root <code>/project</code> maps to the project root on the project's location. The virtual root <code>/workspace</code> maps to the project workspace directory on that same location. The Files rail starts at <code>/project</code> so routine browsing stays rooted in the repository, while viewers and context surfaces can still request any valid virtual file path directly.</p>
+
+  <table>
+    <thead><tr><th>Virtual path</th><th>Storage root</th><th>Writable</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>/project</code></td><td><code>project.root</code></td><td>Yes</td><td>Repository and durable project files.</td></tr>
+      <tr><td><code>/workspace</code></td><td><code>project.root/workspace</code></td><td>Yes</td><td>Project-scoped scratch outputs and generated artifacts.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="flow">3. Preview flow</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 920 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="File preview flow">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+      <rect x="34" y="58" width="170" height="64" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="119" y="84" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Files page</text>
+      <text x="119" y="104" text-anchor="middle" fill="var(--text-muted)" font-size="11">selected virtual path</text>
+
+      <rect x="284" y="58" width="170" height="64" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="369" y="84" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">files.get</text>
+      <text x="369" y="104" text-anchor="middle" fill="var(--text-muted)" font-size="11">projectId + path</text>
+
+      <rect x="534" y="58" width="170" height="64" rx="8" fill="var(--bg-subtle)" stroke="var(--border)"/>
+      <text x="619" y="84" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">resolver</text>
+      <text x="619" y="104" text-anchor="middle" fill="var(--text-muted)" font-size="11">location + root containment</text>
+
+      <rect x="284" y="174" width="420" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="494" y="198" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">native viewer payload</text>
+      <text x="494" y="217" text-anchor="middle" fill="var(--text-muted)" font-size="11">text, image, PDF, spreadsheet, DOCX, or binary metadata</text>
+
+      <line x1="204" y1="90" x2="284" y2="90" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="454" y1="90" x2="534" y2="90" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="619" y1="122" x2="619" y2="174" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+    </svg>
+  </div>
+
+  <h2 id="rpc">4. RPC surface</h2>
+  <table>
+    <thead><tr><th>Method</th><th>Use</th><th>Required fields</th></tr></thead>
+    <tbody>
+      <tr><td><code>files.listDir</code></td><td>List one virtual directory.</td><td><code>projectId</code>, <code>path</code></td></tr>
+      <tr><td><code>files.get</code></td><td>Read a file preview payload.</td><td><code>projectId</code>, <code>path</code></td></tr>
+      <tr><td><code>files.createDir</code>, <code>files.createFile</code>, <code>files.upload</code></td><td>Create project files.</td><td><code>projectId</code>, <code>path</code></td></tr>
+      <tr><td><code>files.move</code>, <code>files.copy</code>, <code>files.delete</code></td><td>Reorganize or remove project files.</td><td><code>projectId</code>, <code>path</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="invariants">5. Invariants</h2>
+  <table>
+    <thead><tr><th>Invariant</th><th>Enforcement</th></tr></thead>
+    <tbody>
+      <tr><td>Only saved projects can be browsed.</td><td>The service loads the project by ID before resolving paths.</td></tr>
+      <tr><td>Remote project files are read from their project location.</td><td>The repository receives <code>file.Reference{LocationID, Path}</code> and refuses not-ready locations.</td></tr>
+      <tr><td>Virtual paths cannot escape their root.</td><td>Path normalization rejects traversal outside <code>/project</code> or <code>/workspace</code>.</td></tr>
+      <tr><td>Missing required fields fail before filesystem access.</td><td>RPC handlers validate inputs and return invalid params.</td></tr>
+      <tr><td>Preview size is bounded.</td><td><code>files.get</code> reads up to the requested byte cap and marks truncated previews.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

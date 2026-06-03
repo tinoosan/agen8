@@ -1,0 +1,86 @@
+name: Feature spec
+description: Propose a new feature with enough structure for an AI agent or human to implement safely.
+title: "[Feature]: "
+labels:
+  - feature
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem exists today and who is affected?
+      placeholder: Users cannot ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What user or system outcome should exist after this work?
+      placeholder: After this change, users can ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is explicitly in scope for the first implementation?
+      placeholder: Include ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What is explicitly out of scope?
+      placeholder: Do not include ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: List the observable conditions that must be true before this issue is done.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Primary subsystem
+      description: Which area owns the main implementation?
+      options:
+        - cli
+        - runtime
+        - storage
+        - protocol
+        - web
+        - docs
+        - cross-cutting
+    validations:
+      required: true
+
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Existing code to reuse or extend
+      description: Point to packages, components, docs, or prior implementations that should be reused.
+      placeholder: Reuse pkg/... and docs/architecture/...
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Rollout and risk notes
+      description: Note migration concerns, compatibility risks, sequencing needs, or parallel-work constraints.
+      placeholder: Depends on ... / risky because ...
+    validations:
+      required: true

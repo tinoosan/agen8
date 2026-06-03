@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auth Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / auth-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Auth Service</span>
+  <h1>Auth Service</h1>
+  <p class="lede">
+    The auth service owns credentials, sessions, API keys, and bearer-token validation. It does not own account identity. Account records live in the user service; auth receives a <code>user.ID</code> and proves that a request belongs to that account.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#layers">Architecture layers</a></li>
+      <li><a href="#subdomains">Auth subdomains</a></li>
+      <li><a href="#credentials">Credentials</a></li>
+      <li><a href="#sessions">Browser sessions</a></li>
+      <li><a href="#api-keys">API keys</a></li>
+      <li><a href="#setup">First-run setup</a></li>
+      <li><a href="#rpc">RPC adapter</a></li>
+      <li><a href="#persistence">Persistence</a></li>
+      <li><a href="#repository-builder">Repository builder</a></li>
+      <li><a href="#layout">Code layout</a></li>
+      <li><a href="#logging">Logging</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="layers">1. Architecture layers</h2>
+
+  <p>Auth is a security boundary around credentials. It answers whether a credential is valid and which account it belongs to. It does not decide whether a user account exists, is active, or owns a project; those checks belong to the user and project services.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">Protocol handler</div>
+      <div class="role">Extract bearer tokens, login payloads, logout requests, and API-key commands. The handler stamps authenticated identity into context after auth validates a credential.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Service (credential orchestration)</div>
+      <div class="role">Hash passwords, verify login attempts, create and revoke sessions, issue and revoke API keys, and validate bearer tokens.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain (auth subdomains)</div>
+      <div class="role"><code>password.Credential</code>, <code>session.Session</code>, and <code>apikey.Key</code> are credential records keyed by <code>user.ID</code>. They never replace the user record.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Repository</div>
+      <div class="role">Persist credential records only. It does not create users, spaces, members, or projects.</div>
+    </div>
+  </div>
+
+  <h2 id="subdomains">2. Auth subdomains</h2>
+
+  <p>Auth is split into small subdomains so each package owns its names. Password credentials live in <code>password</code>, browser sessions live in <code>session</code>, and programmatic credentials live in <code>apikey</code>. User identity is imported as <code>user.ID</code> because the user service owns the account.</p>
+
+<pre><code class="lang-go"><span class="tok-comment">// internal/services/auth/password</span>
+<span class="tok-kw">type</span> <span class="tok-type">Credential</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>       <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>
+    <span class="tok-field">PasswordHash</span> string
+    <span class="tok-field">CreatedAt</span>    time.Time
+    <span class="tok-field">UpdatedAt</span>    time.Time
+}
+
+<span class="tok-comment">// internal/services/auth/session</span>
+<span class="tok-kw">type</span> <span class="tok-type">Session</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>        <span class="tok-type">ID</span>
+    <span class="tok-field">UserID</span>    <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>
+    <span class="tok-field">TokenHash</span> string
+    <span class="tok-field">ExpiresAt</span> time.Time
+    <span class="tok-field">RevokedAt</span> *time.Time
+    <span class="tok-field">CreatedAt</span> time.Time
+}
+
+<span class="tok-comment">// internal/services/auth/apikey</span>
+<span class="tok-kw">type</span> <span class="tok-type">Key</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>        <span class="tok-type">ID</span>
+    <span class="tok-field">UserID</span>    <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>
+    <span class="tok-field">Name</span>      string
+    <span class="tok-field">Prefix</span>    string
+    <span class="tok-field">TokenHash</span> string
+    <span class="tok-field">ExpiresAt</span> *time.Time
+    <span class="tok-field">RevokedAt</span> *time.Time
+    <span class="tok-field">CreatedAt</span> time.Time
+}</code></pre>
+
+  <p>The raw session token and raw API key are returned only once, at creation time. The repository stores only hashes and prefixes.</p>
+
+  <h3>The service struct</h3>
+  <p>The constructor names each credential store explicitly. The user service is passed in as a loader so auth can validate that login and bearer-token results still point to an active account.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">passwords</span> <span class="tok-pkg">password</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">sessions</span>  <span class="tok-pkg">session</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">apiKeys</span>   <span class="tok-pkg">apikey</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">users</span>     <span class="tok-type">UserLoader</span>
+    <span class="tok-field">clock</span>     <span class="tok-pkg">auth</span>.<span class="tok-type">Clock</span>
+    <span class="tok-field">logger</span>    *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(
+    passwords <span class="tok-pkg">password</span>.<span class="tok-type">Repository</span>,
+    sessions <span class="tok-pkg">session</span>.<span class="tok-type">Repository</span>,
+    apiKeys <span class="tok-pkg">apikey</span>.<span class="tok-type">Repository</span>,
+    users <span class="tok-type">UserLoader</span>,
+    clock <span class="tok-pkg">auth</span>.<span class="tok-type">Clock</span>,
+    logger *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>,
+) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+  <h2 id="credentials">3. Credentials</h2>
+
+  <p>Password credentials are an auth concern. The daemon setup route and login RPC pass raw passwords only to auth methods. User service methods receive account fields and never receive raw passwords.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">CreatePasswordParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>   <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>
+    <span class="tok-field">Password</span> string
+}
+
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">CreatePassword</span>(ctx context.Context, params <span class="tok-type">CreatePasswordParams</span>) error
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">VerifyPassword</span>(ctx context.Context, userID <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>, password string) error</code></pre>
+
+  <table>
+    <thead><tr><th>Rule</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>Raw passwords never enter user service or repositories.</td><td>Daemon and RPC call auth credential methods first.</td></tr>
+      <tr><td>Password hashes are never returned in RPC responses.</td><td>Auth RPC DTOs omit credential hashes.</td></tr>
+      <tr><td>Login requires an active user account.</td><td>Auth validates the credential, then loads the user account.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="sessions">4. Browser sessions</h2>
+
+  <p>Browser sessions are the normal UI credential. Setup and login create sessions. Logout revokes the current session. HTTP daemon identity stamping validates the bearer token and stamps <code>rpc.Identity{UserID, Role}</code> into context.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">CreateSessionParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>    <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>
+    <span class="tok-field">UserAgent</span> string
+    <span class="tok-field">RemoteAddr</span> string
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">CreateSessionResult</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Session</span> <span class="tok-pkg">session</span>.<span class="tok-type">Session</span>
+    <span class="tok-field">Token</span>   string
+}
+
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">CreateSession</span>(ctx context.Context, params <span class="tok-type">CreateSessionParams</span>) (<span class="tok-type">CreateSessionResult</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">ValidateSession</span>(ctx context.Context, token string) (<span class="tok-pkg">user</span>.<span class="tok-type">User</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">RevokeSession</span>(ctx context.Context, token string) error</code></pre>
+
+  <h2 id="api-keys">5. API keys</h2>
+
+  <p>API keys are programmatic credentials for CLI, MCP clients, automation, and hosted-style integrations. They are not issued by first-run setup unless a product flow explicitly asks for one after setup.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">CreateAPIKeyParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>    <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>
+    <span class="tok-field">Name</span>      string
+    <span class="tok-field">ExpiresAt</span> *time.Time
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">CreateAPIKeyResult</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">APIKey</span> <span class="tok-pkg">apikey</span>.<span class="tok-type">Key</span>
+    <span class="tok-field">Token</span>  string
+}
+
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">CreateAPIKey</span>(ctx context.Context, params <span class="tok-type">CreateAPIKeyParams</span>) (<span class="tok-type">CreateAPIKeyResult</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">ValidateAPIKey</span>(ctx context.Context, token string) (<span class="tok-pkg">user</span>.<span class="tok-type">User</span>, error)
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">RevokeAPIKey</span>(ctx context.Context, id <span class="tok-pkg">apikey</span>.<span class="tok-type">ID</span>) error</code></pre>
+
+  <h2 id="setup">6. First-run setup</h2>
+
+  <p>Setup is daemon orchestration across user and auth. The user service creates the first account. Auth creates the password credential and browser session for that account. The setup token belongs to the daemon and is never persisted by auth.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 940 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="auth-setup-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+    <rect x="40" y="38" width="860" height="284" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
+    <text x="470" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Setup creates an account, credential, and browser session</text>
+    <text x="470" y="94" text-anchor="middle" fill="var(--text-muted)">Daemon coordinates the flow; user and auth keep separate records.</text>
+
+    <rect x="74" y="145" width="138" height="70" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="143" y="170" text-anchor="middle" font-weight="700" fill="var(--text)">Daemon</text>
+    <text x="143" y="190" text-anchor="middle" fill="var(--text-muted)">setup token</text>
+
+    <rect x="278" y="126" width="158" height="70" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="357" y="151" text-anchor="middle" font-weight="700" fill="var(--text)">User service</text>
+    <text x="357" y="171" text-anchor="middle" fill="var(--text-muted)">create user</text>
+
+    <rect x="278" y="220" width="158" height="70" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="357" y="245" text-anchor="middle" font-weight="700" fill="var(--text)">Auth service</text>
+    <text x="357" y="265" text-anchor="middle" fill="var(--text-muted)">create password</text>
+
+    <rect x="514" y="220" width="158" height="70" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="593" y="245" text-anchor="middle" font-weight="700" fill="var(--text)">Auth service</text>
+    <text x="593" y="265" text-anchor="middle" fill="var(--text-muted)">create session</text>
+
+    <rect x="746" y="220" width="112" height="70" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="802" y="245" text-anchor="middle" font-weight="700" fill="var(--text)">Browser</text>
+    <text x="802" y="265" text-anchor="middle" fill="var(--text-muted)">session token</text>
+
+    <line x1="212" y1="180" x2="278" y2="161" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#auth-setup-arrow)"/>
+    <path d="M 357 196 L 357 220" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#auth-setup-arrow)"/>
+    <line x1="436" y1="255" x2="514" y2="255" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#auth-setup-arrow)"/>
+    <line x1="672" y1="255" x2="746" y2="255" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#auth-setup-arrow)"/>
+  </svg>
+  </div>
+
+  <h2 id="rpc">7. RPC adapter</h2>
+
+  <p>Auth RPC exposes credential flows. User profile and account lifecycle methods live on user RPC. Auth RPC results return user-facing identity projection, session state, and API-key metadata, never password hashes or token hashes.</p>
+
+  <table>
+    <thead><tr><th>RPC method</th><th>Service call</th><th>Boundary rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>auth.login</code></td><td><code>Service.Login</code></td><td>Verifies password and creates a browser session.</td></tr>
+      <tr><td><code>auth.logout</code></td><td><code>Service.RevokeSession</code></td><td>Revokes the current browser session.</td></tr>
+      <tr><td><code>auth.session</code></td><td><code>Service.ValidateSession</code></td><td>Returns current authenticated account projection.</td></tr>
+      <tr><td><code>auth.apiKey.create</code></td><td><code>Service.CreateAPIKey</code></td><td>Returns the raw API key exactly once.</td></tr>
+      <tr><td><code>auth.apiKey.revoke</code></td><td><code>Service.RevokeAPIKey</code></td><td>Revokes a programmatic credential.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="persistence">8. Persistence</h2>
+
+  <p>Auth persistence is separate from user persistence. Tables are keyed by <code>user_id</code>, but the canonical user record remains in the user service table.</p>
+
+  <table>
+    <thead><tr><th>Table</th><th>Purpose</th><th>Important columns</th></tr></thead>
+    <tbody>
+      <tr><td><code>auth_passwords</code></td><td>Password credential per account</td><td><code>user_id</code>, <code>password_hash</code>, <code>created_at</code>, <code>updated_at</code></td></tr>
+      <tr><td><code>auth_sessions</code></td><td>Browser bearer sessions</td><td><code>session_id</code>, <code>user_id</code>, <code>token_hash</code>, <code>expires_at</code>, <code>revoked_at</code></td></tr>
+      <tr><td><code>auth_api_keys</code></td><td>Programmatic bearer credentials</td><td><code>api_key_id</code>, <code>user_id</code>, <code>name</code>, <code>prefix</code>, <code>token_hash</code>, <code>revoked_at</code></td></tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-go"><span class="tok-comment">// internal/services/auth/session</span>
+<span class="tok-kw">type</span> <span class="tok-type">Repository</span> <span class="tok-kw">interface</span> {
+    <span class="tok-type">Reader</span>
+    <span class="tok-type">Writer</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">GetByTokenHash</span>(ctx context.Context, tokenHash string) (<span class="tok-pkg">session</span>.<span class="tok-type">Session</span>, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Create</span>(ctx context.Context, record <span class="tok-pkg">session</span>.<span class="tok-type">Session</span>) error
+    <span class="tok-fn">Update</span>(ctx context.Context, record <span class="tok-pkg">session</span>.<span class="tok-type">Session</span>) error
+}</code></pre>
+
+  <p><code>password.Repository</code> and <code>apikey.Repository</code> follow the same subdomain-owned reader/writer composition pattern.</p>
+
+  <h2 id="repository-builder">9. Repository builder</h2>
+
+  <p>The application composition root does not choose concrete auth repository types directly. Auth has three credential subdomain repositories, so its infra package builds them as one repository bundle from the configured storage handle.</p>
+
+<pre><code class="lang-go"><span class="tok-comment">// internal/services/auth/infra/repository_builder.go</span>
+<span class="tok-kw">type</span> <span class="tok-type">Repositories</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Passwords</span> <span class="tok-pkg">password</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">Sessions</span>  <span class="tok-pkg">session</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">APIKeys</span>   <span class="tok-pkg">apikey</span>.<span class="tok-type">Repository</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">NewRepositories</span>(handle *<span class="tok-pkg">storagedb</span>.<span class="tok-type">Handle</span>) (<span class="tok-type">Repositories</span>, error) {
+    <span class="tok-kw">switch</span> handle.<span class="tok-fn">Dialect</span>() {
+    <span class="tok-kw">case</span> <span class="tok-pkg">storagedb</span>.<span class="tok-field">DialectSQLite</span>:
+        <span class="tok-kw">return</span> <span class="tok-fn">NewSQLiteRepositories</span>(handle)
+    <span class="tok-kw">case</span> <span class="tok-pkg">storagedb</span>.<span class="tok-field">DialectPostgres</span>:
+        <span class="tok-kw">return</span> <span class="tok-fn">NewPostgresRepositories</span>(handle)
+    <span class="tok-kw">default</span>:
+        <span class="tok-kw">return</span> <span class="tok-type">Repositories</span>{}, fmt.Errorf(<span class="tok-string">"unsupported auth repository dialect %q"</span>, handle.<span class="tok-fn">Dialect</span>())
+    }
+}</code></pre>
+
+  <p><code>internal/app.NewApplication</code> calls only <code>authinfra.NewRepositories(handle)</code>, then passes the returned subdomain repositories into <code>authapp.NewService</code>. It never imports or selects concrete SQLite/Postgres auth repository types directly.</p>
+
+  <h2 id="layout">10. Code layout</h2>
+
+  <div class="tree"><pre>internal/services/auth/
+  password/
+    credential.go        # Credential and password credential validation
+    repository.go        # Reader / Writer / Repository
+
+  session/
+    session.go           # Session, ID, expiry and revocation state
+    repository.go        # Reader / Writer / Repository
+
+  apikey/
+    key.go               # Key, ID, prefix and revocation state
+    repository.go        # Reader / Writer / Repository
+
+  auth/
+    token.go             # token generation and hash contract
+    clock.go             # Clock interface and system clock
+    errors.go            # shared auth-domain errors
+
+  app/
+    service.go           # login, sessions, API keys, password credentials
+    service_test.go      # service behavior with repository spies
+
+  infra/
+    repository_builder.go # storage strategy selection from configured handle
+    sqlite_repository.go # SQLite auth credential repositories
+    postgres_repository.go
+    repository_assertions_test.go
+
+  rpc/
+    handler.go           # auth.login/session/logout/apiKey.* adapter
+    types.go             # auth RPC params/results/views
+</pre></div>
+
+  <p><code>internal/daemon</code> calls auth for setup session creation and request identity stamping. Normal auth RPC lives under <code>internal/services/auth/rpc</code>. Auth does not live under <code>pkg</code>, and no application method wraps it.</p>
+
+  <h2 id="logging">11. Logging</h2>
+
+  <p>Auth logs credential lifecycle events without writing raw tokens, token hashes, passwords, password hashes, session ids, API key ids, or API key prefixes.</p>
+
+<pre><code class="lang-text">level=INFO msg="session created" service=auth user_id=user_... source=login
+level=INFO msg="api key revoked" service=auth user_id=user_...
+level=WARN msg="credential rejected" service=auth reason=invalid_password email_hash=...</code></pre>
+
+  <h2 id="invariants">12. Invariants</h2>
+
+  <table>
+    <thead><tr><th>Invariant</th><th>Enforcement point</th></tr></thead>
+    <tbody>
+      <tr><td>Auth never creates user accounts.</td><td>Daemon and RPC create users through the user service only.</td></tr>
+      <tr><td>Raw bearer tokens are returned only once.</td><td>Auth service creation methods return raw tokens; repositories store hashes.</td></tr>
+      <tr><td>Credential secrets and credential record identifiers never appear in RPC responses or logs.</td><td>Auth RPC DTOs and logging helpers omit raw tokens, hashes, prefixes, session ids, and API key ids.</td></tr>
+      <tr><td>Setup creates a browser session, not an API key.</td><td>Daemon setup calls <code>CreateSession</code> after user setup.</td></tr>
+      <tr><td>Bearer validation returns a user account projection.</td><td>Auth validates the token, then loads the user through <code>UserLoader</code>.</td></tr>
+      <tr><td>Closed or suspended accounts cannot authenticate.</td><td>Auth rejects credentials when the loaded user is not active.</td></tr>
+      <tr><td>Application does not hard-code auth repository implementations.</td><td><code>authinfra.NewRepositories</code> selects concrete credential repositories from the configured storage handle.</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    Architecture · agen8 · This document is the source of truth for credential ownership, session handling, API keys, and auth daemon wiring.
+  </footer>
+</div>
+</body>
+</html>

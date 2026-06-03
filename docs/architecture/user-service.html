@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>User Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / user-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · User Service</span>
+  <h1>User Service</h1>
+  <p class="lede">
+    The user service owns account identity, first-run setup, and account lifecycle. Auth owns sessions, API keys, password credential checks, and bearer-token validation. A user can sign in to agen8; a space member participates inside a space. Those are different records with different lifecycles.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#layers">Architecture layers</a></li>
+      <li><a href="#domain">The user domain</a></li>
+      <li><a href="#identity">Identity boundaries</a></li>
+      <li><a href="#setup">First-user setup</a></li>
+      <li><a href="#auth">Auth boundary</a></li>
+      <li><a href="#rpc">RPC adapter</a></li>
+      <li><a href="#persistence">Persistence</a></li>
+      <li><a href="#repository-builder">Repository builder</a></li>
+      <li><a href="#layout">Code layout</a></li>
+      <li><a href="#logging">Logging</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="layers">1. Architecture layers</h2>
+
+  <p>The service is the account boundary. The daemon and RPC layer authenticate transport requests and call the user service for account state; they do not manufacture users or lifecycle state themselves. Auth owns credential validation and session/API-key records.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">Protocol handler</div>
+      <div class="role">Translate setup and account RPC payloads into typed user service calls. Browser storage names, bearer tokens, and HTTP details live in daemon/RPC/auth, not in the user domain.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Service (orchestration)</div>
+      <div class="role">Create the first user, update account profile, rotate account lifecycle state, and call the repository. Account rules live here.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain (account model)</div>
+      <div class="role"><code>user.User</code>, <code>user.ID</code>, and <code>user.Role</code> define account identity. The domain does not know spaces, members, projects, sessions, API keys, daemon routes, or React local storage.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Repository</div>
+      <div class="role">Persist users only. It does not decide who can register, validate passwords, store sessions, or store API keys.</div>
+    </div>
+  </div>
+
+  <h2 id="domain">2. The user domain</h2>
+
+  <p><code>user.User</code> is the canonical account record. <code>user.ID</code> is the only typed user identifier. User ids are account ids; they are never member ids, project ids, or runtime ids.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">ID</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">value</span> string
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Role</span> string
+
+<span class="tok-kw">const</span> (
+    <span class="tok-field">RoleAdmin</span> <span class="tok-type">Role</span> = <span class="tok-string">"admin"</span>
+    <span class="tok-field">RoleUser</span>  <span class="tok-type">Role</span> = <span class="tok-string">"user"</span>
+)
+
+<span class="tok-kw">type</span> <span class="tok-type">User</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>           <span class="tok-type">ID</span>
+    <span class="tok-field">Email</span>        string
+    <span class="tok-field">Name</span>         string
+    <span class="tok-field">Role</span>         <span class="tok-type">Role</span>
+    <span class="tok-field">Lifecycle</span>    <span class="tok-type">Lifecycle</span>
+    <span class="tok-field">CreatedAt</span>    time.Time
+    <span class="tok-field">UpdatedAt</span>    time.Time
+}</code></pre>
+
+  <p>Lifecycle state belongs on the account record so the service can disable or close an account without deleting durable ownership history.</p>
+
+  <table>
+    <thead><tr><th>Lifecycle</th><th>Can sign in?</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>active</code></td><td>yes</td><td>The account can authenticate and use agen8.</td></tr>
+      <tr><td><code>suspended</code></td><td>no</td><td>The account exists, but authentication is blocked by an admin decision.</td></tr>
+      <tr><td><code>closed</code></td><td>no</td><td>The account no longer signs in, but historical ownership remains readable.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The domain validates account data before persistence. Email is normalized to lowercase. Password hashing happens in auth because it is credential behavior. The user domain rejects missing email, missing name, invalid role, invalid lifecycle state, and missing timestamps.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">func</span> <span class="tok-fn">New</span>(input <span class="tok-type">NewInput</span>) (<span class="tok-type">User</span>, error)
+
+<span class="tok-kw">type</span> <span class="tok-type">NewInput</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>           <span class="tok-type">ID</span>
+    <span class="tok-field">Email</span>        string
+    <span class="tok-field">Name</span>         string
+    <span class="tok-field">Role</span>         <span class="tok-type">Role</span>
+    <span class="tok-field">Now</span>          time.Time
+}</code></pre>
+
+  <h3>The service struct</h3>
+  <p>The constructor names the account boundary explicitly. Credential state is not injected into the user service; auth handles sessions, API keys, and password checks.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">users</span>    <span class="tok-pkg">user</span>.<span class="tok-type">Repository</span>
+    <span class="tok-field">clock</span>    <span class="tok-pkg">user</span>.<span class="tok-type">Clock</span>
+    <span class="tok-field">logger</span>   *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(
+    users <span class="tok-pkg">user</span>.<span class="tok-type">Repository</span>,
+    clock <span class="tok-pkg">user</span>.<span class="tok-type">Clock</span>,
+    logger *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>,
+) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+  <h2 id="identity">3. Identity boundaries</h2>
+
+  <p>A user is an account. A project is the first durable workspace object the user creates after setup. A space is created inside a project. A member is an actor inside a space. Setup creates only the account and browser session.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 940 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="identity-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+
+    <rect x="40" y="42" width="860" height="206" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
+    <text x="470" y="76" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Account identity is not space membership</text>
+    <text x="470" y="97" text-anchor="middle" fill="var(--text-muted)">Each record answers a different product question and is created by a different flow.</text>
+
+    <rect x="82" y="136" width="146" height="64" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="155" y="160" text-anchor="middle" font-weight="700" fill="var(--text)">User</text>
+    <text x="155" y="180" text-anchor="middle" fill="var(--text-muted)">signs in</text>
+
+    <rect x="286" y="136" width="146" height="64" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="359" y="160" text-anchor="middle" font-weight="700" fill="var(--text)">Project</text>
+    <text x="359" y="180" text-anchor="middle" fill="var(--text-muted)">owned workspace</text>
+
+    <rect x="490" y="136" width="146" height="64" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="563" y="160" text-anchor="middle" font-weight="700" fill="var(--text)">Space</text>
+    <text x="563" y="180" text-anchor="middle" fill="var(--text-muted)">coordination room</text>
+
+    <rect x="694" y="136" width="146" height="64" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="767" y="160" text-anchor="middle" font-weight="700" fill="var(--text)">Member</text>
+    <text x="767" y="180" text-anchor="middle" fill="var(--text-muted)">actor in a space</text>
+
+    <line x1="228" y1="168" x2="286" y2="168" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#identity-arrow)"/>
+    <line x1="432" y1="168" x2="490" y2="168" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#identity-arrow)"/>
+    <line x1="636" y1="168" x2="694" y2="168" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#identity-arrow)"/>
+  </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Record</th><th>Owned by</th><th>Created by</th><th>What it means</th></tr></thead>
+    <tbody>
+      <tr><td><code>User</code></td><td>User service</td><td>Setup or account invitation flow</td><td>An authenticated account that can use agen8.</td></tr>
+      <tr><td><code>Project</code></td><td>Project service</td><td>User action after setup</td><td>A durable workspace boundary owned by a user.</td></tr>
+      <tr><td><code>Space</code></td><td>Space service</td><td>Project-scoped space creation</td><td>A coordination environment inside a project.</td></tr>
+      <tr><td><code>Member</code></td><td>Space service member roster subdomain</td><td>Space membership flow</td><td>An agent or person acting inside one space.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="setup">4. First-user setup</h2>
+
+  <p>First-run setup is the only open registration path. It is available only while the user repository is empty. It creates the first user as the account owner/admin. Auth creates the browser session for that new user. Setup does not create a project, space, member, API key, or agent.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 940 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="setup-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+
+    <rect x="38" y="38" width="864" height="270" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
+    <text x="470" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">First user setup creates an account, then auth creates a session</text>
+    <text x="470" y="93" text-anchor="middle" fill="var(--text-muted)">The user service owns the account record. Auth owns the browser session and later API-key flows.</text>
+
+    <rect x="78" y="144" width="142" height="64" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="149" y="168" text-anchor="middle" font-weight="700" fill="var(--text)">Daemon</text>
+    <text x="149" y="188" text-anchor="middle" fill="var(--text-muted)">zero users?</text>
+
+    <rect x="286" y="144" width="142" height="64" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="357" y="168" text-anchor="middle" font-weight="700" fill="var(--text)">Setup page</text>
+    <text x="357" y="188" text-anchor="middle" fill="var(--text-muted)">one-time token</text>
+
+    <rect x="494" y="132" width="158" height="88" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="573" y="158" text-anchor="middle" font-weight="700" fill="var(--text)">User service</text>
+    <text x="573" y="178" text-anchor="middle" fill="var(--text-muted)">SetupFirstUser</text>
+    <text x="573" y="196" text-anchor="middle" fill="var(--text-faint)">create account</text>
+
+    <rect x="718" y="144" width="142" height="64" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="789" y="168" text-anchor="middle" font-weight="700" fill="var(--text)">Browser</text>
+    <text x="789" y="188" text-anchor="middle" fill="var(--text-muted)">auth session</text>
+
+    <rect x="494" y="248" width="158" height="40" rx="8" fill="var(--bad-soft)" stroke="var(--border-strong)"/>
+    <text x="573" y="273" text-anchor="middle" font-weight="700" fill="var(--text)">Setup closes</text>
+
+    <line x1="220" y1="176" x2="286" y2="176" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#setup-arrow)"/>
+    <line x1="428" y1="176" x2="494" y2="176" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#setup-arrow)"/>
+    <line x1="652" y1="176" x2="718" y2="176" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#setup-arrow)"/>
+    <path d="M 573 220 L 573 248" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#setup-arrow)"/>
+  </svg>
+  </div>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">SetupFirstUserParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Email</span>        string
+    <span class="tok-field">Name</span>         string
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">SetupFirstUserResult</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">User</span>    <span class="tok-pkg">user</span>.<span class="tok-type">User</span>
+}
+
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">SetupFirstUser</span>(ctx context.Context, params <span class="tok-type">SetupFirstUserParams</span>) (<span class="tok-type">SetupFirstUserResult</span>, error)</code></pre>
+
+  <h3>Anatomy of first-user setup</h3>
+
+  <div class="flow">
+    <div class="step"><div class="marker">1</div><div class="body">Daemon validates the setup token and decodes the setup form. The token is a daemon concern; it is not passed into the user domain.</div></div>
+    <div class="step"><div class="marker">2</div><div class="body">User service checks the user repository count. If any user exists, setup fails with registration closed.</div></div>
+    <div class="step"><div class="marker">3</div><div class="body">Auth validates password policy before user creation. The password hash is stored only in auth credential persistence.</div></div>
+    <div class="step"><div class="marker">4</div><div class="body">User service normalizes email, validates account fields, creates <code>user.User</code> with role <code>admin</code>, and persists it.</div></div>
+    <div class="step"><div class="marker">5</div><div class="body">Auth creates a browser session for the new user and returns the session token to the daemon response.</div></div>
+  </div>
+
+  <table>
+    <thead><tr><th>Setup creates</th><th>Setup does not create</th></tr></thead>
+    <tbody>
+      <tr><td>One <code>User</code> account</td><td>A project</td></tr>
+      <tr><td>One <code>User</code> lifecycle state</td><td>A space</td></tr>
+      <tr><td>Account role <code>admin</code></td><td>A member or coordinator role</td></tr>
+      <tr><td>Account lifecycle <code>active</code></td><td>An API key or agent credential</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="auth">5. Auth boundary</h2>
+
+  <p>Auth owns credentials and bearer-token validation. The user service owns the account records those credentials point to. This keeps user lifecycle simple and keeps credential behavior in one place.</p>
+
+  <table>
+    <thead><tr><th>Concern</th><th>Owner</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Account identity and lifecycle</td><td>User service</td><td>User records are durable product entities.</td></tr>
+      <tr><td>Password policy and password hashes</td><td>Auth service</td><td>Passwords are credentials, not profile data.</td></tr>
+      <tr><td>Browser sessions</td><td>Auth service</td><td>Sessions are bearer credentials.</td></tr>
+      <tr><td>API keys</td><td>Auth service</td><td>API keys are programmatic bearer credentials.</td></tr>
+      <tr><td>Bearer-token validation</td><td>Auth service</td><td>The daemon asks auth to turn a credential into a user identity.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="rpc">6. RPC adapter</h2>
+
+  <p>The RPC adapter exposes account-level methods. It does not create projects, spaces, or members. It maps authenticated daemon identity into response DTOs and maps login/setup payloads into user service commands.</p>
+
+  <table>
+    <thead><tr><th>RPC method</th><th>Service call</th><th>Boundary rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>user.status</code></td><td><code>Service.CurrentUser</code> or validated identity projection</td><td>Returns authenticated account profile and setup state.</td></tr>
+      <tr><td><code>user.get</code></td><td><code>Service.Get</code></td><td>Returns the current account profile.</td></tr>
+      <tr><td><code>user.updateProfile</code></td><td><code>Service.UpdateProfile</code></td><td>Updates account name and email after validation.</td></tr>
+      <tr><td><code>user.suspend</code></td><td><code>Service.SuspendUser</code></td><td>Admin-only account lifecycle transition.</td></tr>
+      <tr><td><code>user.close</code></td><td><code>Service.CloseUser</code></td><td>Admin/self-service account closure path.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The daemon setup route coordinates auth and user service because setup is not normal authenticated RPC. All normal account actions go through RPC with daemon-stamped identity. Login, logout, session status, password changes, and API-key methods live on auth RPC, not user RPC.</p>
+
+  <h2 id="persistence">7. Persistence</h2>
+
+  <p>The user repository stores account records and supports uniqueness checks. Auth stores session and API-key records in its own persistence layer.</p>
+
+  <table>
+    <thead><tr><th>Table</th><th>Purpose</th><th>Important columns</th></tr></thead>
+    <tbody>
+      <tr><td><code>users</code></td><td>Canonical account records</td><td><code>user_id</code>, <code>email</code>, <code>name</code>, <code>role</code>, <code>lifecycle</code></td></tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Repository</span> <span class="tok-kw">interface</span> {
+    <span class="tok-type">Reader</span>
+    <span class="tok-type">Writer</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Get</span>(ctx context.Context, id <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>) (<span class="tok-pkg">user</span>.<span class="tok-type">User</span>, error)
+    <span class="tok-fn">GetByEmail</span>(ctx context.Context, email string) (<span class="tok-pkg">user</span>.<span class="tok-type">User</span>, error)
+    <span class="tok-fn">Count</span>(ctx context.Context) (int, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Create</span>(ctx context.Context, record <span class="tok-pkg">user</span>.<span class="tok-type">User</span>) error
+    <span class="tok-fn">Update</span>(ctx context.Context, record <span class="tok-pkg">user</span>.<span class="tok-type">User</span>) error
+}</code></pre>
+
+  <h2 id="repository-builder">8. Repository builder</h2>
+
+  <p>The application composition root does not choose concrete user repository types directly. It asks the user infra package to build the repository from the configured storage handle. SQLite/Postgres selection stays inside the user service infrastructure boundary.</p>
+
+<pre><code class="lang-go"><span class="tok-comment">// internal/services/user/infra/repository_builder.go</span>
+<span class="tok-kw">func</span> <span class="tok-fn">NewRepository</span>(handle *<span class="tok-pkg">storagedb</span>.<span class="tok-type">Handle</span>) (<span class="tok-pkg">user</span>.<span class="tok-type">Repository</span>, error) {
+    <span class="tok-kw">switch</span> handle.<span class="tok-fn">Dialect</span>() {
+    <span class="tok-kw">case</span> <span class="tok-pkg">storagedb</span>.<span class="tok-field">DialectSQLite</span>:
+        <span class="tok-kw">return</span> <span class="tok-fn">NewSQLiteRepository</span>(handle)
+    <span class="tok-kw">case</span> <span class="tok-pkg">storagedb</span>.<span class="tok-field">DialectPostgres</span>:
+        <span class="tok-kw">return</span> <span class="tok-fn">NewPostgresRepository</span>(handle)
+    <span class="tok-kw">default</span>:
+        <span class="tok-kw">return</span> nil, fmt.Errorf(<span class="tok-string">"unsupported user repository dialect %q"</span>, handle.<span class="tok-fn">Dialect</span>())
+    }
+}</code></pre>
+
+  <p><code>internal/app.NewApplication</code> calls only <code>userinfra.NewRepository(handle)</code>. It never imports or selects <code>NewSQLiteRepository</code> or <code>NewPostgresRepository</code> directly.</p>
+
+  <h2 id="layout">9. Code layout</h2>
+
+  <div class="tree"><pre>internal/services/user/
+  domain/
+    user.go             # User, ID, Role, Lifecycle
+    new.go              # validated New constructor
+    repository.go       # Reader / Writer / Repository
+    clock.go            # Clock interface and system clock
+    errors.go           # typed user-domain errors
+
+  app/
+    service.go          # setup account creation, profile, lifecycle
+    service_test.go     # service behavior with repository spies
+
+  infra/
+    repository_builder.go # storage strategy selection from configured handle
+    sqlite_repository.go    # SQLite implementation
+    postgres_repository.go  # PostgreSQL implementation
+    repository_assertions_test.go
+
+  rpc/
+    handler.go          # user.status/get/updateProfile/suspend/close adapter
+    types.go            # RPC params/results/views</pre></div>
+
+  <p><code>internal/daemon</code> owns the setup HTTP page and calls the user service first-run setup method. Normal account RPC lives under <code>internal/services/user/rpc</code>. The user service does not live under <code>pkg</code>, and no application method wraps it.</p>
+
+  <h2 id="logging">10. Logging</h2>
+
+  <p>The service receives a service-scoped logger from the application composition root. It logs account lifecycle events without logging credential data.</p>
+
+<pre><code class="lang-text">level=INFO msg="user created" service=user user_id=user_... role=admin source=setup
+level=INFO msg="user profile updated" service=user user_id=user_...
+level=INFO msg="user suspended" service=user user_id=user_... actor_user_id=user_...
+level=INFO msg="user closed" service=user user_id=user_... actor_user_id=user_...</code></pre>
+
+  <h2 id="invariants">11. Invariants</h2>
+
+  <table>
+    <thead><tr><th>Invariant</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>First-run setup is open only when no users exist.</td><td>User service counts users before creating the first account.</td></tr>
+      <tr><td>The first user is the account owner/admin.</td><td><code>SetupFirstUser</code> assigns the initial account role.</td></tr>
+      <tr><td>Setup creates no project, space, member, task, or agent.</td><td>Daemon setup route calls only the user service setup method.</td></tr>
+      <tr><td>Browser setup stores a session token, not an API key.</td><td>Daemon setup asks auth to create a browser session after user creation.</td></tr>
+      <tr><td>A user id is never treated as a member id.</td><td>Caller identity keeps <code>UserID</code> and <code>MemberID</code> separate.</td></tr>
+      <tr><td>User service does not create API keys.</td><td>API-key methods and repositories live under auth.</td></tr>
+      <tr><td>User service does not validate bearer tokens.</td><td>Daemon validates credentials through auth before stamping identity.</td></tr>
+      <tr><td>Suspended or closed users cannot authenticate.</td><td>Auth validates user lifecycle before returning identity.</td></tr>
+      <tr><td>Email uniqueness is process-wide.</td><td>User repository enforces a unique normalized email constraint.</td></tr>
+      <tr><td>Application does not hard-code the user repository implementation.</td><td><code>userinfra.NewRepository</code> selects the concrete repository from the configured storage handle.</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    Architecture · agen8 · This document is the source of truth for account identity and first-user setup.
+  </footer>
+</div>
+</body>
+</html>

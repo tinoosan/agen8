@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logging - agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / logging</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture - Logging</span>
+  <h1>Logging</h1>
+  <p class="lede">
+    Logging is process infrastructure. The daemon reads log configuration, the application composition root builds one root logger, and each service receives a scoped child logger.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#ownership">Ownership</a></li>
+      <li><a href="#config">Configuration</a></li>
+      <li><a href="#service">Service logger shape</a></li>
+      <li><a href="#rules">Rules</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="ownership">1. Ownership</h2>
+
+  <p>
+    Logging is not a domain service and it is not owned by any business service. It lives under <code>internal/logging</code> because logger construction is application infrastructure, not a public package contract. Services depend on the resulting <code>*slog.Logger</code>, not on config, environment variables, or process setup.
+  </p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+      <defs>
+        <marker id="log-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+        </marker>
+      </defs>
+
+      <rect x="44" y="86" width="160" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="124" y="114" text-anchor="middle" fill="var(--text)" font-weight="700">daemon config</text>
+      <text x="124" y="135" text-anchor="middle" fill="var(--text-muted)">AGEN8_LOG_LEVEL</text>
+
+      <rect x="284" y="86" width="170" height="70" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="369" y="114" text-anchor="middle" fill="var(--text)" font-weight="700">internal/logging</text>
+      <text x="369" y="135" text-anchor="middle" fill="var(--text-muted)">text slog logger</text>
+
+      <rect x="534" y="86" width="170" height="70" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="619" y="114" text-anchor="middle" fill="var(--text)" font-weight="700">internal/app</text>
+      <text x="619" y="135" text-anchor="middle" fill="var(--text-muted)">scope per service</text>
+
+      <rect x="764" y="50" width="110" height="52" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="819" y="80" text-anchor="middle" fill="var(--text)" font-weight="700">task</text>
+
+      <rect x="764" y="140" width="110" height="52" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="819" y="170" text-anchor="middle" fill="var(--text)" font-weight="700">mission</text>
+
+      <line x1="204" y1="121" x2="284" y2="121" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#log-arrow)"/>
+      <line x1="454" y1="121" x2="534" y2="121" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#log-arrow)"/>
+      <line x1="704" y1="109" x2="764" y2="78" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#log-arrow)"/>
+      <line x1="704" y1="134" x2="764" y2="164" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#log-arrow)"/>
+    </svg>
+  </div>
+
+  <h2 id="config">2. Configuration</h2>
+
+  <p>
+    The daemon reads <code>AGEN8_LOG_LEVEL</code> and passes it through <code>daemon.Config.Logging</code> into <code>app.Config.Logging</code>. <code>NewApplication</code> builds the process root logger once from that config and passes scoped loggers into services as they are constructed. Valid levels are <code>debug</code>, <code>info</code>, <code>warn</code>, and <code>error</code>. Empty means <code>info</code>.
+  </p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Config</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Level</span> string
+}</code></pre>
+
+  <h2 id="service">3. Service logger shape</h2>
+
+  <p>
+    The application composition root passes scoped loggers into services. Services use the logger they are given; they do not read environment variables, parse config, or build process loggers. A rebuilt service constructor accepts its logger directly, next to its real service/repository dependencies.
+  </p>
+
+<pre><code class="lang-go">root, err := <span class="tok-pkg">logging</span>.<span class="tok-fn">NewLogger</span>(cfg.Logging)
+taskSvc, err := <span class="tok-pkg">taskapp</span>.<span class="tok-fn">NewService</span>(
+    repo,
+    clock,
+    caller,
+    members,
+    spaces,
+    messages,
+    root.<span class="tok-fn">With</span>(<span class="tok-string">"service"</span>, <span class="tok-string">"task"</span>),
+)</code></pre>
+
+  <p>Text output includes stable service context:</p>
+
+<pre><code>time=2026-05-17T15:42:10.124+01:00 level=WARN msg="task message publish failed" service=task task_id=task_123 event=assigned error="message service is not wired"</code></pre>
+
+  <p>
+    The task service writes an <code>INFO</code> log after each successful lifecycle transition. Successful task message publication is logged at <code>DEBUG</code>. Returned validation and persistence errors are not logged by the task service; the boundary that handles the returned error owns that log line. Mission, plan, and other rebuilt services should follow the same rule: log successful domain-significant transitions with stable ids, and let protocol/process boundaries log returned errors.
+  </p>
+
+<pre><code>time=2026-05-17T15:42:10.124+01:00 level=INFO msg="task transition" service=task action=create task_id=task_123 space_id=space_1 status=pending assigned_to=member_worker claimed_by_member_id="" caller_user_id=user_1 caller_member_id=member_coordinator</code></pre>
+
+  <h2 id="rules">4. Rules</h2>
+
+  <table>
+    <thead><tr><th>Rule</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>Logging config lives in <code>internal/logging</code>.</td><td>Logging is app infrastructure, not a public package contract.</td></tr>
+      <tr><td>Services accept <code>*slog.Logger</code>.</td><td>The composition root controls formatting and level.</td></tr>
+      <tr><td>Services receive scoped loggers.</td><td>Every service log line includes <code>service=&lt;name&gt;</code>.</td></tr>
+      <tr><td>Logger construction happens once in <code>NewApplication</code>.</td><td>Config stays in the process/application layer, while services receive ready-to-use dependencies.</td></tr>
+      <tr><td>Services do not log and return the same error by default.</td><td>Returned errors are logged at the boundary that handles them.</td></tr>
+      <tr><td>Logging failures do not affect business behavior.</td><td>Missing business dependencies still fail loudly; logger nil falls back to <code>slog.Default()</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <p class="footnote">
+    Architecture · agen8 · This document is the source of truth for process logging.
+  </p>
+</div>
+</body>
+</html>

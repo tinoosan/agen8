@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agen8
+      POSTGRES_USER: agen8
+      POSTGRES_PASSWORD: agen8
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agen8 -d agen8"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - agen8-postgres:/var/lib/postgresql/data
+    ports:
+      - "${AGEN8_POSTGRES_PORT:-5432}:5432"
+
+  agen8-daemon:
+    build:
+      context: .
+      args:
+        VERSION: dev
+    image: agen8:dev
+    command:
+      - daemon
+      - start
+      - --data-dir
+      - /var/lib/agen8
+      - --protocol-stdio=false
+      - --rpc-endpoint
+      - 0.0.0.0:7777
+    env_file:
+      - path: .env.docker
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - agen8-data:/var/lib/agen8
+      - ./docker/templates:/var/lib/agen8/templates:ro
+    ports:
+      - "${AGEN8_DAEMON_PORT:-7777}:7777"
+
+  agen8-web:
+    image: agen8:dev
+    depends_on:
+      agen8-daemon:
+        condition: service_started
+    command:
+      - web
+      - --data-dir
+      - /var/lib/agen8
+      - --rpc-endpoint
+      - agen8-daemon:7777
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    env_file:
+      - path: .env.docker
+        required: false
+    volumes:
+      - agen8-data:/var/lib/agen8
+    ports:
+      - "${AGEN8_WEB_PORT:-8080}:8080"
+
+volumes:
+  agen8-data:
+  agen8-postgres:

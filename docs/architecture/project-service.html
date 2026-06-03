@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / project-service</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture · Project Service</span>
+  <h1>Project Service</h1>
+  <p class="lede">The project service owns project identity, a location-scoped root reference, and project-scoped topology over spaces. Space records remain owned by the space service and are hydrated through a narrow loader interface.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#boundary">Service boundary</a></li>
+      <li><a href="#layers">Architecture layers</a></li>
+      <li><a href="#domains">Domain packages</a></li>
+      <li><a href="#flow">Project space list flow</a></li>
+      <li><a href="#rpc">RPC surface</a></li>
+      <li><a href="#client-contract">Client contract</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="boundary">1. Service boundary</h2>
+  <p>Projects are durable workspace records. A project root is meaningful only inside a location, so the project stores <code>locationId</code> with <code>root</code>. A project does not run code; its location can run code. Member harness sessions execute inside the project location and root through the location and harness services. A space belongs to exactly one project through <code>Space.ProjectID</code>. The project service organizes those spaces into pinned views, clusters, and coordination scopes without owning location probing, filesystem browsing, credentials, runtime state, member roster, message channels, tasks, missions, or harness delivery. Those reachability concerns belong to the <a href="./location-service.html">location service</a>.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">Project owns</div>
+      <div class="title">Composition and context</div>
+      <div class="meta">Project identity, location-scoped root reference, display metadata, pinned spaces, and project-scoped space clusters.</div>
+    </div>
+    <div class="card">
+      <div class="label">Location owns</div>
+      <div class="title">Reachability and capabilities</div>
+      <div class="meta">Location records, filesystem browsing, remote connection setup, credentials, online status, and capability probes live outside the project service.</div>
+    </div>
+    <div class="card">
+      <div class="label">Space owns</div>
+      <div class="title">Space truth</div>
+      <div class="meta">Project membership via <code>ProjectID</code>, title, status, customization, member roster, member labels, and member runtime state.</div>
+    </div>
+    <div class="card">
+      <div class="label">Other services own</div>
+      <div class="title">Behavioral state</div>
+      <div class="meta">Tasks, messages, missions, decisions, escalations, files, and harness-visible context remain behind their own service boundaries.</div>
+    </div>
+  </div>
+
+  <h2 id="layers">2. Architecture layers</h2>
+  <p>The project service follows the same service shape as task and message: domain aggregates own rules, app services orchestrate cross-service reads, infra persists through repository interfaces, and RPC returns client-ready views.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">Protocol</div>
+      <div class="role">RPC handlers validate transport params, resolve caller identity, call <code>app.Service</code>, and return project views.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">App</div>
+      <div class="role"><code>app.Service</code> manages projects and project topology, then hydrates space display data through <code>SpaceLoader</code>.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain</div>
+      <div class="role"><code>project.Project</code> owns project identity and the <code>locationId + root</code> mapping. <code>cluster.Cluster</code> and <code>cluster.SpaceRef</code> own project-scoped grouping, pinning, and coordination scope.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Infra</div>
+      <div class="role">SQLite and Postgres repositories persist projects and topology records behind domain repository contracts.</div>
+    </div>
+  </div>
+
+  <h2 id="domains">3. Domain packages</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="label">Project aggregate</div>
+      <div class="title"><code>internal/services/project/domain/project</code></div>
+      <div class="meta">Creates and validates durable project records: id, location id, root, title, status, created time, and updated time.</div>
+    </div>
+    <div class="card">
+      <div class="label">Space topology</div>
+      <div class="title"><code>internal/services/project/domain/cluster</code></div>
+      <div class="meta">Creates and validates project-owned clusters, pinned spaces, and cluster space references. Topology records do not attach spaces to projects or store space runtime state.</div>
+    </div>
+  </div>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Project</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>        types.ProjectID
+    <span class="tok-field">LocationID</span> types.LocationID
+    <span class="tok-field">Root</span>      <span class="tok-type">string</span>
+    <span class="tok-field">Title</span>     <span class="tok-type">string</span>
+    <span class="tok-field">Status</span>    ProjectStatus
+    <span class="tok-field">CreatedAt</span> time.Time
+    <span class="tok-field">UpdatedAt</span> time.Time
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">SpaceCluster</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>        ClusterID
+    <span class="tok-field">ProjectID</span> types.ProjectID
+    <span class="tok-field">Name</span>      <span class="tok-type">string</span>
+    <span class="tok-field">Status</span>    ClusterStatus
+    <span class="tok-field">CreatedAt</span> time.Time
+    <span class="tok-field">UpdatedAt</span> time.Time
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">ClusterSpace</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ClusterID</span> ClusterID
+    <span class="tok-field">SpaceID</span>   spacedomain.SpaceID
+    <span class="tok-field">SortOrder</span> <span class="tok-type">int</span>
+    <span class="tok-field">Pinned</span>    <span class="tok-type">bool</span>
+}</code></pre>
+
+  <h2 id="flow">4. Project space list flow</h2>
+  <p>The project service loads spaces by project through <code>SpaceLoader</code>, then overlays project-owned topology such as pinned order and cluster membership. This keeps project organization durable without duplicating space-owned state.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Project space list flow">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+      <rect x="20" y="26" width="940" height="86" rx="10" fill="var(--bg-subtle)" stroke="var(--border)"/>
+      <rect x="20" y="136" width="940" height="86" rx="10" fill="var(--bg-elevated)" stroke="var(--border)"/>
+      <rect x="20" y="246" width="940" height="86" rx="10" fill="var(--bg-subtle)" stroke="var(--border)"/>
+
+      <text x="44" y="58" fill="var(--text-faint)" font-size="11" font-weight="700" letter-spacing="1.2">CLIENT</text>
+      <text x="44" y="168" fill="var(--text-faint)" font-size="11" font-weight="700" letter-spacing="1.2">PROJECT SERVICE</text>
+      <text x="44" y="278" fill="var(--text-faint)" font-size="11" font-weight="700" letter-spacing="1.2">SPACE SERVICE</text>
+
+      <rect x="230" y="48" width="168" height="42" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="314" y="74" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">project.space.list</text>
+
+      <rect x="230" y="158" width="168" height="42" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="314" y="184" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Load spaces</text>
+
+      <rect x="470" y="158" width="168" height="42" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="554" y="184" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Overlay topology</text>
+
+      <rect x="710" y="158" width="168" height="42" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="794" y="184" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Return view</text>
+
+      <rect x="470" y="268" width="168" height="42" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="554" y="294" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">List by project</text>
+
+      <text x="314" y="218" text-anchor="middle" fill="var(--text-muted)" font-size="12">Space.ProjectID filter</text>
+      <text x="554" y="328" text-anchor="middle" fill="var(--text-muted)" font-size="12">space-owned records</text>
+      <text x="794" y="218" text-anchor="middle" fill="var(--text-muted)" font-size="12">spaces + clusters</text>
+
+      <line x1="314" y1="90" x2="314" y2="158" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="398" y1="179" x2="470" y2="179" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="554" y1="200" x2="554" y2="268" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="638" y1="289" x2="688" y2="200" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="638" y1="179" x2="710" y2="179" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+    </svg>
+  </div>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">SpaceLoader</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Get</span>(ctx context.Context, id spacedomain.SpaceID) (spacedomain.SpaceRecord, <span class="tok-type">error</span>)
+    <span class="tok-fn">List</span>(ctx context.Context, filter SpaceFilter) ([]spacedomain.SpaceRecord, <span class="tok-type">error</span>)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">ProjectSpaceView</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> types.ProjectID
+    <span class="tok-field">SpaceID</span>   spacedomain.SpaceID
+    <span class="tok-field">Status</span>    <span class="tok-type">string</span>
+    <span class="tok-field">SortOrder</span> <span class="tok-type">int</span>
+    <span class="tok-field">Pinned</span>    <span class="tok-type">bool</span>
+
+    <span class="tok-comment">// Hydrated from the space service.</span>
+    <span class="tok-field">Title</span>     <span class="tok-type">string</span>
+    <span class="tok-field">SpaceOpen</span> <span class="tok-type">bool</span>
+    <span class="tok-field">Members</span>   []SpaceMemberView
+}</code></pre>
+
+  <h2 id="rpc">5. RPC surface</h2>
+  <p>Project RPC methods expose durable project records and project-owned organization. Direct space management remains on <code>space.*</code> methods. Transport handlers validate required ids, call <code>app.Service</code>, and return frontend-ready views.</p>
+
+  <table>
+    <thead><tr><th>Method</th><th>Client need</th><th>App call</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>project.get</code></td><td>Load the active project context.</td><td><code>GetProject</code></td><td>Returns id, location id, root, title, and status.</td></tr>
+      <tr><td><code>project.create</code></td><td>Create a project from browser/user input.</td><td><code>CreateProject</code></td><td>Accepts <code>locationId</code>, root, and title. The service derives the project id so clients do not duplicate id rules.</td></tr>
+      <tr><td><code>project.save</code></td><td>Create or update a durable project record when the caller already has a project id.</td><td><code>SaveProject</code></td><td>Requires <code>projectId</code> and <code>root</code>; empty <code>locationId</code> means <code>local</code>. It is an upsert-shaped command, not a filesystem initializer.</td></tr>
+      <tr><td><code>project.archive</code></td><td>Hide a project from active work without deleting its record immediately.</td><td><code>ArchiveProject</code></td><td>Sets project status to <code>archived</code> and keeps durable project metadata available.</td></tr>
+      <tr><td><code>project.delete</code></td><td>Permanently remove an archived project record.</td><td><code>DeleteProject</code></td><td>Refuses active projects. A project must be archived before it can be deleted.</td></tr>
+      <tr><td><code>project.list</code></td><td>Render project switchers and recent projects.</td><td><code>ListProjects</code></td><td>Returns durable project records, not inferred filesystem entries.</td></tr>
+      <tr><td><code>project.space.list</code></td><td>Render project sidebars, boards, dashboards, and project-scoped pickers.</td><td><code>ListProjectSpaces</code></td><td>Loads spaces by project through <code>SpaceLoader</code> and overlays pinned/cluster state.</td></tr>
+      <tr><td><code>project.cluster.save</code></td><td>Create or update a project-owned space cluster.</td><td><code>SaveCluster</code></td><td>Requires <code>clusterId</code>, <code>projectId</code>, and <code>name</code>. The cluster is organization state, not space ownership.</td></tr>
+      <tr><td><code>project.cluster.list</code></td><td>Render project-owned space groups and coordination scopes.</td><td><code>ListClusters</code></td><td>Returns clusters and their ordered/pinned space refs. Cluster commands stay separate from space lifecycle.</td></tr>
+      <tr><td><code>project.cluster.space.save</code></td><td>Pin or order a project space inside a cluster.</td><td><code>SaveClusterSpace</code></td><td>Validates that the cluster and space belong to the same project before saving the topology ref.</td></tr>
+      <tr><td><code>project.cluster.space.remove</code></td><td>Remove a space from a cluster.</td><td><code>RemoveClusterSpace</code></td><td>Removes topology only. The space remains in the project because ownership lives on <code>Space.ProjectID</code>.</td></tr>
+    </tbody>
+  </table>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">ProjectView</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>        <span class="tok-type">string</span>     <span class="tok-string">`json:"id"`</span>
+    <span class="tok-field">LocationID</span> <span class="tok-type">string</span>     <span class="tok-string">`json:"locationId"`</span>
+    <span class="tok-field">Root</span>      <span class="tok-type">string</span>     <span class="tok-string">`json:"root"`</span>
+    <span class="tok-field">Title</span>     <span class="tok-type">string</span>     <span class="tok-string">`json:"title,omitempty"`</span>
+    <span class="tok-field">Status</span>    <span class="tok-type">string</span>     <span class="tok-string">`json:"status"`</span>
+    <span class="tok-field">CreatedAt</span> *time.Time <span class="tok-string">`json:"createdAt,omitempty"`</span>
+    <span class="tok-field">UpdatedAt</span> *time.Time <span class="tok-string">`json:"updatedAt,omitempty"`</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">ProjectSaveParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"projectId"`</span>
+    <span class="tok-field">LocationID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"locationId,omitempty"`</span>
+    <span class="tok-field">Root</span>      <span class="tok-type">string</span> <span class="tok-string">`json:"root"`</span>
+    <span class="tok-field">Title</span>     <span class="tok-type">string</span> <span class="tok-string">`json:"title,omitempty"`</span>
+    <span class="tok-field">Status</span>    <span class="tok-type">string</span> <span class="tok-string">`json:"status,omitempty"`</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">ProjectArchiveParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"projectId"`</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">ProjectDeleteParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"projectId"`</span>
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">ProjectCreateParams</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">LocationID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"locationId,omitempty"`</span>
+    <span class="tok-field">Root</span>   <span class="tok-type">string</span> <span class="tok-string">`json:"root"`</span>
+    <span class="tok-field">Title</span>  <span class="tok-type">string</span> <span class="tok-string">`json:"title,omitempty"`</span>
+    <span class="tok-field">Status</span> <span class="tok-type">string</span> <span class="tok-string">`json:"status,omitempty"`</span>
+}</code></pre>
+
+  <h2 id="client-contract">6. Client contract</h2>
+  <p>The browser treats <code>projectId</code> as the route key. Project roots are display and filesystem context scoped to <code>locationId</code>, not routing identity. Project-scoped UI calls use <code>projectId</code> and receive views that are already shaped for rendering.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">Project list</div>
+      <div class="title"><code>project.list</code></div>
+      <div class="meta">Returns <code>id</code>, <code>locationId</code>, <code>root</code>, <code>title</code>, <code>status</code>, and timestamps for project switchers and the home page.</div>
+    </div>
+    <div class="card">
+      <div class="label">Space list</div>
+      <div class="title"><code>project.space.list</code></div>
+      <div class="meta">Accepts <code>projectId</code>. Returns spaces sorted with pinned spaces first, open spaces before closed spaces, then configured order and title.</div>
+    </div>
+    <div class="card">
+      <div class="label">Creation command</div>
+      <div class="title"><code>project.create</code></div>
+      <div class="meta">The client-facing creation command is the boundary for deriving a project id from user input. It accepts location id, root, and title, then calls the app service with a valid id.</div>
+    </div>
+  </div>
+
+  <p><code>project.save</code> is available when a caller already has a valid project id. The UI creation flow does not invent ids itself; it uses <code>project.create</code> so every client gets the same id derivation rule.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 980 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Frontend project lifecycle flow">
+      <defs>
+        <marker id="client-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+
+      <text x="34" y="42" fill="var(--text)" font-size="18" font-weight="800">Open or create a project</text>
+      <text x="34" y="68" fill="var(--text-muted)" font-size="12">The UI never derives project ids. It receives an id from the project service, then routes by that id.</text>
+
+      <rect x="34" y="98" width="176" height="62" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="122" y="123" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Project page</text>
+      <text x="122" y="143" text-anchor="middle" fill="var(--text-muted)" font-size="11">home / switcher</text>
+
+      <rect x="270" y="98" width="176" height="62" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="358" y="123" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">project.list</text>
+      <text x="358" y="143" text-anchor="middle" fill="var(--text-muted)" font-size="11">render cards</text>
+
+      <rect x="270" y="184" width="176" height="62" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="358" y="209" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">project.create</text>
+      <text x="358" y="229" text-anchor="middle" fill="var(--text-muted)" font-size="11">location + root -> id</text>
+
+      <rect x="506" y="140" width="176" height="62" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="594" y="165" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">ProjectView</text>
+      <text x="594" y="185" text-anchor="middle" fill="var(--text-muted)" font-size="11">id, location, root, status</text>
+
+      <rect x="742" y="140" width="190" height="62" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="837" y="165" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">/project/:projectId</text>
+      <text x="837" y="185" text-anchor="middle" fill="var(--text-muted)" font-size="11">route identity</text>
+
+      <rect x="742" y="222" width="190" height="54" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="837" y="244" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">project.space.list</text>
+      <text x="837" y="262" text-anchor="middle" fill="var(--text-muted)" font-size="11">{ projectId }</text>
+
+      <line x1="210" y1="129" x2="270" y2="129" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
+      <line x1="122" y1="160" x2="270" y2="215" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
+      <line x1="446" y1="129" x2="506" y2="159" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
+      <line x1="446" y1="215" x2="506" y2="183" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
+      <line x1="682" y1="171" x2="742" y2="171" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
+      <line x1="837" y1="202" x2="837" y2="222" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
+
+      <line x1="34" y1="314" x2="932" y2="314" stroke="var(--border)" stroke-width="1"/>
+      <text x="34" y="354" fill="var(--text)" font-size="18" font-weight="800">Archive or delete a project</text>
+      <text x="34" y="380" fill="var(--text-muted)" font-size="12">Archive is the reversible user action. Delete is permanent and only accepts an archived project.</text>
+
+      <rect x="110" y="414" width="176" height="62" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="198" y="439" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Open project</text>
+      <text x="198" y="459" text-anchor="middle" fill="var(--text-muted)" font-size="11">status open</text>
+
+      <rect x="402" y="414" width="176" height="62" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="490" y="439" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">project.archive</text>
+      <text x="490" y="459" text-anchor="middle" fill="var(--text-muted)" font-size="11">status archived</text>
+
+      <rect x="694" y="414" width="176" height="62" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="782" y="439" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">project.delete</text>
+      <text x="782" y="459" text-anchor="middle" fill="var(--text-muted)" font-size="11">remove record</text>
+
+      <line x1="286" y1="445" x2="402" y2="445" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
+      <line x1="578" y1="445" x2="694" y2="445" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
+      <text x="636" y="431" text-anchor="middle" fill="var(--text-muted)" font-size="11">archive required</text>
+    </svg>
+  </div>
+
+  <h2 id="invariants">7. Invariants</h2>
+  <table>
+    <thead><tr><th>Rule</th><th>Enforced by</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>A space belongs to one project through <code>Space.ProjectID</code>.</td><td>Space service domain</td><td>Project membership is space-owned, not a project attach/detach operation.</td></tr>
+      <tr><td>Project topology records only reference spaces from the same project.</td><td><code>cluster.NewSpaceRef</code> and app validation</td><td>Clusters organize project spaces without becoming cross-project ownership records.</td></tr>
+      <tr><td>Project topology does not store member labels, run ids, or lifecycle runtime state.</td><td>Domain types and repository schema</td><td>Those fields belong to the space and harness boundaries.</td></tr>
+      <tr><td>Listing project spaces loads spaces by project and overlays topology.</td><td><code>app.Service.ListProjectSpaces</code></td><td>The space service remains the source of truth for space state and member roster state.</td></tr>
+      <tr><td>Direct space updates go through <code>space.*</code>, not <code>project.*</code>.</td><td>RPC method ownership</td><td>The space service owns space state and authorization rules.</td></tr>
+      <tr><td>Project creation uses a known harness-ready location.</td><td>Location service contract and project creation validation</td><td>A project location must be able to host member harness sessions.</td></tr>
+      <tr><td>Project records store <code>locationId</code> and root, not location credentials or probe state.</td><td>Project domain schema</td><td>Reachability, credentials, and readiness belong to the location service.</td></tr>
+      <tr><td>A project does not own execution.</td><td>Project, location, and harness service boundaries</td><td>The project supplies <code>locationId</code> and root; the location supplies transport; the harness adapter starts or resumes execution.</td></tr>
+      <tr><td>Project deletion requires the project to be archived first.</td><td><code>app.Service.DeleteProject</code></td><td>Archive is the reversible user action; delete is the explicit destructive action.</td></tr>
+    </tbody>
+  </table>
+
+<pre class="mocha"><code class="lang-text">internal/services/project/
+  domain/
+    project/
+      project.go
+      repository.go
+    cluster/
+      cluster.go
+      space_ref.go
+      repository.go
+  app/
+    clock.go
+    doc.go
+    ports.go
+    service.go
+  infra/
+    sqlite_repository.go
+    postgres_repository.go
+  rpc/
+    handler.go
+    types.go
+
+internal/rpc/
+  project.go</code></pre>
+</div>
+</body>
+</html>

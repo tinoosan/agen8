@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "agen8": {
+      "type": "http",
+      "url": "http://127.0.0.1:7777/mcp?token=agen8-local"
+    },
+    "shadcn": {
+      "command": "npx",
+      "args": [
+        "shadcn@latest",
+        "mcp"
+      ]
+    }
+  }
+}

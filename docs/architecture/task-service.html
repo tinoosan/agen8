@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / task-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Task Service</span>
+  <h1>Task Service</h1>
+  <p class="lede">
+    How tasks are modelled, validated, and moved through their lifecycle inside agen8 — domain rules in one pure layer, side effects in a deliberate seam.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#layers">Architecture layers</a></li>
+      <li><a href="#rpc">RPC adapter</a></li>
+      <li><a href="#lifecycle">The task lifecycle</a></li>
+      <li><a href="#routing">Routing model</a></li>
+      <li><a href="#caller">Caller identity</a></li>
+      <li><a href="#publishing">Persistence &amp; message publishing</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="layers">1. Architecture layers</h2>
+
+  <p>Each layer has one responsibility. Protocol adapters translate requests into typed service commands. Side effects flow downward through the service into the repository and message publisher; rules and validation flow inward into the pure domain.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">Protocol handler</div>
+      <div class="role">Translate JSON-RPC or MCP payloads into typed task service commands. Tool names, action strings, schemas, and response cards live here, not in the service.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Service (orchestration)</div>
+      <div class="role">Authorize the caller. Load the task. Call the domain transition. Persist and publish through a single seam. Side effects live here, deliberately.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain (pure rules)</div>
+      <div class="role"><code>domain.Task</code>, <code>domain.TaskID</code>, <code>domain.TaskStatus</code>, and acceptance criteria live in the task domain. The task record exposes named transition methods. Each validates the source state and required inputs, returns the next state or a precise error. No repositories, no tool semantics, no old <code>pkg/types</code> task model.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Repository</div>
+      <div class="role">Persistence only. Stores the next state the service hands it; does not evaluate rules.</div>
+    </div>
+    <div class="layer events">
+      <div class="label">Messages</div>
+      <div class="role">Agent notifications are created through the message service boundary after task persistence succeeds.</div>
+    </div>
+  </div>
+
+  <h3>The task domain owns the task record</h3>
+  <p><code>domain.Task</code> is the canonical task record persisted by the repository. <code>domain.TaskID</code> is the only typed task identifier. RPC projects the domain record into <code>internal/services/task/rpc.TaskView</code>, keeping transport fields separate from lifecycle state.</p>
+
+<pre><code class="lang-go">current, err := repo.<span class="tok-fn">GetTask</span>(ctx, taskID)          <span class="tok-comment">// taskID is domain.TaskID</span>
+next, err := current.<span class="tok-fn">Cancel</span>(reason, now)            <span class="tok-comment">// domain.Task -> domain.Task</span>
+err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    <span class="tok-comment">// persists the domain record</span></code></pre>
+
+  <h3>The service struct</h3>
+  <p>The application service owns orchestration. It resolves the caller from <code>context.Context</code>, validates member and space boundaries, calls the pure domain transition, persists the next task state, and publishes agent messages through the message service. It does not accept a dependency bag; the constructor lists the service boundary explicitly.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">tasks</span>    <span class="tok-pkg">domain</span>.<span class="tok-type">TaskRepository</span>
+    <span class="tok-field">clock</span>    <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>
+    <span class="tok-field">caller</span>   <span class="tok-pkg">caller</span>.<span class="tok-type">Resolver</span>
+    <span class="tok-field">members</span>  <span class="tok-type">MemberLoader</span>
+    <span class="tok-field">spaces</span>   <span class="tok-type">SpaceLoader</span>
+    <span class="tok-field">messages</span> <span class="tok-type">MessagePublisher</span>
+    <span class="tok-field">logger</span>   *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(
+    tasks <span class="tok-pkg">domain</span>.<span class="tok-type">TaskRepository</span>,
+    clock <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>,
+    caller <span class="tok-pkg">caller</span>.<span class="tok-type">Resolver</span>,
+    members <span class="tok-type">MemberLoader</span>,
+    spaces <span class="tok-type">SpaceLoader</span>,
+    messages <span class="tok-type">MessagePublisher</span>,
+    logger *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>,
+) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+<pre><code class="lang-go"><span class="tok-comment">// internal/caller</span>
+<span class="tok-kw">type</span> <span class="tok-type">Caller</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>   string
+    <span class="tok-field">MemberID</span> <span class="tok-pkg">types</span>.<span class="tok-type">MemberID</span> <span class="tok-comment">// optional for user-owned RPC calls</span>
+    <span class="tok-field">SpaceID</span>  <span class="tok-pkg">types</span>.<span class="tok-type">SpaceID</span>
+    <span class="tok-field">Role</span>     string
+}</code></pre>
+
+  <h2 id="rpc">2. RPC adapter</h2>
+
+  <p>The JSON-RPC task handler is a thin CRUD adapter over the task service. It translates request DTOs into typed service calls, validates transport payloads such as UUID strings, and returns <code>TaskView</code>. Repository access stays inside the service boundary, and agent lifecycle actions stay on the MCP task tool.</p>
+
+  <p>The RPC registry binds <code>task.create</code>, <code>task.get</code>, <code>task.list</code>, and <code>task.update</code> through <code>internal/app/rpchandlers/task.go</code>. The registry receives the process-owned <code>*taskapp.Service</code> from the application composition root; it does not construct a task service and it does not receive a repository.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Handler</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">svc</span> *<span class="tok-pkg">taskapp</span>.<span class="tok-type">Service</span>
+}
+
+<span class="tok-kw">func</span> (h *<span class="tok-type">Handler</span>) <span class="tok-fn">Create</span>(ctx context.Context, p <span class="tok-type">TaskCreateParams</span>) (<span class="tok-type">TaskCreateResult</span>, error)
+<span class="tok-kw">func</span> (h *<span class="tok-type">Handler</span>) <span class="tok-fn">Get</span>(ctx context.Context, p <span class="tok-type">TaskGetParams</span>) (<span class="tok-type">TaskGetResult</span>, error)
+<span class="tok-kw">func</span> (h *<span class="tok-type">Handler</span>) <span class="tok-fn">List</span>(ctx context.Context, p <span class="tok-type">TaskListParams</span>) (<span class="tok-type">TaskListResult</span>, error)
+<span class="tok-kw">func</span> (h *<span class="tok-type">Handler</span>) <span class="tok-fn">Update</span>(ctx context.Context, p <span class="tok-type">TaskUpdateParams</span>) (<span class="tok-type">TaskUpdateResult</span>, error)</code></pre>
+
+<pre><code class="lang-go"><span class="tok-comment">// internal/caller</span>
+<span class="tok-kw">func</span> <span class="tok-fn">ContextWithCaller</span>(ctx context.Context, caller <span class="tok-type">Caller</span>) context.Context
+
+<span class="tok-kw">type</span> <span class="tok-type">ContextResolver</span> <span class="tok-kw">struct</span>{}
+
+<span class="tok-kw">func</span> (<span class="tok-type">ContextResolver</span>) <span class="tok-fn">ResolveCaller</span>(ctx context.Context) (<span class="tok-type">Caller</span>, error)</code></pre>
+
+  <p>Adapters stamp the authenticated caller into <code>context.Context</code> before invoking service methods. The task service consumes the same <code>internal/caller</code> contract as the space service, so service-to-service orchestration keeps caller identity intact. The resolver fails when both <code>UserID</code> and <code>MemberID</code> are missing. <code>MemberID</code> is optional because the human user can use RPC without acting as an agent member. The service never infers a member from a user id, space id, or runtime session.</p>
+
+  <table>
+    <thead><tr><th>RPC method</th><th>Service call</th><th>Boundary rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>task.create</code></td><td><code>Service.Create</code></td><td>Creates a pending task and publishes the assignment message through the service.</td></tr>
+      <tr><td><code>task.get</code></td><td><code>Service.Get</code></td><td>Reads one task and projects it to <code>TaskView</code>.</td></tr>
+      <tr><td><code>task.list</code></td><td><code>Service.List</code> + <code>Service.Count</code></td><td>Applies service-owned filters, including space, assignee, claim, status, task kind, and plan refs.</td></tr>
+      <tr><td><code>task.update</code></td><td><code>Service.Update</code></td><td>Coordinator-only data edit. It updates title, description, acceptance criteria, refs, kind, and metadata; it does not run lifecycle transitions.</td></tr>
+    </tbody>
+  </table>
+
+  <p><code>TaskView</code> contains the task service read model: ids, space/member assignment, creator actor, description, acceptance criteria, status, artifacts, KR and plan refs, metadata, and lifecycle timestamps.</p>
+
+  <h2 id="lifecycle">3. The task lifecycle</h2>
+
+  <p>A task moves through a focused state machine via named transitions. Each transition is a method on <code>domain.Task</code> that takes its inputs and the current time explicitly, and returns either the next state or an error. Terminal states (Succeeded, Failed, Canceled) have no outgoing transitions.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+      <marker id="ar-good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--good)"/>
+      </marker>
+      <marker id="ar-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--warn)"/>
+      </marker>
+      <marker id="ar-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--bad)"/>
+      </marker>
+    </defs>
+
+    <rect x="40"  y="160" width="120" height="52" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)" stroke-width="1.5"/>
+    <text x="100" y="182" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="600">Pending</text>
+    <text x="100" y="200" text-anchor="middle" fill="var(--text-muted)" font-size="10.5">unclaimed</text>
+
+    <rect x="240" y="160" width="120" height="52" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)" stroke-width="1.5"/>
+    <text x="300" y="182" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="600">Active</text>
+    <text x="300" y="200" text-anchor="middle" fill="var(--text-muted)" font-size="10.5">claimed</text>
+
+    <rect x="240" y="40"  width="120" height="52" rx="8" fill="var(--bg-elevated)" stroke="var(--peach)" stroke-width="1.5"/>
+    <text x="300" y="62" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="600">Blocked</text>
+
+    <rect x="440" y="160" width="120" height="52" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)" stroke-width="1.5"/>
+    <text x="500" y="182" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="600">In Review</text>
+
+    <rect x="640" y="40"  width="120" height="52" rx="8" fill="var(--good-soft)" stroke="var(--good)" stroke-width="1.5"/>
+    <text x="700" y="62" text-anchor="middle" fill="var(--good)" font-size="13" font-weight="600">Succeeded</text>
+    <text x="700" y="80" text-anchor="middle" fill="var(--text-muted)" font-size="10">terminal</text>
+
+    <rect x="640" y="160" width="120" height="52" rx="8" fill="var(--bad-soft)" stroke="var(--bad)" stroke-width="1.5"/>
+    <text x="700" y="182" text-anchor="middle" fill="var(--bad)" font-size="13" font-weight="600">Failed</text>
+    <text x="700" y="200" text-anchor="middle" fill="var(--text-muted)" font-size="10">terminal</text>
+
+    <rect x="640" y="280" width="120" height="52" rx="8" fill="var(--bg-code)" stroke="var(--text-faint)" stroke-width="1.5"/>
+    <text x="700" y="302" text-anchor="middle" fill="var(--text-muted)" font-size="13" font-weight="600">Canceled</text>
+    <text x="700" y="320" text-anchor="middle" fill="var(--text-faint)" font-size="10">terminal</text>
+
+    <line x1="160" y1="180" x2="240" y2="180" stroke="var(--good)" stroke-width="1.8" marker-end="url(#ar-good)"/>
+    <text x="200" y="172" text-anchor="middle" fill="var(--good)" font-size="11" font-weight="500">Claim</text>
+
+    <line x1="360" y1="180" x2="440" y2="180" stroke="var(--good)" stroke-width="1.8" marker-end="url(#ar-good)"/>
+    <text x="400" y="172" text-anchor="middle" fill="var(--good)" font-size="11" font-weight="500">Complete</text>
+
+    <line x1="300" y1="160" x2="300" y2="92" stroke="var(--warn)" stroke-width="1.8" marker-end="url(#ar-warn)"/>
+    <text x="318" y="125" fill="var(--warn)" font-size="11" font-weight="500">Block</text>
+
+    <line x1="280" y1="92" x2="280" y2="160" stroke="var(--good)" stroke-width="1.8" marker-end="url(#ar-good)"/>
+    <text x="222" y="125" fill="var(--good)" font-size="11" font-weight="500">Unblock</text>
+
+    <path d="M 240 200 Q 200 232 160 200" fill="none" stroke="var(--text-faint)" stroke-width="1.8" marker-end="url(#ar)"/>
+    <text x="200" y="242" text-anchor="middle" fill="var(--text-muted)" font-size="11" font-weight="500">Release</text>
+
+    <line x1="540" y1="170" x2="640" y2="80" stroke="var(--good)" stroke-width="1.8" marker-end="url(#ar-good)"/>
+    <text x="565" y="115" fill="var(--good)" font-size="11" font-weight="500">Review approve</text>
+
+    <line x1="560" y1="185" x2="640" y2="185" stroke="var(--bad)" stroke-width="1.8" marker-end="url(#ar-bad)"/>
+    <text x="600" y="178" fill="var(--bad)" font-size="11" font-weight="500">Review fail</text>
+
+    <path d="M 480 202 Q 420 242 360 202" fill="none" stroke="var(--text-faint)" stroke-width="1.8" marker-end="url(#ar)"/>
+    <text x="420" y="250" fill="var(--text-muted)" font-size="11" font-weight="500">Review retry</text>
+
+    <line x1="560" y1="305" x2="640" y2="305" stroke="var(--text-faint)" stroke-width="1.8" marker-end="url(#ar)"/>
+    <text x="600" y="298" fill="var(--text-muted)" font-size="11" font-weight="500">Cancel</text>
+
+    <text x="40" y="330" fill="var(--text-muted)" font-size="11">Workers submit tasks into review; coordinators approve, retry, fail, or cancel them.</text>
+  </svg>
+  </div>
+
+  <h3>Service actions</h3>
+  <p>The product-facing task surface stays small. Read actions never publish messages. Mutations publish only when another agent needs to act.</p>
+
+  <table>
+    <thead><tr><th>Action</th><th>Service method</th><th>Message?</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><code>create</code></td><td><code>Create</code></td><td>yes, <code>assigned</code></td><td>The assigned worker needs to claim the task.</td></tr>
+      <tr><td><code>get</code> / <code>list</code></td><td><code>Get</code> / <code>List</code></td><td>no</td><td>Read-only actions do not wake agents.</td></tr>
+      <tr><td><code>update</code></td><td><code>Update</code></td><td>no</td><td>CRUD data edits do not represent a lifecycle transition.</td></tr>
+      <tr><td><code>claim</code></td><td><code>Claim</code></td><td>no</td><td>The caller already knows they claimed the task.</td></tr>
+      <tr><td><code>release</code></td><td><code>Release</code></td><td>yes, <code>released</code></td><td>The coordinator needs to decide what happens next.</td></tr>
+      <tr><td><code>submit</code></td><td><code>Complete</code></td><td>yes, <code>review_requested</code></td><td>The coordinator needs to review the completed work.</td></tr>
+      <tr><td><code>block</code></td><td><code>Block</code></td><td>yes, <code>blocked</code></td><td>The coordinator needs to resolve the blocker or escalate.</td></tr>
+      <tr><td><code>unblock</code></td><td><code>Unblock</code></td><td>yes, <code>unblocked</code></td><td>The assigned worker can continue after the claimant or coordinator clears the blocker.</td></tr>
+      <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td>yes, <code>retry_requested</code></td><td>The worker needs feedback and another pass.</td></tr>
+      <tr><td><code>review</code> approve</td><td><code>ApproveReview</code></td><td>no</td><td>The worker is done; no action is required.</td></tr>
+      <tr><td><code>review</code> fail</td><td><code>FailReview</code></td><td>no</td><td>No action is required unless the coordinator separately retries or cancels.</td></tr>
+      <tr><td><code>cancel</code></td><td><code>Cancel</code></td><td>yes, <code>canceled</code>, when someone may still be working</td><td>The assigned or claimed worker needs to stop work.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Task message kinds</h3>
+  <p>The task service owns lifecycle notification timing because it is the layer that knows whether a state change committed. Message composition is typed and event-specific. A task message is a wake-up envelope: it includes canonical ids, the lifecycle event, the intended next action, and short event-specific context. It does not duplicate the task read model because the receiver can call <code>task.get</code> with the provided <code>taskId</code>.</p>
+
+  <table>
+    <thead><tr><th>Kind</th><th>Published by</th><th>Recipient</th><th>Message guidance</th></tr></thead>
+    <tbody>
+      <tr><td><code>assigned</code></td><td><code>Create</code> and assignment correction</td><td>assigned worker/member</td><td>Claim the task before starting work. Work against the acceptance criteria and submit it for review when complete.</td></tr>
+      <tr><td><code>review_requested</code></td><td><code>Complete</code></td><td>coordinator</td><td>Review the worker summary, artifacts, and acceptance criteria. Approve only when every criterion is satisfied; otherwise request a retry with concrete feedback.</td></tr>
+      <tr><td><code>retry_requested</code></td><td><code>RetryReview</code></td><td>assigned worker/member</td><td>Continue from the active task state. Focus on coordinator feedback and unsatisfied acceptance criteria, then submit again when the remaining work is complete.</td></tr>
+      <tr><td><code>released</code></td><td><code>Release</code></td><td>coordinator</td><td>The worker returned the task without completing it. Decide whether to assign it again, change the direction, or cancel it.</td></tr>
+      <tr><td><code>blocked</code></td><td><code>Block</code></td><td>coordinator</td><td>The worker cannot continue without intervention. Resolve the blocker directly, escalate for human action when needed, then unblock the task.</td></tr>
+      <tr><td><code>unblocked</code></td><td><code>Unblock</code></td><td>assigned worker/member</td><td>Continue from the current task state and submit for review when the acceptance criteria are satisfied.</td></tr>
+      <tr><td><code>canceled</code></td><td><code>Cancel</code></td><td>assigned or claimed worker/member</td><td>Stop working on the task. Do not claim, continue, or submit it unless a coordinator creates or assigns a new task.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Every task message body includes <code>event</code>, <code>taskId</code>, <code>spaceId</code>, <code>actorMemberId</code>, <code>targetMemberId</code>, <code>nextAction</code>, <code>guidance</code>, and a concise human-readable <code>message</code>. Review-ready messages may include the worker <code>summary</code>. Retry, blocker, and cancel messages include a short <code>reason</code>. Unblock messages may include a short <code>note</code>. Message bodies do not include task descriptions, acceptance criteria, artifacts, metadata, plan refs, or KR refs; those live behind <code>task.get</code>.</p>
+
+  <h3>Domain transition methods</h3>
+  <p>Each labelled arrow is a method on <code>domain.Task</code>. Assignment is a single product concept: if a task needs a different worker, the service assigns it again and emits the same <code>assigned</code> message shape.</p>
+
+  <table>
+    <thead><tr><th>Method</th><th>Source state</th><th>Result</th><th>Required inputs</th></tr></thead>
+    <tbody>
+      <tr><td><code>Assign</code></td><td>any non-terminal</td><td>Pending</td><td>assigned member id, now</td></tr>
+      <tr><td><code>Claim</code></td><td>Pending</td><td>Active</td><td>assigned member id, now</td></tr>
+      <tr><td><code>Complete</code></td><td>Active</td><td>In Review</td><td>summary, artifacts, now</td></tr>
+      <tr><td><code>ApproveReview</code></td><td>In Review</td><td>Succeeded</td><td>criterion outcomes, now</td></tr>
+      <tr><td><code>RetryReview</code></td><td>In Review</td><td>Active</td><td>feedback, criterion outcomes, now</td></tr>
+      <tr><td><code>FailReview</code></td><td>In Review</td><td>Failed</td><td>reason, criterion outcomes, now</td></tr>
+      <tr><td><code>Block</code></td><td>Active</td><td>Blocked</td><td>reason, now</td></tr>
+      <tr><td><code>Unblock</code></td><td>Blocked</td><td>Active</td><td>note (optional), now</td></tr>
+      <tr><td><code>Release</code></td><td>Active</td><td>Pending</td><td>now</td></tr>
+      <tr><td><code>Cancel</code></td><td>any non-terminal</td><td>Canceled</td><td>reason, now</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Acceptance criteria as review state</h3>
+  <p>Acceptance criteria are task state, not metadata. Creation turns criterion text into stable criterion objects. Review transitions update their satisfaction state so a retry can tell the worker which criteria already passed and which still need work.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">AcceptanceCriterion</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>        string <span class="tok-string">`json:"id"`</span>
+    <span class="tok-field">Text</span>      string <span class="tok-string">`json:"text"`</span>
+    <span class="tok-field">Satisfied</span> bool   <span class="tok-string">`json:"satisfied"`</span>
+}</code></pre>
+
+  <p>Review commands do not rewrite criterion text. They submit outcomes for existing criterion ids:</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">CriterionReview</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>        string
+    <span class="tok-field">Satisfied</span> bool
+}</code></pre>
+
+  <table>
+    <thead><tr><th>Review rule</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td><code>ApproveReview</code> requires every criterion to be satisfied</td><td>Approval means the task meets the coordinator's stated acceptance bar.</td></tr>
+      <tr><td><code>RetryReview</code> accepts partial satisfaction</td><td>The worker receives durable state for what passed and what remains.</td></tr>
+      <tr><td><code>FailReview</code> records criterion outcomes and requires a reason</td><td>The terminal failure preserves why the task did not satisfy the bar.</td></tr>
+      <tr><td>Unknown, duplicate, or missing criterion ids fail the review</td><td>Partial review payloads are ambiguous and stale ids hide protocol bugs.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Anatomy of a lifecycle call</h3>
+
+  <div class="flow">
+    <div class="step"><div class="marker">1</div><div class="body">Handler decodes the protocol payload and builds a typed command such as <code>CreateTaskParams</code>, <code>CompleteTaskParams</code>, or <code>ReviewTaskParams</code>.</div></div>
+    <div class="step"><div class="marker">2</div><div class="body">Service authorizes the caller. User-owned actions verify the user against the task's space; member-scoped actions verify the caller against the task's assigned or claimed member.</div></div>
+    <div class="step"><div class="marker">3</div><div class="body">Service loads the current task with the typed id: <code>current, err := repo.GetTask(ctx, taskID)</code>.</div></div>
+    <div class="step"><div class="marker">4</div><div class="body">Service calls the domain transition: <code>next, err := current.Cancel(reason, clock.Now())</code>. If validation or state rules fail the call returns an error before any side effect.</div></div>
+    <div class="step"><div class="marker">5</div><div class="body">Service persists the next state and, when another agent needs to act, publishes the corresponding agent message through one service-owned seam. The task service calls the message service boundary; it does not write the message repository directly.</div></div>
+  </div>
+
+  <h2 id="routing">4. Routing model — tasks go to members</h2>
+
+  <p>Tasks are routed by member id. Every task has exactly one assigned member. Assigning a task to a different worker is still assignment; it is not a separate product concept.</p>
+
+  <ul>
+    <li><code>AssignedTo</code> holds the member id.</li>
+    <li><code>ClaimedByMemberID</code> records the member currently doing the work.</li>
+    <li><code>Claim</code> fails when the caller is not the assigned member.</li>
+  </ul>
+
+  <p>This makes the claim authorization question direct: <em>is the caller the assigned member?</em> If yes, the claim succeeds; if no, it fails.</p>
+
+  <h2 id="caller">5. Caller identity — user vs. agent</h2>
+
+  <p>"User" and "agent" are calling-context kinds, not roles. The service determines which kind is calling from the request context and authorizes accordingly.</p>
+
+  <div class="caller-grid">
+    <div class="caller-card op">
+      <span class="who">User (human)</span>
+      <dl>
+        <dt>UserID</dt><dd>present (authenticated session)</dd>
+        <dt>MemberID</dt><dd>optional / usually absent</dd>
+        <dt>Authorized for</dt><dd>create, update, assign, review, and cancel when the user owns the task's space</dd>
+      </dl>
+    </div>
+    <div class="caller-card ag">
+      <span class="who">Agent</span>
+      <dl>
+        <dt>UserID</dt><dd>project tenant</dd>
+        <dt>MemberID</dt><dd>present</dd>
+        <dt>Authorized for</dt><dd>claim, complete, block, and release by assigned/claimed member; unblock by assigned/claimed member or same-space coordinator; create, assign, review, update, and cancel by coordinator members</dd>
+      </dl>
+    </div>
+  </div>
+
+  <p>User-owned calls authorize against <code>Space.UserID</code>. Member-owned calls authorize against the member record and member type. When both <code>UserID</code> and <code>MemberID</code> are present, member authorization is used so a worker cannot become a coordinator just because the owning user is also authenticated.</p>
+
+  <p class="meta">Authorization happens at the service boundary, before any domain transition runs. The domain assumes any caller it sees has already been authorized — it only validates state and inputs.</p>
+
+  <h2 id="activity">6. Task history belongs to events</h2>
+
+  <p>The task service does not own an embedded activity log. Task history is a read model over the event service: events that refer to a task carry a canonical task id in their structured data, and the UI queries the event service for those task-associated events when it needs an activity timeline.</p>
+
+<pre><code class="lang-go"><span class="tok-type">EventRecord</span>{
+    <span class="tok-field">Type</span>: <span class="tok-string">"task.review_requested"</span>,
+    <span class="tok-field">Data</span>: map[string]string{
+        <span class="tok-string">"taskId"</span>: <span class="tok-string">"task_..."</span>,
+    },
+}</code></pre>
+
+  <p>The event service owns event persistence, event querying, and task-history projection. The task service may emit task-related events as part of lifecycle orchestration, but it does not copy those events into <code>Task.Metadata</code> and it does not expose a task-history mutation method.</p>
+
+  <table>
+    <thead><tr><th>Boundary rule</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>Task history is queried from the event service</td><td>The event service already owns append-only event persistence and timeline queries.</td></tr>
+      <tr><td>No <code>TaskActivity</code> type in the task domain</td><td>The task aggregate stays focused on lifecycle state, assignment, review, blockers, and task data.</td></tr>
+      <tr><td>No task activity projector writes back to tasks</td><td>Events are not duplicated into <code>Task.Metadata</code>.</td></tr>
+      <tr><td>Task-related events carry <code>taskId</code></td><td>The UI can build the activity timeline by asking the event service for events associated with that task.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="publishing">7. Persistence and message publishing</h2>
+
+  <p>Only state changes that require another agent to act publish messages. That keeps the message stream useful: messages wake agents for assignment, review, retry, release, blockers, unblock, and cancel. Approval and failure do not notify the worker because no worker action is required.</p>
+
+  <p>Every notification-producing state change passes through a single seam that orders task persistence before message publishing and surfaces the two outcomes distinctly:</p>
+
+  <div class="flow">
+    <div class="step"><div class="marker">1</div><div class="body">Repository writes the next state. On failure the seam returns the error — no message is published, no side effect leaks.</div></div>
+    <div class="step"><div class="marker">2</div><div class="body">Message publisher creates the corresponding <code>AgentMessage</code> through the message service boundary. The task service never receives or calls a message repository.</div></div>
+  </div>
+
+  <p>Two outcomes are meaningfully different to callers:</p>
+
+  <ul>
+    <li><strong>Caller receives an error.</strong> The task repository did not commit, or the message service rejected the notification. State is unchanged unless the service method explicitly documents a committed-before-notify result.</li>
+    <li><strong>Caller receives no error.</strong> The task state committed and the message service accepted the notification for persistence and delivery.</li>
+  </ul>
+
+  <h3>Repository implementation</h3>
+  <p>The task repository is a concrete infra concern. The domain declares the repository contract; <code>internal/services/task/infra</code> owns the SQL-backed implementations. The repository stores the canonical <code>domain.Task</code> document and maintains query columns for task-list filters.</p>
+
+  <table>
+    <thead><tr><th>Column</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>task_id</code></td><td>Primary key, mirrored from <code>Task.ID</code>.</td></tr>
+      <tr><td><code>space_id</code></td><td>Space-scoped list and ownership filter.</td></tr>
+      <tr><td><code>assigned_to</code></td><td>Assigned member filter.</td></tr>
+      <tr><td><code>claimed_by_member_id</code></td><td>Claimed member filter.</td></tr>
+      <tr><td><code>task_kind</code></td><td>Task kind filter.</td></tr>
+      <tr><td><code>status</code></td><td>Lifecycle status filter.</td></tr>
+      <tr><td><code>key_result_ref</code></td><td>KR linkage for strategy and review surfaces.</td></tr>
+      <tr><td><code>created_at</code>, <code>updated_at</code>, <code>completed_at</code></td><td>Ordering and date-range filters.</td></tr>
+      <tr><td><code>task_json</code></td><td>The canonical persisted task document.</td></tr>
+    </tbody>
+  </table>
+
+  <p><code>Metadata</code> is preserved in <code>task_json</code> for task-owned extensibility only. Task history is not stored in metadata; it is queried from the event service by task id.</p>
+
+  <p>The repository implements <code>CreateTask</code>, <code>UpdateTask</code>, <code>GetTask(ctx, domain.TaskID)</code>, <code>ListTasks</code>, and <code>CountTasks</code>. It fails loudly for unsupported metadata filtering until metadata query semantics are defined.</p>
+
+  <h2 id="invariants">8. Invariants — what cannot happen</h2>
+
+  <p>The design forces these states to be unreachable. Each row is enforced by the listed mechanism; there is a regression test for every row in <code>internal/services/task/domain</code>.</p>
+
+  <table>
+    <thead><tr><th>State that cannot occur</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>Task with empty <code>SpaceID</code>, <code>CreatedBy</code>, <code>AssignedTo</code>, or <code>Description</code></td><td><code>NewTask</code> returns an error before any repository call</td></tr>
+      <tr><td>Task claimed by the wrong member</td><td><code>Claim</code> compares the caller member id to <code>AssignedTo</code></td></tr>
+      <tr><td>Task with status <code>Active</code> but no <code>ClaimedByMemberID</code></td><td><code>Claim</code> is the only normal entry to Active; <code>Complete</code> rejects unclaimed active tasks</td></tr>
+      <tr><td>Worker output marked <code>Succeeded</code> without coordinator review</td><td><code>Complete</code> moves Active to In Review only; <code>ApproveReview</code> is the success transition</td></tr>
+      <tr><td>Approved task with unsatisfied acceptance criteria</td><td><code>ApproveReview</code> requires a criterion outcome for every criterion and rejects any unsatisfied result</td></tr>
+      <tr><td>Retry that loses completed criteria</td><td><code>RetryReview</code> persists the reviewed satisfaction state before returning the task to Active</td></tr>
+      <tr><td>Task with status <code>Canceled</code> or <code>Failed</code> but no reason</td><td><code>Cancel</code> and <code>FailReview</code> reject empty reason</td></tr>
+      <tr><td>Status transition outside the state machine</td><td>Every transition method validates the source status</td></tr>
+      <tr><td>Pending task with a stale <code>ClaimedByMemberID</code></td><td><code>Release</code> drops the claim</td></tr>
+      <tr><td>No-action lifecycle update spamming agents</td><td>Approval and failure do not publish worker messages; retry or cancel carries the next action when one exists</td></tr>
+      <tr><td>Re-claiming a terminal task</td><td><code>Claim</code> rejects unless the source status is Pending</td></tr>
+      <tr><td>User-owned action by an unauthorized caller</td><td>The service checks user ownership or coordinator membership before state changes</td></tr>
+      <tr><td>Task service parsing protocol payloads</td><td>Protocol handlers decode requests and call typed service commands</td></tr>
+      <tr><td>Task service writing another service's repository</td><td>The service depends on <code>MessagePublisher</code>, not a message repository</td></tr>
+    </tbody>
+  </table>
+
+  <p class="footnote">
+    Architecture · agen8 · This document is the source of truth for the task service's shape. Updated in lockstep with the code.
+  </p>
+
+</div>
+</body>
+</html>

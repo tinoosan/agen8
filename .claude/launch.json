@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "daemon",
+      "runtimeExecutable": "make",
+      "runtimeArgs": ["dev", "remote"],
+      "port": 7777,
+      "env": {
+        "NODE_OPTIONS": "--max-http-header-size=65536"
+      }
+    }

@@ -1,0 +1,269 @@
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { ArrowRight, ClipboardList, ScrollText, Target } from 'lucide-react'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
+import type { DashboardPanel } from '../../lib/routing'
+import type { ProjectSpaceSummary } from '../../lib/types'
+import DashboardActionsPanel from './DashboardActionsPanel'
+import DashboardMissionsPanel from './DashboardMissionsPanel'
+import DecisionFeed from './DecisionFeed'
+
+const CONTEXT_WIDTH_KEY = 'dashboard.context-panel-width'
+const CONTEXT_DEFAULT_WIDTH = 460
+const CONTEXT_MIN_WIDTH = 340
+const CONTEXT_MAX_WIDTH = 920
+
+function clampContextWidth(value: number): number {
+  if (!Number.isFinite(value)) return CONTEXT_DEFAULT_WIDTH
+  const viewportMax = typeof window === 'undefined'
+    ? CONTEXT_MAX_WIDTH
+    : Math.max(CONTEXT_MIN_WIDTH, window.innerWidth - 860)
+  return Math.max(CONTEXT_MIN_WIDTH, Math.min(CONTEXT_MAX_WIDTH, viewportMax, Math.round(value)))
+}
+
+function readContextWidth(): number {
+  try {
+    const raw = localStorage.getItem(CONTEXT_WIDTH_KEY)
+    if (!raw) return CONTEXT_DEFAULT_WIDTH
+    return clampContextWidth(Number(raw))
+  } catch {
+    return CONTEXT_DEFAULT_WIDTH
+  }
+}
+
+function writeContextWidth(value: number): void {
+  try { localStorage.setItem(CONTEXT_WIDTH_KEY, String(clampContextWidth(value))) } catch { /* ignore */ }
+}
+
+interface DashboardContextPanelProps {
+  open: boolean
+  panel: DashboardPanel
+  actionType?: 'all' | 'oa' | 'escalation'
+  projectId: string | null
+  focusedProjectRoot: string | null
+  spaceLabelByOwnerId?: Map<string, string>
+  spaces?: ProjectSpaceSummary[]
+  onPanelChange: (panel: DashboardPanel) => void
+}
+
+function DashboardOverviewPanel({
+  onOpenActions,
+  onOpenDecisions,
+  onOpenMissions,
+}: {
+  onOpenActions: () => void
+  onOpenDecisions: () => void
+  onOpenMissions: () => void
+}) {
+  return (
+    <div className="dashboard-context-overview">
+      <section className="dashboard-context-overview-section">
+        <div className="dashboard-context-overview-kicker">Keep Close</div>
+        <div className="dashboard-context-overview-list">
+          <div className="dashboard-context-overview-row">
+            <div className="dashboard-context-overview-value">
+              Keep the bigger picture close. Open actions when something needs you, or step into missions when you want to shape where the work goes next.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="dashboard-context-overview-section">
+        <div className="dashboard-context-overview-kicker">Work surfaces</div>
+        <div className="dashboard-context-overview-list">
+          <button
+            type="button"
+            onClick={onOpenActions}
+            className="dashboard-context-overview-action"
+          >
+            <div className="dashboard-context-overview-action-copy">
+              <div className="dashboard-context-overview-action-title">
+                <ClipboardList size={14} />
+                <span>Actions</span>
+              </div>
+              <p>
+                Escalations, operator requests, and follow-through without leaving the dashboard.
+              </p>
+            </div>
+            <ArrowRight size={14} />
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenMissions}
+            className="dashboard-context-overview-action"
+          >
+            <div className="dashboard-context-overview-action-copy">
+              <div className="dashboard-context-overview-action-title">
+                <Target size={14} />
+                <span>Missions</span>
+              </div>
+              <p>
+                Outcomes, key results, and ownership now live here instead of a separate page.
+              </p>
+            </div>
+            <ArrowRight size={14} />
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenDecisions}
+            className="dashboard-context-overview-action"
+          >
+            <div className="dashboard-context-overview-action-copy">
+              <div className="dashboard-context-overview-action-title">
+                <ScrollText size={14} />
+                <span>Decisions</span>
+              </div>
+              <p>
+                Review the choices agents and operators have logged while work moves forward.
+              </p>
+            </div>
+            <ArrowRight size={14} />
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+export default function DashboardContextPanel({
+  open,
+  panel,
+  actionType = 'all',
+  projectId,
+  focusedProjectRoot,
+  spaceLabelByOwnerId,
+  spaces,
+  onPanelChange,
+}: DashboardContextPanelProps) {
+  const [contextWidth, setContextWidth] = useState(readContextWidth)
+  const contextRailRef = useRef<HTMLDivElement | null>(null)
+  const resizeCleanupRef = useRef<(() => void) | null>(null)
+  const resizeFrameRef = useRef<number | null>(null)
+  const widthRef = useRef(contextWidth)
+
+  useEffect(() => {
+    widthRef.current = contextWidth
+  }, [contextWidth])
+
+  useEffect(() => () => {
+    if (resizeCleanupRef.current) resizeCleanupRef.current()
+  }, [])
+
+  const beginResizeContextPanel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !open) return
+    event.preventDefault()
+    if (resizeCleanupRef.current) resizeCleanupRef.current()
+
+    const startX = event.clientX
+    const startWidth = widthRef.current
+    let pendingWidth = startWidth
+    const rail = contextRailRef.current
+    if (!rail) return
+    rail.style.transition = 'none'
+
+    const queueWidthUpdate = (nextWidth: number) => {
+      pendingWidth = clampContextWidth(nextWidth)
+      if (resizeFrameRef.current !== null) return
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null
+        widthRef.current = pendingWidth
+        if (!contextRailRef.current) return
+        contextRailRef.current.style.width = `${pendingWidth}px`
+      })
+    }
+
+    const cleanup = () => {
+      if (resizeFrameRef.current !== null) {
+        cancelAnimationFrame(resizeFrameRef.current)
+        resizeFrameRef.current = null
+      }
+      const finalWidth = clampContextWidth(pendingWidth)
+      widthRef.current = finalWidth
+      setContextWidth((previous) => (previous === finalWidth ? previous : finalWidth))
+      writeContextWidth(finalWidth)
+      if (contextRailRef.current) {
+        contextRailRef.current.style.width = `${finalWidth}px`
+        contextRailRef.current.style.transition = ''
+      }
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      resizeCleanupRef.current = null
+    }
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const delta = startX - moveEvent.clientX
+      queueWidthUpdate(startWidth + delta)
+    }
+
+    const onUp = () => cleanup()
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    resizeCleanupRef.current = cleanup
+  }, [open])
+
+  return (
+    <div
+      ref={contextRailRef}
+      className={cn(
+        'dashboard-context-rail shrink-0 min-h-0 overflow-hidden relative transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width]',
+      )}
+      style={{ width: open ? contextWidth : 0 }}
+    >
+      {open && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-3 -translate-x-1/2 cursor-col-resize z-20 group"
+          onPointerDown={beginResizeContextPanel}
+          aria-hidden
+        >
+          <div className="absolute left-1/2 top-1/2 h-18 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent group-hover:bg-[var(--border)] transition-colors duration-150" />
+        </div>
+      )}
+      <div
+        className={cn(
+          'dashboard-context-surface h-full transition-[clip-path,opacity] duration-220 ease-out bg-[var(--bg-panel)]',
+          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none',
+        )}
+        style={{ clipPath: open ? 'inset(0 0 0 0)' : 'inset(0 100% 0 0)' }}
+      >
+        <Tabs value={panel} onValueChange={(value) => onPanelChange(value as DashboardPanel)} className="flex h-full flex-col">
+          <div className="dashboard-context-header shrink-0 h-12 flex items-center px-[var(--dashboard-context-gutter)] border-b border-[color-mix(in_srgb,var(--border)_48%,transparent)]">
+            <TabsList className="dashboard-context-tabs h-auto bg-transparent gap-0 p-0 rounded-none shrink-0">
+              <TabsTrigger value="overview" className="dashboard-context-tab">Overview</TabsTrigger>
+              <TabsTrigger value="actions" className="dashboard-context-tab">Actions</TabsTrigger>
+              <TabsTrigger value="missions" className="dashboard-context-tab">Missions</TabsTrigger>
+              <TabsTrigger value="decisions" className="dashboard-context-tab">Decisions</TabsTrigger>
+            </TabsList>
+          </div>
+
+          <TabsContent value="overview" className="flex-1 min-h-0 mt-0 overflow-y-auto">
+            <DashboardOverviewPanel
+              onOpenActions={() => onPanelChange('actions')}
+              onOpenDecisions={() => onPanelChange('decisions')}
+              onOpenMissions={() => onPanelChange('missions')}
+            />
+          </TabsContent>
+          <TabsContent value="actions" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <DashboardActionsPanel projectId={projectId} embedded initialType={actionType} />
+          </TabsContent>
+          <TabsContent value="missions" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <DashboardMissionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
+          </TabsContent>
+          <TabsContent value="decisions" className="flex-1 min-h-0 mt-0 overflow-y-auto">
+            <div className="p-[var(--dashboard-context-gutter)]">
+              <DecisionFeed projectId={projectId} hideHeader spaceLabelByOwnerId={spaceLabelByOwnerId} spaces={spaces ?? []} defaultExpanded />
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
+  )
+}

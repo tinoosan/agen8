@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture — agen8 docs</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .architecture-map {
+    display: grid;
+    gap: 48px;
+    margin-top: 48px;
+  }
+  .section-head {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.35fr) minmax(0, 0.65fr);
+    gap: 24px;
+    align-items: end;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-head h2 {
+    margin: 0;
+    padding: 0;
+    font-size: 28px;
+  }
+  .section-head p {
+    margin: 0;
+    max-width: none;
+    color: var(--text-muted);
+    font-size: 15px;
+  }
+  .architecture-map .grid {
+    margin-top: 18px;
+  }
+  .card.primary {
+    border-left: 3px solid var(--accent);
+  }
+  .card .path {
+    display: inline-block;
+    margin-top: 12px;
+    color: var(--text-faint);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+  }
+  @media (max-width: 720px) {
+    .section-head {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / architecture</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture</span>
+  <h1>Service architecture</h1>
+  <p class="lede">Target-architecture documentation for services, process wiring, protocol adapters, and agent-facing tools. Each doc describes the current intended shape in present tense.</p>
+
+  <div class="architecture-map">
+    <section aria-labelledby="core-services">
+      <div class="section-head">
+        <h2 id="core-services">Core services</h2>
+        <p>Domain-owned services that persist business state and expose app/RPC boundaries.</p>
+      </div>
+      <div class="grid">
+        <a class="card primary" href="./user-service.html">
+          <div class="label">Identity</div>
+          <div class="title">User Service</div>
+          <div class="meta">Account identity, first-user setup, profile, and account lifecycle.</div>
+          <span class="path">internal/services/user</span>
+        </a>
+        <a class="card primary" href="./auth-service.html">
+          <div class="label">Credentials</div>
+          <div class="title">Auth Service</div>
+          <div class="meta">Password credentials, browser sessions, API keys, and bearer-token validation.</div>
+          <span class="path">internal/services/auth</span>
+        </a>
+        <a class="card primary" href="./credential-service.html">
+          <div class="label">Secrets</div>
+          <div class="title">Credential Service</div>
+          <div class="meta">Credential references, encrypted secret material, redacted metadata, and runtime credential resolution.</div>
+          <span class="path">internal/services/credential</span>
+        </a>
+        <a class="card primary" href="./project-service.html">
+          <div class="label">Composition</div>
+          <div class="title">Project Service</div>
+          <div class="meta">Durable project identity, location-scoped root mapping, pinned spaces, and project-scoped space clusters.</div>
+          <span class="path">internal/services/project</span>
+        </a>
+        <a class="card primary" href="./location-service.html">
+          <div class="label">Reachability</div>
+          <div class="title">Location Service</div>
+          <div class="meta">Local and remote work locations, filesystem browsing, capability probes, and location-scoped roots.</div>
+          <span class="path">internal/services/location</span>
+        </a>
+        <a class="card primary" href="./file-service.html">
+          <div class="label">Files</div>
+          <div class="title">File Service</div>
+          <div class="meta">Native project file browsing, preview, upload, create, move, copy, and delete operations.</div>
+          <span class="path">internal/services/file</span>
+        </a>
+        <a class="card primary" href="./space-service.html">
+          <div class="label">Workspace</div>
+          <div class="title">Space Service</div>
+          <div class="meta">Space identity, lifecycle, configuration, the member roster subdomain, and space-owned state.</div>
+          <span class="path">internal/services/space</span>
+        </a>
+        <a class="card" href="./space-first-runtime-contracts.html">
+          <div class="label">Runtime model</div>
+          <div class="title">Space-First Runtime Contracts</div>
+          <div class="meta">Contracts for spaces, members, member types, roles, templates, harness sessions, and cross-space communication.</div>
+          <span class="path">docs/architecture</span>
+        </a>
+        <a class="card" href="./space-first-terminology-map.html">
+          <div class="label">Naming</div>
+          <div class="title">Space-First Terminology Map</div>
+          <div class="meta">Canonical names for space-first runtime APIs, schema, UI language, and transitional aliases.</div>
+          <span class="path">docs/architecture</span>
+        </a>
+        <a class="card primary" href="./task-service.html">
+          <div class="label">Work</div>
+          <div class="title">Task Service</div>
+          <div class="meta">Task state transitions, member assignment, event publication, and review workflow.</div>
+          <span class="path">internal/services/task</span>
+        </a>
+        <a class="card primary" href="./schedule-service.html">
+          <div class="label">Timed work</div>
+          <div class="title">Schedule Service</div>
+          <div class="meta">Durable schedule entries, timed task materialization, run history, and schedule notifications.</div>
+          <span class="path">internal/services/schedule</span>
+        </a>
+        <a class="card primary" href="./decision-service.html">
+          <div class="label">Work memory</div>
+          <div class="title">Decision Service</div>
+          <div class="meta">Decision records, human-question outcomes, context links, and decision event publication.</div>
+          <span class="path">internal/services/decision</span>
+        </a>
+        <a class="card primary" href="./graph-service.html">
+          <div class="label">Work memory</div>
+          <div class="title">Graph Service</div>
+          <div class="meta">Typed context links, node hydration, graph search, and durable cross-domain relationship queries.</div>
+          <span class="path">internal/services/graph</span>
+        </a>
+        <a class="card primary" href="./operator-service.html">
+          <div class="label">Human operations</div>
+          <div class="title">Operator Service</div>
+          <div class="meta">Escalations, operator actions, task blocking, operator decisions, and graph-linked intervention workflows.</div>
+          <span class="path">internal/services/operator</span>
+        </a>
+        <a class="card primary" href="./humaninput-service.html">
+          <div class="label">Human gate</div>
+          <div class="title">Human Input Service</div>
+          <div class="meta">Pending human questions, answer/cancel/expiry lifecycle, wake signals, and tool-call resumption.</div>
+          <span class="path">internal/services/humaninput</span>
+        </a>
+        <a class="card primary" href="./message-service.html">
+          <div class="label">Communication</div>
+          <div class="title">Message Service</div>
+          <div class="meta">Durable agent inbox, member-addressed channels, read state, and wake publication.</div>
+          <span class="path">internal/services/message</span>
+        </a>
+        <a class="card primary" href="./event-service.html">
+          <div class="label">Activity</div>
+          <div class="title">Event Service</div>
+          <div class="meta">Append-only product activity facts, timeline queries, Inspector history, and event notifications.</div>
+          <span class="path">internal/services/events</span>
+        </a>
+        <a class="card" href="./mission-service.html">
+          <div class="label">Strategy</div>
+          <div class="title">Mission Service</div>
+          <div class="meta">Missions and key results: lifecycle, activation gate, and scope expansion.</div>
+          <span class="path">internal/services/mission</span>
+        </a>
+      </div>
+    </section>
+
+    <section aria-labelledby="runtime-protocol">
+      <div class="section-head">
+        <h2 id="runtime-protocol">Runtime and protocol</h2>
+        <p>Process composition, daemon lifecycle, and client-facing transport surfaces.</p>
+      </div>
+      <div class="grid">
+        <a class="card" href="./daemon.html">
+          <div class="label">Process</div>
+          <div class="title">Daemon</div>
+          <div class="meta">Process host, listener strategies, first-run setup, and local/HTTP modes.</div>
+          <span class="path">internal/daemon</span>
+        </a>
+        <a class="card" href="./application-composition-root.html">
+          <div class="label">Wiring</div>
+          <div class="title">Application Composition Root</div>
+          <div class="meta">Production service construction, dependency injection, adapters, and startup wiring.</div>
+          <span class="path">internal/app</span>
+        </a>
+        <a class="card" href="./rpc-layer.html">
+          <div class="label">Protocol</div>
+          <div class="title">RPC Layer</div>
+          <div class="meta">JSON-RPC server, registry, identity stamping, and service-owned RPC adapters.</div>
+          <span class="path">internal/rpc</span>
+        </a>
+        <a class="card" href="./caller-identity.html">
+          <div class="label">Identity</div>
+          <div class="title">Caller Identity</div>
+          <div class="meta">Shared caller context contract for RPC, MCP, and service authorization.</div>
+          <span class="path">internal/caller</span>
+        </a>
+        <a class="card" href="./logging.html">
+          <div class="label">Infrastructure</div>
+          <div class="title">Logging</div>
+          <div class="meta">Config-driven text logging, root logger construction, and service-scoped log context.</div>
+          <span class="path">internal/logging</span>
+        </a>
+      </div>
+    </section>
+
+    <section aria-labelledby="agent-tools">
+      <div class="section-head">
+        <h2 id="agent-tools">Agent tools</h2>
+        <p>MCP tool surfaces exposed to agents. Tools validate inputs, call service-backed modules, and return semantic cards/results.</p>
+      </div>
+      <div class="grid">
+        <a class="card" href="./mcp-message-tool.html">
+          <div class="label">MCP Tool</div>
+          <div class="title">Message Tool</div>
+          <div class="meta">Agent-facing <code>message</code> tool for asynchronous member-addressed communication.</div>
+          <span class="path">internal/mcp/tools/message</span>
+        </a>
+        <a class="card" href="./mcp-task-tool.html">
+          <div class="label">MCP Tool</div>
+          <div class="title">Task Tool</div>
+          <div class="meta">Agent-facing <code>task</code> tool for member-routed task lifecycle and review.</div>
+          <span class="path">internal/mcp/tools/task</span>
+        </a>
+        <a class="card" href="./mcp-mission-tool.html">
+          <div class="label">MCP Tool</div>
+          <div class="title">Mission Tool</div>
+          <div class="meta">Agent-facing <code>mission</code> tool for missions, key results, and progress.</div>
+          <span class="path">internal/mcp/tools/mission</span>
+        </a>
+        <a class="card" href="./mcp-space-tool.html">
+          <div class="label">MCP Tool</div>
+          <div class="title">Space Tool</div>
+          <div class="meta">Agent-facing <code>space</code> tool for listing spaces and members.</div>
+          <span class="path">internal/mcp/tools/space</span>
+        </a>
+        <a class="card" href="./mcp-http-tool.html">
+          <div class="label">MCP Tool</div>
+          <div class="title">HTTP Tool</div>
+          <div class="meta">Agent-facing <code>http</code> tool for bounded HTTP requests with host-scoped credentials.</div>
+          <span class="path">internal/mcp/tools/http</span>
+        </a>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

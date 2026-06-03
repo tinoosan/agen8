@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP task tool</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / mcp-task-tool</span>
+  </div>
+</nav>
+
+<div class="page">
+
+<span class="eyebrow">Architecture · MCP Task Tool</span>
+<h1>MCP task tool</h1>
+<p class="lede">The agent-facing task lifecycle tool. It is a native MCP handler wired directly to the task service.</p>
+
+<h2>1. Boundary</h2>
+
+<p><code>task</code> is an MCP protocol adapter. It owns the member-facing action names, request schema, payload validation, session member resolution, service context stamping, and deterministic MCP result formatting. The task service owns lifecycle authorization, state transitions, persistence, and task-originated messages.</p>
+
+<div class="callout">
+  <strong>Service rule.</strong> The handler calls <code>internal/services/task/app.Service</code> methods. It never calls task repositories, storage handles, or message repositories.
+</div>
+
+<h2>2. Wiring</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 980 360" width="980" height="360" role="img" aria-label="MCP task tool wiring">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/>
+    </marker>
+  </defs>
+
+  <rect x="40" y="52" width="150" height="64" rx="8" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="115" y="78" text-anchor="middle" font-size="14" font-weight="700">MCP client</text>
+  <text x="115" y="98" text-anchor="middle" font-size="12" fill="#555">tools/call task</text>
+
+  <rect x="250" y="52" width="150" height="64" rx="8" fill="#fff4d6" stroke="#b58820"/>
+  <text x="325" y="78" text-anchor="middle" font-size="14" font-weight="700">MCP server</text>
+  <text x="325" y="98" text-anchor="middle" font-size="12" fill="#555">token → Session</text>
+
+  <rect x="460" y="52" width="150" height="64" rx="8" fill="#f7fbff" stroke="#769cc5"/>
+  <text x="535" y="78" text-anchor="middle" font-size="14" font-weight="700">native dispatch</text>
+  <text x="535" y="98" text-anchor="middle" font-size="12" fill="#555">task.Name</text>
+
+  <rect x="670" y="52" width="150" height="64" rx="8" fill="#fff" stroke="#555"/>
+  <text x="745" y="78" text-anchor="middle" font-size="14" font-weight="700">task handler</text>
+  <text x="745" y="98" text-anchor="middle" font-size="12" fill="#555">decode + map</text>
+
+  <rect x="670" y="196" width="150" height="64" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="745" y="222" text-anchor="middle" font-size="14" font-weight="700">task service</text>
+  <text x="745" y="242" text-anchor="middle" font-size="12" fill="#555">lifecycle owner</text>
+
+  <rect x="250" y="196" width="150" height="64" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="325" y="222" text-anchor="middle" font-size="14" font-weight="700">space members</text>
+  <text x="325" y="242" text-anchor="middle" font-size="12" fill="#555">caller + assignee</text>
+
+  <rect x="460" y="196" width="150" height="64" rx="8" fill="#f2f2f2" stroke="#888"/>
+  <text x="535" y="222" text-anchor="middle" font-size="14" font-weight="700">MCP result</text>
+  <text x="535" y="242" text-anchor="middle" font-size="12" fill="#555">text + structured</text>
+
+  <line x1="190" y1="84" x2="250" y2="84" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="400" y1="84" x2="460" y2="84" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="610" y1="84" x2="670" y2="84" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="745" y1="116" x2="745" y2="196" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M670 102 C520 158, 450 206, 400 224" fill="none" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M670 228 C628 228, 630 228, 610 228" fill="none" stroke="#5f6368" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="325" y="304" text-anchor="middle" font-size="12" fill="#666">Session.TaskMembers</text>
+  <text x="745" y="304" text-anchor="middle" font-size="12" fill="#666">Session.TaskService</text>
+  <text x="535" y="304" text-anchor="middle" font-size="12" fill="#666">deterministic product payload</text>
+</svg>
+</div>
+
+<p><code>internal/mcp/toolset.go</code> registers the schema with <code>task.NewHandler().Schema()</code>. <code>internal/mcp/server.go</code> resolves the MCP token into a <code>Session</code>, dispatches the native <code>task</code> tool by name, and passes <code>Session.TaskService</code>, <code>Session.TaskMembers</code>, <code>SpaceID</code>, and <code>MemberID</code> into the handler.</p>
+
+<h2>3. Handler flow</h2>
+
+<ol>
+  <li>The handler decodes the action-specific JSON payload and rejects unknown fields.</li>
+  <li>The handler resolves the MCP caller through <code>TaskMembers.Get</code>.</li>
+  <li>The handler validates active member state and same-space assignee routing.</li>
+  <li>The handler stamps <code>taskapp.Caller{MemberID: ...}</code> into <code>context.Context</code>.</li>
+  <li>The handler maps the action payload into typed task service params.</li>
+  <li>The task service authorizes the caller, transitions state, persists, and publishes any required task message.</li>
+  <li>The handler returns a stable text payload and structured MCP content.</li>
+</ol>
+
+<h2>4. Actions</h2>
+
+<table>
+  <tr><th>MCP action</th><th>Service method</th><th>Message behavior</th></tr>
+  <tr><td><code>create</code></td><td><code>Create</code></td><td>service publishes <code>assigned</code></td></tr>
+  <tr><td><code>list</code></td><td><code>List</code></td><td>none</td></tr>
+  <tr><td><code>get</code></td><td><code>Get</code></td><td>none</td></tr>
+  <tr><td><code>claim</code></td><td><code>Claim</code></td><td>none</td></tr>
+  <tr><td><code>release</code></td><td><code>Release</code></td><td>service publishes <code>released</code></td></tr>
+  <tr><td><code>submit</code></td><td><code>Complete</code></td><td>service publishes <code>review_requested</code></td></tr>
+  <tr><td><code>block</code></td><td><code>Block</code></td><td>service publishes <code>blocked</code></td></tr>
+  <tr><td><code>unblock</code></td><td><code>Unblock</code></td><td>service publishes <code>unblocked</code></td></tr>
+  <tr><td><code>reassign</code></td><td><code>Assign</code></td><td>service publishes <code>assigned</code></td></tr>
+  <tr><td><code>cancel</code></td><td><code>Cancel</code></td><td>service publishes <code>canceled</code> when a worker may still act</td></tr>
+  <tr><td><code>review</code> approve</td><td><code>ApproveReview</code></td><td>none</td></tr>
+  <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td>service publishes <code>retry_requested</code></td></tr>
+  <tr><td><code>review</code> fail</td><td><code>FailReview</code></td><td>none</td></tr>
+</table>
+
+<h2>5. Schema</h2>
+
+<p>The schema requires only <code>action</code> at the top level. Callers include only the fields used by the selected action. The decoder rejects unknown fields, fields that belong to another action, and explicit <code>null</code> values before resolving members or calling the task service. <code>create</code> requires <code>description</code> and <code>assignee_member_id</code>; <code>reassign</code> requires <code>task_id</code> and <code>assignee_member_id</code>. Agen8 resolves caller identity from the MCP session, but task assignment is agent intent and must be explicit.</p>
+
+<table>
+  <tr><th>Field</th><th>Used by</th></tr>
+  <tr><td><code>action</code></td><td>all calls</td></tr>
+  <tr><td><code>task_id</code></td><td>get, claim, release, submit, block, unblock, reassign, cancel, review</td></tr>
+  <tr><td><code>assignee_member_id</code></td><td>create, reassign</td></tr>
+  <tr><td><code>title</code>, <code>description</code>, <code>acceptance_criteria</code>, <code>task_kind</code></td><td>create</td></tr>
+  <tr><td><code>key_result_ref</code>, <code>mission_ref</code>, <code>metadata</code></td><td>create</td></tr>
+  <tr><td><code>status</code>, <code>limit</code>, <code>offset</code></td><td>list</td></tr>
+  <tr><td><code>summary</code>, <code>artifacts</code></td><td>submit</td></tr>
+  <tr><td><code>reason</code></td><td>block, cancel, review retry, review fail</td></tr>
+  <tr><td><code>note</code></td><td>unblock</td></tr>
+  <tr><td><code>decision</code>, <code>criteria</code></td><td>review</td></tr>
+</table>
+
+<p><code>metadata</code> is an optional object with string values. Agents use it for lightweight correlation labels, not arbitrary nested payloads.</p>
+
+<h2>6. Result shape</h2>
+
+<p>Lifecycle responses return <code>ok</code>, <code>tool</code>, <code>action</code>, and a <code>task</code> object. Service reasons such as block, retry, failure, or cancellation notes are exposed as <code>statusReason</code>. They are not exposed as <code>error</code> when the lifecycle transition succeeds.</p>
+
+<h2>7. Authorization</h2>
+
+<table>
+  <tr><th>Caller</th><th>Allowed task behavior</th></tr>
+  <tr><td>Coordinator member</td><td>Create, list same-space tasks, get same-space tasks, assign/reassign, review, cancel, and unblock same-space blocked tasks.</td></tr>
+  <tr><td>Worker member</td><td>List assigned tasks, get visible assigned/claimed tasks, claim assigned tasks, release claimed tasks, submit claimed tasks, block claimed tasks, and unblock claimed tasks.</td></tr>
+</table>
+
+<p>Coordinator unblock exists because blocked task messages route to the coordinator for resolution. After the coordinator resolves the blocker directly or through an operator action, the same task service transition returns the task to active work and notifies the assigned worker.</p>
+
+<footer>Architecture · agen8 · This document describes the current MCP task tool shape.</footer>
+
+</div>
+</body>
+</html>

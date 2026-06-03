@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Service - agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / mission-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture - Mission Service</span>
+  <h1>Mission Service</h1>
+  <p class="lede">
+    Missions describe strategic objectives. Key results describe measurable outcomes. The mission service owns mission lifecycle, key-result lifecycle, progress rules, persistence, and mission event publication.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#boundary">Service boundary</a></li>
+      <li><a href="#records">Domain records</a></li>
+      <li><a href="#kr-subdomain">KR subdomain</a></li>
+      <li><a href="#dependencies">Dependencies</a></li>
+      <li><a href="#commands">Service commands</a></li>
+      <li><a href="#lifecycle">Mission lifecycle</a></li>
+      <li><a href="#key-results">Key results and progress</a></li>
+      <li><a href="#events">Fired events</a></li>
+      <li><a href="#event-specs">Event specs</a></li>
+      <li><a href="#rpc">RPC adapter</a></li>
+      <li><a href="#mcp">MCP mission tool</a></li>
+      <li><a href="#delete-archive">Delete and archive semantics</a></li>
+      <li><a href="#rules">Hard rules</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="boundary">1. Service boundary</h2>
+
+  <p>
+    The mission service is an application service. It is called by protocol adapters and other services through typed methods. It does not parse tool actions, build transcript cards, own MCP schemas, or talk to another service's repository.
+  </p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 960 420" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+      <defs>
+        <marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+        </marker>
+      </defs>
+
+      <rect x="38" y="70" width="170" height="76" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="123" y="100" text-anchor="middle" fill="var(--text)" font-weight="700">RPC handler</text>
+      <text x="123" y="121" text-anchor="middle" fill="var(--text-muted)">UI CRUD/query DTOs</text>
+
+      <rect x="38" y="224" width="170" height="76" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="123" y="254" text-anchor="middle" fill="var(--text)" font-weight="700">MCP handler</text>
+      <text x="123" y="275" text-anchor="middle" fill="var(--text-muted)">agent tool orchestration</text>
+
+      <rect x="308" y="146" width="210" height="88" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="413" y="178" text-anchor="middle" fill="var(--text)" font-weight="700">mission app.Service</text>
+      <text x="413" y="199" text-anchor="middle" fill="var(--text-muted)">authorize, load, transition</text>
+      <text x="413" y="218" text-anchor="middle" fill="var(--text-muted)">persist, publish events</text>
+
+      <rect x="624" y="46" width="220" height="62" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="734" y="73" text-anchor="middle" fill="var(--text)" font-weight="700">mission repositories</text>
+      <text x="734" y="93" text-anchor="middle" fill="var(--text-muted)">missions, KRs, progress, lifecycle history</text>
+
+      <rect x="624" y="144" width="220" height="62" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="734" y="171" text-anchor="middle" fill="var(--text)" font-weight="700">collaborator services</text>
+      <text x="734" y="191" text-anchor="middle" fill="var(--text-muted)">space, task, context links</text>
+
+      <rect x="624" y="242" width="220" height="62" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="734" y="269" text-anchor="middle" fill="var(--text)" font-weight="700">event publisher</text>
+      <text x="734" y="289" text-anchor="middle" fill="var(--text-muted)">mission.lifecycle, kr.progress</text>
+
+      <rect x="624" y="340" width="220" height="48" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="734" y="369" text-anchor="middle" fill="var(--text)" font-weight="700">event bus subscribers</text>
+
+      <line x1="208" y1="108" x2="308" y2="172" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#flow-arrow)"/>
+      <line x1="208" y1="262" x2="308" y2="208" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#flow-arrow)"/>
+      <line x1="518" y1="166" x2="624" y2="78" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#flow-arrow)"/>
+      <line x1="518" y1="188" x2="624" y2="176" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#flow-arrow)"/>
+      <line x1="518" y1="212" x2="624" y2="274" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#flow-arrow)"/>
+      <line x1="734" y1="304" x2="734" y2="340" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#flow-arrow)"/>
+
+      <text x="480" y="402" text-anchor="middle" fill="var(--text-muted)">Handlers translate protocols. The service owns mission behavior. Subscribers react to fired events.</text>
+    </svg>
+  </div>
+
+  <h2 id="records">2. Domain records</h2>
+
+  <p>
+    The public records are deliberately small. They hold durable mission facts, not tool state, UI projections, notification delivery state, or activity timelines.
+  </p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Mission</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>          <span class="tok-type">MissionID</span>
+    <span class="tok-field">ProjectID</span>   string
+    <span class="tok-field">Title</span>       string
+    <span class="tok-field">Description</span> string
+    <span class="tok-field">Status</span>      <span class="tok-type">MissionStatus</span>
+    <span class="tok-field">StartDate</span>   *time.Time
+    <span class="tok-field">EndDate</span>     *time.Time
+    <span class="tok-field">CreatedAt</span>   time.Time
+    <span class="tok-field">UpdatedAt</span>   time.Time
+    <span class="tok-field">PausedAt</span>    *time.Time
+    <span class="tok-field">CompletedAt</span> *time.Time
+}</code></pre>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">KeyResult</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>                    <span class="tok-type">KeyResultID</span>
+    <span class="tok-field">MissionID</span>             <span class="tok-type">MissionID</span>
+    <span class="tok-field">Title</span>                 string
+    <span class="tok-field">Description</span>           string
+    <span class="tok-field">MeasurementType</span>       <span class="tok-type">MeasurementType</span>
+    <span class="tok-field">Direction</span>             <span class="tok-type">Direction</span>
+    <span class="tok-field">Unit</span>                  string
+    <span class="tok-field">Baseline</span>              *float64
+    <span class="tok-field">TargetValue</span>           float64
+    <span class="tok-field">CurrentValue</span>          float64
+    <span class="tok-field">ProgressPercent</span>       int
+    <span class="tok-field">Status</span>                <span class="tok-type">KeyResultStatus</span>
+    <span class="tok-field">SpaceID</span>               string
+    <span class="tok-field">OwnerSpaceName</span>        string
+    <span class="tok-field">OwnerAssignedAt</span>       *time.Time
+    <span class="tok-field">LastUpdatedBy</span>         string
+    <span class="tok-field">LastUpdateNote</span>        string
+    <span class="tok-field">LastMilestoneNotified</span> int
+    <span class="tok-field">CreatedAt</span>             time.Time
+    <span class="tok-field">UpdatedAt</span>             time.Time
+    <span class="tok-field">CompletedAt</span>           *time.Time
+}</code></pre>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">ProgressEntry</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>              string
+    <span class="tok-field">KeyResultID</span>     <span class="tok-type">KeyResultID</span>
+    <span class="tok-field">PreviousValue</span>   float64
+    <span class="tok-field">NewValue</span>        float64
+    <span class="tok-field">ProgressPercent</span> int
+    <span class="tok-field">UpdatedBy</span>       string
+    <span class="tok-field">Note</span>            string
+    <span class="tok-field">CreatedAt</span>       time.Time
+}</code></pre>
+
+  <table>
+    <thead><tr><th>Record</th><th>What belongs there</th><th>What does not belong there</th></tr></thead>
+    <tbody>
+      <tr><td><code>Mission</code></td><td>Objective identity, descriptive fields, lifecycle status, lifecycle timestamps.</td><td>Tool action names, message bodies, delivery attempts, activity feed rows.</td></tr>
+      <tr><td><code>KeyResult</code></td><td>Measurement definition, progress snapshot, assigned space, milestone notification cursor.</td><td>Task lists, plan snapshots, heartbeat runtime state.</td></tr>
+      <tr><td><code>ProgressEntry</code></td><td>Append-only history of progress value changes.</td><td>Mission and KR lifecycle events.</td></tr>
+      <tr><td><code>LifecycleHistoryEntry</code></td><td>Append-only mission/KR lifecycle event facts, including optional notes.</td><td>Progress value deltas; those live in <code>ProgressEntry</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="kr-subdomain">3. KR subdomain</h2>
+
+  <p>
+    Key results are a mission-owned subdomain. They are not a separate service, because a KR cannot exist outside a mission and mission activation/completion depends on KR state. They are also not just fields on <code>Mission</code>, because measurement, progress, assignment, milestones, and completion checks have their own rules.
+  </p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+      <defs>
+        <marker id="subdomain-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+        </marker>
+      </defs>
+
+      <rect x="46" y="82" width="210" height="104" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="151" y="114" text-anchor="middle" fill="var(--text)" font-weight="700">mission/app.Service</text>
+      <text x="151" y="136" text-anchor="middle" fill="var(--text-muted)">cross-subdomain</text>
+      <text x="151" y="156" text-anchor="middle" fill="var(--text-muted)">orchestration</text>
+
+      <rect x="356" y="44" width="210" height="82" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="461" y="74" text-anchor="middle" fill="var(--text)" font-weight="700">domain/mission</text>
+      <text x="461" y="96" text-anchor="middle" fill="var(--text-muted)">objective lifecycle</text>
+
+      <rect x="356" y="162" width="210" height="82" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="461" y="192" text-anchor="middle" fill="var(--text)" font-weight="700">domain/kr</text>
+      <text x="461" y="214" text-anchor="middle" fill="var(--text-muted)">measurement + progress</text>
+
+      <rect x="666" y="44" width="210" height="82" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="771" y="74" text-anchor="middle" fill="var(--text)" font-weight="700">mission repo</text>
+      <text x="771" y="96" text-anchor="middle" fill="var(--text-muted)">MissionRepository</text>
+
+      <rect x="666" y="162" width="210" height="82" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="771" y="192" text-anchor="middle" fill="var(--text)" font-weight="700">KR repos</text>
+      <text x="771" y="214" text-anchor="middle" fill="var(--text-muted)">KeyResult + Progress + Lifecycle</text>
+
+      <line x1="256" y1="118" x2="356" y2="86" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#subdomain-arrow)"/>
+      <line x1="256" y1="154" x2="356" y2="202" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#subdomain-arrow)"/>
+      <line x1="566" y1="85" x2="666" y2="85" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#subdomain-arrow)"/>
+      <line x1="566" y1="203" x2="666" y2="203" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#subdomain-arrow)"/>
+
+      <text x="460" y="278" text-anchor="middle" fill="var(--text-muted)">Mission is the parent domain. KR is a mission subdomain with its own rules and repositories.</text>
+    </svg>
+  </div>
+
+<pre><code class="lang-go">internal/services/mission/
+  app/
+    service.go              <span class="tok-comment">// service methods, orchestration, persistence, event publish calls</span>
+    service_test.go         <span class="tok-comment">// lifecycle, KR gates, concurrency, event publish behavior</span>
+    events.go               <span class="tok-comment">// MissionEventKind, private event specs, publish helpers</span>
+    ports.go                <span class="tok-comment">// SpaceLoader, TaskLoader, LinkedTaskLoader, EventPublisher, caller-facing interfaces</span>
+  domain/
+    mission/
+      clock.go              <span class="tok-comment">// Clock interface and SystemClock</span>
+      mission.go            <span class="tok-comment">// Mission aggregate and lifecycle transitions</span>
+      new_mission.go        <span class="tok-comment">// validated mission constructor</span>
+      repository.go         <span class="tok-comment">// MissionRepository</span>
+      types.go              <span class="tok-comment">// MissionID, MissionStatus, errors</span>
+      mission_test.go       <span class="tok-comment">// pure mission transition tests</span>
+    kr/
+      key_result.go         <span class="tok-comment">// KR aggregate and measurement rules</span>
+      new_key_result.go     <span class="tok-comment">// validated KR constructor</span>
+      progress.go           <span class="tok-comment">// progress math, milestone, completion rules</span>
+      repository.go         <span class="tok-comment">// KeyResultRepository + ProgressEntryRepository</span>
+      types.go              <span class="tok-comment">// KeyResultID, MeasurementType, MeasurementDirection, statuses</span>
+      progress_test.go      <span class="tok-comment">// measurement, milestone, regression tests</span>
+  infra/
+    repository_builder.go   <span class="tok-comment">// selects sqlite/postgres from storagedb.Handle.Driver()</span>
+    sqlite_repository.go    <span class="tok-comment">// SQLite MissionRepository + KR repositories</span>
+    postgres_repository.go  <span class="tok-comment">// PostgreSQL MissionRepository + KR repositories</span>
+    lifecycle_repository.go <span class="tok-comment">// LifecycleEventRepository persistence and queries</span>
+    repository_assertions_test.go
+internal/services/mission/subscribers/
+  activation_messages.go    <span class="tok-comment">// mission.activated event to idempotent coordinator messages</span>
+  owner_messages.go         <span class="tok-comment">// owner-assigned/reopened/intervention message subscribers</span></code></pre>
+
+  <table>
+    <thead><tr><th>Question</th><th>Decision</th></tr></thead>
+    <tbody>
+      <tr><td>Is KR a separate service?</td><td>No. KR identity and lifecycle are owned by mission.</td></tr>
+      <tr><td>Is KR a nested field on mission?</td><td>No. KR has enough behavior to be a subdomain with its own aggregate and repositories.</td></tr>
+      <tr><td>Who orchestrates mission/KR interactions?</td><td><code>mission/app.Service</code>. It coordinates activation gates, auto-completion, and reactivation.</td></tr>
+      <tr><td>Who owns cross-domain effects?</td><td>The mission service fires events. Event subscribers, MCP handlers, and other services react through their own boundaries.</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    Repository infrastructure follows the task service pattern. The application composition root opens the database from config once, then passes the resolved <code>*storagedb.Handle</code> into the mission repository builder. Mission repositories do not receive host config and do not choose storage from config directly.
+  </p>
+
+<pre><code class="lang-go"><span class="tok-kw">func</span> <span class="tok-fn">NewRepositories</span>(handle *<span class="tok-pkg">storagedb</span>.<span class="tok-type">Handle</span>) (<span class="tok-type">RepositorySet</span>, error) {
+    <span class="tok-kw">switch</span> handle.<span class="tok-fn">Driver</span>() {
+    <span class="tok-kw">case</span> <span class="tok-pkg">storagedb</span>.<span class="tok-field">DriverSQLite</span>:
+        repo := <span class="tok-fn">NewSQLiteRepository</span>(handle)
+        <span class="tok-kw">return</span> <span class="tok-type">RepositorySet</span>{<span class="tok-field">Missions</span>: repo, <span class="tok-field">KeyResults</span>: repo, <span class="tok-field">ProgressEntries</span>: repo, <span class="tok-field">LifecycleEvents</span>: repo}, nil
+    <span class="tok-kw">case</span> <span class="tok-pkg">storagedb</span>.<span class="tok-field">DriverPostgres</span>:
+        repo := <span class="tok-fn">NewPostgresRepository</span>(handle)
+        <span class="tok-kw">return</span> <span class="tok-type">RepositorySet</span>{<span class="tok-field">Missions</span>: repo, <span class="tok-field">KeyResults</span>: repo, <span class="tok-field">ProgressEntries</span>: repo, <span class="tok-field">LifecycleEvents</span>: repo}, nil
+    <span class="tok-kw">default</span>:
+        <span class="tok-kw">return</span> <span class="tok-type">RepositorySet</span>{}, fmt.<span class="tok-fn">Errorf</span>(<span class="tok-string">"mission repositories: unsupported storage driver %q"</span>, handle.<span class="tok-fn">Driver</span>())
+    }
+}</code></pre>
+
+  <h2 id="dependencies">4. Dependencies</h2>
+
+  <p>
+    The constructor is explicit. There is no dependency bag. Repositories are mission-owned repositories only. Other service data is reached through narrow service-facing interfaces.
+  </p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">missions</span>        <span class="tok-pkg">domain</span>.<span class="tok-type">MissionRepository</span>
+    <span class="tok-field">keyResults</span>      <span class="tok-pkg">kr</span>.<span class="tok-type">KeyResultRepository</span>
+    <span class="tok-field">progressEntries</span> <span class="tok-pkg">kr</span>.<span class="tok-type">ProgressEntryRepository</span>
+    <span class="tok-field">lifecycleEvents</span> <span class="tok-type">LifecycleEventRepository</span>
+    <span class="tok-field">clock</span>           <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>
+    <span class="tok-field">caller</span>          <span class="tok-type">CallerResolver</span>
+    <span class="tok-field">spaces</span>          <span class="tok-type">SpaceLoader</span>
+    <span class="tok-field">tasks</span>           <span class="tok-type">TaskLoader</span>
+    <span class="tok-field">linkedTasks</span>     <span class="tok-type">LinkedTaskLoader</span>
+    <span class="tok-field">events</span>          <span class="tok-type">EventPublisher</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(
+    missions <span class="tok-pkg">domain</span>.<span class="tok-type">MissionRepository</span>,
+    keyResults <span class="tok-pkg">kr</span>.<span class="tok-type">KeyResultRepository</span>,
+    progressEntries <span class="tok-pkg">kr</span>.<span class="tok-type">ProgressEntryRepository</span>,
+    lifecycleEvents <span class="tok-type">LifecycleEventRepository</span>,
+    clock <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>,
+    caller <span class="tok-type">CallerResolver</span>,
+    spaces <span class="tok-type">SpaceLoader</span>,
+    tasks <span class="tok-type">TaskLoader</span>,
+    linkedTasks <span class="tok-type">LinkedTaskLoader</span>,
+    events <span class="tok-type">EventPublisher</span>,
+) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+  <table>
+    <thead><tr><th>Dependency</th><th>Used for</th><th>Boundary</th></tr></thead>
+    <tbody>
+      <tr><td><code>MissionRepository</code></td><td>Save, load, list, archive missions.</td><td>Mission-owned persistence.</td></tr>
+      <tr><td><code>KeyResultRepository</code></td><td>Save, load, list, progress, assign owner spaces, track notified milestones.</td><td>Mission-owned persistence.</td></tr>
+      <tr><td><code>ProgressEntryRepository</code></td><td>Append progress audit entries and read KR history.</td><td>Mission-owned persistence.</td></tr>
+      <tr><td><code>LifecycleEventRepository</code></td><td>Append lifecycle event facts and read mission lifecycle history.</td><td>Mission-owned persistence.</td></tr>
+      <tr><td><code>Clock</code></td><td>All timestamps.</td><td>No direct <code>time.Now()</code> in service use cases.</td></tr>
+      <tr><td><code>CallerResolver</code></td><td>User/member identity at the service boundary.</td><td>RPC and MCP stamp callers into <code>context.Context</code>.</td></tr>
+      <tr><td><code>SpaceLoader</code></td><td>Validate assigned KR space and resolve display name.</td><td>Calls the space service interface, not the space repository.</td></tr>
+      <tr><td><code>TaskLoader</code></td><td>Load task state for linked task completion checks.</td><td>Calls the task service read interface, not the task repository.</td></tr>
+      <tr><td><code>LinkedTaskLoader</code></td><td>Resolve task ids linked to a KR before KR completion.</td><td>Temporary graph-slot port; the graph service replaces the implementation when context links are rebuilt.</td></tr>
+      <tr><td><code>EventPublisher</code></td><td>Fire mission lifecycle and KR progress events after persistence succeeds.</td><td>Events are facts; subscriber workflows live outside the mission service.</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    Context-link integration is represented by <code>LinkedTaskLoader</code>. The mission service does not know the context-link repository or graph storage shape. It asks for task ids linked to the KR, then uses <code>TaskLoader</code> to verify each linked task is terminal before allowing KR completion. When graph service owns context links, only the <code>LinkedTaskLoader</code> implementation changes.
+  </p>
+
+  <h3>Production wiring</h3>
+
+<pre><code class="lang-go"><span class="tok-comment">// internal/app/application.go</span>
+missionRepos, err := missioninfra.<span class="tok-fn">NewRepositories</span>(handle)
+missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
+    missionRepos.<span class="tok-field">Missions</span>,
+    missionRepos.<span class="tok-field">KeyResults</span>,
+    missionRepos.<span class="tok-field">ProgressEntries</span>,
+    missionRepos.<span class="tok-field">LifecycleEvents</span>,
+    missiondomain.<span class="tok-type">SystemClock</span>{},
+    caller.<span class="tok-type">ContextResolver</span>{},
+    spaceSvc,
+    taskSvc,
+    missionLinkedTaskLoader{},
+    missionEventPublisher{<span class="tok-field">bus</span>: bus},
+    logger.<span class="tok-fn">With</span>(<span class="tok-string">"service"</span>, <span class="tok-string">"mission"</span>),
+)</code></pre>
+
+  <p>
+    <code>Application</code> holds <code>MissionSvc</code> as a field. The daemon registers it with <code>internal/rpc</code> through <code>rpc.RegisterMission</code>. The app composition root does not expose repositories, does not add methods to <code>Application</code>, and does not create an adapter layer between RPC and the service.
+  </p>
+
+  <p>
+    The current <code>LinkedTaskLoader</code> implementation is the graph-service slot. It returns the task ids linked to a KR; while graph/context-link ownership is being rebuilt, production wiring uses the slot without giving mission service direct access to graph or context-link storage. The lifecycle repository writes mission facts to mission-owned history, and the event publisher writes the same facts to daemon event bus topics so subscribers can react without using the old run-backed event repository.
+  </p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Caller</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">UserID</span>   string
+    <span class="tok-field">MemberID</span> <span class="tok-pkg">types</span>.<span class="tok-type">MemberID</span> <span class="tok-comment">// optional for user-owned RPC calls</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">ContextWithCaller</span>(ctx context.Context, caller <span class="tok-type">Caller</span>) context.Context
+
+<span class="tok-kw">type</span> <span class="tok-type">ContextCallerResolver</span> <span class="tok-kw">struct</span>{}</code></pre>
+
+  <h2 id="commands">5. Service commands</h2>
+
+  <p>
+    Service methods are named use cases. They validate required fields, resolve the caller, enforce domain rules, persist the changed aggregate, and return the resulting record or view. The service does not expose a generic <code>Execute(action)</code> shape.
+  </p>
+
+  <table>
+    <thead><tr><th>Method</th><th>Responsibility</th><th>Side effects</th></tr></thead>
+    <tbody>
+      <tr><td><code>CreateMission</code></td><td>Create a draft mission from validated input.</td><td>Persists mission.</td></tr>
+      <tr><td><code>GetMission</code></td><td>Read one mission.</td><td>None.</td></tr>
+      <tr><td><code>ListMissions</code></td><td>Read missions for a project with service-owned filters.</td><td>None.</td></tr>
+      <tr><td><code>UpdateMission</code></td><td>Update descriptive fields or route a named lifecycle transition with an optional note.</td><td>Persists mission and fires a lifecycle event when status changes. Repeating the current lifecycle state is an idempotent success; note-only retries are stored in lifecycle history without publishing duplicate bus events.</td></tr>
+      <tr><td><code>DeleteMission</code></td><td>Archive the mission through the lifecycle boundary with an optional note.</td><td>Persists archived state and fires a lifecycle event. Archiving an already archived mission is an idempotent success; note-only retries are stored in lifecycle history without publishing duplicate bus events.</td></tr>
+      <tr><td><code>CreateKeyResult</code></td><td>Create a KR under an existing non-archived mission, optionally assign an owning space, and reactivate a completed mission when scope expands.</td><td>Persists KR and fires <code>kr.created</code>; may persist mission activation and fire <code>mission.activated</code>.</td></tr>
+      <tr><td><code>GetKeyResult</code></td><td>Read one KR.</td><td>None.</td></tr>
+      <tr><td><code>ListKeyResults</code></td><td>Read KRs for a mission.</td><td>None.</td></tr>
+      <tr><td><code>UpdateKeyResult</code></td><td>Change KR descriptive or measurement fields and recompute progress.</td><td>Persists KR; may fire progress events.</td></tr>
+      <tr><td><code>DeleteKeyResult</code></td><td>Drop/archive a KR without deleting mission history, record an optional rationale note, and recompute the parent mission from remaining live KRs.</td><td>Persists KR status and fires <code>kr.dropped</code>; may persist mission status and fire a lifecycle event. Dropping an already dropped KR is an idempotent success.</td></tr>
+      <tr><td><code>ReopenKeyResult</code></td><td>Reopen a completed or dropped KR when scope has renewed work, record an optional rationale note, and reset progress to the KR starting value.</td><td>Persists KR state and fires <code>kr.reopened</code>; may reactivate the parent mission and fire <code>mission.activated</code>. Reopening an already open or in-progress KR is an idempotent success.</td></tr>
+      <tr><td><code>AssignKeyResultSpace</code></td><td>Assign an open space as the KR owner.</td><td>Persists KR owner fields and fires <code>kr.owner_assigned</code>.</td></tr>
+      <tr><td><code>UpdateProgress</code></td><td>Validate progress update, enforce completion gates before writing, append progress entry, update KR progress, and update milestone cursor.</td><td>Persists progress entry and KR state; fires progress, milestone, and completion events after persistence; may complete mission.</td></tr>
+      <tr><td><code>ComputeMissionProgress</code></td><td>Compute aggregate mission progress, KR status counts, and non-completed blocking KR summaries.</td><td>None.</td></tr>
+      <tr><td><code>GetProgressHistory</code></td><td>Read progress entries for a KR.</td><td>None.</td></tr>
+      <tr><td><code>GetLifecycleHistory</code></td><td>Read mission and KR lifecycle events for a mission, including persisted notes.</td><td>None.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="lifecycle">6. Mission lifecycle</h2>
+
+  <p>
+    A mission moves through named transitions. <code>Archived</code> is terminal. <code>Completed</code> is not terminal because adding or reopening scope can reactivate the mission.
+  </p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 390" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+      <defs>
+        <marker id="mission-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+        </marker>
+      </defs>
+
+      <rect x="50" y="160" width="128" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="114" y="184" text-anchor="middle" fill="var(--text)" font-weight="700">Draft</text>
+      <text x="114" y="204" text-anchor="middle" fill="var(--text-muted)">new mission</text>
+
+      <rect x="270" y="160" width="128" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="334" y="184" text-anchor="middle" fill="var(--text)" font-weight="700">Active</text>
+      <text x="334" y="204" text-anchor="middle" fill="var(--text-muted)">in progress</text>
+
+      <rect x="270" y="50" width="128" height="58" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="334" y="74" text-anchor="middle" fill="var(--text)" font-weight="700">Paused</text>
+      <text x="334" y="94" text-anchor="middle" fill="var(--text-muted)">suspended</text>
+
+      <rect x="490" y="160" width="128" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="554" y="184" text-anchor="middle" fill="var(--text)" font-weight="700">Completed</text>
+      <text x="554" y="204" text-anchor="middle" fill="var(--text-muted)">KRs done</text>
+
+      <rect x="722" y="160" width="128" height="58" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="786" y="184" text-anchor="middle" fill="var(--text)" font-weight="700">Archived</text>
+      <text x="786" y="204" text-anchor="middle" fill="var(--text-muted)">terminal</text>
+
+      <line x1="178" y1="189" x2="270" y2="189" stroke="var(--good)" stroke-width="1.8" marker-end="url(#mission-arrow)"/>
+      <text x="224" y="177" text-anchor="middle" fill="var(--good)" font-weight="700">Activate</text>
+
+      <line x1="398" y1="189" x2="490" y2="189" stroke="var(--good)" stroke-width="1.8" marker-end="url(#mission-arrow)"/>
+      <text x="444" y="177" text-anchor="middle" fill="var(--good)" font-weight="700">Complete</text>
+
+      <line x1="334" y1="160" x2="334" y2="108" stroke="var(--warn)" stroke-width="1.8" marker-end="url(#mission-arrow)"/>
+      <text x="352" y="136" fill="var(--warn)" font-weight="700">Pause</text>
+
+      <line x1="310" y1="108" x2="310" y2="160" stroke="var(--good)" stroke-width="1.8" marker-end="url(#mission-arrow)"/>
+      <text x="244" y="136" fill="var(--good)" font-weight="700">Activate</text>
+
+      <path d="M 490 205 Q 444 260 398 205" fill="none" stroke="var(--good)" stroke-width="1.8" stroke-dasharray="5,4" marker-end="url(#mission-arrow)"/>
+      <text x="444" y="272" text-anchor="middle" fill="var(--good)" font-weight="700">Reactivate when scope expands</text>
+
+      <path d="M 618 189 Q 674 140 722 184" fill="none" stroke="var(--text-faint)" stroke-width="1.8" marker-end="url(#mission-arrow)"/>
+      <text x="674" y="130" text-anchor="middle" fill="var(--text-muted)" font-weight="700">Archive</text>
+
+      <text x="450" y="342" text-anchor="middle" fill="var(--text-muted)">Archive is allowed from any non-archived state. Archived has no outgoing transitions.</text>
+    </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>Transition</th><th>Allowed from</th><th>Result</th><th>Event type</th></tr></thead>
+    <tbody>
+      <tr><td><code>Activate</code></td><td>Draft, Paused, Completed</td><td>Active; clears pause/completion timestamps as needed.</td><td><code>mission.activated</code></td></tr>
+      <tr><td><code>Pause</code></td><td>Active</td><td>Paused; stamps <code>PausedAt</code>.</td><td><code>mission.paused</code></td></tr>
+      <tr><td><code>Complete</code></td><td>Active</td><td>Completed; stamps <code>CompletedAt</code>.</td><td><code>mission.completed</code></td></tr>
+      <tr><td><code>Archive</code></td><td>Draft, Active, Paused, Completed</td><td>Archived.</td><td><code>mission.archived</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    <code>UpdateMission(Status=...)</code> is the service command boundary for lifecycle requests. <code>active</code> runs the activation gate. <code>completed</code> runs the completion gate. <code>paused</code> is allowed from <code>active</code> without KR checks. <code>archived</code> archives any non-archived mission. Repeating the current status returns the current mission without publishing a duplicate lifecycle event. <code>draft</code> is not a valid update target; draft exists only at creation.
+  </p>
+
+  <h2 id="key-results">7. Key results and progress</h2>
+
+  <p>
+    Key results are the mission's measurable work units. A KR belongs to one mission and can be owned by one space. Progress updates produce append-only history and fired events.
+  </p>
+
+  <h3>Measurement model</h3>
+  <p>
+    Measurement type defines how raw KR values become progress. Direction is not a free-standing concept; it is required, forbidden, or constrained by the measurement type.
+  </p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">MeasurementType</span> string
+
+<span class="tok-kw">const</span> (
+    <span class="tok-field">MeasurementNumber</span>     <span class="tok-type">MeasurementType</span> = <span class="tok-string">"number"</span>
+    <span class="tok-field">MeasurementPercentage</span> <span class="tok-type">MeasurementType</span> = <span class="tok-string">"percentage"</span>
+    <span class="tok-field">MeasurementBoolean</span>    <span class="tok-type">MeasurementType</span> = <span class="tok-string">"boolean"</span>
+)
+
+<span class="tok-kw">type</span> <span class="tok-type">MeasurementDirection</span> string
+
+<span class="tok-kw">const</span> (
+    <span class="tok-field">DirectionIncrease</span> <span class="tok-type">MeasurementDirection</span> = <span class="tok-string">"increase"</span>
+    <span class="tok-field">DirectionDecrease</span> <span class="tok-type">MeasurementDirection</span> = <span class="tok-string">"decrease"</span>
+)</code></pre>
+
+  <table>
+    <thead><tr><th>Measurement type</th><th>Direction rule</th><th>Progress rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>number</code></td><td>Requires <code>increase</code> or <code>decrease</code>.</td><td>Uses baseline, target, current value, and direction to compute <code>0..100</code>.</td></tr>
+      <tr><td><code>percentage</code></td><td>Direction is constrained to <code>increase</code> for now.</td><td>Current value is already a percent and is clamped to <code>0..100</code>.</td></tr>
+      <tr><td><code>boolean</code></td><td>Direction is forbidden.</td><td><code>false</code> is <code>0</code>; <code>true</code> is <code>100</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    Maintain/range measurements are intentionally out of scope until tolerance fields are designed. They should become a separate measurement type, not a third direction, because they need acceptable bounds rather than a simple better-higher or better-lower rule.
+  </p>
+
+  <h3>Progress math</h3>
+  <p>
+    Numeric KRs use <code>0</code> as the baseline when <code>Baseline</code> is unset. For <code>direction=increase</code>, progress is <code>(current - baseline) / (target - baseline)</code>. For <code>direction=decrease</code>, progress is <code>(baseline - current) / (baseline - target)</code>. The result is clamped to <code>0..100</code>.
+  </p>
+
+  <p>
+    Percentage KRs treat the submitted value as the percentage and clamp it to <code>0..100</code>. Boolean KRs use numeric values at the service boundary: <code>0</code> means false and any value greater than or equal to <code>1</code> means true.
+  </p>
+
+  <p>
+    A progress update moves a <code>draft</code> or <code>open</code> KR to <code>in_progress</code> when computed progress is below <code>100</code>, and to <code>completed</code> when computed progress is <code>100</code>. <code>ExpectedVersion=0</code> skips the version check; any non-zero expected version must match the KR version. <code>completed</code> and <code>dropped</code> KRs reject progress updates.
+  </p>
+
+  <p>
+    Mission progress is the unweighted average of all non-dropped KR progress percentages, rounded to the nearest integer. Dropped KRs are excluded. A mission with no non-dropped KRs reports <code>0</code> progress and <code>0</code> counted KRs. The progress read model also includes counts by KR status and a blocking list of non-dropped KRs whose status is not <code>completed</code>, so callers can distinguish a numeric percentage from lifecycle closability. KR weights are not part of the model; adding weights would add user burden unless the product can abstract that complexity.
+  </p>
+
+  <h3>Mission activation gate</h3>
+  <p>
+    A mission can activate only when it has measurable scope and each live KR has an accountable owner. The activation predicate is:
+  </p>
+
+<pre><code class="lang-go">count(nonDroppedKRs) &gt; <span class="tok-num">0</span> &amp;&amp; every(nonDroppedKRs, ownerSpaceID != <span class="tok-string">""</span> &amp;&amp; ownerSpaceStatus == <span class="tok-string">"open"</span>)</code></pre>
+
+  <p>
+    These mission states do not activate: no KRs, all KRs dropped, or any non-dropped KR without an owning space. If there is no active measurable scope, the coordinator should add KRs. If a live KR has no owner, the coordinator should assign it to a space before activation.
+  </p>
+
+  <h3>Owner space availability</h3>
+  <p>
+    A KR owner space is both a durable assignment and a live execution dependency. The historical <code>SpaceID</code> stays on the KR, but activation depends on that space still being open.
+  </p>
+
+  <p>
+    Assigning a KR to an open space moves the KR from <code>draft</code> to <code>open</code>. Reassignment is allowed only while the KR is <code>draft</code> or <code>open</code>. Once progress starts and the KR becomes <code>in_progress</code>, ownership is locked to preserve accountability. <code>completed</code> and <code>dropped</code> KRs cannot be reassigned through this command.
+  </p>
+
+  <table>
+    <thead><tr><th>Owner space change</th><th>Mission result</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>A KR is assigned to an open space.</td><td>Eligible for activation.</td><td>The live KR has an accountable delivery owner.</td></tr>
+      <tr><td>A KR's assigned space is closed or archived before activation.</td><td>Not eligible for activation.</td><td>The assignment remains historical, but the space cannot own live work.</td></tr>
+      <tr><td>An active mission has a live KR whose owner space closes or archives.</td><td><code>Paused</code></td><td>The mission has live scope without live execution capacity.</td></tr>
+      <tr><td>A completed mission has a completed KR whose owner space closes or archives.</td><td><code>Completed</code></td><td>The measurable outcome is already satisfied.</td></tr>
+      <tr><td>The KR is reassigned to an open space.</td><td>Eligible for activation again.</td><td>Live ownership has been restored.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Mission completion gate</h3>
+  <p>
+    A mission can complete only when its measurable scope has actually been satisfied. The completion predicate is:
+  </p>
+
+<pre><code class="lang-go">count(nonDroppedKRs) &gt; <span class="tok-num">0</span> &amp;&amp; every(nonDroppedKRs, status == <span class="tok-string">"completed"</span>)</code></pre>
+
+  <p>
+    These mission states do not complete: no KRs, all KRs dropped, or only draft/open/in-progress KRs. If there is no active measurable scope, the coordinator should add KRs, pause the mission, or archive it instead of completing it.
+  </p>
+
+  <h3>Dropping KRs recomputes mission state</h3>
+  <p>
+    Dropping a KR changes the mission's measurable scope. The service must recompute the parent mission from the remaining non-dropped KRs instead of leaving the old mission status untouched.
+  </p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 920 390" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+      <defs>
+        <marker id="drop-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+        </marker>
+      </defs>
+
+      <rect x="44" y="44" width="180" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="134" y="72" text-anchor="middle" fill="var(--text)" font-weight="700">Drop KR</text>
+      <text x="134" y="94" text-anchor="middle" fill="var(--text-muted)">scope changed</text>
+
+      <rect x="330" y="44" width="220" height="70" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="440" y="72" text-anchor="middle" fill="var(--text)" font-weight="700">Load remaining KRs</text>
+      <text x="440" y="94" text-anchor="middle" fill="var(--text-muted)">exclude dropped rows</text>
+
+      <rect x="676" y="34" width="190" height="62" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="771" y="60" text-anchor="middle" fill="var(--text)" font-weight="700">none remain</text>
+      <text x="771" y="80" text-anchor="middle" fill="var(--text-muted)">mission pauses</text>
+
+      <rect x="676" y="134" width="190" height="62" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="771" y="160" text-anchor="middle" fill="var(--text)" font-weight="700">all completed</text>
+      <text x="771" y="180" text-anchor="middle" fill="var(--text-muted)">mission completed</text>
+
+      <rect x="676" y="234" width="190" height="62" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="771" y="260" text-anchor="middle" fill="var(--text)" font-weight="700">some incomplete</text>
+      <text x="771" y="280" text-anchor="middle" fill="var(--text-muted)">mission active</text>
+
+      <rect x="330" y="256" width="220" height="72" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="440" y="284" text-anchor="middle" fill="var(--text)" font-weight="700">Previous status is input</text>
+      <text x="440" y="306" text-anchor="middle" fill="var(--text-muted)">not the source of truth</text>
+
+      <line x1="224" y1="79" x2="330" y2="79" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#drop-arrow)"/>
+      <line x1="550" y1="69" x2="676" y2="64" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#drop-arrow)"/>
+      <line x1="550" y1="82" x2="676" y2="164" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#drop-arrow)"/>
+      <line x1="550" y1="96" x2="676" y2="264" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#drop-arrow)"/>
+      <line x1="440" y1="256" x2="440" y2="114" stroke="var(--text-faint)" stroke-width="1.3" stroke-dasharray="5,4" marker-end="url(#drop-arrow)"/>
+
+      <text x="460" y="366" text-anchor="middle" fill="var(--text-muted)">After a KR drop, remaining non-dropped KRs decide whether the mission is paused, active, or completed.</text>
+    </svg>
+  </div>
+
+  <table>
+    <thead><tr><th>After the drop</th><th>Mission result</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Zero non-dropped KRs remain.</td><td><code>Paused</code></td><td>The mission still exists, but has no measurable scope to execute.</td></tr>
+      <tr><td>At least one non-dropped KR remains and all remaining KRs are completed.</td><td><code>Completed</code></td><td>The remaining measurable scope is satisfied.</td></tr>
+      <tr><td>At least one non-dropped KR remains and any remaining KR is draft/open/in-progress.</td><td><code>Active</code></td><td>The mission has live measurable work.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Renewed scope reactivates completed missions</h3>
+  <p>
+    A completed mission reactivates only when new live measurable work is introduced. Completion is not invalidated by cosmetic edits or administrative changes.
+  </p>
+
+  <table>
+    <thead><tr><th>Change to a completed mission</th><th>Mission result</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>Add a new non-dropped KR.</td><td><code>Active</code></td><td>The mission has renewed measurable scope.</td></tr>
+      <tr><td>Reopen a completed or dropped KR.</td><td><code>Active</code></td><td>Previously satisfied or removed scope now has live work again.</td></tr>
+      <tr><td>Add or keep a dropped/archived KR.</td><td><code>Completed</code></td><td>Dropped scope is ignored by active mission progress rules until it is explicitly reopened.</td></tr>
+      <tr><td>Edit title, description, note, metadata, or display fields on a completed KR.</td><td><code>Completed</code></td><td>No new measurable work was introduced.</td></tr>
+      <tr><td>Assign or change owner space on an already-completed KR.</td><td><code>Completed</code></td><td>Ownership changed, but the measurable outcome is still satisfied.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Progress update atomicity</h3>
+  <p>
+    <code>UpdateProgress</code> is all-or-nothing. The service validates the caller, loads the KR and parent mission, computes the next progress state, and runs every completion gate before it writes a progress entry, KR state, mission state, or event. If a completion gate fails, the call returns an error and no progress row, KR value, KR status, mission status, or event is written.
+  </p>
+  <p>
+    Progress can be recorded only after the parent mission is <code>active</code>. Draft missions are still being shaped; progress on a draft mission creates execution evidence before the mission has passed its ownership and activation gate.
+  </p>
+
+<pre><code class="lang-go"><span class="tok-comment">// UpdateProgress order</span>
+kr := keyResults.<span class="tok-fn">Load</span>(ctx, krID)
+mission := missions.<span class="tok-fn">Load</span>(ctx, kr.MissionID)
+gates.<span class="tok-fn">RequireActiveMission</span>(mission)
+next := <span class="tok-pkg">krdomain</span>.<span class="tok-fn">ComputeNextProgress</span>(kr, value)
+
+<span class="tok-kw">if</span> next.<span class="tok-fn">Completes</span>() {
+    gates.<span class="tok-fn">ValidateKRCompletion</span>(ctx, next)
+}
+
+tx.<span class="tok-fn">SaveProgressEntry</span>(entry)
+tx.<span class="tok-fn">SaveKeyResult</span>(next)
+tx.<span class="tok-fn">SaveMission</span>(missionUpdate)
+
+events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
+
+  <h3>Milestone jumps</h3>
+  <p>
+    A progress update can cross multiple milestone thresholds at once. The service fires one milestone event for every newly crossed milestone and never re-fires a milestone that was already recorded in <code>LastMilestoneNotified</code>.
+  </p>
+
+  <table>
+    <thead><tr><th>Previous progress</th><th>New progress</th><th>Last notified</th><th>Milestone events</th></tr></thead>
+    <tbody>
+      <tr><td><code>10</code></td><td><code>80</code></td><td><code>0</code></td><td><code>25</code>, <code>50</code>, <code>75</code></td></tr>
+      <tr><td><code>60</code></td><td><code>90</code></td><td><code>50</code></td><td><code>75</code></td></tr>
+      <tr><td><code>80</code></td><td><code>100</code></td><td><code>75</code></td><td><code>100</code></td></tr>
+      <tr><td><code>90</code></td><td><code>40</code></td><td><code>75</code></td><td>none</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    A normal <code>kr.progress_updated</code> event is still fired for the value change. Milestone events are additional facts emitted after the progress write for thresholds crossed by that update.
+  </p>
+
+  <h3>Progress regression</h3>
+  <p>
+    Progress can move down only while the KR is not completed and the measurement type allows regression. Completed KRs are stable: if the outcome is no longer true, the KR must be explicitly reopened before progress can regress.
+  </p>
+
+  <table>
+    <thead><tr><th>Case</th><th>Result</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>Draft/open/in-progress KR moves from higher progress to lower progress.</td><td>Allowed when measurement rules permit it.</td><td>The outcome is still being worked.</td></tr>
+      <tr><td>Completed KR receives lower progress through <code>UpdateProgress</code>.</td><td>Rejected.</td><td>Completion is a lifecycle state, not a value that silently unwinds.</td></tr>
+      <tr><td>Completed KR is explicitly reopened.</td><td>KR becomes active again and parent mission reactivates.</td><td>The service records renewed measurable work.</td></tr>
+      <tr><td>Progress regresses below a notified milestone.</td><td><code>LastMilestoneNotified</code> stays unchanged.</td><td>Milestones are historical facts.</td></tr>
+      <tr><td>Progress later crosses the same milestone again.</td><td>No duplicate milestone event.</td><td>The milestone was already recorded.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Linked task completion gate</h3>
+  <p>
+    A KR can complete only when every linked task is terminal. The mission service resolves linked task ids through <code>LinkedTaskLoader</code> and checks task state through <code>TaskLoader</code>. It does not query task repositories, context-link repositories, or graph storage directly.
+  </p>
+
+  <table>
+    <thead><tr><th>Task status</th><th>KR completion effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>succeeded</code></td><td>Terminal; does not block KR completion.</td></tr>
+      <tr><td><code>failed</code></td><td>Terminal; does not block KR completion.</td></tr>
+      <tr><td><code>canceled</code></td><td>Terminal; does not block KR completion.</td></tr>
+      <tr><td><code>pending</code>, <code>active</code>, <code>blocked</code>, <code>in_review</code></td><td>Non-terminal; blocks KR completion.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Concurrent progress updates</h3>
+  <p>
+    Progress updates use optimistic concurrency. A KR update includes the version or updated timestamp the caller read. If the stored KR changed before the write, the service rejects the update with a conflict and the caller must reload before trying again.
+  </p>
+
+  <table>
+    <thead><tr><th>Concern</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Measurement</td><td>Each KR has a measurement type. The measurement type determines whether direction is required, forbidden, or constrained.</td></tr>
+      <tr><td>Number progress</td><td>Number KRs require baseline, target, current value, and direction to compute progress.</td></tr>
+      <tr><td>Percentage progress</td><td>Percentage KRs use the current value directly, clamped to <code>0..100</code>, and support increase semantics only for now.</td></tr>
+      <tr><td>Boolean progress</td><td>Boolean KRs forbid direction and map <code>false</code> to <code>0</code>, <code>true</code> to <code>100</code>.</td></tr>
+      <tr><td>Assignment</td><td>A KR can be assigned only to an open space resolved through the space service.</td></tr>
+      <tr><td>Activation gate</td><td>A mission activates only when at least one non-dropped KR exists and every non-dropped KR has an open owning space.</td></tr>
+      <tr><td>Owner availability</td><td>Closed or archived owner spaces remain historical assignments, but they do not count as live execution ownership.</td></tr>
+      <tr><td>Progress entry</td><td>Every value update appends a progress entry before the resulting KR state is returned.</td></tr>
+      <tr><td>Milestone jumps</td><td>Progress jumps fire every newly crossed milestone threshold and do not re-fire thresholds already recorded in <code>LastMilestoneNotified</code>.</td></tr>
+      <tr><td>Progress regression</td><td>Incomplete KRs may regress when measurement rules allow it; completed KRs must be explicitly reopened before progress can move down.</td></tr>
+      <tr><td>Completion</td><td>A KR cannot complete while linked serving tasks are still non-terminal.</td></tr>
+      <tr><td>Concurrency</td><td>Progress updates reject stale writes through optimistic concurrency instead of using last-write-wins.</td></tr>
+      <tr><td>Auto-completion</td><td>A mission auto-completes only when at least one non-dropped KR exists and every non-dropped KR is complete.</td></tr>
+      <tr><td>KR drop</td><td>Dropping a KR recomputes the mission from remaining non-dropped KRs: none means paused, all completed means completed, any incomplete means active.</td></tr>
+      <tr><td>Reactivation</td><td>Only renewed live measurable scope reactivates a completed mission: a new non-dropped KR or a reopened completed/dropped KR.</td></tr>
+      <tr><td>Delete/archive</td><td>Service methods do not hard-delete mission records. Mission delete archives; KR delete drops.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+      <defs>
+        <marker id="kr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+        </marker>
+      </defs>
+      <rect x="42" y="88" width="160" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="122" y="116" text-anchor="middle" fill="var(--text)" font-weight="700">UpdateProgress</text>
+      <text x="122" y="137" text-anchor="middle" fill="var(--text-muted)">value, actor, note</text>
+
+      <rect x="278" y="88" width="170" height="70" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="363" y="116" text-anchor="middle" fill="var(--text)" font-weight="700">linked task gate</text>
+      <text x="363" y="137" text-anchor="middle" fill="var(--text-muted)">only for completion</text>
+
+      <rect x="526" y="48" width="170" height="70" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="611" y="76" text-anchor="middle" fill="var(--text)" font-weight="700">persist</text>
+      <text x="611" y="97" text-anchor="middle" fill="var(--text-muted)">entry + KR state</text>
+
+      <rect x="526" y="164" width="170" height="70" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="611" y="192" text-anchor="middle" fill="var(--text)" font-weight="700">fire events</text>
+      <text x="611" y="213" text-anchor="middle" fill="var(--text-muted)">progress, milestone, complete</text>
+
+      <line x1="202" y1="123" x2="278" y2="123" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#kr-arrow)"/>
+      <line x1="448" y1="112" x2="526" y2="88" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#kr-arrow)"/>
+      <line x1="611" y1="118" x2="611" y2="164" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#kr-arrow)"/>
+      <text x="450" y="258" text-anchor="middle" fill="var(--text-muted)">The service writes the fact first, then publishes the fact.</text>
+    </svg>
+  </div>
+
+  <h2 id="events">8. Fired events</h2>
+
+  <p>
+    Mission events are facts emitted after a successful state change. They are not agent instructions. Lifecycle event facts are also stored in mission-owned history so lifecycle notes remain readable after the action response is gone. Subscribers may translate fired facts into messages, heartbeat changes, dashboards, or operator workflows.
+  </p>
+
+  <h3>Event failure semantics</h3>
+  <p>
+    Mission/KR state changes and their fired events are one use case. If the lifecycle history write or event publication fails, the operation returns an error. There is no silent event loss for mission lifecycle or KR progress transitions.
+  </p>
+
+  <table>
+    <thead><tr><th>Topic</th><th>Event type</th><th>Fired when</th><th>Required fields</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>mission.lifecycle</code></td>
+        <td><code>mission.activated</code></td>
+        <td>A mission moves into <code>active</code>.</td>
+        <td><code>eventId</code>, <code>projectId</code>, <code>missionId</code>, <code>title</code>, <code>oldStatus</code>, <code>newStatus</code>, <code>trigger</code>, <code>timestamp</code>.</td>
+      </tr>
+      <tr>
+        <td><code>mission.lifecycle</code></td>
+        <td><code>mission.paused</code></td>
+        <td>An active mission pauses.</td>
+        <td>Same lifecycle payload; includes KR count and owning-space count when available.</td>
+      </tr>
+      <tr>
+        <td><code>mission.lifecycle</code></td>
+        <td><code>mission.completed</code></td>
+        <td>A mission completes manually or through KR auto-completion.</td>
+        <td>Same lifecycle payload; <code>trigger</code> is <code>manual</code>, <code>coordinator</code>, or <code>auto</code>.</td>
+      </tr>
+      <tr>
+        <td><code>mission.lifecycle</code></td>
+        <td><code>mission.archived</code></td>
+        <td>A mission archives.</td>
+        <td>Same lifecycle payload.</td>
+      </tr>
+      <tr>
+        <td><code>kr.progress</code></td>
+        <td><code>kr.progress_updated</code></td>
+        <td>A KR progress value changes without crossing a special milestone.</td>
+        <td><code>projectId</code>, <code>missionId</code>, <code>keyResultId</code>, <code>eventType</code>, <code>oldProgress</code>, <code>newProgress</code>, <code>updatedBy</code>, <code>timestamp</code>.</td>
+      </tr>
+      <tr>
+        <td><code>kr.progress</code></td>
+        <td><code>kr.milestone</code></td>
+        <td>Progress crosses 25, 50, 75, or 100 for the first time.</td>
+        <td>KR progress payload plus <code>milestone</code>.</td>
+      </tr>
+      <tr>
+        <td><code>kr.progress</code></td>
+        <td><code>kr.completed</code></td>
+        <td>A KR reaches completion.</td>
+        <td>KR progress payload with <code>newProgress</code> at 100.</td>
+      </tr>
+      <tr>
+        <td><code>kr.progress</code></td>
+        <td><code>mission.completed</code></td>
+        <td>The KR update causes all non-dropped KRs to complete.</td>
+        <td>KR progress payload identifies the KR that caused mission completion.</td>
+      </tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">MissionLifecycleEvent</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">EventID</span>        string
+    <span class="tok-field">ProjectID</span>      string
+    <span class="tok-field">MissionID</span>      string
+    <span class="tok-field">Title</span>          string
+    <span class="tok-field">EventType</span>      string
+    <span class="tok-field">OldStatus</span>      string
+    <span class="tok-field">NewStatus</span>      string
+    <span class="tok-field">KRCount</span>        int
+    <span class="tok-field">SpaceCount</span>     int
+    <span class="tok-field">Trigger</span>        string
+    <span class="tok-field">TriggerSpaceID</span> string
+    <span class="tok-field">Timestamp</span>      time.Time
+}</code></pre>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">KRProgressEvent</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span>      string
+    <span class="tok-field">MissionID</span>      string
+    <span class="tok-field">KeyResultID</span>    string
+    <span class="tok-field">KeyResultTitle</span> string
+    <span class="tok-field">EventType</span>      string
+    <span class="tok-field">OldProgress</span>    int
+    <span class="tok-field">NewProgress</span>    int
+    <span class="tok-field">Milestone</span>      int
+    <span class="tok-field">UpdatedBy</span>      string
+    <span class="tok-field">Timestamp</span>      time.Time
+}</code></pre>
+
+  <p>
+    Event consumers own delivery workflows. Mission activation briefings, heartbeat pause/resume changes, coordinator wakeups, and operator notifications are event-subscriber behavior, not methods on the mission service.
+  </p>
+
+  <p>
+    Mission events are published only after the state change is persisted. If mission persistence fails, no event is emitted. If event publication fails after persistence, the service returns that error so the caller sees that the transition side effect did not complete.
+  </p>
+
+  <h2 id="event-specs">9. Event specs</h2>
+
+  <p>
+    The mission service owns service-local event specs, not a member-facing message registry and not a separate factory object. This follows the task service pattern: typed outcome constants plus private helper functions in <code>service.go</code>. The helpers map successful mission and KR outcomes into event records with consistent payloads.
+  </p>
+
+  <table>
+    <thead><tr><th>Outcome</th><th>Event output</th><th>Default message behavior</th></tr></thead>
+    <tbody>
+      <tr><td>Mission activates, pauses, completes, or archives.</td><td><code>MissionLifecycleEvent</code></td><td>Activation notifies coordinators of assigned spaces. Other lifecycle events send messages only if they create work or require intervention.</td></tr>
+      <tr><td>KR progress changes.</td><td><code>KRProgressEvent</code> with <code>kr.progress_updated</code>.</td><td>No agent message. Dashboards/history consume the event.</td></tr>
+      <tr><td>KR crosses milestone thresholds.</td><td>One <code>KRProgressEvent</code> per newly crossed <code>kr.milestone</code>.</td><td>No agent message by default. Subscriber may create summaries later if product behavior needs them.</td></tr>
+      <tr><td>KR completes and mission may complete.</td><td><code>kr.completed</code> and optional <code>mission.completed</code>.</td><td>No agent message by default; the caller usually already knows the outcome.</td></tr>
+      <tr><td>KR is created, dropped, reopened, or assigned.</td><td>Typed KR lifecycle events when those outcomes are persisted.</td><td>Message only when action is required, such as a new owner assignment or reopened work.</td></tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">MissionEventKind</span> string
+
+<span class="tok-kw">const</span> (
+    <span class="tok-field">MissionEventActivated</span> <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"mission.activated"</span>
+    <span class="tok-field">MissionEventPaused</span>    <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"mission.paused"</span>
+    <span class="tok-field">MissionEventCompleted</span> <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"mission.completed"</span>
+    <span class="tok-field">MissionEventArchived</span>  <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"mission.archived"</span>
+
+    <span class="tok-field">KREventProgressUpdated</span> <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.progress_updated"</span>
+    <span class="tok-field">KREventMilestone</span>       <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.milestone"</span>
+    <span class="tok-field">KREventCompleted</span>       <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.completed"</span>
+    <span class="tok-field">KREventCreated</span>         <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.created"</span>
+    <span class="tok-field">KREventDropped</span>         <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.dropped"</span>
+    <span class="tok-field">KREventReopened</span>        <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.reopened"</span>
+    <span class="tok-field">KREventOwnerAssigned</span>   <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.owner_assigned"</span>
+)
+
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">publishMissionEvent</span>(ctx context.Context, kind <span class="tok-type">MissionEventKind</span>, mission <span class="tok-pkg">mission</span>.<span class="tok-type">Mission</span>) error
+<span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">publishKREvent</span>(ctx context.Context, kind <span class="tok-type">MissionEventKind</span>, kr <span class="tok-pkg">kr</span>.<span class="tok-type">KeyResult</span>) error
+<span class="tok-kw">func</span> <span class="tok-fn">missionEventSpec</span>(kind <span class="tok-type">MissionEventKind</span>) (<span class="tok-type">missionEventTemplate</span>, error)</code></pre>
+
+<pre><code class="lang-go"><span class="tok-comment">// mission activation event payload</span>
+<span class="tok-type">EventRecord</span>{
+    <span class="tok-field">Type</span>:    <span class="tok-string">"mission.activated"</span>,
+    <span class="tok-field">Origin</span>:  <span class="tok-string">"mission"</span>,
+    <span class="tok-field">Message</span>: <span class="tok-string">"mission.activated"</span>,
+    <span class="tok-field">Data</span>: map[string]string{
+        <span class="tok-string">"missionId"</span>: <span class="tok-string">"mission-..."</span>,
+        <span class="tok-string">"projectId"</span>: <span class="tok-string">"project-..."</span>,
+        <span class="tok-string">"status"</span>:    <span class="tok-string">"active"</span>,
+    },
+}</code></pre>
+
+<pre><code class="lang-go"><span class="tok-comment">// key-result lifecycle event payload</span>
+<span class="tok-type">EventRecord</span>{
+    <span class="tok-field">Type</span>:    <span class="tok-string">"kr.created"</span>,
+    <span class="tok-field">Origin</span>:  <span class="tok-string">"mission"</span>,
+    <span class="tok-field">Message</span>: <span class="tok-string">"kr.created"</span>,
+    <span class="tok-field">Data</span>: map[string]string{
+        <span class="tok-string">"missionId"</span>:       <span class="tok-string">"mission-..."</span>,
+        <span class="tok-string">"keyResultId"</span>:     <span class="tok-string">"kr-..."</span>,
+        <span class="tok-string">"status"</span>:          <span class="tok-string">"draft"</span>,
+        <span class="tok-string">"measurementType"</span>: <span class="tok-string">"number"</span>,
+        <span class="tok-string">"progressPercent"</span>: <span class="tok-string">"0"</span>,
+        <span class="tok-string">"spaceId"</span>:         <span class="tok-string">"space-..."</span>, <span class="tok-comment">// present when assigned</span>
+    },
+}</code></pre>
+
+  <p>
+    This differs from the task service message registry only in the target boundary. Task lifecycle transitions are message-driven work handoffs, so task service publishes member-facing task messages. Mission lifecycle transitions are strategic facts, so mission service publishes event records. Event subscribers translate mission events into messages only when the event creates an actionable obligation or requires human/coordinator intervention.
+  </p>
+
+  <table>
+    <thead><tr><th>Mission event</th><th>Agent message?</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td><code>kr.progress_updated</code>, <code>kr.milestone</code>, <code>kr.completed</code>, <code>mission.completed</code>, <code>mission.archived</code></td><td>No by default.</td><td>These are facts the caller or dashboard can observe; they do not inherently ask another agent to act.</td></tr>
+      <tr><td><code>mission.activated</code></td><td>Yes.</td><td>Notify the coordinator of each space assigned to a live KR so the space knows the mission is now active.</td></tr>
+      <tr><td><code>kr.owner_assigned</code>, <code>kr.reopened</code></td><td>Usually yes.</td><td>A space/agent may need to begin tracking or resume work.</td></tr>
+      <tr><td>Mission paused because live KR ownership became unavailable.</td><td>Yes.</td><td>Coordinator or operator intervention is required.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Notification idempotency</h3>
+  <p>
+    Mission activation can be retried, recomputed after KR assignment, or replayed by an event subscriber. Activation messages must therefore be idempotent per mission, assigned space, and event kind.
+  </p>
+
+  <table>
+    <thead><tr><th>Notification</th><th>Idempotency key</th><th>Duplicate rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>mission.activated</code> to an assigned space coordinator.</td><td><code>mission:&lt;missionId&gt;:space:&lt;spaceId&gt;:activated</code></td><td>Send at most once for the activation episode.</td></tr>
+      <tr><td><code>kr.owner_assigned</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:owner:&lt;spaceId&gt;</code></td><td>Send only when the owner space actually changes.</td></tr>
+      <tr><td><code>kr.reopened</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:reopened:&lt;version&gt;</code></td><td>Send once for the reopen transition, not for later progress edits.</td></tr>
+      <tr><td>Mission paused because owner space became unavailable.</td><td><code>mission:&lt;missionId&gt;:paused:owner-unavailable:&lt;spaceId&gt;</code></td><td>Send once per unavailable owner-space cause.</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    The mission service still publishes events only. The event subscriber that creates agent messages must use deterministic producer intent/correlation ids so message persistence can reject or ignore duplicates.
+  </p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+      <defs>
+        <marker id="activation-message-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+        </marker>
+      </defs>
+
+      <rect x="44" y="56" width="190" height="74" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="139" y="86" text-anchor="middle" fill="var(--text)" font-weight="700">Mission service</text>
+      <text x="139" y="108" text-anchor="middle" fill="var(--text-muted)">Activate mission</text>
+
+      <rect x="316" y="56" width="190" height="74" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+      <text x="411" y="86" text-anchor="middle" fill="var(--text)" font-weight="700">Event specs</text>
+      <text x="411" y="108" text-anchor="middle" fill="var(--text-muted)">mission.activated</text>
+
+      <rect x="588" y="56" width="190" height="74" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="683" y="86" text-anchor="middle" fill="var(--text)" font-weight="700">Event publisher</text>
+      <text x="683" y="108" text-anchor="middle" fill="var(--text-muted)">publish mission fact</text>
+
+      <rect x="588" y="202" width="190" height="82" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+      <text x="683" y="232" text-anchor="middle" fill="var(--text)" font-weight="700">Activation subscriber</text>
+      <text x="683" y="254" text-anchor="middle" fill="var(--text-muted)">resolve assigned spaces</text>
+      <text x="683" y="272" text-anchor="middle" fill="var(--text-muted)">find coordinators</text>
+
+      <rect x="44" y="202" width="190" height="82" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="139" y="232" text-anchor="middle" fill="var(--text)" font-weight="700">Message service</text>
+      <text x="139" y="254" text-anchor="middle" fill="var(--text-muted)">PublishAgentMessage</text>
+      <text x="139" y="272" text-anchor="middle" fill="var(--text-muted)">idempotent producer ids</text>
+
+      <rect x="316" y="214" width="190" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
+      <text x="411" y="238" text-anchor="middle" fill="var(--text)" font-weight="700">Space coordinator</text>
+      <text x="411" y="258" text-anchor="middle" fill="var(--text-muted)">mission is active</text>
+
+      <line x1="234" y1="93" x2="316" y2="93" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
+      <line x1="506" y1="93" x2="588" y2="93" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
+      <line x1="683" y1="130" x2="683" y2="202" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
+      <line x1="588" y1="243" x2="234" y2="243" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
+      <line x1="234" y1="243" x2="316" y2="243" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
+
+      <text x="480" y="330" text-anchor="middle" fill="var(--text-muted)">Mission emits one fact. The subscriber owns message delivery and duplicate suppression.</text>
+    </svg>
+  </div>
+
+  <h2 id="rpc">10. RPC adapter</h2>
+
+  <p>
+    RPC is the UI surface. DTOs live with the mission service under <code>internal/services/mission/rpc</code>. Shared JSON-RPC routing lives under <code>internal/rpc</code>. The handler validates DTO fields, stamps caller identity into context, calls a typed service method, and maps the result to a response DTO.
+  </p>
+
+  <p>
+    Mission views include the canonical lifecycle and schedule fields the UI renders: <code>status</code>, <code>startDate</code>, <code>endDate</code>, <code>createdAt</code>, <code>updatedAt</code>, <code>pausedAt</code>, and <code>completedAt</code>. Date inputs at the RPC boundary use <code>YYYY-MM-DD</code>; invalid dates fail before the service is called.
+  </p>
+
+  <table>
+    <thead><tr><th>RPC method</th><th>Service call</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>mission.create</code></td><td><code>CreateMission</code></td><td>Create a draft mission.</td></tr>
+      <tr><td><code>mission.get</code></td><td><code>GetMission</code></td><td>Read one mission view.</td></tr>
+      <tr><td><code>mission.list</code></td><td><code>ListMissions</code></td><td>List mission views for a project.</td></tr>
+      <tr><td><code>mission.update</code></td><td><code>UpdateMission</code></td><td>Patch descriptive fields or request lifecycle transition.</td></tr>
+      <tr><td><code>mission.delete</code></td><td><code>DeleteMission</code></td><td>Archive mission.</td></tr>
+      <tr><td><code>mission.history</code></td><td><code>GetLifecycleHistory</code></td><td>Read mission lifecycle entries and notes.</td></tr>
+      <tr><td><code>mission.kr.create</code></td><td><code>CreateKeyResult</code></td><td>Create a KR.</td></tr>
+      <tr><td><code>mission.kr.get</code></td><td><code>GetKeyResult</code></td><td>Read one KR.</td></tr>
+      <tr><td><code>mission.kr.list</code></td><td><code>ListKeyResults</code></td><td>List KRs for a mission.</td></tr>
+      <tr><td><code>mission.kr.update</code></td><td><code>UpdateKeyResult</code></td><td>Patch KR fields.</td></tr>
+      <tr><td><code>mission.kr.assignSpace</code></td><td><code>AssignKeyResultSpace</code></td><td>Assign an open space as the KR owner.</td></tr>
+      <tr><td><code>mission.kr.delete</code></td><td><code>DeleteKeyResult</code></td><td>Drop/archive KR.</td></tr>
+      <tr><td><code>mission.kr.reopen</code></td><td><code>ReopenKeyResult</code></td><td>Reopen completed or dropped KR scope and reset progress.</td></tr>
+      <tr><td><code>mission.kr.progress</code></td><td><code>UpdateProgress</code></td><td>Record KR progress.</td></tr>
+      <tr><td><code>mission.kr.progressHistory</code></td><td><code>GetProgressHistory</code></td><td>Read KR progress entries.</td></tr>
+      <tr><td><code>mission.progress</code></td><td><code>ComputeMissionProgress</code></td><td>Read aggregate mission progress.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="mcp">11. MCP mission tool</h2>
+
+  <p>
+    MCP is the agent-facing strategy surface. The <a href="./mcp-mission-tool.html">MCP mission tool</a> owns action names, request decoding, session member resolution, caller context stamping, and deterministic structured output. The mission service owns all mission, KR, measurement, progress, persistence, and event rules.
+  </p>
+
+  <table>
+    <thead><tr><th>MCP concern</th><th>Owner</th></tr></thead>
+    <tbody>
+      <tr><td>Action strings such as <code>kr_progress</code> and <code>activate</code></td><td><code>internal/mcp/tools/mission</code></td></tr>
+      <tr><td>Mission lifecycle and KR state transitions</td><td><code>internal/services/mission/app.Service</code></td></tr>
+      <tr><td>Small handler-owned service interfaces</td><td><code>internal/mcp/tools/mission/types.go</code></td></tr>
+      <tr><td>Real concrete implementation</td><td><code>*missionapp.Service</code>, supplied through the MCP session</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="delete-archive">12. Delete and archive semantics</h2>
+
+  <p>
+    Mission and KR service methods do not expose hard deletion. Deletion requests are lifecycle changes that preserve history.
+  </p>
+
+  <table>
+    <thead><tr><th>Operation</th><th>Result</th><th>Visibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>DeleteMission</code></td><td>Archives the mission.</td><td>Archived missions are terminal unless a future restore flow is explicitly designed.</td></tr>
+      <tr><td><code>DeleteKeyResult</code></td><td>Drops the KR.</td><td>Dropped KRs are excluded from activation, completion, and progress aggregation, but remain queryable as history.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="rules">13. Hard rules</h2>
+
+  <table>
+    <thead><tr><th>Rule</th><th>Why it exists</th></tr></thead>
+    <tbody>
+      <tr><td>No <code>Deps</code> bag in mission service construction.</td><td>Constructor dependencies stay visible and reviewable.</td></tr>
+      <tr><td>No tool request or generic action dispatcher in <code>internal/services/mission/app</code>.</td><td>MCP owns tool semantics.</td></tr>
+      <tr><td>No direct writes to task, space, heartbeat, message, or context-link repositories.</td><td>Services talk to services through narrow interfaces.</td></tr>
+      <tr><td>No lifecycle notification handlers in the mission app service package.</td><td>Event subscribers belong to the event/subscriber layer, not the mission service.</td></tr>
+      <tr><td>No member-facing message registry or exported event factory in mission service.</td><td>The mission service owns typed event kinds and private publishing/spec helpers; subscribers own message wording and delivery.</td></tr>
+      <tr><td>No automatic mission-event-to-agent-message rule.</td><td>Mission events become messages only when a subscriber identifies an actionable obligation or intervention need; <code>mission.activated</code> is actionable for coordinators of assigned spaces.</td></tr>
+      <tr><td>No duplicate mission activation messages.</td><td>Activation notifications use deterministic idempotency keys per mission and assigned space.</td></tr>
+      <tr><td>No raw JSON or protocol DTOs in service methods.</td><td>Protocol adapters translate at the boundary.</td></tr>
+      <tr><td>No partial progress writes.</td><td><code>UpdateProgress</code> runs completion gates before persistence and writes progress entry, KR state, mission state, and events as one use case.</td></tr>
+      <tr><td>No KR progress under a draft mission.</td><td>Progress updates require the parent mission to be <code>active</code>.</td></tr>
+      <tr><td>No last-write-wins progress updates.</td><td>Concurrent KR progress writes use optimistic concurrency and stale writes return a conflict.</td></tr>
+      <tr><td>No lost milestone events on progress jumps.</td><td>A single update from low progress to high progress emits every newly crossed threshold, not only the final threshold.</td></tr>
+      <tr><td>No silent regression of completed KRs.</td><td>A completed KR must be explicitly reopened before progress can decrease, and reopening resets progress to the starting value and reactivates the parent mission.</td></tr>
+      <tr><td>No milestone un-notification.</td><td>Progress regression does not clear <code>LastMilestoneNotified</code> or make already fired milestones eligible to fire again.</td></tr>
+      <tr><td>No unsupported measurement semantics.</td><td><code>maintain</code> and range/tolerance KRs are not supported until their fields and progress rules are designed.</td></tr>
+      <tr><td>No mission activation without owned measurable scope.</td><td>Activation requires at least one non-dropped KR and every non-dropped KR assigned to an open owning space; no KRs, all dropped KRs, unowned live KRs, and closed/archived owner spaces fail the gate.</td></tr>
+      <tr><td>No mission completion without satisfied measurable scope.</td><td>Completion requires at least one non-dropped KR and every non-dropped KR completed; no KRs, all dropped KRs, and only draft/open/in-progress KRs fail the gate.</td></tr>
+      <tr><td>No KR completion with non-terminal linked tasks.</td><td>Linked tasks in <code>pending</code>, <code>active</code>, <code>blocked</code>, or <code>in_review</code> block KR completion.</td></tr>
+      <tr><td>No stale mission status after dropping KRs.</td><td>The parent mission is recomputed from remaining non-dropped KRs; previous status does not preserve an invalid active or completed state.</td></tr>
+      <tr><td>No reactivation for cosmetic or administrative KR edits.</td><td>A completed mission reactivates only when new live measurable work is introduced.</td></tr>
+      <tr><td>No silent event-publish failures on state transitions.</td><td>Fired events are part of the service contract.</td></tr>
+      <tr><td>No hard delete through mission service methods.</td><td>Mission deletion archives and KR deletion drops so history remains available.</td></tr>
+      <tr><td>No activity timeline embedded in mission metadata.</td><td>The event layer owns event history and query projections.</td></tr>
+      <tr><td>Tests drive service methods and production RPC/MCP entry points.</td><td>The service is done only when real wiring reaches it.</td></tr>
+    </tbody>
+  </table>
+
+  <p class="footnote">
+    Architecture · agen8 · This document is the source of truth for the mission service rebuild.
+  </p>
+
+</div>
+</body>
+</html>
