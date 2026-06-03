@@ -885,12 +885,19 @@ func TestServiceStartAgentDeliveryRetriesQueuedMessageAfterHarnessBusy(t *testin
 			t.Fatalf("expected delivery attempt %d", want)
 		}
 	}
-	msg, err := svc.GetMessage(context.Background(), "msg-busy")
-	if err != nil {
-		t.Fatalf("GetMessage: %v", err)
-	}
-	if msg.Status != types.MessageStatusConsumedTyped || msg.ConsumedBy != "member-dest" {
-		t.Fatalf("message=%+v", msg)
+	deadline := time.Now().Add(time.Second)
+	for {
+		msg, err := svc.GetMessage(context.Background(), "msg-busy")
+		if err != nil {
+			t.Fatalf("GetMessage: %v", err)
+		}
+		if msg.Status == types.MessageStatusConsumedTyped && msg.ConsumedBy == "member-dest" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("message=%+v", msg)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
