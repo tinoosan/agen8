@@ -247,7 +247,7 @@ function MembersStripCard({
                 onSelect={() => {
                   if (!projectId || !spaceId) return
                   navigate(
-                    `/project/${encodeURIComponent(projectId)}/space/${encodeURIComponent(spaceId)}?tab=inspector`,
+                    `/project/${encodeURIComponent(projectId)}/space/${encodeURIComponent(spaceId)}`,
                   )
                 }}
               />

@@ -199,6 +199,20 @@ describe('SpaceFocus', () => {
     expect(localStorage.getItem('oa-context-view:space-1')).toBeNull()
   })
 
+  it('does not render the removed Inspector tab', () => {
+    renderSpaceFocus()
+
+    expect(screen.queryByRole('tab', { name: /inspector/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /overview/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /board/i })).toBeInTheDocument()
+  })
+
+  it('falls back to overview for a stale ?tab=inspector deep link', () => {
+    renderSpaceFocus('inspector')
+
+    expect(screen.getByRole('tab', { name: /overview/i })).toHaveAttribute('data-state', 'active')
+  })
+
   it('keeps the context panel scoped to the current space', async () => {
     mockUseSpaceManifest.mockReturnValue({
       data: {

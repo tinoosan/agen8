@@ -159,6 +159,22 @@ func (h *Handler) Update(ctx context.Context, p TaskUpdateParams) (TaskUpdateRes
 	return TaskUpdateResult{Task: NewTaskView(task)}, nil
 }
 
+func (h *Handler) Cancel(ctx context.Context, p TaskCancelParams) (TaskCancelResult, error) {
+	taskID := strings.TrimSpace(p.TaskID)
+	if taskID == "" {
+		return TaskCancelResult{}, invalidParams("taskId is required")
+	}
+	reason := strings.TrimSpace(p.Reason)
+	if reason == "" {
+		return TaskCancelResult{}, invalidParams("reason is required")
+	}
+	task, err := h.svc.Cancel(ctx, domain.TaskID(taskID), reason)
+	if err != nil {
+		return TaskCancelResult{}, internalError("cancel task", err)
+	}
+	return TaskCancelResult{Task: NewTaskView(task)}, nil
+}
+
 func parseOptionalUUID(raw, field string) (*uuid.UUID, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

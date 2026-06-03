@@ -14,6 +14,12 @@ func RunStdio(ctx context.Context, session Session) error {
 	if err != nil {
 		return err
 	}
-	server := (&Server{registry: registry}).newMCPServerForSession(session)
+	tokenStore := NewTokenStore()
+	token := session.Token
+	if token == "" {
+		token = "stdio"
+	}
+	tokenStore.Register(token, session)
+	server := (&Server{registry: registry, tokenStore: tokenStore}).newMCPServerForConnection(newMCPConnectionState(token, "", ""), session)
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

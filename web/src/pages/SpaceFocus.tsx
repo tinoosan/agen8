@@ -3,11 +3,8 @@ import { useNavigation } from '../lib/routing'
 import ContextPanel from '../components/ContextPanel'
 import { useSpaceStatus } from '../hooks/useSpaceStatus'
 import { lazyWithRetry } from '../lib/lazyWithRetry'
-// The inspector is small and part of the core space route, so keep it out of
-// the lazy chunk path that can retain failed imports during Vite hot reloads.
-import SpaceInspectorTab from '../components/space-focus/SpaceInspectorTab'
 import type { SpaceMember, Task } from '../lib/types'
-import { Coins, Cpu, PanelRight, LayoutGrid, KanbanSquare, Search } from 'lucide-react'
+import { Coins, Cpu, PanelRight, LayoutGrid, KanbanSquare } from 'lucide-react'
 
 // Tab icons keyed by tab name. Defined alongside the tab definitions so
 // Overview/Chat/Board/Inspector/Schedule render with a consistent
@@ -15,13 +12,11 @@ import { Coins, Cpu, PanelRight, LayoutGrid, KanbanSquare, Search } from 'lucide
 const TAB_ICONS = {
   overview: LayoutGrid,
   board: KanbanSquare,
-  inspector: Search,
 } as const
 
 const TAB_LABELS = {
   overview: 'Overview',
   board: 'Board',
-  inspector: 'Inspector',
 } as const
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -91,7 +86,6 @@ function writeContextWidth(v: number): void {
 const VALID_TABS: ReadonlySet<string> = new Set([
   'overview',
   'board',
-  'inspector',
 ])
 
 /**
@@ -347,7 +341,7 @@ export default function SpaceFocus({ spaceId: spaceIdProp }: SpaceFocusProps) {
         <div className="shrink-0 border-b border-[color-mix(in_srgb,var(--border)_50%,transparent)]">
           <div className="space-focus-header-row px-6 py-2 flex items-center gap-3 flex-wrap">
             <TabsList className="h-auto bg-transparent gap-0 p-0 rounded-none shrink-0">
-              {(['overview', 'board', 'inspector'] as const).map(tab => {
+              {(['overview', 'board'] as const).map(tab => {
                 const Icon = TAB_ICONS[tab]
                 return (
                   <TabsTrigger
@@ -450,12 +444,6 @@ export default function SpaceFocus({ spaceId: spaceIdProp }: SpaceFocusProps) {
                   writeContextCollapsed(false)
                 }}
               />
-            </Suspense>
-          </TabsContent>
-
-          <TabsContent value="inspector" className="flex-1 min-h-0 mt-0 overflow-hidden">
-            <Suspense fallback={<TabLoadingFallback />}>
-              <SpaceInspectorTab spaceId={spaceId} />
             </Suspense>
           </TabsContent>
 

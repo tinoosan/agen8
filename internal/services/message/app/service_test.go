@@ -156,6 +156,9 @@ func TestServiceDeliverNextAgentMessageSendsAttributedEnvelopeAndActivity(t *tes
 		!strings.Contains(harness.input.Text, "correlationId: corr-1") {
 		t.Fatalf("harness text:\n%s", harness.input.Text)
 	}
+	if !harness.input.AllowSteering || !harness.input.SteerOnly {
+		t.Fatalf("agent inbox delivery must steer the active harness turn only, input=%+v", harness.input)
+	}
 	activities, err := conversations.ListActivitiesByChannel(context.Background(), "channel:space-1:member:member-dest", 10)
 	if err != nil {
 		t.Fatalf("ListActivitiesByChannel: %v", err)
@@ -540,6 +543,9 @@ func TestServiceStartAgentDeliveryDrainsPublishedMessages(t *testing.T) {
 		if !input.AllowSteering {
 			t.Fatalf("agent inbox delivery must allow harness steering")
 		}
+		if !input.SteerOnly {
+			t.Fatalf("agent inbox delivery must not start a background harness turn")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("expected agent delivery")
 	}
@@ -724,8 +730,8 @@ func TestServicePublishAgentMessageRestartsExitedDeliveryWorker(t *testing.T) {
 	}
 	staleCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := svc.StartAgentDelivery(staleCtx, "member-dest"); err != nil {
-		t.Fatalf("StartAgentDelivery: %v", err)
+	if err := svc.StartAgentDelivery(staleCtx, "member-dest"); err == nil {
+		t.Fatal("StartAgentDelivery returned nil for canceled context")
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -776,7 +782,7 @@ func TestServicePublishAgentMessageRestartsExitedDeliveryWorker(t *testing.T) {
 	}
 }
 
-func TestServiceStartAgentDeliveryDrainsMessagesQueuedBeforeWorkerStarts(t *testing.T) {
+func TestServiceStartAgentDeliveryDrainsQueuedWakeBufferedBeforeWorkerStarts(t *testing.T) {
 	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
 	repo := newMemoryRepo()
 	conversations := newMemoryConversationRepo()
@@ -819,7 +825,7 @@ func TestServiceStartAgentDeliveryDrainsMessagesQueuedBeforeWorkerStarts(t *test
 			t.Fatalf("delivered input=%+v", input)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("expected queued message to drain when delivery worker starts")
+		t.Fatal("expected buffered queued wake to drain when delivery worker starts")
 	}
 	msg, err := svc.GetMessage(context.Background(), "msg-before-start")
 	if err != nil {
@@ -898,6 +904,93 @@ func TestServiceStartAgentDeliveryRetriesQueuedMessageAfterHarnessBusy(t *testin
 			t.Fatalf("message=%+v", msg)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestServiceDeliverNextAgentMessageDefersUnreachableTurnAndAllowsFreshMessage(t *testing.T) {
+	previousDelay := agentDeliveryRetryDelay
+	agentDeliveryRetryDelay = 10 * time.Millisecond
+	t.Cleanup(func() { agentDeliveryRetryDelay = previousDelay })
+
+	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	repo := newMemoryRepo()
+	conversations := newMemoryConversationRepo()
+	attempts := make(chan string, 2)
+	harness := &fakeHarnessChatSender{
+		sendFn: func(ctx context.Context, input HarnessChatMessage) (HarnessChatResult, error) {
+			if strings.Contains(input.Text, "old unreachable") {
+				attempts <- "old"
+				return HarnessChatResult{}, fmt.Errorf("steer active codex turn: codex app-server thread %q is not loaded by the reachable remote-control server", "thread-1")
+			}
+			attempts <- "fresh"
+			return HarnessChatResult{SessionID: "session-1", TurnID: "turn-1", Delivery: string(conversation.DeliveryDelivered)}, nil
+		},
+	}
+	svc := newServiceWithHarnessForTest(t, repo, conversations, harness, now)
+
+	for _, input := range []domain.NewMessageInput{
+		{
+			ID: "msg-a-old",
+			Route: domain.MessageRoute{
+				SpaceID:             "space-1",
+				DestinationMemberID: "member-dest",
+				ChannelID:           "channel:space-1:member:member-dest",
+			},
+			Content: domain.MessageContent{
+				Kind:    types.AgentMessageKindSystem,
+				Subject: "Old",
+				Body:    map[string]any{"message": "old unreachable"},
+			},
+			Producer: domain.MessageProducer{IntentID: "intent-old", Producer: "test"},
+		},
+		{
+			ID: "msg-z-fresh",
+			Route: domain.MessageRoute{
+				SpaceID:             "space-1",
+				DestinationMemberID: "member-dest",
+				ChannelID:           "channel:space-1:member:member-dest",
+			},
+			Content: domain.MessageContent{
+				Kind:    types.AgentMessageKindSystem,
+				Subject: "Fresh",
+				Body:    map[string]any{"message": "fresh reachable"},
+			},
+			Producer: domain.MessageProducer{IntentID: "intent-fresh", Producer: "test"},
+		},
+	} {
+		if _, err := svc.PublishAgentMessage(context.Background(), input); err != nil {
+			t.Fatalf("PublishAgentMessage(%s): %v", input.ID, err)
+		}
+	}
+
+	if _, err := svc.DeliverNextAgentMessage(context.Background(), "member-dest"); err == nil {
+		t.Fatal("expected first delivery to report unreachable turn")
+	} else if !isUnavailableTurnDeliveryError(err) {
+		t.Fatalf("expected unreachable-turn error, got %v", err)
+	}
+	if _, err := svc.DeliverNextAgentMessage(context.Background(), "member-dest"); err != nil {
+		t.Fatalf("DeliverNextAgentMessage fresh: %v", err)
+	}
+
+	if got := <-attempts; got != "old" {
+		t.Fatalf("first attempt=%q want old", got)
+	}
+	if got := <-attempts; got != "fresh" {
+		t.Fatalf("second attempt=%q want fresh", got)
+	}
+	oldMsg, err := svc.GetMessage(context.Background(), "msg-a-old")
+	if err != nil {
+		t.Fatalf("GetMessage old: %v", err)
+	}
+	if oldMsg.Status != types.MessageStatusQueuedTyped || !oldMsg.VisibleAt.Equal(now.Add(agentDeliveryRetryDelay)) {
+		t.Fatalf("old message should stay queued with deferred visibility: %+v", oldMsg)
+	}
+	freshMsg, err := svc.GetMessage(context.Background(), "msg-z-fresh")
+	if err != nil {
+		t.Fatalf("GetMessage fresh: %v", err)
+	}
+	if freshMsg.Status != types.MessageStatusConsumedTyped || freshMsg.ConsumedBy != "member-dest" {
+		t.Fatalf("fresh message should be consumed: %+v", freshMsg)
 	}
 }
 
@@ -1217,149 +1310,6 @@ func TestServiceSendConversationMessagePersistsThinkingDeltasAsConversationActiv
 	}
 	if got.ToolCallID != "thinking-reason-1" || got.Data["itemId"] != "reason-1" || got.Data["kind"] != "reasoning" {
 		t.Fatalf("thinking identity/data = %+v data=%+v", got, got.Data)
-	}
-}
-
-func TestServiceAppendHarnessExternalEventPersistsMirroredTurn(t *testing.T) {
-	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
-	repo := newMemoryRepo()
-	conversations := newMemoryConversationRepo()
-	svc := newServiceWithHarnessForTest(t, repo, conversations, &fakeHarnessChatSender{}, now)
-	ch, err := svc.EnsureMemberChannel(context.Background(), NewMemberChannelParams{
-		SpaceID:  "space-1",
-		MemberID: "member-1",
-	})
-	if err != nil {
-		t.Fatalf("EnsureMemberChannel: %v", err)
-	}
-
-	err = svc.AppendHarnessExternalEvent(context.Background(), HarnessExternalEvent{
-		SpaceID:    "space-1",
-		ChannelID:  string(ch.ID),
-		MemberID:   "member-1",
-		SessionID:  "session-1",
-		SessionRef: "thread-1",
-		TurnID:     "native-turn-1",
-		Sequence:   1,
-		UserText:   "hello from native user",
-	})
-	if err != nil {
-		t.Fatalf("AppendHarnessExternalEvent user text: %v", err)
-	}
-	err = svc.AppendHarnessExternalEvent(context.Background(), HarnessExternalEvent{
-		SpaceID:    "space-1",
-		ChannelID:  string(ch.ID),
-		MemberID:   "member-1",
-		SessionID:  "session-1",
-		SessionRef: "thread-1",
-		TurnID:     "native-turn-1",
-		Sequence:   2,
-		Text:       "hello ",
-	})
-	if err != nil {
-		t.Fatalf("AppendHarnessExternalEvent text 1: %v", err)
-	}
-	err = svc.AppendHarnessExternalEvent(context.Background(), HarnessExternalEvent{
-		SpaceID:    "space-1",
-		ChannelID:  string(ch.ID),
-		MemberID:   "member-1",
-		SessionID:  "session-1",
-		SessionRef: "thread-1",
-		TurnID:     "native-turn-1",
-		Sequence:   3,
-		Text:       "from native codex",
-		Activity: &HarnessActivity{
-			ToolCallID: "tool-1",
-			ToolName:   "web.run",
-			Status:     "completed",
-			Text:       "searched",
-		},
-		Completed: true,
-	})
-	if err != nil {
-		t.Fatalf("AppendHarnessExternalEvent text 2: %v", err)
-	}
-
-	messages, err := conversations.ListByChannel(context.Background(), string(ch.ID), 10)
-	if err != nil {
-		t.Fatalf("ListByChannel: %v", err)
-	}
-	if len(messages) != 2 {
-		t.Fatalf("messages = %+v", messages)
-	}
-	if messages[0].Direction != conversation.DirectionInbound || messages[0].Text != "hello from native user" || messages[0].Delivery != conversation.DeliveryDelivered {
-		t.Fatalf("mirrored user message = %+v", messages[0])
-	}
-	if messages[0].SenderType != "external_codex_user" {
-		t.Fatalf("mirrored user sender = %+v", messages[0])
-	}
-	if messages[1].Direction != conversation.DirectionOutbound || messages[1].Text != "hello from native codex" {
-		t.Fatalf("mirrored assistant message = %+v", messages[1])
-	}
-	if messages[1].SessionID != "session-1" || messages[1].TurnID != "native-turn-1" {
-		t.Fatalf("mirrored binding = session %q turn %q", messages[1].SessionID, messages[1].TurnID)
-	}
-	activities, err := conversations.ListActivitiesByChannel(context.Background(), string(ch.ID), 10)
-	if err != nil {
-		t.Fatalf("ListActivitiesByChannel: %v", err)
-	}
-	if len(activities) != 1 {
-		t.Fatalf("activities = %+v", activities)
-	}
-	if activities[0].Data["origin"] != "external_codex" || activities[0].Data["nativeSessionRef"] != "thread-1" {
-		t.Fatalf("activity data = %+v", activities[0].Data)
-	}
-}
-
-func TestServiceAppendHarnessExternalEventPersistsThinkingEvent(t *testing.T) {
-	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
-	repo := newMemoryRepo()
-	conversations := newMemoryConversationRepo()
-	svc := newServiceWithHarnessForTest(t, repo, conversations, &fakeHarnessChatSender{}, now)
-	ch, err := svc.EnsureMemberChannel(context.Background(), NewMemberChannelParams{
-		SpaceID:  "space-1",
-		MemberID: "member-1",
-	})
-	if err != nil {
-		t.Fatalf("EnsureMemberChannel: %v", err)
-	}
-
-	err = svc.AppendHarnessExternalEvent(context.Background(), HarnessExternalEvent{
-		SpaceID:    "space-1",
-		ChannelID:  string(ch.ID),
-		MemberID:   "member-1",
-		SessionID:  "session-1",
-		SessionRef: "thread-1",
-		TurnID:     "native-turn-1",
-		Sequence:   1,
-		Thinking:   "Planning\nChecking",
-		Data:       map[string]string{"itemId": "reason-1", "kind": "reasoning"},
-		Completed:  true,
-	})
-	if err != nil {
-		t.Fatalf("AppendHarnessExternalEvent thinking: %v", err)
-	}
-
-	messages, err := conversations.ListByChannel(context.Background(), string(ch.ID), 10)
-	if err != nil {
-		t.Fatalf("ListByChannel: %v", err)
-	}
-	if len(messages) != 0 {
-		t.Fatalf("thinking should not create assistant message rows: %+v", messages)
-	}
-	activities, err := conversations.ListActivitiesByChannel(context.Background(), string(ch.ID), 10)
-	if err != nil {
-		t.Fatalf("ListActivitiesByChannel: %v", err)
-	}
-	if len(activities) != 1 {
-		t.Fatalf("activities = %+v", activities)
-	}
-	got := activities[0]
-	if got.Kind != "thinking" || got.Text != "Planning\nChecking" || got.Data["origin"] != "" {
-		t.Fatalf("thinking activity = %+v data=%+v", got, got.Data)
-	}
-	if got.Data["itemId"] != "reason-1" || got.Data["kind"] != "reasoning" {
-		t.Fatalf("thinking data = %+v", got.Data)
 	}
 }
 
@@ -2031,12 +1981,39 @@ func (r *memoryRepo) SaveQueued(_ context.Context, msg types.AgentMessage) (type
 }
 
 func (r *memoryRepo) NextQueuedForMember(_ context.Context, memberID member.ID, now time.Time) (types.AgentMessage, error) {
+	messages := make([]types.AgentMessage, 0, len(r.messages))
 	for _, msg := range r.messages {
 		if msg.DestinationMemberID == memberID && msg.Status == types.MessageStatusQueuedTyped && !msg.VisibleAt.After(now) {
-			return msg, nil
+			messages = append(messages, msg)
 		}
 	}
+	sort.Slice(messages, func(i, j int) bool {
+		if !messages[i].VisibleAt.Equal(messages[j].VisibleAt) {
+			return messages[i].VisibleAt.Before(messages[j].VisibleAt)
+		}
+		if !messages[i].CreatedAt.Equal(messages[j].CreatedAt) {
+			return messages[i].CreatedAt.Before(messages[j].CreatedAt)
+		}
+		return messages[i].ID < messages[j].ID
+	})
+	if len(messages) > 0 {
+		return messages[0], nil
+	}
 	return types.AgentMessage{}, domain.ErrMessageNotFound
+}
+
+func (r *memoryRepo) DeferQueued(_ context.Context, messageID types.AgentMessageID, visibleAt time.Time, updatedAt time.Time) (types.AgentMessage, error) {
+	msg, ok := r.messages[messageID]
+	if !ok {
+		return types.AgentMessage{}, domain.ErrMessageNotFound
+	}
+	if msg.Status != types.MessageStatusQueuedTyped {
+		return types.AgentMessage{}, domain.ErrConsumed
+	}
+	msg.VisibleAt = visibleAt.UTC()
+	msg.UpdatedAt = updatedAt.UTC()
+	r.messages[messageID] = msg.Normalized()
+	return r.messages[messageID], nil
 }
 
 func (r *memoryRepo) MarkConsumed(_ context.Context, msg types.AgentMessage) (types.AgentMessage, error) {

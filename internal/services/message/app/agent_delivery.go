@@ -36,6 +36,10 @@ func (s *Service) DeliverNextAgentMessage(ctx context.Context, memberID member.I
 	if err != nil {
 		return types.AgentMessage{}, err
 	}
+	return s.deliverAgentMessage(ctx, msg)
+}
+
+func (s *Service) deliverAgentMessage(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
 	channelID := msg.ChannelID
 	if channelID == "" {
 		channelID = messagechannel.MemberChannelID(msg.SpaceID, msg.DestinationMemberID)
@@ -88,11 +92,46 @@ func (s *Service) DeliverNextAgentMessage(ctx context.Context, memberID member.I
 		SenderID:              strings.TrimSpace(msg.Producer),
 		Text:                  text,
 		AllowSteering:         true,
+		SteerOnly:             true,
 		Stream:                stream,
 	})
 	if err != nil {
+		if isNoActiveHarnessRunDeliveryError(err) {
+			if deferErr := s.deferAgentMessageDelivery(ctx, msg, err); deferErr != nil {
+				return types.AgentMessage{}, deferErr
+			}
+			s.logInfo("agent message delivery waiting for active harness turn",
+				"message_id", msg.ID,
+				"space_id", msg.SpaceID,
+				"source_member_id", msg.SourceMemberID,
+				"destination_member_id", msg.DestinationMemberID,
+				"channel_id", channelID,
+				"kind", msg.Kind,
+				"producer", msg.Producer,
+				"correlation_id", msg.CorrelationID,
+				"error", err,
+			)
+			return types.AgentMessage{}, fmt.Errorf("deliver agent inbox message to harness: %w", err)
+		}
 		if isActiveRunDeliveryError(err) {
-			s.logInfo("agent message delivery deferred behind active run",
+			s.logInfo("agent message delivery deferred until active turn is steerable",
+				"message_id", msg.ID,
+				"space_id", msg.SpaceID,
+				"source_member_id", msg.SourceMemberID,
+				"destination_member_id", msg.DestinationMemberID,
+				"channel_id", channelID,
+				"kind", msg.Kind,
+				"producer", msg.Producer,
+				"correlation_id", msg.CorrelationID,
+				"error", err,
+			)
+			return types.AgentMessage{}, fmt.Errorf("deliver agent inbox message to harness: %w", err)
+		}
+		if isUnavailableTurnDeliveryError(err) {
+			if deferErr := s.deferAgentMessageDelivery(ctx, msg, err); deferErr != nil {
+				return types.AgentMessage{}, deferErr
+			}
+			s.logInfo("agent message delivery deferred until target turn is reachable",
 				"message_id", msg.ID,
 				"space_id", msg.SpaceID,
 				"source_member_id", msg.SourceMemberID,
@@ -170,8 +209,9 @@ func (s *Service) DrainAgentMessages(ctx context.Context, memberID member.ID) er
 	}
 }
 
-// StartAgentDelivery starts a per-member delivery worker that drains queued
-// durable inbox messages and wakes again when new messages are published.
+// StartAgentDelivery starts a per-member delivery worker that wakes when new
+// messages are published. Existing backlog stays durable until explicitly read
+// or delivered by an operator-controlled path.
 func (s *Service) StartAgentDelivery(ctx context.Context, memberID member.ID) error {
 	if s == nil {
 		return fmt.Errorf("message service is required")
@@ -197,10 +237,16 @@ func (s *Service) StartAgentDelivery(ctx context.Context, memberID member.ID) er
 	s.agentDeliveries[memberID] = worker
 	s.agentDeliveriesMu.Unlock()
 
+	ready := make(chan struct{})
 	go func() {
 		defer s.clearAgentDelivery(memberID, worker)
-		s.runAgentDelivery(workerCtx, memberID)
+		s.runAgentDelivery(workerCtx, memberID, ready)
 	}()
+	select {
+	case <-ready:
+	case <-workerCtx.Done():
+		return workerCtx.Err()
+	}
 	return nil
 }
 
@@ -252,9 +298,12 @@ func (s *Service) clearAgentDelivery(memberID member.ID, worker *agentDeliveryWo
 	s.agentDeliveriesMu.Unlock()
 }
 
-func (s *Service) runAgentDelivery(ctx context.Context, memberID member.ID) {
+func (s *Service) runAgentDelivery(ctx context.Context, memberID member.ID, ready chan<- struct{}) {
 	wakes, cancel := s.SubscribeMemberWake(memberID)
 	defer cancel()
+	if ready != nil {
+		close(ready)
+	}
 	var retry <-chan time.Time
 	drain := func() {
 		if err := s.drainAgentDelivery(ctx, memberID); err != nil {
@@ -267,7 +316,6 @@ func (s *Service) runAgentDelivery(ctx context.Context, memberID member.ID) {
 		}
 		retry = nil
 	}
-	drain()
 	for {
 		select {
 		case <-ctx.Done():
@@ -285,6 +333,13 @@ func (s *Service) runAgentDelivery(ctx context.Context, memberID member.ID) {
 
 func (s *Service) drainAgentDelivery(ctx context.Context, memberID member.ID) error {
 	if err := s.DrainAgentMessages(ctx, memberID); err != nil && ctx.Err() == nil {
+		if isRetryableAgentDeliveryError(err) {
+			s.logInfo("agent inbox drain paused",
+				"member_id", memberID,
+				"error", err,
+			)
+			return err
+		}
 		s.logError("agent inbox drain failed", "member_id", memberID, "error", err)
 		return err
 	}
@@ -292,7 +347,7 @@ func (s *Service) drainAgentDelivery(ctx context.Context, memberID member.ID) er
 }
 
 func isRetryableAgentDeliveryError(err error) bool {
-	return isActiveRunDeliveryError(err) || isTransientDeliveryStorageError(err)
+	return isActiveRunDeliveryError(err) || isNoActiveHarnessRunDeliveryError(err) || isUnavailableTurnDeliveryError(err) || isTransientDeliveryStorageError(err)
 }
 
 func isActiveRunDeliveryError(err error) bool {
@@ -300,6 +355,23 @@ func isActiveRunDeliveryError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "already has active run")
+}
+
+func isNoActiveHarnessRunDeliveryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "no active harness run to steer")
+}
+
+func isUnavailableTurnDeliveryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "active codex turn is not registered") ||
+		strings.Contains(text, "thread not found") ||
+		strings.Contains(text, "not loaded by the reachable remote-control server")
 }
 
 func isTransientDeliveryStorageError(err error) bool {
@@ -310,6 +382,24 @@ func isTransientDeliveryStorageError(err error) bool {
 	return strings.Contains(text, "database is locked") ||
 		strings.Contains(text, "database table is locked") ||
 		strings.Contains(text, "database is busy")
+}
+
+func (s *Service) deferAgentMessageDelivery(ctx context.Context, msg types.AgentMessage, cause error) error {
+	if s.repo == nil {
+		return fmt.Errorf("message repository is required")
+	}
+	now := s.clock.Now()
+	nextVisibleAt := now.Add(agentDeliveryRetryDelay)
+	if _, err := s.repo.DeferQueued(ctx, msg.ID, nextVisibleAt, now); err != nil {
+		return fmt.Errorf("defer queued agent message %s after delivery wait: %w", msg.ID, err)
+	}
+	s.logInfo("agent message kept queued for later steering",
+		"message_id", msg.ID,
+		"destination_member_id", msg.DestinationMemberID,
+		"visible_at", nextVisibleAt,
+		"error", cause,
+	)
+	return nil
 }
 
 func (s *Service) saveAgentMessageReceivedActivity(ctx context.Context, msg types.AgentMessage, channelID types.ChannelID, result HarnessChatResult) error {

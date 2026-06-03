@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -179,16 +178,19 @@ type mcpRegisterRequest struct {
 }
 
 type mcpRegisterResponse struct {
-	ProjectID   string   `json:"projectId"`
-	ProjectRoot string   `json:"projectRoot"`
-	LocationID  string   `json:"locationId"`
-	SpaceID     string   `json:"spaceId"`
-	MemberID    string   `json:"memberId"`
-	MemberType  string   `json:"memberType"`
-	ChannelID   string   `json:"channelId"`
-	Token       string   `json:"token"`
-	URL         string   `json:"url"`
-	MCPServers  []string `json:"mcpServers"`
+	ProjectID        string   `json:"projectId"`
+	ProjectRoot      string   `json:"projectRoot"`
+	LocationID       string   `json:"locationId"`
+	SpaceID          string   `json:"spaceId"`
+	MemberID         string   `json:"memberId"`
+	MemberType       string   `json:"memberType"`
+	ChannelID        string   `json:"channelId"`
+	SessionID        string   `json:"sessionId,omitempty"`
+	ThreadID         string   `json:"threadId,omitempty"`
+	NativeSessionRef string   `json:"nativeSessionRef,omitempty"`
+	Token            string   `json:"token"`
+	URL              string   `json:"url"`
+	MCPServers       []string `json:"mcpServers"`
 }
 
 func (d *Daemon) handleMCPRegister(w http.ResponseWriter, r *http.Request) {
@@ -221,16 +223,7 @@ func (d *Daemon) registerExternalMCPHarness(ctx context.Context, identity rpc.Id
 }
 
 func (d *Daemon) RegisterMCPContext(ctx context.Context, req mcpspace.RegisterContextRequest) (mcpspace.RegisterContextResult, error) {
-	userID := d.currentLocalUser()
-	if userID == "" && d != nil && d.app != nil && d.app.UserSvc != nil {
-		user, err := d.app.UserSvc.FirstActive(ctx)
-		if err == nil && !user.ID.IsZero() {
-			userID = user.ID.String()
-		}
-	}
-	if strings.TrimSpace(userID) == "" {
-		userID = "local-user"
-	}
+	userID := d.currentMCPUser(ctx)
 	out, err := d.registerExternalMCPHarnessForUser(ctx, userID, mcpRegisterRequest{
 		ProjectID:      req.ProjectID,
 		ProjectRoot:    req.ProjectRoot,
@@ -244,21 +237,24 @@ func (d *Daemon) RegisterMCPContext(ctx context.Context, req mcpspace.RegisterCo
 		Effort:         req.Effort,
 		PermissionMode: req.PermissionMode,
 		ConfigRef:      req.ConfigRef,
-	}, "")
+	}, req.Token)
 	if err != nil {
 		return mcpspace.RegisterContextResult{}, err
 	}
 	return mcpspace.RegisterContextResult{
-		ProjectID:   out.ProjectID,
-		ProjectRoot: out.ProjectRoot,
-		LocationID:  out.LocationID,
-		SpaceID:     out.SpaceID,
-		MemberID:    out.MemberID,
-		MemberType:  out.MemberType,
-		ChannelID:   out.ChannelID,
-		Token:       out.Token,
-		URL:         out.URL,
-		MCPServers:  append([]string(nil), out.MCPServers...),
+		ProjectID:        out.ProjectID,
+		ProjectRoot:      out.ProjectRoot,
+		LocationID:       out.LocationID,
+		SpaceID:          out.SpaceID,
+		MemberID:         out.MemberID,
+		MemberType:       out.MemberType,
+		ChannelID:        out.ChannelID,
+		SessionID:        out.SessionID,
+		ThreadID:         out.ThreadID,
+		NativeSessionRef: out.NativeSessionRef,
+		Token:            out.Token,
+		URL:              out.URL,
+		MCPServers:       append([]string(nil), out.MCPServers...),
 	}, nil
 }
 
@@ -281,6 +277,13 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 	effort := strings.TrimSpace(req.Effort)
 	if effort == "" {
 		effort = "medium"
+	}
+	if err := validateMCPRegisterSessionRefs(req); err != nil {
+		return mcpRegisterResponse{}, err
+	}
+	stableMCPToken := strings.TrimSpace(tokenOverride)
+	if stableMCPToken == "" {
+		stableMCPToken = bootstrapMCPToken
 	}
 	project, err := d.resolveMCPRegisterProject(ctx, req)
 	if err != nil {
@@ -351,7 +354,7 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 		PermissionMode: rosterMember.PermissionMode,
 		ConfigRef:      rosterMember.ConfigRef,
 		SessionRef:     sessionKey,
-		MCPToken:       strings.TrimSpace(tokenOverride),
+		MCPToken:       stableMCPToken,
 	}
 	if active == nil {
 		active, err = d.app.HarnessSvc.ActivateSession(ctx, activation)
@@ -364,32 +367,58 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 	if err := d.registerMCPTokenForSession(active); err != nil {
 		return mcpRegisterResponse{}, err
 	}
-	if err := d.app.MessageSvc.StartAgentDelivery(context.WithoutCancel(ctx), member.ID(active.MemberID)); err != nil {
-		return mcpRegisterResponse{}, fmt.Errorf("start message delivery for member %s: %w", active.MemberID, err)
-	}
-	if strings.TrimSpace(active.Ref) != "" {
-		if err := d.app.HarnessSvc.EnsureExternalSessionSync(context.WithoutCancel(ctx), active.ID); err != nil {
-			slog.WarnContext(ctx, "start external harness session sync after mcp register failed",
+	d.mcpBinding.bind(stableMCPToken, active.ID)
+	if turn := d.mcpBinding.activeCodexTurnForRef(active.Ref); strings.TrimSpace(turn.threadID) != "" && strings.TrimSpace(turn.turnID) != "" {
+		d.mcpBinding.bindActiveCodexTurn(active.ID, turn.threadID, turn.turnID)
+		if d != nil && d.logger != nil {
+			d.logger.InfoContext(ctx, "mcp active codex turn attached to registered session",
 				"session_id", active.ID,
+				"thread_id", turn.threadID,
+				"turn_id", turn.turnID,
 				"member_id", active.MemberID,
-				"harness_kind", active.Kind,
-				"has_session_ref", strings.TrimSpace(active.Ref) != "",
-				"error", err,
 			)
 		}
 	}
+	if strings.EqualFold(strings.TrimSpace(active.Kind), "codex") && strings.TrimSpace(active.LocationID) == "local" {
+		if appServerURL, err := findLocalCodexRemoteControlSocket(ctx); err != nil {
+			return mcpRegisterResponse{}, err
+		} else if appServerURL != "" {
+			d.mcpBinding.bindAppServerURL(active.ID, appServerURL)
+		} else if appServerURL, err := findLocalCodexAppServerURL(ctx, stableMCPToken); err != nil {
+			return mcpRegisterResponse{}, err
+		} else if appServerURL != "" {
+			d.mcpBinding.bindAppServerURL(active.ID, appServerURL)
+		}
+	}
 	return mcpRegisterResponse{
-		ProjectID:   projectID,
-		ProjectRoot: project.Root(),
-		LocationID:  string(project.LocationID()),
-		SpaceID:     active.SpaceID,
-		MemberID:    active.MemberID,
-		MemberType:  active.MemberType,
-		ChannelID:   active.ChannelID,
-		Token:       active.MCPToken,
-		URL:         d.mcpURL(active.MCPToken),
-		MCPServers:  append([]string(nil), active.MCPServers...),
+		ProjectID:        projectID,
+		ProjectRoot:      project.Root(),
+		LocationID:       string(project.LocationID()),
+		SpaceID:          active.SpaceID,
+		MemberID:         active.MemberID,
+		MemberType:       active.MemberType,
+		ChannelID:        active.ChannelID,
+		SessionID:        strings.TrimSpace(req.SessionID),
+		ThreadID:         strings.TrimSpace(req.ThreadID),
+		NativeSessionRef: strings.TrimSpace(active.Ref),
+		Token:            stableMCPToken,
+		URL:              d.mcpURL(stableMCPToken),
+		MCPServers:       append([]string(nil), active.MCPServers...),
 	}, nil
+}
+
+func (d *Daemon) currentMCPUser(ctx context.Context) string {
+	userID := d.currentLocalUser()
+	if userID == "" && d != nil && d.app != nil && d.app.UserSvc != nil {
+		user, err := d.app.UserSvc.FirstActive(ctx)
+		if err == nil && !user.ID.IsZero() {
+			userID = user.ID.String()
+		}
+	}
+	if strings.TrimSpace(userID) == "" {
+		userID = "local-user"
+	}
+	return strings.TrimSpace(userID)
 }
 
 func (d *Daemon) resolveExistingMCPRegisterMemberID(ctx context.Context, userID string, projectID string, spaceID string, harnessKind string) (string, error) {
@@ -468,6 +497,44 @@ func mcpRegisterSessionKey(req mcpRegisterRequest) string {
 		}
 	}
 	return ""
+}
+
+func validateMCPRegisterSessionRefs(req mcpRegisterRequest) error {
+	for label, value := range map[string]string{
+		"threadId":  req.ThreadID,
+		"sessionId": req.SessionID,
+	} {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if looksLikeMalformedUUID(value) {
+			return fmt.Errorf("%s %q is malformed", label, value)
+		}
+	}
+	return nil
+}
+
+func looksLikeMalformedUUID(value string) bool {
+	if strings.Count(value, "-") != 4 {
+		return false
+	}
+	parts := strings.Split(value, "-")
+	if len(parts) != 5 {
+		return true
+	}
+	want := []int{8, 4, 4, 4, 12}
+	for i, part := range parts {
+		if len(part) != want[i] {
+			return true
+		}
+		for _, r := range part {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (d *Daemon) resolveMCPRegisterProject(ctx context.Context, req mcpRegisterRequest) (projectdomain.Project, error) {

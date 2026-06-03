@@ -232,8 +232,6 @@ func NewApplication(cfg Config) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build message service: %w", err)
 	}
-	harnessSvc.SetExternalSessionEventSink(harnessExternalEventSinkAdapter{svc: messageSvc})
-
 	projectRepo, err := projectinfra.NewRepository(handle)
 	if err != nil {
 		return nil, fmt.Errorf("build project repository: %w", err)
@@ -713,6 +711,7 @@ func (a harnessChatSenderAdapter) SendMessage(ctx context.Context, input message
 		Text:                  input.Text,
 		Attachments:           harnessAttachmentsFromMessage(input.Attachments),
 		AllowSteering:         input.AllowSteering,
+		SteerOnly:             input.SteerOnly,
 		OnAssistantDelta: func(ctx context.Context, delta harnessapp.AssistantDelta) error {
 			if input.Stream == nil {
 				return nil
@@ -762,39 +761,6 @@ func (a harnessChatSenderAdapter) SendMessage(ctx context.Context, input message
 		Delivery:  result.Delivery,
 		Text:      result.Text,
 	}, nil
-}
-
-func (a harnessExternalEventSinkAdapter) AppendHarnessExternalEvent(ctx context.Context, event harnessapp.ExternalSessionEvent) error {
-	if a.svc == nil {
-		return fmt.Errorf("message service is required")
-	}
-	var activity *messageapp.HarnessActivity
-	if event.Activity != nil {
-		activity = &messageapp.HarnessActivity{
-			SessionID:  event.Activity.SessionID,
-			TurnID:     event.Activity.TurnID,
-			ToolCallID: event.Activity.ToolCallID,
-			ToolName:   event.Activity.ToolName,
-			Sequence:   event.Activity.Sequence,
-			Status:     event.Activity.Status,
-			Text:       event.Activity.Text,
-			Data:       event.Activity.Data,
-		}
-	}
-	return a.svc.AppendHarnessExternalEvent(ctx, messageapp.HarnessExternalEvent{
-		SpaceID:    event.SpaceID,
-		ChannelID:  event.ChannelID,
-		MemberID:   event.MemberID,
-		SessionID:  event.SessionID,
-		SessionRef: event.SessionRef,
-		TurnID:     event.TurnID,
-		Sequence:   event.Sequence,
-		Text:       event.Text,
-		Thinking:   event.Thinking,
-		Data:       event.Data,
-		Activity:   activity,
-		Completed:  event.Completed,
-	})
 }
 
 func harnessAttachmentsFromMessage(attachments []messageconversation.Attachment) []harnessapp.PromptAttachment {

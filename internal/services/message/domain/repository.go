@@ -20,6 +20,7 @@ type Reader interface {
 type Writer interface {
 	SaveQueued(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error)
 	NextQueuedForMember(ctx context.Context, memberID member.ID, now time.Time) (types.AgentMessage, error)
+	DeferQueued(ctx context.Context, messageID types.AgentMessageID, visibleAt time.Time, updatedAt time.Time) (types.AgentMessage, error)
 	MarkConsumed(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error)
 }
 

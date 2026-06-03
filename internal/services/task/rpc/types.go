@@ -138,6 +138,15 @@ type TaskUpdateResult struct {
 	Task TaskView `json:"task"`
 }
 
+type TaskCancelParams struct {
+	TaskID string `json:"taskId"`
+	Reason string `json:"reason"`
+}
+
+type TaskCancelResult struct {
+	Task TaskView `json:"task"`
+}
+
 func uuidString(id *uuid.UUID) string {
 	if id == nil {
 		return ""

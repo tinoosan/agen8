@@ -3,6 +3,8 @@ package space
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,11 +19,24 @@ import (
 const Name = "space"
 const Description = "[COORDINATION] Space gateway for workspace registration, spaces, and member roster CRUD. Call action=register first when the MCP session is not yet bound to a project/space/member."
 
-var allActions = []string{"register", "list", "member_create", "member_get", "member_list", "member_update_config", "member_remove"}
+var allActions = []string{"register", "list", "create", "member_create", "member_get", "member_list", "member_update_config", "member_remove"}
+
+func BootstrapActionAllowed(action string) bool {
+	switch strings.TrimSpace(strings.ToLower(action)) {
+	case "register", "list", "create":
+		return true
+	default:
+		return false
+	}
+}
 
 type SpaceService interface {
 	Get(ctx context.Context, id spacedomain.SpaceID) (spacedomain.SpaceRecord, error)
 	List(ctx context.Context, filter spacedomain.SpaceFilter) ([]spacedomain.SpaceRecord, error)
+}
+
+type SetupService interface {
+	Create(ctx context.Context, space spacedomain.SpaceRecord) (spacedomain.SpaceRecord, error)
 }
 
 type MemberService interface {
@@ -56,16 +71,19 @@ type RegisterContextRequest struct {
 }
 
 type RegisterContextResult struct {
-	ProjectID   string
-	ProjectRoot string
-	LocationID  string
-	SpaceID     string
-	MemberID    string
-	MemberType  string
-	ChannelID   string
-	Token       string
-	URL         string
-	MCPServers  []string
+	ProjectID        string
+	ProjectRoot      string
+	LocationID       string
+	SpaceID          string
+	MemberID         string
+	MemberType       string
+	ChannelID        string
+	SessionID        string
+	ThreadID         string
+	NativeSessionRef string
+	Token            string
+	URL              string
+	MCPServers       []string
 }
 
 type CallContext struct {
@@ -73,7 +91,9 @@ type CallContext struct {
 	Members          MemberService
 	Registrar        MemberRegistrar
 	ContextRegistrar ContextRegistrar
+	SpaceSetup       SetupService
 	MCPToken         string
+	UserID           string
 	HarnessKind      string
 	ProjectID        string
 	SpaceID          string
@@ -108,9 +128,12 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	if input.Action == "register" {
 		return h.registerContext(ctx, call, input)
 	}
-	ctx = contextWithSessionActor(ctx, call.ActorMemberID, call.SpaceID)
+	ctx = contextWithSetupCaller(ctx, call)
 	if input.Action == "list" {
-		return h.list(ctx, call)
+		return h.list(ctx, call, input)
+	}
+	if input.Action == "create" {
+		return h.createSpace(ctx, call, input)
 	}
 	actor, err := h.resolveActor(ctx, call)
 	if err != nil {
@@ -140,6 +163,18 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	default:
 		return Result{}, fmt.Errorf("space: unsupported action %q", input.Action)
 	}
+}
+
+func contextWithSetupCaller(ctx context.Context, call CallContext) context.Context {
+	userID := strings.TrimSpace(call.UserID)
+	if userID != "" {
+		return caller.ContextWithCaller(ctx, caller.Caller{
+			UserID:   userID,
+			MemberID: member.ID(strings.TrimSpace(call.ActorMemberID)),
+			SpaceID:  spacedomain.SpaceID(strings.TrimSpace(call.SpaceID)),
+		})
+	}
+	return contextWithSessionActor(ctx, call.ActorMemberID, call.SpaceID)
 }
 
 func contextWithSessionActor(ctx context.Context, actorMemberID, spaceID string) context.Context {
@@ -185,11 +220,14 @@ func requireCoordinatorActor(actor member.Record, action string) error {
 	return nil
 }
 
-func (h Handler) list(ctx context.Context, call CallContext) (Result, error) {
+func (h Handler) list(ctx context.Context, call CallContext, input requestInput) (Result, error) {
 	if call.Spaces == nil {
 		return Result{}, fmt.Errorf("space: space service is not configured")
 	}
-	projectID := strings.TrimSpace(call.ProjectID)
+	projectID := strings.TrimSpace(input.ProjectID)
+	if projectID == "" {
+		projectID = strings.TrimSpace(call.ProjectID)
+	}
 	spaces, err := call.Spaces.List(ctx, spacedomain.SpaceFilter{
 		ProjectID: projectID,
 		Status:    spacedomain.SpaceStatusOpen,
@@ -225,6 +263,47 @@ func (h Handler) list(ctx context.Context, call CallContext) (Result, error) {
 	return Result{Text: text, Structured: structured}, nil
 }
 
+func (h Handler) createSpace(ctx context.Context, call CallContext, input requestInput) (Result, error) {
+	if call.SpaceSetup == nil {
+		return Result{}, fmt.Errorf("space: setup service is not configured")
+	}
+	projectID := strings.TrimSpace(input.ProjectID)
+	if projectID == "" {
+		projectID = strings.TrimSpace(call.ProjectID)
+	}
+	if projectID == "" {
+		return Result{}, fmt.Errorf("space: project_id is required for action=create")
+	}
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		title = "MCP Work Context"
+	}
+	spaceID := strings.TrimSpace(input.SpaceID)
+	if spaceID == "" {
+		spaceID = "space-" + stableShortID(projectID+"\x00"+title)
+	}
+	created, err := call.SpaceSetup.Create(ctx, spacedomain.SpaceRecord{
+		ID:        spacedomain.SpaceID(spaceID),
+		ProjectID: projectID,
+		Title:     title,
+		Status:    spacedomain.SpaceStatusOpen,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("space: create space: %w", err)
+	}
+	structured := map[string]any{
+		"ok":     true,
+		"tool":   Name,
+		"action": "create",
+		"space":  toSpaceEntry(created),
+	}
+	text, err := encodeText(structured)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Text: text, Structured: structured}, nil
+}
+
 func (h Handler) registerContext(ctx context.Context, call CallContext, input requestInput) (Result, error) {
 	if call.ContextRegistrar == nil {
 		return Result{}, fmt.Errorf("space: context registrar is not configured")
@@ -237,13 +316,13 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 	if harnessKind == "" {
 		harnessKind = strings.TrimSpace(call.HarnessKind)
 	}
-	sessionID := strings.TrimSpace(input.SessionID)
+	sessionID := strings.TrimSpace(call.SessionID)
 	if sessionID == "" {
-		sessionID = strings.TrimSpace(call.SessionID)
+		sessionID = strings.TrimSpace(input.SessionID)
 	}
-	threadID := strings.TrimSpace(input.ThreadID)
+	threadID := strings.TrimSpace(call.ThreadID)
 	if threadID == "" {
-		threadID = strings.TrimSpace(call.ThreadID)
+		threadID = strings.TrimSpace(input.ThreadID)
 	}
 	result, err := call.ContextRegistrar.RegisterMCPContext(ctx, RegisterContextRequest{
 		Token:          token,
@@ -277,6 +356,15 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 		"token":       strings.TrimSpace(result.Token),
 		"url":         strings.TrimSpace(result.URL),
 		"mcpServers":  append([]string(nil), result.MCPServers...),
+	}
+	if strings.TrimSpace(result.SessionID) != "" {
+		structured["sessionId"] = strings.TrimSpace(result.SessionID)
+	}
+	if strings.TrimSpace(result.ThreadID) != "" {
+		structured["threadId"] = strings.TrimSpace(result.ThreadID)
+	}
+	if strings.TrimSpace(result.NativeSessionRef) != "" {
+		structured["nativeSessionRef"] = strings.TrimSpace(result.NativeSessionRef)
 	}
 	text, err := encodeText(structured)
 	if err != nil {
@@ -461,6 +549,7 @@ type request struct {
 	SpaceID        *string `json:"space_id"`
 	MemberID       *string `json:"member_id"`
 	DisplayName    *string `json:"display_name"`
+	Title          *string `json:"title"`
 	HarnessKind    *string `json:"harness_kind"`
 	SessionID      *string `json:"session_id"`
 	ThreadID       *string `json:"thread_id"`
@@ -498,6 +587,7 @@ func decode(args json.RawMessage) (requestInput, error) {
 		SpaceID:        strings.TrimSpace(ptrString(raw.SpaceID)),
 		MemberID:       strings.TrimSpace(ptrString(raw.MemberID)),
 		DisplayName:    strings.TrimSpace(ptrString(raw.DisplayName)),
+		Title:          strings.TrimSpace(ptrString(raw.Title)),
 		HarnessKind:    strings.TrimSpace(ptrString(raw.HarnessKind)),
 		SessionID:      strings.TrimSpace(ptrString(raw.SessionID)),
 		ThreadID:       strings.TrimSpace(ptrString(raw.ThreadID)),
@@ -510,6 +600,10 @@ func decode(args json.RawMessage) (requestInput, error) {
 	case "register":
 		if input.ProjectID == "" && input.ProjectRoot == "" {
 			return requestInput{}, fmt.Errorf("space: project_root or project_id is required for action=register")
+		}
+	case "create":
+		if input.ProjectID == "" {
+			return requestInput{}, fmt.Errorf("space: project_id is required for action=create")
 		}
 	case "member_create":
 		if err := requireRuntimeConfig(input, "member_create"); err != nil {
@@ -577,7 +671,8 @@ func validateActionFields(args json.RawMessage) error {
 
 var fieldsByAction = map[string]map[string]struct{}{
 	"register":             fieldSet("action", "project_id", "project_root", "location_id", "space_id", "display_name", "harness_kind", "session_id", "thread_id", "model", "effort", "permission_mode", "config_ref"),
-	"list":                 fieldSet("action"),
+	"list":                 fieldSet("action", "project_id"),
+	"create":               fieldSet("action", "project_id", "space_id", "title"),
 	"member_create":        fieldSet("action", "space_id", "display_name", "harness_kind", "model", "effort"),
 	"member_get":           fieldSet("action", "member_id"),
 	"member_list":          fieldSet("action", "space_id"),
@@ -605,6 +700,7 @@ type requestInput struct {
 	SpaceID        string
 	MemberID       string
 	DisplayName    string
+	Title          string
 	HarnessKind    string
 	SessionID      string
 	ThreadID       string
@@ -631,7 +727,8 @@ func mustSchema(actions []string) json.RawMessage {
 				"type":        "string",
 				"description": "Optional location ID for action=register. Defaults to local.",
 			},
-			"space_id": map[string]any{"type": "string", "description": "Space ID for action=member_list or action=member_create. Omit to use the caller's current space."},
+			"space_id": map[string]any{"type": "string", "description": "Space ID for action=member_list, action=member_create, or action=create. Omit to use the caller's current space where supported."},
+			"title":    map[string]any{"type": "string", "description": "Space title for action=create."},
 			"member_id": map[string]any{
 				"type":        "string",
 				"description": "Required for member_get, member_update_config, and member_remove.",
@@ -692,6 +789,11 @@ func ptrString(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func stableShortID(value string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(value)))
+	return hex.EncodeToString(sum[:8])
 }
 
 func toMemberEntry(item member.Record) memberEntry {

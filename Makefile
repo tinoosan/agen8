@@ -106,6 +106,7 @@ dev-remote: ensure-air web-install
 	printf 'vite:   %s\n' "$(DEV_WEB_URL)"; \
 	AGEN8_DAEMON_LISTENER=http \
 	AGEN8_HTTP_ADDR="$(HTTP_ADDR)" \
+	AGEN8_LOG_FILE="tmp/daemon.log" \
 	AGEN8_DEV_WEB_URL="$(DEV_WEB_URL)" \
 	"$$AIR_BIN" \
 		-build.full_bin "./tmp/agen8-mcp-server daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(HTTP_ADDR)\""

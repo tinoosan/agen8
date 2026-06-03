@@ -5495,214 +5495,248 @@ button[disabled] {
   color: var(--text-2);
 }
 
-@media (max-width: 1180px) {
-  .space-board-context {
-    position: relative;
-    top: auto;
-    max-height: none;
-  }
+/* ── Board: Classic Kanban (status columns) ──────────── */
+
+.kb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
-@media (max-width: 760px) {
-  .space-board-tab {
-    padding: 14px;
-  }
-
-  .space-board-intro {
-    justify-content: flex-start;
-  }
-
-  .space-board-intro p {
-    text-align: left;
-  }
-
-  .space-board-columns {
-    width: 100%;
-  }
-
-  .space-board-column {
-    flex-basis: min(82vw, 260px);
-    min-width: min(82vw, 260px);
-  }
+.kb-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 6px 10px;
+  min-width: 220px;
+  color: var(--text-3);
 }
 
-/* ── Swimlane board (agent rows × status columns) ──── */
+.kb-search svg {
+  flex-shrink: 0;
+}
 
-.swimlanes {
+.kb-search input {
+  width: 100%;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+.kb-search input::placeholder {
+  color: var(--text-3);
+}
+
+.kb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-panel);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.kb-pill-static {
+  color: var(--text-3);
+}
+
+.kb-pill-btn {
+  cursor: pointer;
+  transition: border-color 150ms, color 150ms;
+}
+
+.kb-pill-btn:hover {
+  color: var(--text-1);
+  border-color: var(--border-strong);
+}
+
+.kb-spacer {
+  flex: 1 1 auto;
+}
+
+.kb-stats {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.kb-stats b {
+  color: var(--text-1);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Board grid ──── */
+
+.kb-board {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+  padding-bottom: 4px;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklab, var(--text-4) 28%, transparent) transparent;
 }
 
-.swim-header-row {
-  display: grid;
-  grid-template-columns: 148px repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  padding: 0 0 10px;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg-app);
-}
+/* ── Status column ──── */
 
-.swim-header-label {
-  font-size: 10px;
-  font-weight: 650;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-2);
-}
-
-.swim-header-status {
-  text-align: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-}
-
-.swim-header-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-/* ── Agent swim lane (one row) ──── */
-
-.swim-lane {
-  display: grid;
-  grid-template-columns: 148px repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
-  align-items: start;
-}
-
-.swim-lane:last-child {
-  border-bottom: none;
-}
-
-.swim-agent {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-}
-
-.swim-agent-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.swim-agent-info {
+.kb-col {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 9px;
   min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
 }
 
-.swim-agent-name {
-  font-size: 13px;
-  font-weight: 550;
-  color: var(--text-1);
-  line-height: 1.25;
-  text-transform: capitalize;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.kb-col-waiting { --s: var(--text-3); --sd: color-mix(in oklab, var(--text-3) 16%, transparent); }
+.kb-col-active  { --s: var(--blue);   --sd: var(--blue-dim); }
+.kb-col-done    { --s: var(--green);  --sd: var(--green-dim); }
+.kb-col-failed  { --s: var(--red);    --sd: var(--red-dim); }
 
-.swim-agent-role {
-  font-size: 10px;
-  font-weight: 550;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* ── Swim cell (status bucket per agent) ──── */
-
-.swim-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 36px;
-}
-
-/* ── Swim task card (compact) ──── */
-
-.swim-task {
-  width: 100%;
-  padding: 7px 9px;
-  border-radius: 7px;
-  background: color-mix(in oklab, var(--bg-panel) 70%, transparent);
-  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
-  color: var(--text-2);
-  cursor: pointer;
-  transition: border-color 180ms, background 180ms;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.swim-task:hover {
-  border-color: var(--border-strong, var(--border));
-  background: var(--bg-elevated);
-}
-
-.swim-task-selected {
-  border-color: color-mix(in oklab, var(--accent) 40%, var(--border)) !important;
-  background: color-mix(in oklab, var(--accent) 4%, var(--bg-panel));
-}
-
-.swim-task-blocked {
-  border-color: color-mix(in oklab, var(--amber) 30%, var(--border));
-}
-
-.swim-task-review {
-  border-left: 2px solid var(--accent);
-}
-
-.swim-task-done {
-  opacity: 0.55;
-}
-
-.swim-task-head {
+.kb-col-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 9px;
-  color: var(--text-4);
-  line-height: 1;
+  gap: 7px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--border);
 }
 
-.swim-task-id {
-  font-family: var(--font-mono, 'SF Mono', Monaco, 'Fira Code', monospace);
+.kb-col-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--s);
 }
 
-.swim-task-time {
+.kb-col-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-1);
+}
+
+.kb-col-count {
   margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.swim-task-title {
+.kb-col-empty {
+  padding: 14px 0;
+  text-align: center;
+  color: var(--text-3);
   font-size: 11px;
-  font-weight: 500;
+}
+
+/* ── Task card ──── */
+
+.kb-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-surface);
+  color: var(--text-2);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms, background 150ms;
+}
+
+.kb-card:hover {
+  border-color: var(--border-strong);
+}
+
+.kb-card-selected {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border)) !important;
+  background: color-mix(in oklab, var(--accent) 5%, var(--bg-surface));
+}
+
+.kb-card-failed {
+  background: color-mix(in oklab, var(--red) 6%, var(--bg-surface));
+  border-color: color-mix(in oklab, var(--red) 22%, var(--border));
+}
+
+.kb-card-done {
+  opacity: 0.64;
+}
+
+.kb-card-done:hover {
+  opacity: 0.92;
+}
+
+.kb-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+}
+
+.kb-kind {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  color: var(--text-2);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.kb-card-id {
+  color: var(--text-4);
+  font-family: var(--font-mono, 'SF Mono', Monaco, 'Fira Code', monospace);
+  font-size: 9.5px;
+}
+
+.kb-card-time {
+  margin-left: auto;
+  color: var(--text-4);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kb-card-title {
   color: var(--text-1);
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -5710,159 +5744,215 @@ button[disabled] {
   overflow: hidden;
 }
 
-.swim-badge-blocked {
-  font-size: 8px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 1px 5px;
+.kb-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kb-assignee {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+
+.kb-assignee-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+.kb-av {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kb-badges {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.kb-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
   border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-badge-retry {
   background: var(--amber-dim);
   color: var(--amber);
 }
 
-.swim-badge-review {
-  font-size: 8px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: var(--accent-dim);
-  color: var(--accent);
+.kb-badge-review {
+  background: var(--green-dim);
+  color: var(--green);
 }
 
-.swim-empty-state {
+/* ── Show more / less ──── */
+
+.kb-more {
+  padding: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 10.5px;
+  text-align: center;
+  cursor: pointer;
+  transition: color 150ms, border-color 150ms;
+}
+
+.kb-more:hover {
+  color: var(--text-2);
+  border-color: var(--border-strong);
+}
+
+/* ── No-match / empty states ──── */
+
+.kb-no-match {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.kb-clear {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.kb-empty {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 48px 18px;
   color: var(--text-3);
   font-size: 13px;
 }
 
-@media (max-width: 760px) {
-  .swim-header-row,
-  .swim-lane {
-    grid-template-columns: 100px repeat(4, minmax(0, 1fr));
-    gap: 4px;
-  }
+/* ── Create / edit / delete affordances ──────────────── */
 
-  .swim-agent-name {
-    font-size: 11px;
-  }
+.kb-new-task {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--accent) 16%, var(--bg-panel));
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+}
 
-  .swim-task-title {
-    font-size: 10px;
+.kb-new-task:hover {
+  background: color-mix(in oklab, var(--accent) 26%, var(--bg-panel));
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+}
+
+.kb-card-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+  transition: color 120ms, background 120ms;
+}
+
+.kb-card-menu:hover,
+.kb-card-menu[data-state='open'] {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+
+.kb-menu-danger {
+  color: var(--red);
+}
+
+/* ── Responsive: board reacts to panel width (container), not viewport ──── */
+
+/* Laptop / large tablet: 4 → 2 columns */
+@container (max-width: 900px) {
+  .kb-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@container (max-width: 660px) {
+/* Tablet portrait / large phone: 2 → 1 column, compact toolbar */
+@container (max-width: 520px) {
   .space-board-tab {
-    padding: 16px;
-    overflow: auto;
+    padding: 14px;
   }
 
   .space-board-main {
-    height: auto;
-    min-height: 100%;
-  }
-
-  .swimlanes {
-    overflow: visible;
     gap: 12px;
   }
 
-  .swim-header-row {
+  .kb-board {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .kb-search {
+    flex: 1 1 100%;
+  }
+
+  .kb-pill-static {
     display: none;
   }
 
-  .swim-lane {
-    display: block;
-    padding: 12px;
-    border: 1px solid color-mix(in oklab, var(--border) 58%, transparent);
-    border-radius: var(--r-lg);
-    background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
-  }
-
-  .swim-lane + .swim-lane {
-    margin-top: 12px;
-  }
-
-  .swim-agent {
-    padding: 0 0 12px;
-    border-bottom: 1px solid color-mix(in oklab, var(--border) 58%, transparent);
-  }
-
-  .swim-agent-avatar {
-    width: 30px;
-    height: 30px;
-  }
-
-  .swim-agent-name {
-    font-size: 13px;
-  }
-
-  .swim-cell {
-    display: grid;
-    grid-template-columns: minmax(92px, 0.35fr) minmax(0, 1fr);
-    align-items: start;
-    min-height: 0;
-    padding: 10px 0 0;
-    gap: 8px;
-  }
-
-  .swim-cell::before {
-    align-self: start;
-    display: inline-flex;
-    align-items: center;
-    min-height: 24px;
-    color: var(--text-3);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  .swim-lane > .swim-cell:nth-child(2)::before {
-    content: "Waiting";
-  }
-
-  .swim-lane > .swim-cell:nth-child(3)::before {
-    content: "Active";
-  }
-
-  .swim-lane > .swim-cell:nth-child(4)::before {
-    content: "Done";
-  }
-
-  .swim-lane > .swim-cell:nth-child(5)::before {
-    content: "Failed";
-  }
-
-  .swim-task {
-    max-width: 100%;
+  .kb-stats {
+    display: none;
   }
 }
 
-@container (max-width: 430px) {
-  .space-board-tab {
-    padding: 12px;
+/* Small phone: trim padding so cards keep their content width */
+@container (max-width: 400px) {
+  .kb-col {
+    padding: 8px;
   }
 
-  .swim-lane {
-    padding: 11px;
-  }
-
-  .swim-cell {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 5px;
-  }
-
-  .swim-cell::before {
-    min-height: 0;
+  .kb-card {
+    padding: 8px 9px;
   }
 }
 

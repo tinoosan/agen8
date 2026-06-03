@@ -5,11 +5,26 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 func NewLogger(cfg Config) (*slog.Logger, error) {
-	return NewTextLogger(os.Stderr, cfg)
+	file := strings.TrimSpace(cfg.File)
+	if file == "" {
+		file = strings.TrimSpace(os.Getenv(EnvLogFile))
+	}
+	if file == "" {
+		return NewTextLogger(os.Stderr, cfg)
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return nil, fmt.Errorf("logging: create log directory: %w", err)
+	}
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("logging: open log file: %w", err)
+	}
+	return NewTextLogger(io.MultiWriter(os.Stderr, f), cfg)
 }
 
 func NewTextLogger(w io.Writer, cfg Config) (*slog.Logger, error) {

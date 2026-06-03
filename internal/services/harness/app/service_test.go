@@ -208,33 +208,6 @@ type fakeSessionRuntime struct {
 	err             error
 }
 
-type fakeSyncRuntime struct {
-	fakeRuntime
-	params domain.StartParams
-	events []domain.Event
-	done   chan struct{}
-}
-
-type spyExternalSink struct {
-	mu     sync.Mutex
-	events []app.ExternalSessionEvent
-	done   chan struct{}
-}
-
-func (s *spyExternalSink) AppendHarnessExternalEvent(_ context.Context, event app.ExternalSessionEvent) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events = append(s.events, event)
-	if s.done != nil {
-		select {
-		case <-s.done:
-		default:
-			close(s.done)
-		}
-	}
-	return nil
-}
-
 type invalidatingSessionRuntime struct {
 	fakeSessionRuntime
 	invalidated []string
@@ -416,19 +389,6 @@ func (f *fakeSessionRuntime) ExecuteSessionTurn(_ context.Context, params domain
 	return domain.SessionTurnResult{}, nil
 }
 
-func (f *fakeSyncRuntime) SyncSession(_ context.Context, params domain.StartParams, emit func(domain.Event)) error {
-	f.params = params
-	for _, ev := range f.events {
-		if emit != nil {
-			emit(ev)
-		}
-	}
-	if f.done != nil {
-		close(f.done)
-	}
-	return nil
-}
-
 func newTestService(t *testing.T) (*app.Service, *memRepo) {
 	t.Helper()
 	repo := newMemRepo()
@@ -503,6 +463,37 @@ func TestService_SendMessageRoutesToActiveMemberSession(t *testing.T) {
 	session, err := svc.GetSession(context.Background(), "sess-1")
 	require.NoError(t, err)
 	assert.Equal(t, "thread-1", session.Ref)
+}
+
+func TestService_SendMessageSteerOnlyDoesNotStartBackgroundTurn(t *testing.T) {
+	repo := newMemRepo()
+	rt := &fakeSessionRuntime{fakeRuntime: fakeRuntime{kind: "codex"}}
+	svc, err := app.NewService(
+		domain.DefaultCatalog(),
+		[]domain.Runtime{rt},
+		repo,
+		newMemRunRepo(),
+		func() string { return "sess-1" },
+		func() time.Time { return testNow },
+		nil,
+	)
+	require.NoError(t, err)
+	svc.SetProjectWorkdirResolver(fakeWorkdirResolver{})
+	_, err = svc.ActivateSession(context.Background(), activationParams("member-1", "space-1", "codex", "gpt-5.5", "medium"))
+	require.NoError(t, err)
+
+	_, err = svc.SendMessage(context.Background(), app.SendMessageParams{
+		SpaceID:               "space-1",
+		MemberID:              "member-1",
+		ChannelID:             "channel:space-1:member:member-1",
+		ConversationMessageID: "conversation-1",
+		Text:                  "task assigned",
+		AllowSteering:         true,
+		SteerOnly:             true,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no active harness run to steer")
+	assert.Empty(t, rt.input.Text)
 }
 
 func TestService_RequestStopCancelsActiveRun(t *testing.T) {
@@ -1413,6 +1404,48 @@ func TestService_UpdateSessionRuntimeContextInvalidatesLiveRuntimeSession(t *tes
 	assert.Equal(t, []string{"thread-1"}, rt.invalidated)
 }
 
+func TestService_RefreshSessionMCPBindingPreservesNativeSessionRef(t *testing.T) {
+	repo := newMemRepo()
+	rt := &invalidatingSessionRuntime{
+		fakeSessionRuntime: fakeSessionRuntime{
+			fakeRuntime: fakeRuntime{kind: "codex"},
+		},
+	}
+	svc, err := app.NewService(
+		domain.DefaultCatalog(),
+		[]domain.Runtime{rt},
+		repo,
+		newMemRunRepo(),
+		func() string { return "sess-1" },
+		func() time.Time { return testNow },
+		nil,
+	)
+	require.NoError(t, err)
+	svc.SetProjectWorkdirResolver(fakeWorkdirResolver{})
+	svc.SetMCPConfigFormatter(fakeMCPConfigFormatter{})
+	ctx := context.Background()
+
+	session, err := svc.ActivateSession(ctx, activationParams("member-1", "space-1", "codex", "gpt-5.4", "medium"))
+	require.NoError(t, err)
+	_, err = svc.SendMessage(ctx, app.SendMessageParams{
+		SpaceID:               "space-1",
+		MemberID:              "member-1",
+		ChannelID:             "channel:space-1:member:member-1",
+		ConversationMessageID: "msg-1",
+		SenderType:            "user",
+		SenderID:              "user-1",
+		Text:                  "hello",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.RefreshSessionMCPBinding(ctx, session.ID, "mcp-token-member-1", "http://127.0.0.1:7777/mcp?token=mcp-token-member-1")
+	require.NoError(t, err)
+	assert.Equal(t, "mcp-token-member-1", updated.MCPToken)
+	assert.Equal(t, []string{"codex:http://127.0.0.1:7777/mcp?token=mcp-token-member-1"}, updated.MCPServers)
+	assert.Equal(t, "thread-1", updated.Ref)
+	assert.Empty(t, rt.invalidated)
+}
+
 func TestService_UpdateSessionConfig_ValidatesAgainstSessionKind(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()
@@ -1496,144 +1529,4 @@ func TestService_ListSessionsByMember(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	assert.Equal(t, "member-1", sessions[0].MemberID)
-}
-
-func TestService_StartExternalSessionSyncForActiveSessions(t *testing.T) {
-	repo := newMemRepo()
-	done := make(chan struct{})
-	runtime := &fakeSyncRuntime{
-		fakeRuntime: fakeRuntime{kind: "codex"},
-		done:        done,
-		events: []domain.Event{
-			{Type: domain.EventText, TurnID: "native-turn-1", SessionRef: "thread-1", Text: "external prompt", Data: map[string]string{"kind": "user"}},
-			{Type: domain.EventText, TurnID: "native-turn-1", SessionRef: "thread-1", Text: "external response", Data: map[string]string{"kind": "assistant"}},
-			{Type: domain.EventTurnCompleted, TurnID: "native-turn-1", SessionRef: "thread-1"},
-		},
-	}
-	svc, err := app.NewService(
-		domain.DefaultCatalog(),
-		[]domain.Runtime{runtime},
-		repo,
-		newMemRunRepo(),
-		func() string { return "session-new" },
-		func() time.Time { return testNow },
-		nil,
-	)
-	require.NoError(t, err)
-	sink := &spyExternalSink{done: make(chan struct{})}
-	svc.SetExternalSessionEventSink(sink)
-	require.NoError(t, repo.Save(context.Background(), &domain.Session{
-		ID:             "session-1",
-		ProjectID:      "project-1",
-		SpaceID:        "space-1",
-		ChannelID:      "channel:space-1:member:member-1",
-		MemberID:       "member-1",
-		Kind:           "codex",
-		Model:          "gpt-5.5",
-		Effort:         "medium",
-		PermissionMode: "codex/full-access",
-		Ref:            "thread-1",
-		Status:         domain.SessionActive,
-	}))
-
-	require.NoError(t, svc.StartExternalSessionSyncForActiveSessions(context.Background()))
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("sync runtime was not called")
-	}
-	select {
-	case <-sink.done:
-	case <-time.After(time.Second):
-		t.Fatal("external sink was not called")
-	}
-
-	assert.Equal(t, "thread-1", runtime.params.SessionRef)
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	require.NotEmpty(t, sink.events)
-	assert.Equal(t, "external prompt", sink.events[0].UserText)
-	assert.Equal(t, "native-turn-1", sink.events[0].TurnID)
-	require.Len(t, sink.events, 3)
-	assert.Equal(t, "external response", sink.events[1].Text)
-	assert.Equal(t, "native-turn-1", sink.events[1].TurnID)
-}
-
-func TestService_StartExternalSessionSyncForActiveSessionsSkipsManagedRunTurns(t *testing.T) {
-	repo := newMemRepo()
-	runRepo := newMemRunRepo()
-	done := make(chan struct{})
-	runtime := &fakeSyncRuntime{
-		fakeRuntime: fakeRuntime{kind: "codex"},
-		done:        done,
-		events: []domain.Event{
-			{Type: domain.EventText, TurnID: "managed-native-turn", SessionRef: "thread-1", Text: "managed response", Data: map[string]string{"kind": "assistant"}},
-			{Type: domain.EventTurnCompleted, TurnID: "managed-native-turn", SessionRef: "thread-1"},
-			{Type: domain.EventText, TurnID: "native-turn-1", SessionRef: "thread-1", Text: "external prompt", Data: map[string]string{"kind": "user"}},
-			{Type: domain.EventText, TurnID: "native-turn-1", SessionRef: "thread-1", Text: "external response", Data: map[string]string{"kind": "assistant"}},
-			{Type: domain.EventTurnCompleted, TurnID: "native-turn-1", SessionRef: "thread-1"},
-		},
-	}
-	svc, err := app.NewService(
-		domain.DefaultCatalog(),
-		[]domain.Runtime{runtime},
-		repo,
-		runRepo,
-		func() string { return "session-new" },
-		func() time.Time { return testNow },
-		nil,
-	)
-	require.NoError(t, err)
-	sink := &spyExternalSink{done: make(chan struct{})}
-	svc.SetExternalSessionEventSink(sink)
-	require.NoError(t, repo.Save(context.Background(), &domain.Session{
-		ID:             "session-1",
-		ProjectID:      "project-1",
-		SpaceID:        "space-1",
-		ChannelID:      "channel:space-1:member:member-1",
-		MemberID:       "member-1",
-		Kind:           "codex",
-		Model:          "gpt-5.5",
-		Effort:         "medium",
-		PermissionMode: "codex/full-access",
-		Ref:            "thread-1",
-		Status:         domain.SessionActive,
-	}))
-	managedRun, err := harnessrun.Start(harnessrun.StartParams{
-		ID:               "run-1",
-		ProjectID:        "project-1",
-		SpaceID:          "space-1",
-		ChannelID:        "channel:space-1:member:member-1",
-		MemberID:         "member-1",
-		SessionID:        "session-1",
-		HarnessKind:      "codex",
-		NativeSessionRef: "thread-1",
-		TurnID:           "turn-conversation-1",
-		StartedAt:        testNow,
-	})
-	require.NoError(t, err)
-	require.NoError(t, managedRun.SetNativeTurnID("managed-native-turn"))
-	require.NoError(t, runRepo.Save(context.Background(), managedRun))
-
-	require.NoError(t, svc.StartExternalSessionSyncForActiveSessions(context.Background()))
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("sync runtime was not called")
-	}
-	select {
-	case <-sink.done:
-	case <-time.After(time.Second):
-		t.Fatal("external sink was not called")
-	}
-
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	require.Len(t, sink.events, 3)
-	assert.Equal(t, "native-turn-1", sink.events[0].TurnID)
-	assert.Equal(t, "external prompt", sink.events[0].UserText)
-	assert.Equal(t, "native-turn-1", sink.events[1].TurnID)
-	assert.Equal(t, "external response", sink.events[1].Text)
-	assert.Equal(t, "native-turn-1", sink.events[2].TurnID)
-	assert.True(t, sink.events[2].Completed)
 }

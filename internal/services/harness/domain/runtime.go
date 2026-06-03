@@ -167,11 +167,6 @@ type SessionSteeringRuntime interface {
 	SupportsSessionSteering() bool
 }
 
-type SessionSyncRuntime interface {
-	Runtime
-	SyncSession(ctx context.Context, params StartParams, emit func(Event)) error
-}
-
 type SessionRuntimeInvalidator interface {
 	InvalidateSessionRef(sessionRef string) error
 }

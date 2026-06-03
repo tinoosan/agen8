@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -1095,6 +1094,22 @@ func TestValidateResumedThreadIDRejectsChangedThread(t *testing.T) {
 	}
 }
 
+func TestAppServerLoadedThreadRefsAcceptsStringAndObjectEntries(t *testing.T) {
+	refs, err := appServerLoadedThreadRefs([]byte(`{"data":["thread-a",{"id":"thread-b","sessionId":"session-b"}]}`))
+	if err != nil {
+		t.Fatalf("appServerLoadedThreadRefs: %v", err)
+	}
+	want := []string{"thread-a", "thread-b", "session-b"}
+	if len(refs) != len(want) {
+		t.Fatalf("refs=%v want %v", refs, want)
+	}
+	for i := range want {
+		if refs[i] != want[i] {
+			t.Fatalf("refs=%v want %v", refs, want)
+		}
+	}
+}
+
 func TestPersistAppServerThreadIDPersistsSynchronously(t *testing.T) {
 	var persisted string
 	err := persistAppServerThreadID(domain.StartParams{
@@ -2164,121 +2179,6 @@ func TestParseEvents_MapsReconnectProgressToRetryEvent(t *testing.T) {
 	}
 	if events[1].Data["attempt"] != "2" || events[1].Data["max"] != "5" {
 		t.Fatalf("second retry data=%v", events[1].Data)
-	}
-}
-
-func TestParseCodexRolloutLine_MapsNativeTurnEvents(t *testing.T) {
-	state := codexRolloutSyncState{toolNames: map[string]string{}}
-	lines := []string{
-		`{"timestamp":"2026-05-31T16:21:59.543Z","type":"turn_context","payload":{"turn_id":"native-turn-1"}}`,
-		`{"timestamp":"2026-05-31T16:21:59.544Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"please run date"}]}}`,
-		`{"timestamp":"2026-05-31T16:22:08.652Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"date\"}","call_id":"call-1"}}`,
-		`{"timestamp":"2026-05-31T16:22:09.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"ok"}}`,
-		`{"timestamp":"2026-05-31T16:22:10.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}`,
-	}
-	var events []domain.Event
-	for i, line := range lines {
-		got, err := parseCodexRolloutLine(line, i+1, "thread-1", &state)
-		if err != nil {
-			t.Fatalf("parseCodexRolloutLine line %d: %v", i+1, err)
-		}
-		events = append(events, got...)
-	}
-	if len(events) != 5 {
-		t.Fatalf("events len=%d want 5: %+v", len(events), events)
-	}
-	if events[0].Type != domain.EventTurnStarted || events[0].TurnID != "native-turn-1" || events[0].SessionRef != "thread-1" {
-		t.Fatalf("turn event mismatch: %+v", events[0])
-	}
-	if events[1].Type != domain.EventText || events[1].TurnID != "native-turn-1" || events[1].Text != "please run date" || events[1].Data["kind"] != "user" {
-		t.Fatalf("user message mismatch: %+v", events[1])
-	}
-	if events[2].Type != domain.EventToolCall || events[2].ToolName != "exec_command" || events[2].ToolCallID != "call-1" {
-		t.Fatalf("tool call mismatch: %+v", events[2])
-	}
-	if events[3].Type != domain.EventToolResult || events[3].ToolName != "exec_command" || events[3].Text != "ok" {
-		t.Fatalf("tool result mismatch: %+v", events[3])
-	}
-	if events[4].Type != domain.EventText || events[4].TurnID != "native-turn-1" || events[4].Text != "done" || events[4].Data["kind"] != "assistant" {
-		t.Fatalf("assistant message mismatch: %+v", events[4])
-	}
-}
-
-func TestTailLocalCodexRollout_StartsAtEOFAndEmitsAppendedNativeEvents(t *testing.T) {
-	file, err := os.CreateTemp(t.TempDir(), "rollout-*.jsonl")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	defer file.Close()
-	if _, err := file.WriteString(`{"type":"event_msg","payload":{"type":"agent_message","message":"old"}}` + "\n"); err != nil {
-		t.Fatalf("write initial rollout: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	events := make(chan domain.Event, 16)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- tailLocalCodexRollout(ctx, file.Name(), "thread-1", func(ev domain.Event) {
-			events <- ev
-		})
-	}()
-	select {
-	case ev := <-events:
-		if ev.Type != domain.EventTurnStarted || ev.SessionRef != "thread-1" {
-			t.Fatalf("initial sync event mismatch: %+v", ev)
-		}
-	case err := <-errCh:
-		t.Fatalf("tailLocalCodexRollout exited before append: %v", err)
-	case <-time.After(3 * time.Second):
-		t.Fatalf("timed out waiting for initial sync event")
-	}
-	if _, err := file.WriteString(strings.Join([]string{
-		`{"type":"turn_context","payload":{"turn_id":"native-turn-2"}}`,
-		`{"type":"event_msg","payload":{"type":"user_message","message":"ignored duplicate"}}`,
-		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"native question"}]}}`,
-		`{"type":"event_msg","payload":{"type":"agent_message","message":"new duplicate","phase":"commentary"}}`,
-		`{"type":"response_item","payload":{"id":"reason-1","type":"reasoning","summary":["Planning","Checking"]}}`,
-		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"new"}]}}`,
-	}, "\n") + "\n"); err != nil {
-		t.Fatalf("append rollout: %v", err)
-	}
-	if err := file.Sync(); err != nil {
-		t.Fatalf("sync rollout: %v", err)
-	}
-
-	var got []domain.Event
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case ev := <-events:
-			got = append(got, ev)
-			if ev.Text == "new" {
-				cancel()
-				if err := <-errCh; err != context.Canceled {
-					t.Fatalf("tailLocalCodexRollout err=%v want context.Canceled", err)
-				}
-				if len(got) != 4 {
-					t.Fatalf("events len=%d want 4: %+v", len(got), got)
-				}
-				if got[0].Type != domain.EventTurnStarted || got[0].TurnID != "native-turn-2" {
-					t.Fatalf("turn event mismatch: %+v", got[0])
-				}
-				if got[1].Type != domain.EventText || got[1].TurnID != "native-turn-2" || got[1].Text != "native question" || got[1].Data["kind"] != "user" {
-					t.Fatalf("user event mismatch: %+v", got[1])
-				}
-				if got[2].Type != domain.EventText || got[2].TurnID != "native-turn-2" || got[2].Text != "Planning\nChecking" || got[2].Data["kind"] != "reasoning" || got[2].Data["itemId"] != "reason-1" {
-					t.Fatalf("reasoning event mismatch: %+v", got[2])
-				}
-				if got[3].Type != domain.EventText || got[3].TurnID != "native-turn-2" || got[3].Text != "new" || got[3].Data["kind"] != "assistant" {
-					t.Fatalf("assistant event mismatch: %+v", got[3])
-				}
-				return
-			}
-		case err := <-errCh:
-			t.Fatalf("tailLocalCodexRollout exited early: %v; events=%+v", err, got)
-		case <-deadline:
-			t.Fatalf("timed out waiting for rollout events; got %+v", got)
-		}
 	}
 }
 

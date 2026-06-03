@@ -29,10 +29,13 @@ type SendMessageParams struct {
 	Text                  string
 	Attachments           []PromptAttachment
 	AllowSteering         bool
+	SteerOnly             bool
 	OnAssistantDelta      func(ctx context.Context, delta AssistantDelta) error
 	OnThinkingDelta       func(ctx context.Context, delta ThinkingDelta) error
 	OnActivity            func(ctx context.Context, activity ActivityEvent) error
 }
+
+const errNoActiveHarnessRunToSteer = "no active harness run to steer"
 
 type PromptAttachment struct {
 	ID        string
@@ -74,26 +77,6 @@ type ActivityEvent struct {
 	Status     string
 	Text       string
 	Data       map[string]string
-}
-
-type ExternalSessionEvent struct {
-	SpaceID    string
-	ChannelID  string
-	MemberID   string
-	SessionID  string
-	SessionRef string
-	TurnID     string
-	Sequence   int
-	UserText   string
-	Text       string
-	Thinking   string
-	Data       map[string]string
-	Activity   *ActivityEvent
-	Completed  bool
-}
-
-type ExternalSessionEventSink interface {
-	AppendHarnessExternalEvent(ctx context.Context, event ExternalSessionEvent) error
 }
 
 type RunListParams struct {
@@ -163,6 +146,11 @@ type ProjectWorkdir struct {
 type RuntimeHostRequest struct {
 	LocationID  string
 	HarnessKind string
+	SessionID   string
+	ProjectID   string
+	MemberID    string
+	SessionRef  string
+	MCPToken    string
 }
 
 type RuntimeHost struct {
@@ -203,15 +191,11 @@ type Service struct {
 	runtimeHosts       RuntimeHostResolver
 	attachmentStager   AttachmentStager
 	humanInputAwaiter  HumanInputAwaiter
-	externalEventSink  ExternalSessionEventSink
-	// Lock order: do not hold cancelMu, steeringMu, or syncMu while acquiring another Service mutex.
+	// Lock order: do not hold cancelMu or steeringMu while acquiring another Service mutex.
 	cancelMu        sync.Mutex
 	cancelHandles   map[string]context.CancelFunc
 	steeringMu      sync.Mutex
 	steeringHandles map[string]chan domain.PromptInput
-	syncMu          sync.Mutex
-	syncRoot        context.Context
-	syncCancels     map[string]context.CancelFunc
 }
 
 func NewService(catalog *domain.Catalog, runtimes []domain.Runtime, repo domain.SessionRepository, runRepo harnessrun.Repository, newID IDGenerator, now Clock, logger *slog.Logger) (*Service, error) {
@@ -248,7 +232,6 @@ func NewService(catalog *domain.Catalog, runtimes []domain.Runtime, repo domain.
 		logger:          logger,
 		cancelHandles:   map[string]context.CancelFunc{},
 		steeringHandles: map[string]chan domain.PromptInput{},
-		syncCancels:     map[string]context.CancelFunc{},
 	}, nil
 }
 
@@ -335,10 +318,6 @@ func (s *Service) SetRuntimeHostResolver(resolver RuntimeHostResolver) {
 
 func (s *Service) SetAttachmentStager(stager AttachmentStager) {
 	s.attachmentStager = stager
-}
-
-func (s *Service) SetExternalSessionEventSink(sink ExternalSessionEventSink) {
-	s.externalEventSink = sink
 }
 
 func (s *Service) ListRuns(ctx context.Context, p RunListParams) ([]harnessrun.Run, error) {
@@ -686,8 +665,11 @@ func (s *Service) SendMessage(ctx context.Context, p SendMessageParams) (SendMes
 			return result, nil
 		}
 	}
-	if s.runtimeHosts != nil && strings.TrimSpace(session.LocationID) != "" && strings.TrimSpace(session.LocationID) != "local" {
-		s.logger.InfoContext(ctx, "harness resolving remote runtime host",
+	if p.SteerOnly {
+		return SendMessageResult{}, fmt.Errorf("%s for session %q", errNoActiveHarnessRunToSteer, session.ID)
+	}
+	if s.runtimeHosts != nil && strings.TrimSpace(session.LocationID) != "" {
+		s.logger.InfoContext(ctx, "harness resolving runtime host",
 			"session_id", session.ID,
 			"member_id", session.MemberID,
 			"harness_kind", session.Kind,
@@ -696,9 +678,14 @@ func (s *Service) SendMessage(ctx context.Context, p SendMessageParams) (SendMes
 		host, err := s.runtimeHosts.ResolveRuntimeHost(ctx, RuntimeHostRequest{
 			LocationID:  strings.TrimSpace(session.LocationID),
 			HarnessKind: strings.TrimSpace(session.Kind),
+			SessionID:   strings.TrimSpace(session.ID),
+			ProjectID:   strings.TrimSpace(session.ProjectID),
+			MemberID:    strings.TrimSpace(session.MemberID),
+			SessionRef:  strings.TrimSpace(session.Ref),
+			MCPToken:    strings.TrimSpace(session.MCPToken),
 		})
 		if err != nil {
-			s.logger.ErrorContext(ctx, "harness remote runtime host resolution failed",
+			s.logger.ErrorContext(ctx, "harness runtime host resolution failed",
 				"session_id", session.ID,
 				"member_id", session.MemberID,
 				"harness_kind", session.Kind,
@@ -709,7 +696,7 @@ func (s *Service) SendMessage(ctx context.Context, p SendMessageParams) (SendMes
 		}
 		params.AppServerURL = strings.TrimSpace(host.AppServerURL)
 		params.RuntimeHostDiagnostics = strings.TrimSpace(host.Diagnostics)
-		s.logger.InfoContext(ctx, "harness remote runtime host resolved",
+		s.logger.InfoContext(ctx, "harness runtime host resolved",
 			"session_id", session.ID,
 			"member_id", session.MemberID,
 			"harness_kind", session.Kind,
@@ -725,7 +712,7 @@ func (s *Service) SendMessage(ctx context.Context, p SendMessageParams) (SendMes
 				Token:       session.MCPToken,
 			})
 			if err != nil {
-				s.logger.ErrorContext(ctx, "harness remote mcp config format failed",
+				s.logger.ErrorContext(ctx, "harness mcp config format failed",
 					"session_id", session.ID,
 					"member_id", session.MemberID,
 					"harness_kind", session.Kind,
@@ -734,7 +721,7 @@ func (s *Service) SendMessage(ctx context.Context, p SendMessageParams) (SendMes
 				)
 				return SendMessageResult{}, err
 			}
-			s.logger.InfoContext(ctx, "harness remote mcp config formatted",
+			s.logger.InfoContext(ctx, "harness mcp config formatted",
 				"session_id", session.ID,
 				"member_id", session.MemberID,
 				"harness_kind", session.Kind,
@@ -869,11 +856,6 @@ func (s *Service) SendMessage(ctx context.Context, p SendMessageParams) (SendMes
 			return SendMessageResult{}, fmt.Errorf("persist harness session ref: %w", err)
 		}
 	}
-	if sessionRef != "" {
-		if err := s.EnsureExternalSessionSync(ctx, session.ID); err != nil {
-			return SendMessageResult{}, err
-		}
-	}
 	s.logger.InfoContext(ctx, "harness session turn delivered",
 		"session_id", session.ID,
 		"member_id", session.MemberID,
@@ -955,209 +937,6 @@ func runtimeSupportsSessionSteering(runtime domain.Runtime) bool {
 	return ok && steeringRuntime.SupportsSessionSteering()
 }
 
-func (s *Service) StartExternalSessionSyncForActiveSessions(ctx context.Context) error {
-	if s == nil {
-		return fmt.Errorf("harness service is required")
-	}
-	s.syncMu.Lock()
-	s.syncRoot = ctx
-	s.syncMu.Unlock()
-	sessions, err := s.repo.ListActive(ctx)
-	if err != nil {
-		return fmt.Errorf("list active harness sessions for sync: %w", err)
-	}
-	for _, session := range sessions {
-		if session == nil || strings.TrimSpace(session.Ref) == "" {
-			continue
-		}
-		if err := s.EnsureExternalSessionSync(ctx, session.ID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Service) EnsureExternalSessionSync(ctx context.Context, sessionID string) error {
-	if s == nil {
-		return fmt.Errorf("harness service is required")
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return fmt.Errorf("session id is required")
-	}
-	if s.externalEventSink == nil {
-		return nil
-	}
-	session, err := s.repo.Get(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("load harness session for sync: %w", err)
-	}
-	if session == nil {
-		return fmt.Errorf("harness session %q not found", sessionID)
-	}
-	if strings.TrimSpace(session.Ref) == "" {
-		return nil
-	}
-	runtime, err := s.registry.Get(session.Kind)
-	if err != nil {
-		return err
-	}
-	syncRuntime, ok := runtime.(domain.SessionSyncRuntime)
-	if !ok {
-		return nil
-	}
-	params, err := s.startParamsForSession(ctx, session)
-	if err != nil {
-		return err
-	}
-	params.ApprovalHandler = nil
-	s.syncMu.Lock()
-	if s.syncCancels == nil {
-		s.syncCancels = map[string]context.CancelFunc{}
-	}
-	if _, exists := s.syncCancels[session.ID]; exists {
-		s.syncMu.Unlock()
-		return nil
-	}
-	root := s.syncRoot
-	if root == nil {
-		root = ctx
-	}
-	syncCtx, cancel := context.WithCancel(root)
-	s.syncCancels[session.ID] = cancel
-	s.syncMu.Unlock()
-
-	go s.runExternalSessionSync(syncCtx, session, syncRuntime, params)
-	return nil
-}
-
-func (s *Service) runExternalSessionSync(ctx context.Context, session *domain.Session, runtime domain.SessionSyncRuntime, params domain.StartParams) {
-	if s == nil || session == nil || runtime == nil {
-		return
-	}
-	defer func() {
-		s.syncMu.Lock()
-		delete(s.syncCancels, session.ID)
-		s.syncMu.Unlock()
-	}()
-	sequence := 0
-	turnID := ""
-	err := runtime.SyncSession(ctx, params, func(ev domain.Event) {
-		if ev.TurnID != "" {
-			turnID = ev.TurnID
-		}
-		resolvedTurnID := firstNonEmpty(ev.TurnID, turnID)
-		managed, managedErr := s.isManagedRunTurn(ctx, session.ID, resolvedTurnID)
-		if managedErr != nil {
-			s.logger.ErrorContext(ctx, "harness external sync managed turn lookup failed",
-				"session_id", session.ID,
-				"turn_id", resolvedTurnID,
-				"error", managedErr,
-			)
-			return
-		}
-		if managed {
-			return
-		}
-		if ev.Type == domain.EventText && isUserConversationText(ev) {
-			sequence++
-			if sinkErr := s.externalEventSink.AppendHarnessExternalEvent(ctx, ExternalSessionEvent{
-				SpaceID:    session.SpaceID,
-				ChannelID:  session.ChannelID,
-				MemberID:   session.MemberID,
-				SessionID:  session.ID,
-				SessionRef: firstNonEmpty(ev.SessionRef, session.Ref),
-				TurnID:     resolvedTurnID,
-				Sequence:   sequence,
-				UserText:   ev.Text,
-			}); sinkErr != nil {
-				s.logger.ErrorContext(ctx, "harness external sync user event failed", "session_id", session.ID, "error", sinkErr)
-			}
-		}
-		if ev.Type == domain.EventText && isAssistantConversationText(ev) {
-			sequence++
-			if sinkErr := s.externalEventSink.AppendHarnessExternalEvent(ctx, ExternalSessionEvent{
-				SpaceID:    session.SpaceID,
-				ChannelID:  session.ChannelID,
-				MemberID:   session.MemberID,
-				SessionID:  session.ID,
-				SessionRef: firstNonEmpty(ev.SessionRef, session.Ref),
-				TurnID:     resolvedTurnID,
-				Sequence:   sequence,
-				Text:       ev.Text,
-			}); sinkErr != nil {
-				s.logger.ErrorContext(ctx, "harness external sync assistant event failed", "session_id", session.ID, "error", sinkErr)
-			}
-		}
-		if ev.Type == domain.EventText && isReasoningConversationText(ev) {
-			sequence++
-			if sinkErr := s.externalEventSink.AppendHarnessExternalEvent(ctx, ExternalSessionEvent{
-				SpaceID:    session.SpaceID,
-				ChannelID:  session.ChannelID,
-				MemberID:   session.MemberID,
-				SessionID:  session.ID,
-				SessionRef: firstNonEmpty(ev.SessionRef, session.Ref),
-				TurnID:     resolvedTurnID,
-				Sequence:   sequence,
-				Thinking:   ev.Text,
-				Data:       ev.Data,
-			}); sinkErr != nil {
-				s.logger.ErrorContext(ctx, "harness external sync thinking event failed", "session_id", session.ID, "error", sinkErr)
-			}
-		}
-		if isToolActivityEvent(ev) {
-			sequence++
-			activity := activityEventFromRuntime(session.ID, firstNonEmpty(ev.TurnID, turnID), sequence, ev)
-			if sinkErr := s.externalEventSink.AppendHarnessExternalEvent(ctx, ExternalSessionEvent{
-				SpaceID:    session.SpaceID,
-				ChannelID:  session.ChannelID,
-				MemberID:   session.MemberID,
-				SessionID:  session.ID,
-				SessionRef: firstNonEmpty(ev.SessionRef, session.Ref),
-				TurnID:     resolvedTurnID,
-				Sequence:   sequence,
-				Activity:   &activity,
-			}); sinkErr != nil {
-				s.logger.ErrorContext(ctx, "harness external sync activity event failed", "session_id", session.ID, "error", sinkErr)
-			}
-		}
-		if ev.Type == domain.EventTurnCompleted {
-			sequence++
-			if sinkErr := s.externalEventSink.AppendHarnessExternalEvent(ctx, ExternalSessionEvent{
-				SpaceID:    session.SpaceID,
-				ChannelID:  session.ChannelID,
-				MemberID:   session.MemberID,
-				SessionID:  session.ID,
-				SessionRef: firstNonEmpty(ev.SessionRef, session.Ref),
-				TurnID:     resolvedTurnID,
-				Sequence:   sequence,
-				Completed:  true,
-			}); sinkErr != nil {
-				s.logger.ErrorContext(ctx, "harness external sync completion event failed", "session_id", session.ID, "error", sinkErr)
-			}
-		}
-	})
-	if err != nil && ctx.Err() == nil {
-		s.logger.WarnContext(ctx, "harness external session sync stopped", "session_id", session.ID, "session_ref", session.Ref, "error", err)
-	}
-}
-
-func (s *Service) isManagedRunTurn(ctx context.Context, sessionID, turnID string) (bool, error) {
-	if s == nil || s.runs == nil {
-		return false, nil
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	turnID = strings.TrimSpace(turnID)
-	if sessionID == "" || turnID == "" {
-		return false, nil
-	}
-	item, err := s.runs.GetByTurnID(ctx, turnID)
-	if err != nil {
-		return false, err
-	}
-	return item != nil && strings.TrimSpace(item.SessionID) == sessionID, nil
-}
-
 func (s *Service) startParamsForSession(ctx context.Context, session *domain.Session) (domain.StartParams, error) {
 	if session == nil {
 		return domain.StartParams{}, fmt.Errorf("session is required")
@@ -1173,10 +952,15 @@ func (s *Service) startParamsForSession(ctx context.Context, session *domain.Ses
 		SessionRef:      strings.TrimSpace(session.Ref),
 		Continue:        strings.TrimSpace(session.Ref) != "",
 	}
-	if s.runtimeHosts != nil && strings.TrimSpace(session.LocationID) != "" && strings.TrimSpace(session.LocationID) != "local" {
+	if s.runtimeHosts != nil && strings.TrimSpace(session.LocationID) != "" {
 		host, err := s.runtimeHosts.ResolveRuntimeHost(ctx, RuntimeHostRequest{
 			LocationID:  strings.TrimSpace(session.LocationID),
 			HarnessKind: strings.TrimSpace(session.Kind),
+			SessionID:   strings.TrimSpace(session.ID),
+			ProjectID:   strings.TrimSpace(session.ProjectID),
+			MemberID:    strings.TrimSpace(session.MemberID),
+			SessionRef:  strings.TrimSpace(session.Ref),
+			MCPToken:    strings.TrimSpace(session.MCPToken),
 		})
 		if err != nil {
 			return domain.StartParams{}, err
@@ -1736,6 +1520,43 @@ func (s *Service) RefreshSessionMCPURL(ctx context.Context, id string, rawURL st
 		return session, nil
 	}
 	return s.RefreshSessionMCPConfig(ctx, id, servers)
+}
+
+func (s *Service) RefreshSessionMCPBinding(ctx context.Context, id string, token string, rawURL string) (*domain.Session, error) {
+	id = strings.TrimSpace(id)
+	token = strings.TrimSpace(token)
+	if id == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if token == "" {
+		return nil, fmt.Errorf("mcp token is required")
+	}
+	session, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("load harness session %s: %w", id, err)
+	}
+	if session == nil {
+		return nil, fmt.Errorf("harness session %s not found", id)
+	}
+	if session.Status != domain.SessionActive {
+		return nil, fmt.Errorf("cannot refresh session %q mcp binding: status is %q, not active", session.ID, session.Status)
+	}
+	servers, err := s.formatMCPServers(ctx, MCPConfigRequest{
+		HarnessKind: session.Kind,
+		RawURL:      rawURL,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if session.MCPToken == token && equalStringSlices(session.MCPServers, servers) {
+		return session, nil
+	}
+	session.MCPToken = token
+	session.MCPServers = append([]string(nil), servers...)
+	if err := s.repo.Save(ctx, session); err != nil {
+		return nil, fmt.Errorf("save harness session %s mcp binding: %w", session.ID, err)
+	}
+	return session, nil
 }
 
 func (s *Service) RefreshSessionWorkdir(ctx context.Context, id string) (*domain.Session, error) {

@@ -182,6 +182,7 @@ export function spaceDetailEntryToActivity(
   if (Number.isFinite(entry.sequence) && !data.seq)
     data.seq = String(entry.sequence)
   if (entry.kind === 'agent_message_received') {
+    if (entry.status && !data.deliveryStatus) data.deliveryStatus = entry.status
     const status = activityStatus(entry.status)
     return {
       id: entry.id,

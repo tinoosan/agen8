@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,9 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,6 +45,119 @@ type appServerSession struct {
 
 func (r *Runtime) SupportsSessionSteering() bool {
 	return true
+}
+
+func SteerAppServerTurn(ctx context.Context, params domain.StartParams, turnID string, text string, attachments []domain.PromptAttachment) error {
+	threadID := strings.TrimSpace(params.SessionRef)
+	turnID = strings.TrimSpace(turnID)
+	text = strings.TrimSpace(text)
+	if strings.TrimSpace(params.AppServerURL) == "" {
+		return fmt.Errorf("codex app-server url is required")
+	}
+	if threadID == "" {
+		return fmt.Errorf("codex thread id is required")
+	}
+	if turnID == "" {
+		return fmt.Errorf("codex turn id is required")
+	}
+	if text == "" && len(attachments) == 0 {
+		return fmt.Errorf("codex steer text or attachment is required")
+	}
+	dialURL, dialOptions, err := appServerDialTarget(params, strings.TrimSpace(params.AppServerURL))
+	if err != nil {
+		return err
+	}
+	conn, resp, err := websocket.Dial(ctx, dialURL, dialOptions)
+	if err != nil {
+		return fmt.Errorf("codex app-server dial: %w%s", err, websocketDialResponseText(resp))
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(appServerReadLimit)
+	client := newAppServerClient(conn, params.ApprovalHandler)
+	if _, err := client.call(ctx, "initialize", map[string]any{
+		"clientInfo":   map[string]string{"name": "agen8", "version": "dev"},
+		"capabilities": map[string]any{"experimentalApi": true},
+	}); err != nil {
+		return err
+	}
+	if err := client.notification(ctx, "initialized", map[string]any{}); err != nil {
+		return err
+	}
+	if strings.HasPrefix(strings.TrimSpace(params.AppServerURL), "unix://") {
+		if err := ensureAppServerThreadLoaded(ctx, client, threadID); err != nil {
+			return err
+		}
+	}
+	result, err := client.call(ctx, "turn/steer", map[string]any{
+		"threadId":       threadID,
+		"expectedTurnId": turnID,
+		"input":          codexInputItems(text, attachments),
+	})
+	if err != nil {
+		return err
+	}
+	steeredTurnID := strings.TrimSpace(nestedJSONRPCString(result, "turnId"))
+	if steeredTurnID == "" {
+		return fmt.Errorf("codex app-server turn/steer returned no turn id")
+	}
+	if steeredTurnID != turnID {
+		return fmt.Errorf("codex app-server turn/steer returned turn id %q, expected %q", steeredTurnID, turnID)
+	}
+	return nil
+}
+
+func ensureAppServerThreadLoaded(ctx context.Context, client *appServerClient, threadID string) error {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return fmt.Errorf("codex thread id is required")
+	}
+	result, err := client.call(ctx, "thread/loaded/list", map[string]any{})
+	if err != nil {
+		return fmt.Errorf("codex app-server thread/loaded/list: %w", err)
+	}
+	loaded, err := appServerLoadedThreadRefs(result)
+	if err != nil {
+		return fmt.Errorf("codex app-server thread/loaded/list returned invalid response: %w", err)
+	}
+	for _, item := range loaded {
+		if item == threadID {
+			return nil
+		}
+	}
+	return fmt.Errorf("codex app-server thread %q is not loaded by the reachable remote-control server", threadID)
+}
+
+func appServerLoadedThreadRefs(result json.RawMessage) ([]string, error) {
+	var parsed struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(result, &parsed); err != nil {
+		return nil, err
+	}
+	refs := make([]string, 0, len(parsed.Data)*2)
+	for _, raw := range parsed.Data {
+		var id string
+		if err := json.Unmarshal(raw, &id); err == nil {
+			if id = strings.TrimSpace(id); id != "" {
+				refs = append(refs, id)
+			}
+			continue
+		}
+		var item struct {
+			ID        string `json:"id"`
+			SessionID string `json:"sessionId"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return nil, err
+		}
+		if id := strings.TrimSpace(item.ID); id != "" {
+			refs = append(refs, id)
+		}
+		if sessionID := strings.TrimSpace(item.SessionID); sessionID != "" {
+			refs = append(refs, sessionID)
+		}
+	}
+	return refs, nil
 }
 
 func (r *Runtime) ExecuteSessionTurn(ctx context.Context, params domain.StartParams, input domain.SessionTurnInput, emit func(domain.Event)) (domain.SessionTurnResult, error) {
@@ -226,364 +336,6 @@ func (r *Runtime) ExecuteSessionTurn(ctx context.Context, params domain.StartPar
 	}
 }
 
-func (r *Runtime) SyncSession(ctx context.Context, params domain.StartParams, emit func(domain.Event)) error {
-	threadID := strings.TrimSpace(params.SessionRef)
-	if threadID == "" {
-		return fmt.Errorf("codex app-server sync requires a session ref")
-	}
-	if strings.TrimSpace(params.AppServerURL) == "" {
-		rolloutPath, err := resolveLocalCodexRolloutPath(ctx, params, threadID)
-		if err != nil {
-			return err
-		}
-		return tailLocalCodexRollout(ctx, rolloutPath, threadID, emit)
-	}
-	client, proc, _, err := openDedicatedAppServerClient(ctx, params, threadID)
-	if err != nil {
-		return err
-	}
-	defer client.close()
-	defer stopAppServerProcess(proc)
-	if emit != nil {
-		emit(domain.Event{Type: domain.EventTurnStarted, SessionRef: threadID})
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err, ok := <-client.done:
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if !ok {
-				return fmt.Errorf("codex app-server sync connection closed")
-			}
-			return err
-		case msg, ok := <-client.notifications:
-			if !ok {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				return fmt.Errorf("codex app-server sync notification stream closed")
-			}
-			if msg.Error != nil {
-				return fmt.Errorf("codex app-server sync: %s", strings.TrimSpace(msg.Error.Message))
-			}
-			if msg.Method == "" {
-				continue
-			}
-			events, err := appServerNotificationEvents(msg)
-			if err != nil {
-				return err
-			}
-			for _, ev := range events {
-				if ev.Type == "" {
-					continue
-				}
-				if ev.SessionRef == "" {
-					ev.SessionRef = threadID
-				}
-				if emit != nil {
-					emit(ev)
-				}
-			}
-		}
-	}
-}
-
-func resolveLocalCodexRolloutPath(ctx context.Context, params domain.StartParams, threadID string) (string, error) {
-	client, proc, result, err := openDedicatedAppServerClient(ctx, params, threadID)
-	if err != nil {
-		return "", err
-	}
-	defer client.close()
-	defer stopAppServerProcess(proc)
-	rolloutPath := strings.TrimSpace(nestedJSONRPCString(result, "thread", "path"))
-	if rolloutPath == "" {
-		return "", fmt.Errorf("codex app-server thread/resume returned no rollout path for thread %q", threadID)
-	}
-	if !filepath.IsAbs(rolloutPath) {
-		return "", fmt.Errorf("codex app-server thread/resume returned non-absolute rollout path %q", rolloutPath)
-	}
-	if _, err := os.Stat(rolloutPath); err != nil {
-		return "", fmt.Errorf("stat codex rollout path %q: %w", rolloutPath, err)
-	}
-	return rolloutPath, nil
-}
-
-func tailLocalCodexRollout(ctx context.Context, rolloutPath, threadID string, emit func(domain.Event)) error {
-	file, err := os.Open(rolloutPath)
-	if err != nil {
-		return fmt.Errorf("open codex rollout path %q: %w", rolloutPath, err)
-	}
-	defer file.Close()
-	stat, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("stat codex rollout path %q: %w", rolloutPath, err)
-	}
-	offset := stat.Size()
-	lineNo := 0
-	state := codexRolloutSyncState{toolNames: map[string]string{}}
-	if emit != nil {
-		emit(domain.Event{Type: domain.EventTurnStarted, SessionRef: threadID})
-	}
-	reader := bufio.NewReader(file)
-	buffered := ""
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		stat, err := file.Stat()
-		if err != nil {
-			return fmt.Errorf("stat codex rollout path %q: %w", rolloutPath, err)
-		}
-		size := stat.Size()
-		if size < offset {
-			return fmt.Errorf("codex rollout path %q was truncated while syncing", rolloutPath)
-		}
-		if size == offset {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(250 * time.Millisecond):
-				continue
-			}
-		}
-		if _, err := file.Seek(offset, io.SeekStart); err != nil {
-			return fmt.Errorf("seek codex rollout path %q: %w", rolloutPath, err)
-		}
-		reader.Reset(io.LimitReader(file, size-offset))
-		chunk, err := io.ReadAll(reader)
-		if err != nil {
-			return fmt.Errorf("read codex rollout path %q: %w", rolloutPath, err)
-		}
-		offset = size
-		text := buffered + string(chunk)
-		lines := strings.Split(text, "\n")
-		buffered = lines[len(lines)-1]
-		for _, line := range lines[:len(lines)-1] {
-			lineNo++
-			events, err := parseCodexRolloutLine(line, lineNo, threadID, &state)
-			if err != nil {
-				return err
-			}
-			for _, ev := range events {
-				if ev.Type == "" {
-					continue
-				}
-				if ev.SessionRef == "" {
-					ev.SessionRef = threadID
-				}
-				if ev.TurnID == "" && state.currentTurnID != "" && appServerEventCanUseActiveTurn(ev.Type) {
-					ev.TurnID = state.currentTurnID
-					if ev.Data == nil {
-						ev.Data = map[string]string{}
-					}
-					ev.Data["turnId"] = state.currentTurnID
-				}
-				if emit != nil {
-					emit(ev)
-				}
-			}
-		}
-	}
-}
-
-type codexRolloutSyncState struct {
-	currentTurnID string
-	toolNames     map[string]string
-}
-
-func parseCodexRolloutLine(line string, lineNo int, threadID string, state *codexRolloutSyncState) ([]domain.Event, error) {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return nil, nil
-	}
-	var record map[string]any
-	if err := json.Unmarshal([]byte(line), &record); err != nil {
-		return nil, fmt.Errorf("parse codex rollout line %d: %w", lineNo, err)
-	}
-	payload := mapField(record, "payload")
-	recordType := firstString(record, "type")
-	switch recordType {
-	case "session_meta":
-		return nil, nil
-	case "turn_context":
-		turnID := firstString(payload, "turn_id", "turnId")
-		if turnID == "" {
-			return nil, fmt.Errorf("parse codex rollout line %d: turn_context missing turn_id", lineNo)
-		}
-		if state != nil {
-			state.currentTurnID = turnID
-		}
-		return []domain.Event{{Type: domain.EventTurnStarted, TurnID: turnID, SessionRef: threadID}}, nil
-	case "event_msg":
-		return codexRolloutEventMsgEvents(payload, lineNo, threadID, state)
-	case "response_item":
-		return codexRolloutResponseItemEvents(payload, lineNo, threadID, state)
-	default:
-		return nil, nil
-	}
-}
-
-func codexRolloutEventMsgEvents(payload map[string]any, lineNo int, threadID string, state *codexRolloutSyncState) ([]domain.Event, error) {
-	switch firstString(payload, "type") {
-	case "agent_message":
-		return nil, nil
-	case "user_message":
-		return nil, nil
-	case "token_count":
-		info := mapField(payload, "info")
-		currentTokens, err := intField(mapField(info, "last_token_usage"), "input_tokens", "inputTokens")
-		if err != nil {
-			return nil, fmt.Errorf("parse codex rollout line %d token_count current context: %w", lineNo, err)
-		}
-		budgetTokens, err := intField(info, "model_context_window", "modelContextWindow")
-		if err != nil {
-			return nil, fmt.Errorf("parse codex rollout line %d token_count context window: %w", lineNo, err)
-		}
-		return []domain.Event{{
-			Type:          domain.EventContextSize,
-			TurnID:        currentCodexRolloutTurnID(state),
-			SessionRef:    threadID,
-			CurrentTokens: currentTokens,
-			BudgetTokens:  budgetTokens,
-		}}, nil
-	case "context_compacted":
-		return []domain.Event{{
-			Type:       domain.EventCompaction,
-			TurnID:     currentCodexRolloutTurnID(state),
-			SessionRef: threadID,
-			ServerSide: true,
-		}}, nil
-	default:
-		return appServerRawEventMsgEvents(payload)
-	}
-}
-
-func codexRolloutResponseItemEvents(payload map[string]any, lineNo int, threadID string, state *codexRolloutSyncState) ([]domain.Event, error) {
-	turnID := currentCodexRolloutTurnID(state)
-	switch firstString(payload, "type") {
-	case "message":
-		role := firstString(payload, "role")
-		if role != "assistant" && role != "user" {
-			return nil, nil
-		}
-		text := rolloutMessageText(payload)
-		if text == "" {
-			return nil, nil
-		}
-		kind := "assistant"
-		if role == "user" {
-			kind = "user"
-		}
-		return []domain.Event{{
-			Type:       domain.EventText,
-			TurnID:     turnID,
-			SessionRef: threadID,
-			Text:       text,
-			Data:       map[string]string{"kind": kind},
-		}}, nil
-	case "function_call":
-		toolName := firstString(payload, "name")
-		if toolName == "" {
-			return nil, fmt.Errorf("parse codex rollout line %d function_call missing name", lineNo)
-		}
-		toolCallID := firstString(payload, "call_id", "callId", "id")
-		if toolCallID == "" {
-			return nil, fmt.Errorf("parse codex rollout line %d function_call missing call_id", lineNo)
-		}
-		if state != nil {
-			if state.toolNames == nil {
-				state.toolNames = map[string]string{}
-			}
-			state.toolNames[toolCallID] = toolName
-		}
-		args := firstString(payload, "arguments")
-		return []domain.Event{{
-			Type:       domain.EventToolCall,
-			TurnID:     turnID,
-			SessionRef: threadID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			Data: map[string]string{
-				"status": "in_progress",
-				"op":     toolName,
-				"input":  strings.TrimSpace(args),
-			},
-		}}, nil
-	case "function_call_output":
-		toolCallID := firstString(payload, "call_id", "callId", "id")
-		if toolCallID == "" {
-			return nil, fmt.Errorf("parse codex rollout line %d function_call_output missing call_id", lineNo)
-		}
-		toolName := ""
-		if state != nil && state.toolNames != nil {
-			toolName = state.toolNames[toolCallID]
-			delete(state.toolNames, toolCallID)
-		}
-		output := firstString(payload, "output")
-		return []domain.Event{{
-			Type:       domain.EventToolResult,
-			TurnID:     turnID,
-			SessionRef: threadID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			Data: map[string]string{
-				"status":        "completed",
-				"result":        output,
-				"outputPreview": output,
-			},
-			Text: output,
-		}}, nil
-	case "reasoning":
-		text := reasoningSummaryText(payload)
-		if text == "" {
-			return nil, nil
-		}
-		return []domain.Event{{
-			Type:       domain.EventText,
-			TurnID:     turnID,
-			SessionRef: threadID,
-			Text:       text,
-			Data: reasoningEventData(
-				firstString(payload, "id", "itemId", "item_id"),
-				"",
-			),
-		}}, nil
-	default:
-		return appServerRawResponseItemEvents(payload)
-	}
-}
-
-func currentCodexRolloutTurnID(state *codexRolloutSyncState) string {
-	if state == nil {
-		return ""
-	}
-	return strings.TrimSpace(state.currentTurnID)
-}
-
-func rolloutMessageText(payload map[string]any) string {
-	content, ok := payload["content"].([]any)
-	if !ok {
-		return firstString(payload, "text")
-	}
-	var out strings.Builder
-	for _, raw := range content {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		switch firstString(item, "type") {
-		case "output_text", "input_text", "text":
-			out.WriteString(firstString(item, "text"))
-		}
-	}
-	return out.String()
-}
-
 func openDedicatedAppServerClient(ctx context.Context, params domain.StartParams, threadID string) (*appServerClient, domain.CommandProcess, json.RawMessage, error) {
 	port, err := reserveLocalPort()
 	if err != nil {
@@ -620,7 +372,7 @@ func openDedicatedAppServerClient(ctx context.Context, params domain.StartParams
 	if appServerURL != "" {
 		dialURL = appServerURL
 	}
-	dialOptions, err := appServerDialOptions(params)
+	dialURL, dialOptions, err := appServerDialTarget(params, dialURL)
 	if err != nil {
 		stopAppServerProcess(proc)
 		return nil, nil, nil, err
@@ -765,7 +517,7 @@ func (r *Runtime) openAppServerSession(ctx context.Context, params domain.StartP
 	if appServerURL != "" {
 		dialURL = appServerURL
 	}
-	dialOptions, err := appServerDialOptions(params)
+	dialURL, dialOptions, err := appServerDialTarget(params, dialURL)
 	if err != nil {
 		stopAppServerProcess(proc)
 		return nil, err
@@ -922,6 +674,33 @@ func appServerDialOptions(params domain.StartParams) (*websocket.DialOptions, er
 		return nil, nil
 	}
 	return &websocket.DialOptions{HTTPHeader: header}, nil
+}
+
+func appServerDialTarget(params domain.StartParams, rawURL string) (string, *websocket.DialOptions, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	options, err := appServerDialOptions(params)
+	if err != nil {
+		return "", nil, err
+	}
+	if !strings.HasPrefix(rawURL, "unix://") {
+		return rawURL, options, nil
+	}
+	socketPath := strings.TrimSpace(strings.TrimPrefix(rawURL, "unix://"))
+	if socketPath == "" {
+		return "", nil, fmt.Errorf("codex app-server unix socket path is required")
+	}
+	if options == nil {
+		options = &websocket.DialOptions{}
+	}
+	options.HTTPClient = &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", socketPath)
+		},
+	}}
+	if options.Host == "" {
+		options.Host = "localhost"
+	}
+	return "ws://localhost/", options, nil
 }
 
 func codexConfigValues(args []string) []string {

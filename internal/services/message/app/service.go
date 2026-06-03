@@ -44,8 +44,6 @@ type Service struct {
 	agentWakeQueue     chan types.AgentMessage
 	agentDeliveriesMu  sync.Mutex
 	agentDeliveries    map[member.ID]*agentDeliveryWorker
-	externalStreamsMu  sync.Mutex
-	externalStreams    map[string]*conversationStreamSink
 }
 
 // WakeFilter selects member or space wake subscriptions.
@@ -89,6 +87,7 @@ type HarnessChatMessage struct {
 	Text                  string
 	Attachments           []conversation.Attachment
 	AllowSteering         bool
+	SteerOnly             bool
 	Stream                HarnessChatStream
 }
 
@@ -152,7 +151,6 @@ func NewService(params NewServiceParams) (*Service, error) {
 		wakes:             signalhub.NewPayload[WakeFilter, domain.MessageWake](),
 		agentWakeQueue:    make(chan types.AgentMessage, 256),
 		agentDeliveries:   map[member.ID]*agentDeliveryWorker{},
-		externalStreams:   map[string]*conversationStreamSink{},
 	}
 	service.startAgentWakeDispatcher()
 	return service, nil
@@ -162,191 +160,15 @@ func (s *Service) SetProjectRootResolver(resolver ProjectRootResolver) {
 	s.projectRoots = resolver
 }
 
+func (s *Service) SetHarnessChatSender(sender HarnessChatSender) {
+	if s == nil {
+		return
+	}
+	s.harnessChatSender = sender
+}
+
 func (s *Service) SetConversationNotifier(notifier ConversationNotifier) {
 	s.conversationNotify = notifier
-}
-
-type HarnessExternalEvent struct {
-	SpaceID    string
-	ChannelID  string
-	MemberID   string
-	SessionID  string
-	SessionRef string
-	TurnID     string
-	Sequence   int
-	UserText   string
-	Text       string
-	Thinking   string
-	Data       map[string]string
-	Activity   *HarnessActivity
-	Completed  bool
-}
-
-func (s *Service) AppendHarnessExternalEvent(ctx context.Context, event HarnessExternalEvent) error {
-	if s == nil {
-		return fmt.Errorf("message service is required")
-	}
-	if s.conversations == nil {
-		return fmt.Errorf("message conversation repository is required")
-	}
-	if strings.TrimSpace(event.ChannelID) == "" {
-		return fmt.Errorf("channel id is required")
-	}
-	if strings.TrimSpace(event.SpaceID) == "" {
-		return fmt.Errorf("space id is required")
-	}
-	if strings.TrimSpace(event.MemberID) == "" {
-		return fmt.Errorf("member id is required")
-	}
-	if strings.TrimSpace(event.SessionID) == "" {
-		return fmt.Errorf("session id is required")
-	}
-	if strings.TrimSpace(event.TurnID) == "" {
-		return fmt.Errorf("turn id is required")
-	}
-	var stream *conversationStreamSink
-	if strings.TrimSpace(event.UserText) != "" {
-		inbound, err := s.saveExternalInboundConversationMessage(ctx, event)
-		if err != nil {
-			return err
-		}
-		stream = s.externalStreamWithInbound(event, &inbound)
-	}
-	if strings.TrimSpace(event.Text) != "" {
-		if stream == nil {
-			stream = s.externalStream(event)
-		}
-		if err := stream.AppendAssistantDelta(ctx, HarnessAssistantDelta{
-			SessionID: event.SessionID,
-			TurnID:    event.TurnID,
-			Sequence:  event.Sequence,
-			Text:      event.Text,
-		}); err != nil {
-			return err
-		}
-	}
-	if strings.TrimSpace(event.Thinking) != "" {
-		if stream == nil {
-			stream = s.externalStream(event)
-		}
-		if err := stream.AppendThinkingDelta(ctx, HarnessThinkingDelta{
-			SessionID: event.SessionID,
-			TurnID:    event.TurnID,
-			Sequence:  event.Sequence,
-			Text:      event.Thinking,
-			Data:      event.Data,
-		}); err != nil {
-			return err
-		}
-	}
-	if event.Activity != nil {
-		if stream == nil {
-			stream = s.externalStream(event)
-		}
-		activity := *event.Activity
-		activity.SessionID = event.SessionID
-		activity.TurnID = event.TurnID
-		if activity.Sequence <= 0 {
-			activity.Sequence = event.Sequence
-		}
-		if activity.Data == nil {
-			activity.Data = map[string]string{}
-		}
-		activity.Data["origin"] = "external_codex"
-		if strings.TrimSpace(event.SessionRef) != "" {
-			activity.Data["nativeSessionRef"] = strings.TrimSpace(event.SessionRef)
-		}
-		if err := stream.AppendActivity(ctx, activity); err != nil {
-			return err
-		}
-	}
-	if event.Completed {
-		s.externalStreamsMu.Lock()
-		delete(s.externalStreams, externalStreamKey(event.SessionID, event.TurnID))
-		s.externalStreamsMu.Unlock()
-	}
-	return nil
-}
-
-func (s *Service) externalStream(event HarnessExternalEvent) *conversationStreamSink {
-	return s.externalStreamWithInbound(event, nil)
-}
-
-func (s *Service) externalStreamWithInbound(event HarnessExternalEvent, inbound *conversation.Message) *conversationStreamSink {
-	key := externalStreamKey(event.SessionID, event.TurnID)
-	s.externalStreamsMu.Lock()
-	defer s.externalStreamsMu.Unlock()
-	if stream := s.externalStreams[key]; stream != nil {
-		if inbound != nil {
-			stream.inbound = *inbound
-		}
-		return stream
-	}
-	var streamInbound conversation.Message
-	if inbound != nil {
-		streamInbound = *inbound
-	} else {
-		at := s.clock.Now()
-		if event.Sequence > 0 {
-			at = at.Add(-time.Duration(event.Sequence) * time.Millisecond)
-		}
-		streamInbound = conversation.Message{
-			ID:         "external_" + key,
-			ChannelID:  strings.TrimSpace(event.ChannelID),
-			SpaceID:    strings.TrimSpace(event.SpaceID),
-			MemberID:   strings.TrimSpace(event.MemberID),
-			Direction:  conversation.DirectionSystem,
-			SenderType: "external_codex",
-			SenderID:   strings.TrimSpace(event.MemberID),
-			Text:       "External Codex turn",
-			Render:     conversation.RenderVisible,
-			CreatedAt:  at,
-			UpdatedAt:  at,
-		}
-	}
-	stream := s.conversationStream(streamInbound)
-	s.externalStreams[key] = stream
-	return stream
-}
-
-func (s *Service) saveExternalInboundConversationMessage(ctx context.Context, event HarnessExternalEvent) (conversation.Message, error) {
-	at := s.clock.Now()
-	if event.Sequence > 0 {
-		at = at.Add(-time.Duration(event.Sequence) * time.Millisecond)
-	}
-	msg, err := conversation.NewMessage(conversation.MessageParams{
-		ID:         "conversation_" + uuid.NewString(),
-		ChannelID:  strings.TrimSpace(event.ChannelID),
-		SpaceID:    strings.TrimSpace(event.SpaceID),
-		MemberID:   strings.TrimSpace(event.MemberID),
-		SessionID:  strings.TrimSpace(event.SessionID),
-		TurnID:     strings.TrimSpace(event.TurnID),
-		Direction:  conversation.DirectionInbound,
-		SenderType: "external_codex_user",
-		SenderID:   strings.TrimSpace(event.MemberID),
-		Text:       strings.TrimSpace(event.UserText),
-		Delivery:   conversation.DeliveryDelivered,
-		Render:     conversation.RenderVisible,
-		Now:        at,
-	})
-	if err != nil {
-		return conversation.Message{}, err
-	}
-	if err := s.conversations.Save(ctx, msg); err != nil {
-		return conversation.Message{}, fmt.Errorf("persist external inbound conversation message: %w", err)
-	}
-	if err := s.notifyConversationChanged(ctx, msg); err != nil {
-		return conversation.Message{}, err
-	}
-	if err := s.repo.RecordActivity(ctx, types.ChannelID(msg.ChannelID), msg.CreatedAt); err != nil {
-		return conversation.Message{}, fmt.Errorf("record external inbound conversation channel activity: %w", err)
-	}
-	return msg, nil
-}
-
-func externalStreamKey(sessionID, turnID string) string {
-	raw := strings.NewReplacer(" ", "_", "/", "_", ":", "_").Replace(strings.TrimSpace(sessionID) + "_" + strings.TrimSpace(turnID))
-	return raw
 }
 
 func (s *Service) SetTaskStateReader(tasks TaskStateReader) {
@@ -1397,7 +1219,7 @@ func (s *Service) PublishAgentMessage(ctx context.Context, input domain.NewMessa
 			return types.AgentMessage{}, fmt.Errorf("record message channel activity: %w", err)
 		}
 	}
-	if err := s.ensureAgentDelivery(ctx, saved.DestinationMemberID); err != nil {
+	if err := s.ensureAgentDelivery(ctx, saved); err != nil {
 		return types.AgentMessage{}, err
 	}
 	s.scheduleMemberWake(saved)
@@ -1415,17 +1237,28 @@ func (s *Service) PublishAgentMessage(ctx context.Context, input domain.NewMessa
 	return saved, nil
 }
 
-func (s *Service) ensureAgentDelivery(ctx context.Context, memberID member.ID) error {
+func (s *Service) ensureAgentDelivery(ctx context.Context, msg types.AgentMessage) error {
 	if s == nil || !s.autoStartDelivery || s.harnessChatSender == nil || s.conversations == nil {
 		return nil
 	}
+	memberID := msg.DestinationMemberID
 	memberID = trimMemberID(memberID)
 	if memberID == "" {
 		return fmt.Errorf("member id is required")
 	}
-	if err := s.StartAgentDelivery(context.WithoutCancel(ctx), memberID); err != nil {
-		return fmt.Errorf("start message delivery for member %s: %w", memberID, err)
-	}
+	go func() {
+		if _, err := s.deliverAgentMessage(context.WithoutCancel(ctx), msg); err != nil {
+			s.logInfo("agent message direct delivery unavailable",
+				"message_id", msg.ID,
+				"space_id", msg.SpaceID,
+				"destination_member_id", msg.DestinationMemberID,
+				"kind", msg.Kind,
+				"producer", msg.Producer,
+				"correlation_id", msg.CorrelationID,
+				"error", err,
+			)
+		}
+	}()
 	return nil
 }
 

@@ -83,7 +83,7 @@ function MemberRow({
         onClick={() => {
           if (projectId) {
             navigate(
-              `/project/${encodeURIComponent(projectId)}/space/${encodeURIComponent(spaceId)}?tab=inspector`
+              `/project/${encodeURIComponent(projectId)}/space/${encodeURIComponent(spaceId)}`
             )
           }
         }}

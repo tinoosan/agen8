@@ -175,6 +175,49 @@ func TestHandlerUpdateRejectsMissingTaskID(t *testing.T) {
 	}
 }
 
+func TestHandlerCancelCallsTaskService(t *testing.T) {
+	handler, repo, publisher := newHandlerForTest(t, member.ID("member-coordinator"), newHandlerTaskRepo(handlerTask()))
+
+	result, err := handler.Cancel(context.Background(), TaskCancelParams{
+		TaskID: "task-1",
+		Reason: "no longer needed",
+	})
+	if err != nil {
+		t.Fatalf("Cancel returned error: %v", err)
+	}
+	if result.Task.Status != string(domain.TaskStatusCanceled) {
+		t.Fatalf("cancelled status=%q want canceled", result.Task.Status)
+	}
+	if result.Task.Error != "no longer needed" {
+		t.Fatalf("cancelled reason=%q want %q", result.Task.Error, "no longer needed")
+	}
+	stored := repo.tasks["task-1"]
+	if stored.Status != domain.TaskStatusCanceled {
+		t.Fatalf("stored status=%q want canceled", stored.Status)
+	}
+	if len(publisher.messages) != 1 {
+		t.Fatalf("published messages=%d want 1", len(publisher.messages))
+	}
+}
+
+func TestHandlerCancelRejectsMissingTaskID(t *testing.T) {
+	handler, _, _ := newHandlerForTest(t, member.ID("member-coordinator"), newHandlerTaskRepo(handlerTask()))
+
+	_, err := handler.Cancel(context.Background(), TaskCancelParams{Reason: "x"})
+	if err == nil || !strings.Contains(err.Error(), "taskId is required") {
+		t.Fatalf("Cancel error=%v want taskId required", err)
+	}
+}
+
+func TestHandlerCancelRejectsMissingReason(t *testing.T) {
+	handler, _, _ := newHandlerForTest(t, member.ID("member-coordinator"), newHandlerTaskRepo(handlerTask()))
+
+	_, err := handler.Cancel(context.Background(), TaskCancelParams{TaskID: "task-1"})
+	if err == nil || !strings.Contains(err.Error(), "reason is required") {
+		t.Fatalf("Cancel error=%v want reason required", err)
+	}
+}
+
 type handlerTaskRepo struct {
 	tasks           map[string]domain.Task
 	lastListFilter  domain.TaskFilter

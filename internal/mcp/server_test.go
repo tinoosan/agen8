@@ -99,6 +99,43 @@ func TestMCPSessionRefsFallsBackToNestedCodexThreadMetadata(t *testing.T) {
 	}
 }
 
+func TestSessionRefsFromJSONRPCBodyExtractsCodexMetadata(t *testing.T) {
+	sessionID, threadID := SessionRefsFromJSONRPCBody([]byte(`{
+		"jsonrpc": "2.0",
+		"id": "1",
+		"method": "tools/call",
+		"params": {
+			"name": "task",
+			"_meta": {
+				"x-codex-turn-metadata": {
+					"session_id": "session-nested",
+					"thread_id": "thread-nested"
+				}
+			},
+			"arguments": {"action": "list"}
+		}
+	}`))
+	if sessionID != "session-nested" {
+		t.Fatalf("sessionID=%q want session-nested", sessionID)
+	}
+	if threadID != "thread-nested" {
+		t.Fatalf("threadID=%q want thread-nested", threadID)
+	}
+}
+
+func TestSessionRefsFromHTTPHeaderExtractsMCPSessionID(t *testing.T) {
+	header := http.Header{}
+	header.Set("Mcp-Session-Id", "claude-session-1")
+
+	sessionID, threadID := SessionRefsFromHTTPHeader(header)
+	if sessionID != "claude-session-1" {
+		t.Fatalf("sessionID=%q want claude-session-1", sessionID)
+	}
+	if threadID != "" {
+		t.Fatalf("threadID=%q want empty", threadID)
+	}
+}
+
 type stubMCPTaskService struct{}
 
 func (stubMCPTaskService) Create(context.Context, taskapp.CreateTaskParams) (taskdomain.Task, error) {
@@ -263,6 +300,7 @@ func (s stubMCPMemberRegistrar) RemoveMember(ctx context.Context, id member.ID) 
 type stubMCPMessagePublisher struct {
 	publishFn func(context.Context, messagedomain.NewMessageInput) (types.AgentMessage, error)
 	listFn    func(context.Context, messagedomain.MessageFilter) ([]types.AgentMessage, error)
+	wakes     <-chan messagedomain.MessageWake
 }
 
 type stubMCPDecisionService struct{}
@@ -328,6 +366,13 @@ func (s stubMCPMessagePublisher) ListMessages(ctx context.Context, filter messag
 		return s.listFn(ctx, filter)
 	}
 	return nil, nil
+}
+
+func (s stubMCPMessagePublisher) SubscribeMemberWake(member.ID) (<-chan messagedomain.MessageWake, func()) {
+	if s.wakes == nil {
+		return nil, func() {}
+	}
+	return s.wakes, func() {}
 }
 
 func TestTokenStore_RegisterResolveRevoke(t *testing.T) {
@@ -1273,6 +1318,386 @@ func TestServer_ToolsCallReadsNativeMessageInbox(t *testing.T) {
 	}
 }
 
+func TestServer_InitializeAdvertisesInboxResourceSubscriptions(t *testing.T) {
+	store := NewTokenStore()
+	store.Register("token-resource-init", Session{
+		SpaceID:          "space-source",
+		MemberID:         "member-source",
+		MessagePublisher: stubMCPMessagePublisher{},
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-resource-init", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "init-1",
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2025-06-18",
+			"capabilities":    map[string]any{},
+			"clientInfo": map[string]any{
+				"name":    "test-client",
+				"version": "0.0.0",
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
+	}
+	var result struct {
+		Capabilities struct {
+			Resources struct {
+				ListChanged bool `json:"listChanged"`
+				Subscribe   bool `json:"subscribe"`
+			} `json:"resources"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode initialize result: %v", err)
+	}
+	if !result.Capabilities.Resources.ListChanged || !result.Capabilities.Resources.Subscribe {
+		t.Fatalf("resource capabilities=%+v", result.Capabilities.Resources)
+	}
+}
+
+func TestServer_BootstrapInitializeAdvertisesInboxResourceSubscriptions(t *testing.T) {
+	store := NewTokenStore()
+	store.Register("token-resource-bootstrap-init", Session{
+		Bootstrap: true,
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-resource-bootstrap-init", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "bootstrap-init-1",
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2025-06-18",
+			"capabilities":    map[string]any{},
+			"clientInfo": map[string]any{
+				"name":    "test-client",
+				"version": "0.0.0",
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
+	}
+	var result struct {
+		Capabilities struct {
+			Resources struct {
+				ListChanged bool `json:"listChanged"`
+				Subscribe   bool `json:"subscribe"`
+			} `json:"resources"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode initialize result: %v", err)
+	}
+	if !result.Capabilities.Resources.ListChanged || !result.Capabilities.Resources.Subscribe {
+		t.Fatalf("bootstrap resource capabilities=%+v", result.Capabilities.Resources)
+	}
+}
+
+func TestServer_ResourcesListExposesCurrentMemberInbox(t *testing.T) {
+	store := NewTokenStore()
+	store.Register("token-resource-list", Session{
+		SpaceID:          "space-source",
+		MemberID:         "member-source",
+		MessagePublisher: stubMCPMessagePublisher{},
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-resource-list", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "resource-list-1",
+		"method":  "resources/list",
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
+	}
+	var result struct {
+		Resources []struct {
+			URI      string `json:"uri"`
+			Name     string `json:"name"`
+			Title    string `json:"title"`
+			MIMEType string `json:"mimeType"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode resources/list result: %v", err)
+	}
+	if len(result.Resources) != 1 {
+		t.Fatalf("resources=%+v", result.Resources)
+	}
+	got := result.Resources[0]
+	if got.URI != agen8InboxResourceURI || got.Name != "agen8-current-member-inbox" || got.MIMEType != "application/json" {
+		t.Fatalf("resource=%+v", got)
+	}
+}
+
+func TestServer_BootstrapResourcesListExposesCurrentMemberInbox(t *testing.T) {
+	store := NewTokenStore()
+	store.Register("token-resource-bootstrap-list", Session{
+		Bootstrap: true,
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-resource-bootstrap-list", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "bootstrap-resource-list-1",
+		"method":  "resources/list",
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
+	}
+	var result struct {
+		Resources []struct {
+			URI      string `json:"uri"`
+			Name     string `json:"name"`
+			MIMEType string `json:"mimeType"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode resources/list result: %v", err)
+	}
+	if len(result.Resources) != 1 {
+		t.Fatalf("resources=%+v", result.Resources)
+	}
+	got := result.Resources[0]
+	if got.URI != agen8InboxResourceURI || got.Name != "agen8-current-member-inbox" || got.MIMEType != "application/json" {
+		t.Fatalf("resource=%+v", got)
+	}
+}
+
+func TestServer_ResourcesReadReturnsCurrentMemberQueuedInbox(t *testing.T) {
+	store := NewTokenStore()
+	store.Register("token-resource-read", Session{
+		SpaceID:  "space-source",
+		MemberID: "member-source",
+		MessagePublisher: stubMCPMessagePublisher{
+			listFn: func(_ context.Context, filter messagedomain.MessageFilter) ([]types.AgentMessage, error) {
+				if filter.SpaceID != "space-source" || filter.DestinationMemberID != "member-source" {
+					t.Fatalf("filter route=%+v", filter)
+				}
+				if len(filter.Statuses) != 1 || filter.Statuses[0] != types.MessageStatusQueuedTyped {
+					t.Fatalf("filter statuses=%+v", filter.Statuses)
+				}
+				if filter.Limit != 25 {
+					t.Fatalf("filter limit=%d want 25", filter.Limit)
+				}
+				return []types.AgentMessage{{
+					ID:                  "msg-resource-1",
+					SpaceID:             "space-source",
+					DestinationMemberID: "member-source",
+					ChannelID:           "channel:space-source:member:member-source",
+					Kind:                types.AgentMessageKindSystem,
+					Subject:             "Task assigned",
+					Body:                map[string]any{"taskId": "task-resource-1", "nextAction": "claim"},
+					Producer:            "task-service",
+					CorrelationID:       "task:task-resource-1",
+					TaskRef:             "task-resource-1",
+					Status:              types.MessageStatusQueuedTyped,
+					VisibleAt:           fixedMCPTime,
+					CreatedAt:           fixedMCPTime,
+				}}, nil
+			},
+		},
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-resource-read", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "resource-read-1",
+		"method":  "resources/read",
+		"params": map[string]any{
+			"uri": agen8InboxResourceURI,
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
+	}
+	var result struct {
+		Contents []struct {
+			URI      string `json:"uri"`
+			MIMEType string `json:"mimeType"`
+			Text     string `json:"text"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode resources/read result: %v", err)
+	}
+	if len(result.Contents) != 1 || result.Contents[0].URI != agen8InboxResourceURI || result.Contents[0].MIMEType != "application/json" {
+		t.Fatalf("contents=%+v", result.Contents)
+	}
+	var payload struct {
+		Resource string `json:"resource"`
+		SpaceID  string `json:"spaceId"`
+		MemberID string `json:"memberId"`
+		Status   string `json:"status"`
+		Count    int    `json:"count"`
+		Messages []struct {
+			ID        string         `json:"id"`
+			Subject   string         `json:"subject"`
+			TaskRef   string         `json:"taskRef"`
+			Body      map[string]any `json:"body"`
+			Producer  string         `json:"producer"`
+			CreatedAt string         `json:"createdAt"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(result.Contents[0].Text), &payload); err != nil {
+		t.Fatalf("decode inbox payload: %v", err)
+	}
+	if payload.Resource != agen8InboxResourceURI || payload.SpaceID != "space-source" || payload.MemberID != "member-source" || payload.Status != "queued" || payload.Count != 1 {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if payload.Messages[0].ID != "msg-resource-1" || payload.Messages[0].Subject != "Task assigned" || payload.Messages[0].TaskRef != "task-resource-1" {
+		t.Fatalf("message=%+v", payload.Messages[0])
+	}
+	if payload.Messages[0].Body["nextAction"] != "claim" || payload.Messages[0].Producer != "task-service" || strings.TrimSpace(payload.Messages[0].CreatedAt) == "" {
+		t.Fatalf("message details=%+v", payload.Messages[0])
+	}
+}
+
+func TestServer_BootstrapResourcesReadRequiresRegistration(t *testing.T) {
+	store := NewTokenStore()
+	store.Register("token-resource-bootstrap-read", Session{
+		Bootstrap:        true,
+		MessagePublisher: stubMCPMessagePublisher{},
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-resource-bootstrap-read", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "bootstrap-resource-read-1",
+		"method":  "resources/read",
+		"params": map[string]any{
+			"uri": agen8InboxResourceURI,
+		},
+	})
+	if resp.Error == nil {
+		t.Fatal("expected registration error")
+	}
+	if !strings.Contains(resp.Error.Message, "call space.register first") {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+}
+
+func TestServer_ResourcesSubscribeValidatesInboxURI(t *testing.T) {
+	store := NewTokenStore()
+	store.Register("token-resource-subscribe", Session{
+		SpaceID:          "space-source",
+		MemberID:         "member-source",
+		MessagePublisher: stubMCPMessagePublisher{},
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-resource-subscribe", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "resource-subscribe-1",
+		"method":  "resources/subscribe",
+		"params": map[string]any{
+			"uri": agen8InboxResourceURI,
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
+	}
+
+	resp = postMCPRequest(t, server.Handler(), "token-resource-subscribe", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "resource-subscribe-unknown",
+		"method":  "resources/subscribe",
+		"params": map[string]any{
+			"uri": "agen8://unknown",
+		},
+	})
+	if resp.Error == nil {
+		t.Fatal("expected rpc error for unknown resource subscription")
+	}
+	if !strings.Contains(resp.Error.Message, "not found") {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+}
+
+func TestServer_ResourcesSubscribeEmitsInboxUpdateOnMemberWake(t *testing.T) {
+	wakes := make(chan messagedomain.MessageWake, 1)
+	store := NewTokenStore()
+	store.Register("token-resource-update", Session{
+		SpaceID:  "space-source",
+		MemberID: "member-source",
+		MessagePublisher: stubMCPMessagePublisher{
+			wakes: wakes,
+		},
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	updates := make(chan string, 1)
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "agen8-resource-test", Version: "0.0.0"}, &sdkmcp.ClientOptions{
+		ResourceUpdatedHandler: func(_ context.Context, req *sdkmcp.ResourceUpdatedNotificationRequest) {
+			if req == nil || req.Params == nil {
+				updates <- ""
+				return
+			}
+			updates <- strings.TrimSpace(req.Params.URI)
+		},
+	})
+	session, err := client.Connect(ctx, &sdkmcp.StreamableClientTransport{
+		Endpoint: httpServer.URL + "/mcp?token=token-resource-update",
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect client: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	if err := session.Subscribe(ctx, &sdkmcp.SubscribeParams{URI: agen8InboxResourceURI}); err != nil {
+		t.Fatalf("subscribe inbox resource: %v", err)
+	}
+	wakes <- messagedomain.MessageWake{
+		MessageID:           "msg-resource-update-1",
+		SpaceID:             "space-source",
+		DestinationMemberID: "member-source",
+		ChannelID:           "channel:space-source:member:member-source",
+		Kind:                types.AgentMessageKindInform,
+	}
+
+	select {
+	case uri := <-updates:
+		if uri != agen8InboxResourceURI {
+			t.Fatalf("resource update uri=%q want %q", uri, agen8InboxResourceURI)
+		}
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for resource update notification: %v", ctx.Err())
+	}
+}
+
 func TestServer_ToolsCallExecutesNativeHTTPHandler(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -1479,6 +1904,40 @@ func TestExposeTool_RejectsEmptyName(t *testing.T) {
 
 func postMCPRequest(t *testing.T, handler http.Handler, token string, payload map[string]any) testMCPJSONRPCResponse {
 	t.Helper()
+	sessionID := ""
+	if method, _ := payload["method"].(string); method != "initialize" {
+		initResp, initSessionID := postMCPRequestRaw(t, handler, token, "", map[string]any{
+			"jsonrpc": "2.0",
+			"id":      "test-init",
+			"method":  "initialize",
+			"params": map[string]any{
+				"protocolVersion": "2025-06-18",
+				"capabilities":    map[string]any{},
+				"clientInfo": map[string]any{
+					"name":    "agen8-test",
+					"version": "0.0.0",
+				},
+			},
+		})
+		if initResp.Error != nil {
+			return initResp
+		}
+		if strings.TrimSpace(initSessionID) == "" {
+			t.Fatal("initialize response missing Mcp-Session-Id")
+		}
+		sessionID = initSessionID
+		_ = postMCPNotification(t, handler, token, sessionID, map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "notifications/initialized",
+			"params":  map[string]any{},
+		})
+	}
+	resp, _ := postMCPRequestRaw(t, handler, token, sessionID, payload)
+	return resp
+}
+
+func postMCPRequestRaw(t *testing.T, handler http.Handler, token string, sessionID string, payload map[string]any) (testMCPJSONRPCResponse, string) {
+	t.Helper()
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -1486,6 +1945,9 @@ func postMCPRequest(t *testing.T, handler http.Handler, token string, payload ma
 	req := httptest.NewRequest(http.MethodPost, "/mcp?token="+token, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	if strings.TrimSpace(sessionID) != "" {
+		req.Header.Set("Mcp-Session-Id", strings.TrimSpace(sessionID))
+	}
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -1495,7 +1957,27 @@ func postMCPRequest(t *testing.T, handler http.Handler, token string, payload ma
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v (body=%s)", err, rr.Body.String())
 	}
-	return resp
+	return resp, strings.TrimSpace(rr.Header().Get("Mcp-Session-Id"))
+}
+
+func postMCPNotification(t *testing.T, handler http.Handler, token string, sessionID string, payload map[string]any) int {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal notification: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp?token="+token, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if strings.TrimSpace(sessionID) != "" {
+		req.Header.Set("Mcp-Session-Id", strings.TrimSpace(sessionID))
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted && rr.Code != http.StatusOK {
+		t.Fatalf("notification status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	return rr.Code
 }
 
 func anyString(value any) string {

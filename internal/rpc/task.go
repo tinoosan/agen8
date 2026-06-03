@@ -15,6 +15,7 @@ const (
 	MethodTaskGet    = "task.get"
 	MethodTaskList   = "task.list"
 	MethodTaskUpdate = "task.update"
+	MethodTaskCancel = "task.cancel"
 )
 
 func RegisterTask(reg *Registry, taskSvc *taskapp.Service) error {
@@ -34,6 +35,9 @@ func RegisterTask(reg *Registry, taskSvc *taskapp.Service) error {
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodTaskUpdate, false, withTaskCaller(handler.Update))
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodTaskCancel, false, withTaskCaller(handler.Cancel))
 		},
 	)
 }

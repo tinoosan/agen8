@@ -91,6 +91,43 @@ func (r *sqlStore) NextQueuedForMember(ctx context.Context, memberID member.ID, 
 	return msg, nil
 }
 
+func (r *sqlStore) DeferQueued(ctx context.Context, messageID types.AgentMessageID, visibleAt time.Time, updatedAt time.Time) (types.AgentMessage, error) {
+	messageID = types.AgentMessageID(strings.TrimSpace(string(messageID)))
+	if messageID == "" {
+		return types.AgentMessage{}, fmt.Errorf("message id is required")
+	}
+	msg, err := r.Get(ctx, messageID)
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	if msg.Status != types.MessageStatusQueuedTyped {
+		return types.AgentMessage{}, domain.ErrConsumed
+	}
+	msg.VisibleAt = visibleAt.UTC()
+	msg.UpdatedAt = updatedAt.UTC()
+	payload, body, metadata, err := marshalMessage(msg)
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	res, err := r.db.ExecContext(ctx, r.rebind(`
+		UPDATE agent_messages
+		SET visible_at = ?, updated_at = ?, body_json = ?, metadata_json = ?, message_json = ?
+		WHERE message_id = ?
+		  AND status = ?
+	`), formatTime(msg.VisibleAt), formatTime(msg.UpdatedAt), body, metadata, payload, msg.ID, types.MessageStatusQueuedTyped)
+	if err != nil {
+		return types.AgentMessage{}, fmt.Errorf("defer queued message %s: %w", msg.ID, err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	if rows == 0 {
+		return types.AgentMessage{}, domain.ErrConsumed
+	}
+	return r.Get(ctx, msg.ID)
+}
+
 func (r *sqlStore) MarkConsumed(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
 	msg = msg.Normalized()
 	if msg.ID == "" {
