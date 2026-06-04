@@ -21,7 +21,7 @@ const (
 	defaultChannelName         = "agen8-channel"
 	defaultChannelVersion      = "0.0.0"
 	defaultChannelListenAddr   = "127.0.0.1:0"
-	defaultChannelInstructions = "Agen8 coordination events arrive as <channel> messages. Treat task, decision, escalation, and operator-action messages as durable work-context updates for this Claude Code session."
+	defaultChannelInstructions = "Agen8 coordination events arrive as <channel> messages. Treat task, decision, escalation, and operator-action messages as durable work-context updates for this Claude Code session. Reply to Agen8 channel messages with the reply tool on this channel server, passing the destination_member_id, correlation_id, subject, kind, and body for the response."
 )
 
 type ChannelOptions struct {
@@ -55,6 +55,11 @@ type channelRPCRequest struct {
 type channelRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type channelCallToolParams struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
 type channelWriter struct {
@@ -164,7 +169,14 @@ func RunChannel(ctx context.Context, opts ChannelOptions) error {
 		case "initialize":
 			_ = writer.result(req.ID, channelInitializeResult(name, version, instructions, req.Params))
 		case "tools/list":
-			_ = writer.result(req.ID, map[string]any{"tools": []any{}})
+			_ = writer.result(req.ID, map[string]any{"tools": []any{channelReplyToolDefinition()}})
+		case "tools/call":
+			result, err := handleChannelToolCall(ctx, opts.ProjectRoot, req.Params)
+			if err != nil {
+				_ = writer.error(req.ID, -32000, err.Error())
+				continue
+			}
+			_ = writer.result(req.ID, result)
 		default:
 			_ = writer.error(req.ID, -32601, "method not found")
 		}
@@ -183,19 +195,66 @@ func RunChannel(ctx context.Context, opts ChannelOptions) error {
 	return nil
 }
 
+func handleChannelToolCall(ctx context.Context, projectRoot string, rawParams json.RawMessage) (map[string]any, error) {
+	var params channelCallToolParams
+	if len(rawParams) == 0 {
+		return nil, fmt.Errorf("tool call params are required")
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, fmt.Errorf("parse tool call params: %w", err)
+	}
+	if strings.TrimSpace(params.Name) != "reply" {
+		return nil, fmt.Errorf("unknown channel tool %q", params.Name)
+	}
+	binding, err := readClaudeSessionBinding(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	result, err := sendClaudeChannelReply(ctx, binding, params.Arguments)
+	if err != nil {
+		return nil, err
+	}
+	text := "sent"
+	if rawText, ok := result["text"].(string); ok && strings.TrimSpace(rawText) != "" {
+		text = strings.TrimSpace(rawText)
+	}
+	return map[string]any{
+		"content": []map[string]string{{
+			"type": "text",
+			"text": text,
+		}},
+		"structuredContent": result,
+	}, nil
+}
+
 func registerClaudeChannelRoute(ctx context.Context, opts ChannelOptions, notifyURL string) {
 	errOut := opts.ErrOut
-	for attempt := 1; attempt <= 30; attempt++ {
-		if err := registerClaudeChannelRouteOnce(ctx, opts.ProjectRoot, notifyURL); err != nil {
-			logChannel(errOut, "route registration attempt %d failed: %v", attempt, err)
+	var lastRegistered string
+	attempt := 0
+	for {
+		binding, err := readClaudeSessionBinding(opts.ProjectRoot)
+		if err != nil {
+			attempt++
+			if attempt <= 30 || attempt%30 == 0 {
+				logChannel(errOut, "route registration attempt %d failed: %v", attempt, err)
+			}
 		} else {
-			logChannel(errOut, "registered route with Agen8 daemon")
-			return
+			key := binding.Token + "\x00" + binding.MemberID + "\x00" + binding.SessionID
+			if key != lastRegistered {
+				if err := registerClaudeChannelRouteWithBinding(ctx, binding, notifyURL); err != nil {
+					attempt++
+					logChannel(errOut, "route registration attempt %d failed: %v", attempt, err)
+				} else {
+					attempt = 0
+					lastRegistered = key
+					logChannel(errOut, "registered route with Agen8 daemon for member %s", strings.TrimSpace(binding.MemberID))
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Second):
+		case <-time.After(2 * time.Second):
 		}
 	}
 }
@@ -205,6 +264,10 @@ func registerClaudeChannelRouteOnce(ctx context.Context, projectRoot string, not
 	if err != nil {
 		return err
 	}
+	return registerClaudeChannelRouteWithBinding(ctx, binding, notifyURL)
+}
+
+func registerClaudeChannelRouteWithBinding(ctx context.Context, binding claudeSessionBindingFile, notifyURL string) error {
 	if strings.TrimSpace(binding.MCPURL) == "" || strings.TrimSpace(binding.Token) == "" || strings.TrimSpace(binding.SessionID) == "" {
 		return fmt.Errorf("claude session binding is incomplete")
 	}
@@ -242,6 +305,53 @@ func registerClaudeChannelRouteOnce(ctx context.Context, projectRoot string, not
 		return fmt.Errorf("register route status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+func sendClaudeChannelReply(ctx context.Context, binding claudeSessionBindingFile, arguments json.RawMessage) (map[string]any, error) {
+	if strings.TrimSpace(binding.MCPURL) == "" || strings.TrimSpace(binding.Token) == "" || strings.TrimSpace(binding.SessionID) == "" || strings.TrimSpace(binding.MemberID) == "" {
+		return nil, fmt.Errorf("claude session binding is incomplete")
+	}
+	if len(arguments) == 0 {
+		return nil, fmt.Errorf("reply arguments are required")
+	}
+	parsed, err := url.Parse(strings.TrimSpace(binding.MCPURL))
+	if err != nil {
+		return nil, fmt.Errorf("parse mcp url: %w", err)
+	}
+	replyURL := url.URL{
+		Scheme: parsed.Scheme,
+		Host:   parsed.Host,
+		Path:   "/harness/claude-channel/reply",
+	}
+	payload := map[string]any{
+		"token":     binding.Token,
+		"sessionId": binding.SessionID,
+		"memberId":  binding.MemberID,
+		"arguments": json.RawMessage(arguments),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal reply request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, replyURL.String(), bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("build reply request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send reply: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("reply status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse reply response: %w", err)
+	}
+	return result, nil
 }
 
 func readClaudeSessionBinding(projectRoot string) (claudeSessionBindingFile, error) {
@@ -285,12 +395,47 @@ func channelInitializeResult(name string, version string, instructions string, r
 			"experimental": map[string]any{
 				"claude/channel": map[string]any{},
 			},
+			"tools": map[string]any{},
 		},
 		"serverInfo": map[string]any{
 			"name":    name,
 			"version": version,
 		},
 		"instructions": instructions,
+	}
+}
+
+func channelReplyToolDefinition() map[string]any {
+	return map[string]any{
+		"name":        "reply",
+		"description": "Send a reply or acknowledgement back through Agen8 from this Claude Code channel session.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"destination_member_id": map[string]any{
+					"type":        "string",
+					"description": "Agen8 member id to receive the reply.",
+				},
+				"kind": map[string]any{
+					"type":        "string",
+					"enum":        []string{"inform", "query", "ack", "response"},
+					"description": "Message kind.",
+				},
+				"subject": map[string]any{
+					"type":        "string",
+					"description": "Short reply subject.",
+				},
+				"body": map[string]any{
+					"type":        "string",
+					"description": "Reply body.",
+				},
+				"correlation_id": map[string]any{
+					"type":        "string",
+					"description": "Correlation id from the inbound Agen8 channel message when replying or acknowledging.",
+				},
+			},
+			"required": []string{"destination_member_id", "kind", "subject", "body"},
+		},
 	}
 }
 

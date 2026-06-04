@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	mcpmessage "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/message"
 	mcpspace "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/space"
 	"github.com/tinoosan/agen8-mcp-server/internal/rpc"
 	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
@@ -83,6 +84,7 @@ func (d *Daemon) httpHandler() (http.Handler, error) {
 	mux.HandleFunc("POST /rpc", d.handleRPC)
 	mux.HandleFunc("POST /mcp/register", d.handleMCPRegister)
 	mux.HandleFunc("POST /harness/claude-channel/register", d.handleClaudeChannelRegister)
+	mux.HandleFunc("POST /harness/claude-channel/reply", d.handleClaudeChannelReply)
 	if d.mcp == nil {
 		return nil, fmt.Errorf("mcp server is required")
 	}
@@ -202,6 +204,13 @@ type claudeChannelRegisterRequest struct {
 	NotifyURL string `json:"notifyUrl"`
 }
 
+type claudeChannelReplyRequest struct {
+	Token     string          `json:"token"`
+	SessionID string          `json:"sessionId"`
+	MemberID  string          `json:"memberId"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
 func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Request) {
 	var req claudeChannelRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -229,6 +238,67 @@ func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Requ
 		"sessionId":        session.ID,
 		"nativeSessionRef": session.Ref,
 	})
+}
+
+func (d *Daemon) handleClaudeChannelReply(w http.ResponseWriter, r *http.Request) {
+	var req claudeChannelReplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	session, err := d.resolveClaudeChannelSession(r.Context(), claudeChannelRegisterRequest{
+		Token:     req.Token,
+		SessionID: req.SessionID,
+		MemberID:  req.MemberID,
+		NotifyURL: "http://127.0.0.1/notify",
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.SessionID) != "" && strings.TrimSpace(session.Ref) != strings.TrimSpace(req.SessionID) {
+		http.Error(w, "sessionId does not match active claude-cli session", http.StatusBadRequest)
+		return
+	}
+	if len(req.Arguments) == 0 {
+		http.Error(w, "arguments are required", http.StatusBadRequest)
+		return
+	}
+	var args map[string]json.RawMessage
+	if err := json.Unmarshal(req.Arguments, &args); err != nil {
+		http.Error(w, "invalid arguments", http.StatusBadRequest)
+		return
+	}
+	args["action"] = json.RawMessage(`"send"`)
+	normalizedArgs, err := json.Marshal(args)
+	if err != nil {
+		http.Error(w, "marshal arguments", http.StatusInternalServerError)
+		return
+	}
+	result, err := mcpmessage.NewHandler().Handle(r.Context(), mcpmessage.CallContext{
+		Members:       d.app.SpaceSvc,
+		Messages:      d.app.MessageSvc,
+		ProjectID:     strings.TrimSpace(session.ProjectID),
+		SpaceID:       strings.TrimSpace(session.SpaceID),
+		ActorMemberID: strings.TrimSpace(session.MemberID),
+	}, normalizedArgs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	response := map[string]any{
+		"ok":     true,
+		"text":   strings.TrimSpace(result.Text),
+		"result": result.Structured,
+	}
+	if d.logger != nil {
+		d.logger.InfoContext(r.Context(), "claude channel reply published",
+			"member_id", session.MemberID,
+			"session_id", session.ID,
+		)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (d *Daemon) resolveClaudeChannelSession(ctx context.Context, req claudeChannelRegisterRequest) (*harnessdomain.Session, error) {

@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +69,7 @@ func TestRunChannelInitializesClaudeChannelCapabilityAndEmitsNotification(t *tes
 		Result struct {
 			Capabilities struct {
 				Experimental map[string]map[string]any `json:"experimental"`
+				Tools        map[string]any            `json:"tools"`
 			} `json:"capabilities"`
 			Instructions string `json:"instructions"`
 		} `json:"result"`
@@ -75,6 +79,9 @@ func TestRunChannelInitializesClaudeChannelCapabilityAndEmitsNotification(t *tes
 	}
 	if _, ok := initResp.Result.Capabilities.Experimental["claude/channel"]; !ok {
 		t.Fatalf("missing claude/channel capability: %#v", initResp.Result.Capabilities.Experimental)
+	}
+	if initResp.Result.Capabilities.Tools == nil {
+		t.Fatal("missing tools capability")
 	}
 	if !strings.Contains(initResp.Result.Instructions, "Agen8 coordination events") {
 		t.Fatalf("unexpected instructions: %q", initResp.Result.Instructions)
@@ -101,5 +108,128 @@ func TestRunChannelInitializesClaudeChannelCapabilityAndEmitsNotification(t *tes
 	}
 	if notification.Params.Meta["taskId"] != "task-1" || notification.Params.Meta["source"] != "agen8" {
 		t.Fatalf("meta=%#v", notification.Params.Meta)
+	}
+}
+
+func TestHandleChannelToolCallSendsReplyWithSessionBinding(t *testing.T) {
+	root := t.TempDir()
+	received := make(chan map[string]any, 1)
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/harness/claude-channel/reply" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		received <- payload
+		_, _ = w.Write([]byte(`{"ok":true,"text":"sent","result":{"messageId":"msg-1"}}`))
+	}))
+	t.Cleanup(daemon.Close)
+
+	writeBindingForTest(t, root, claudeSessionBindingFile{
+		MCPURL:    daemon.URL + "/mcp?token=token-1",
+		Token:     "token-1",
+		MemberID:  "member-claude",
+		SessionID: "claude-session-1",
+	})
+	result, err := handleChannelToolCall(context.Background(), root, json.RawMessage(`{
+		"name":"reply",
+		"arguments":{
+			"destination_member_id":"member-codex",
+			"kind":"ack",
+			"subject":"Re: UAT",
+			"body":"confirmed",
+			"correlation_id":"corr-1"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("handleChannelToolCall: %v", err)
+	}
+	if result["structuredContent"] == nil {
+		t.Fatalf("missing structured content: %#v", result)
+	}
+	select {
+	case payload := <-received:
+		if payload["token"] != "token-1" || payload["memberId"] != "member-claude" || payload["sessionId"] != "claude-session-1" {
+			t.Fatalf("binding payload=%#v", payload)
+		}
+		args, ok := payload["arguments"].(map[string]any)
+		if !ok {
+			t.Fatalf("arguments=%#v", payload["arguments"])
+		}
+		if args["destination_member_id"] != "member-codex" || args["kind"] != "ack" || args["correlation_id"] != "corr-1" {
+			t.Fatalf("arguments=%#v", args)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for reply request")
+	}
+}
+
+func TestRegisterClaudeChannelRouteReregistersWhenBindingChanges(t *testing.T) {
+	root := t.TempDir()
+	received := make(chan map[string]any, 2)
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/harness/claude-channel/register" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		received <- payload
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(daemon.Close)
+
+	writeBindingForTest(t, root, claudeSessionBindingFile{
+		MCPURL:    daemon.URL + "/mcp?token=token-1",
+		Token:     "token-1",
+		MemberID:  "member-1",
+		SessionID: "session-ref-1",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go registerClaudeChannelRoute(ctx, ChannelOptions{ProjectRoot: root}, "http://127.0.0.1:4555/notify")
+
+	first := waitForChannelRoutePayload(t, received)
+	if first["memberId"] != "member-1" || first["sessionId"] != "session-ref-1" {
+		t.Fatalf("first payload=%#v", first)
+	}
+	writeBindingForTest(t, root, claudeSessionBindingFile{
+		MCPURL:    daemon.URL + "/mcp?token=token-2",
+		Token:     "token-2",
+		MemberID:  "member-2",
+		SessionID: "session-ref-2",
+	})
+	second := waitForChannelRoutePayload(t, received)
+	if second["memberId"] != "member-2" || second["sessionId"] != "session-ref-2" {
+		t.Fatalf("second payload=%#v", second)
+	}
+}
+
+func writeBindingForTest(t *testing.T, root string, binding claudeSessionBindingFile) {
+	t.Helper()
+	data, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".agen8", "claude-session.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitForChannelRoutePayload(t *testing.T, received <-chan map[string]any) map[string]any {
+	t.Helper()
+	select {
+	case payload := <-received:
+		return payload
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for route registration")
+		return nil
 	}
 }
