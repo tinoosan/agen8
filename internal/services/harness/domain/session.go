@@ -24,33 +24,35 @@ const (
 )
 
 type Session struct {
-	ID               string
-	ProjectID        string
-	LocationID       string
-	MemberID         string
-	SpaceID          string
-	ChannelID        string
-	DisplayName      string
-	MemberType       string
-	LifecycleState   string
-	Status           SessionStatus
-	InactiveReason   InactiveReason
-	InactiveError    string
-	ActivatedAt      time.Time
-	DeactivatedAt    *time.Time
-	TokensIn         int64
-	TokensOut        int64
-	Kind             string
-	Model            string
-	Effort           string
-	PermissionMode   string
-	ConfigRef        string
-	Ref              string
-	Workdir          string
-	SystemPrompt     string
-	MCPToken         string
-	MCPServers       []string
-	ClaudeChannelURL string
+	ID                      string
+	ProjectID               string
+	LocationID              string
+	MemberID                string
+	SpaceID                 string
+	ChannelID               string
+	DisplayName             string
+	MemberType              string
+	LifecycleState          string
+	Status                  SessionStatus
+	InactiveReason          InactiveReason
+	InactiveError           string
+	ActivatedAt             time.Time
+	DeactivatedAt           *time.Time
+	TokensIn                int64
+	TokensOut               int64
+	Kind                    string
+	Model                   string
+	Effort                  string
+	PermissionMode          string
+	ConfigRef               string
+	Ref                     string
+	Workdir                 string
+	SystemPrompt            string
+	MCPToken                string
+	MCPServers              []string
+	ClaudeChannelURL        string
+	ClaudeChannelInstanceID string
+	ClaudeChannelStartedAt  *time.Time
 }
 
 type RuntimeContext struct {
@@ -296,10 +298,29 @@ func (s *Session) AddUsage(tokensIn, tokensOut int64) {
 	s.TokensOut += tokensOut
 }
 
-func (s *Session) UpdateClaudeChannelURL(rawURL string) error {
+func (s *Session) UpdateClaudeChannelRoute(rawURL string, instanceID string, startedAt time.Time) error {
 	if s.Status != SessionActive {
 		return fmt.Errorf("cannot update session %q claude channel url: status is %q, not active", s.ID, s.Status)
 	}
+	if rawURL == "" {
+		return fmt.Errorf("claude channel url is required")
+	}
+	if instanceID == "" {
+		return fmt.Errorf("claude channel instance id is required")
+	}
+	if startedAt.IsZero() {
+		return fmt.Errorf("claude channel started at is required")
+	}
+	if s.ClaudeChannelStartedAt != nil && startedAt.Before(*s.ClaudeChannelStartedAt) {
+		return fmt.Errorf("cannot replace newer claude channel instance %q started at %s with older instance %q started at %s", s.ClaudeChannelInstanceID, s.ClaudeChannelStartedAt.UTC().Format(time.RFC3339Nano), instanceID, startedAt.UTC().Format(time.RFC3339Nano))
+	}
 	s.ClaudeChannelURL = rawURL
+	s.ClaudeChannelInstanceID = instanceID
+	started := startedAt.UTC()
+	s.ClaudeChannelStartedAt = &started
 	return nil
+}
+
+func (s *Session) UpdateClaudeChannelURL(rawURL string) error {
+	return s.UpdateClaudeChannelRoute(rawURL, "legacy-"+rawURL, time.Now().UTC())
 }

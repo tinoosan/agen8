@@ -2543,6 +2543,75 @@ func TestClaudeChannelRegisterBindsRouteByMemberID(t *testing.T) {
 	require.Equal(t, "http://127.0.0.1:4567/notify", persisted.ClaudeChannelURL)
 }
 
+func TestClaudeChannelRegisterRejectsOlderRouteInstance(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	err := d.handleSpaceMemberLifecycle(ctx, eventbus.SpaceMemberLifecycleEvent{
+		ProjectID:      "project-1",
+		SpaceID:        "space-1",
+		MemberID:       "member-1",
+		ChannelID:      "channel:space-1:member:member-1",
+		DisplayName:    "Claude One",
+		MemberType:     "worker",
+		EventType:      eventbus.SpaceMemberEventRegistered,
+		LifecycleState: "active",
+		HarnessKind:    "claude-cli",
+		Model:          "claude-opus-4-7",
+		Effort:         "high",
+	})
+	require.NoError(t, err)
+	active, err := d.app.HarnessSvc.GetActiveSession(ctx, "member-1")
+	require.NoError(t, err)
+	require.NotNil(t, active)
+
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	postRegister := func(instanceID string, startedAt time.Time, notifyURL string) *http.Response {
+		t.Helper()
+		body := fmt.Sprintf(`{
+			"token": %q,
+			"sessionId": %q,
+			"memberId": "member-1",
+			"notifyUrl": %q,
+			"channelInstanceId": %q,
+			"channelStartedAt": %q,
+			"processId": 1234
+		}`, active.MCPToken, active.Ref, notifyURL, instanceID, startedAt.UTC().Format(time.RFC3339Nano))
+		resp, err := http.Post(srv.URL+"/harness/claude-channel/register", "application/json", strings.NewReader(body))
+		require.NoError(t, err)
+		return resp
+	}
+
+	currentStarted := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	resp := postRegister("current-instance", currentStarted, "http://127.0.0.1:4567/notify")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	older := postRegister("older-instance", currentStarted.Add(-time.Minute), "http://127.0.0.1:9999/notify")
+	require.Equal(t, http.StatusConflict, older.StatusCode)
+	older.Body.Close()
+	require.Equal(t, "http://127.0.0.1:4567/notify", d.mcpBinding.claudeChannelURL(active.ID))
+	persisted, err := d.app.HarnessSvc.GetSession(ctx, active.ID)
+	require.NoError(t, err)
+	require.Equal(t, "http://127.0.0.1:4567/notify", persisted.ClaudeChannelURL)
+	require.Equal(t, "current-instance", persisted.ClaudeChannelInstanceID)
+
+	newerStarted := currentStarted.Add(time.Minute)
+	newer := postRegister("newer-instance", newerStarted, "http://127.0.0.1:7777/notify")
+	require.Equal(t, http.StatusOK, newer.StatusCode)
+	newer.Body.Close()
+	require.Equal(t, "http://127.0.0.1:7777/notify", d.mcpBinding.claudeChannelURL(active.ID))
+	persisted, err = d.app.HarnessSvc.GetSession(ctx, active.ID)
+	require.NoError(t, err)
+	require.Equal(t, "http://127.0.0.1:7777/notify", persisted.ClaudeChannelURL)
+	require.Equal(t, "newer-instance", persisted.ClaudeChannelInstanceID)
+	require.NotNil(t, persisted.ClaudeChannelStartedAt)
+	require.True(t, persisted.ClaudeChannelStartedAt.Equal(newerStarted))
+}
+
 func TestHTTPStrategyRestoresClaudeChannelRegistrationAfterRestart(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := Config{Listener: ListenerHTTP, HTTPAddr: "127.0.0.1:0"}

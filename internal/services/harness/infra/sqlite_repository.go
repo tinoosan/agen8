@@ -68,7 +68,9 @@ func MigrateSessionSchema(ctx context.Context, db *sql.DB) error {
 			system_prompt  TEXT NOT NULL DEFAULT '',
 			mcp_token      TEXT NOT NULL DEFAULT '',
 			mcp_servers_json TEXT NOT NULL DEFAULT '[]',
-			claude_channel_url TEXT NOT NULL DEFAULT ''
+			claude_channel_url TEXT NOT NULL DEFAULT '',
+			claude_channel_instance_id TEXT NOT NULL DEFAULT '',
+			claude_channel_started_at TEXT
 		)`)
 	if err != nil {
 		return fmt.Errorf("harness session migration: create table: %w", err)
@@ -105,19 +107,21 @@ func ensureSessionColumns(ctx context.Context, db *sql.DB) error {
 		existing[column] = true
 	}
 	additions := map[string]string{
-		"project_id":         "TEXT NOT NULL DEFAULT ''",
-		"location_id":        "TEXT NOT NULL DEFAULT 'local'",
-		"channel_id":         "TEXT NOT NULL DEFAULT ''",
-		"workdir":            "TEXT NOT NULL DEFAULT ''",
-		"display_name":       "TEXT NOT NULL DEFAULT ''",
-		"member_type":        "TEXT NOT NULL DEFAULT ''",
-		"lifecycle_state":    "TEXT NOT NULL DEFAULT ''",
-		"system_prompt":      "TEXT NOT NULL DEFAULT ''",
-		"mcp_token":          "TEXT NOT NULL DEFAULT ''",
-		"mcp_servers_json":   "TEXT NOT NULL DEFAULT '[]'",
-		"claude_channel_url": "TEXT NOT NULL DEFAULT ''",
-		"permission_mode":    "TEXT NOT NULL DEFAULT ''",
-		"config_ref":         "TEXT NOT NULL DEFAULT ''",
+		"project_id":                 "TEXT NOT NULL DEFAULT ''",
+		"location_id":                "TEXT NOT NULL DEFAULT 'local'",
+		"channel_id":                 "TEXT NOT NULL DEFAULT ''",
+		"workdir":                    "TEXT NOT NULL DEFAULT ''",
+		"display_name":               "TEXT NOT NULL DEFAULT ''",
+		"member_type":                "TEXT NOT NULL DEFAULT ''",
+		"lifecycle_state":            "TEXT NOT NULL DEFAULT ''",
+		"system_prompt":              "TEXT NOT NULL DEFAULT ''",
+		"mcp_token":                  "TEXT NOT NULL DEFAULT ''",
+		"mcp_servers_json":           "TEXT NOT NULL DEFAULT '[]'",
+		"claude_channel_url":         "TEXT NOT NULL DEFAULT ''",
+		"claude_channel_instance_id": "TEXT NOT NULL DEFAULT ''",
+		"claude_channel_started_at":  "TEXT",
+		"permission_mode":            "TEXT NOT NULL DEFAULT ''",
+		"config_ref":                 "TEXT NOT NULL DEFAULT ''",
 	}
 	for column, ddl := range additions {
 		if existing[column] {
@@ -149,8 +153,9 @@ func (r *SQLiteSessionRepository) Save(ctx context.Context, session *domain.Sess
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			location_id, channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url,
+			claude_channel_instance_id, claude_channel_started_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (session_id) DO UPDATE SET
 			project_id = excluded.project_id,
 			location_id = excluded.location_id,
@@ -174,7 +179,9 @@ func (r *SQLiteSessionRepository) Save(ctx context.Context, session *domain.Sess
 			system_prompt = excluded.system_prompt,
 			mcp_token = excluded.mcp_token,
 			mcp_servers_json = excluded.mcp_servers_json,
-			claude_channel_url = excluded.claude_channel_url`),
+			claude_channel_url = excluded.claude_channel_url,
+			claude_channel_instance_id = excluded.claude_channel_instance_id,
+			claude_channel_started_at = excluded.claude_channel_started_at`),
 		session.ID,
 		session.ProjectID,
 		session.MemberID,
@@ -202,6 +209,8 @@ func (r *SQLiteSessionRepository) Save(ctx context.Context, session *domain.Sess
 		session.MCPToken,
 		string(mcpServersJSON),
 		session.ClaudeChannelURL,
+		session.ClaudeChannelInstanceID,
+		formatOptionalTime(session.ClaudeChannelStartedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("save harness session %s: %w", session.ID, err)
@@ -216,7 +225,8 @@ func (r *SQLiteSessionRepository) Get(ctx context.Context, sessionRef string) (*
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url,
+			claude_channel_instance_id, claude_channel_started_at
 		FROM harness_sessions WHERE session_id = ?`), sessionRef)
 	return scanSession(row)
 }
@@ -228,7 +238,8 @@ func (r *SQLiteSessionRepository) GetActiveByMember(ctx context.Context, memberI
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url,
+			claude_channel_instance_id, claude_channel_started_at
 		FROM harness_sessions WHERE member_id = ? AND status = 'active'
 		LIMIT 1`), memberID)
 	return scanSession(row)
@@ -241,7 +252,8 @@ func (r *SQLiteSessionRepository) ListActive(ctx context.Context) ([]*domain.Ses
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url,
+			claude_channel_instance_id, claude_channel_started_at
 		FROM harness_sessions WHERE status = 'active'
 		ORDER BY activated_at DESC`))
 	if err != nil {
@@ -267,7 +279,8 @@ func (r *SQLiteSessionRepository) ListByMember(ctx context.Context, memberID str
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url,
+			claude_channel_instance_id, claude_channel_started_at
 		FROM harness_sessions WHERE member_id = ?
 		ORDER BY activated_at DESC`), memberID)
 	if err != nil {
@@ -293,7 +306,8 @@ func (r *SQLiteSessionRepository) ListBySpace(ctx context.Context, spaceID strin
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url,
+			claude_channel_instance_id, claude_channel_started_at
 		FROM harness_sessions WHERE space_id = ?
 		ORDER BY activated_at DESC`), spaceID)
 	if err != nil {
@@ -320,7 +334,7 @@ func scanSession(row *sql.Row) (*domain.Session, error) {
 	var s domain.Session
 	var status, inactiveReason, activatedAtStr string
 	var mcpServersJSON string
-	var deactivatedAtStr *string
+	var deactivatedAtStr, claudeChannelStartedAtStr *string
 	err := row.Scan(
 		&s.ID, &s.MemberID, &s.SpaceID,
 		&status, &inactiveReason, &s.InactiveError,
@@ -330,6 +344,7 @@ func scanSession(row *sql.Row) (*domain.Session, error) {
 		&s.Kind, &s.Model, &s.Effort, &s.PermissionMode, &s.ConfigRef, &s.Ref,
 		&s.ChannelID, &s.Workdir, &s.DisplayName, &s.MemberType, &s.LifecycleState,
 		&s.SystemPrompt, &s.MCPToken, &mcpServersJSON, &s.ClaudeChannelURL,
+		&s.ClaudeChannelInstanceID, &claudeChannelStartedAtStr,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -337,14 +352,14 @@ func scanSession(row *sql.Row) (*domain.Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scan harness session: %w", err)
 	}
-	return hydrateScannedSession(s, status, inactiveReason, activatedAtStr, deactivatedAtStr, mcpServersJSON)
+	return hydrateScannedSession(s, status, inactiveReason, activatedAtStr, deactivatedAtStr, mcpServersJSON, claudeChannelStartedAtStr)
 }
 
 func scanSessionRow(rows *sql.Rows) (*domain.Session, error) {
 	var s domain.Session
 	var status, inactiveReason, activatedAtStr string
 	var mcpServersJSON string
-	var deactivatedAtStr *string
+	var deactivatedAtStr, claudeChannelStartedAtStr *string
 	err := rows.Scan(
 		&s.ID, &s.MemberID, &s.SpaceID,
 		&status, &inactiveReason, &s.InactiveError,
@@ -354,14 +369,15 @@ func scanSessionRow(rows *sql.Rows) (*domain.Session, error) {
 		&s.Kind, &s.Model, &s.Effort, &s.PermissionMode, &s.ConfigRef, &s.Ref,
 		&s.ChannelID, &s.Workdir, &s.DisplayName, &s.MemberType, &s.LifecycleState,
 		&s.SystemPrompt, &s.MCPToken, &mcpServersJSON, &s.ClaudeChannelURL,
+		&s.ClaudeChannelInstanceID, &claudeChannelStartedAtStr,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan harness session row: %w", err)
 	}
-	return hydrateScannedSession(s, status, inactiveReason, activatedAtStr, deactivatedAtStr, mcpServersJSON)
+	return hydrateScannedSession(s, status, inactiveReason, activatedAtStr, deactivatedAtStr, mcpServersJSON, claudeChannelStartedAtStr)
 }
 
-func hydrateScannedSession(s domain.Session, status, inactiveReason, activatedAtStr string, deactivatedAtStr *string, mcpServersJSON string) (*domain.Session, error) {
+func hydrateScannedSession(s domain.Session, status, inactiveReason, activatedAtStr string, deactivatedAtStr *string, mcpServersJSON string, claudeChannelStartedAtStr *string) (*domain.Session, error) {
 	s.Status = domain.SessionStatus(status)
 	s.InactiveReason = domain.InactiveReason(inactiveReason)
 	activatedAt, err := time.Parse(time.RFC3339Nano, activatedAtStr)
@@ -381,6 +397,13 @@ func hydrateScannedSession(s domain.Session, status, inactiveReason, activatedAt
 			return nil, fmt.Errorf("decode harness session mcp servers: %w", err)
 		}
 	}
+	if claudeChannelStartedAtStr != nil && *claudeChannelStartedAtStr != "" {
+		t, err := time.Parse(time.RFC3339Nano, *claudeChannelStartedAtStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse harness session claude_channel_started_at %q: %w", *claudeChannelStartedAtStr, err)
+		}
+		s.ClaudeChannelStartedAt = &t
+	}
 	if s.PermissionMode == "" {
 		switch s.Kind {
 		case "codex":
@@ -390,4 +413,12 @@ func hydrateScannedSession(s domain.Session, status, inactiveReason, activatedAt
 		}
 	}
 	return &s, nil
+}
+
+func formatOptionalTime(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339Nano)
+	return &s
 }

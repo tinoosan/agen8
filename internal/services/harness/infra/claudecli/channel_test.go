@@ -187,7 +187,7 @@ func TestHandleChannelToolCallSendsMessageWithSessionBinding(t *testing.T) {
 	}
 }
 
-func TestRegisterClaudeChannelRouteReregistersWhenBindingChanges(t *testing.T) {
+func TestRegisterClaudeChannelRouteDoesNotFollowBindingChangesAfterSuccess(t *testing.T) {
 	root := t.TempDir()
 	received := make(chan map[string]any, 2)
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -211,11 +211,16 @@ func TestRegisterClaudeChannelRouteReregistersWhenBindingChanges(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go registerClaudeChannelRoute(ctx, ChannelOptions{ProjectRoot: root}, "http://127.0.0.1:4555/notify")
+	startedAt := time.Date(2026, 6, 4, 10, 0, 0, 123, time.UTC)
+	instance := channelRouteInstance{ID: "channel-instance-1", StartedAt: startedAt, ProcessID: 1234}
+	go registerClaudeChannelRoute(ctx, ChannelOptions{ProjectRoot: root}, "http://127.0.0.1:4555/notify", instance)
 
 	first := waitForChannelRoutePayload(t, received)
 	if first["memberId"] != "member-1" || first["sessionId"] != "session-ref-1" {
 		t.Fatalf("first payload=%#v", first)
+	}
+	if first["channelInstanceId"] != "channel-instance-1" || first["channelStartedAt"] != startedAt.Format(time.RFC3339Nano) || first["processId"] != float64(1234) {
+		t.Fatalf("route metadata=%#v", first)
 	}
 	writeBindingForTest(t, root, claudeSessionBindingFile{
 		MCPURL:    daemon.URL + "/mcp?token=token-2",
@@ -223,9 +228,10 @@ func TestRegisterClaudeChannelRouteReregistersWhenBindingChanges(t *testing.T) {
 		MemberID:  "member-2",
 		SessionID: "session-ref-2",
 	})
-	second := waitForChannelRoutePayload(t, received)
-	if second["memberId"] != "member-2" || second["sessionId"] != "session-ref-2" {
-		t.Fatalf("second payload=%#v", second)
+	select {
+	case second := <-received:
+		t.Fatalf("stale channel process followed changed binding: %#v", second)
+	case <-time.After(250 * time.Millisecond):
 	}
 }
 

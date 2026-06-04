@@ -203,10 +203,13 @@ type mcpRegisterResponse struct {
 }
 
 type claudeChannelRegisterRequest struct {
-	Token     string `json:"token"`
-	SessionID string `json:"sessionId"`
-	MemberID  string `json:"memberId"`
-	NotifyURL string `json:"notifyUrl"`
+	Token             string `json:"token"`
+	SessionID         string `json:"sessionId"`
+	MemberID          string `json:"memberId"`
+	NotifyURL         string `json:"notifyUrl"`
+	ChannelInstanceID string `json:"channelInstanceId"`
+	ChannelStartedAt  string `json:"channelStartedAt"`
+	ProcessID         int    `json:"processId"`
 }
 
 type claudeChannelMessageRequest struct {
@@ -271,9 +274,38 @@ func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	persisted, err := d.app.HarnessSvc.RefreshSessionClaudeChannelURL(r.Context(), session.ID, req.NotifyURL)
+	instanceID := strings.TrimSpace(req.ChannelInstanceID)
+	if instanceID == "" {
+		instanceID = fmt.Sprintf("legacy:%s", strings.TrimSpace(req.NotifyURL))
+	}
+	startedAt := time.Now().UTC()
+	if rawStartedAt := strings.TrimSpace(req.ChannelStartedAt); rawStartedAt != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, rawStartedAt)
+		if err != nil {
+			http.Error(w, "channelStartedAt must be RFC3339Nano", http.StatusBadRequest)
+			return
+		}
+		startedAt = parsed.UTC()
+	}
+	persisted, err := d.app.HarnessSvc.RefreshSessionClaudeChannelRoute(r.Context(), session.ID, req.NotifyURL, instanceID, startedAt)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "older instance") {
+			status = http.StatusConflict
+		}
+		if d.logger != nil {
+			d.logger.WarnContext(r.Context(), "claude channel registration rejected",
+				"member_id", session.MemberID,
+				"session_id", session.ID,
+				"native_session_ref", session.Ref,
+				"notify_url", strings.TrimSpace(req.NotifyURL),
+				"channel_instance_id", instanceID,
+				"channel_started_at", startedAt.Format(time.RFC3339Nano),
+				"process_id", req.ProcessID,
+				"error", err,
+			)
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	session = persisted
@@ -285,6 +317,9 @@ func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Requ
 			"session_id", session.ID,
 			"native_session_ref", session.Ref,
 			"notify_url", strings.TrimSpace(req.NotifyURL),
+			"channel_instance_id", instanceID,
+			"channel_started_at", startedAt.Format(time.RFC3339Nano),
+			"process_id", req.ProcessID,
 		)
 	}
 	w.Header().Set("Content-Type", "application/json")

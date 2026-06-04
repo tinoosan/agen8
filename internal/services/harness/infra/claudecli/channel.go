@@ -40,6 +40,12 @@ type ChannelReady struct {
 	NotifyURL string
 }
 
+type channelRouteInstance struct {
+	ID        string
+	StartedAt time.Time
+	ProcessID int
+}
+
 type channelNotificationInput struct {
 	Content string         `json:"content"`
 	Meta    map[string]any `json:"meta,omitempty"`
@@ -94,6 +100,7 @@ func RunChannel(ctx context.Context, opts ChannelOptions) error {
 	}
 
 	writer := &channelWriter{enc: json.NewEncoder(out)}
+	routeInstance := newChannelRouteInstance()
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return fmt.Errorf("start claude channel notify listener: %w", err)
@@ -148,7 +155,7 @@ func RunChannel(ctx context.Context, opts ChannelOptions) error {
 		}
 	}
 	logChannel(opts.ErrOut, "listening for local notifications at %s", notifyURL)
-	go registerClaudeChannelRoute(ctx, opts, notifyURL)
+	go registerClaudeChannelRoute(ctx, opts, notifyURL, routeInstance)
 
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -227,9 +234,8 @@ func handleChannelToolCall(ctx context.Context, projectRoot string, rawParams js
 	}, nil
 }
 
-func registerClaudeChannelRoute(ctx context.Context, opts ChannelOptions, notifyURL string) {
+func registerClaudeChannelRoute(ctx context.Context, opts ChannelOptions, notifyURL string, routeInstance channelRouteInstance) {
 	errOut := opts.ErrOut
-	var lastRegistered string
 	attempt := 0
 	for {
 		binding, err := readClaudeSessionBinding(opts.ProjectRoot)
@@ -239,16 +245,12 @@ func registerClaudeChannelRoute(ctx context.Context, opts ChannelOptions, notify
 				logChannel(errOut, "route registration attempt %d failed: %v", attempt, err)
 			}
 		} else {
-			key := binding.Token + "\x00" + binding.MemberID + "\x00" + binding.SessionID
-			if key != lastRegistered {
-				if err := registerClaudeChannelRouteWithBinding(ctx, binding, notifyURL); err != nil {
-					attempt++
-					logChannel(errOut, "route registration attempt %d failed: %v", attempt, err)
-				} else {
-					attempt = 0
-					lastRegistered = key
-					logChannel(errOut, "registered route with Agen8 daemon for member %s", strings.TrimSpace(binding.MemberID))
-				}
+			if err := registerClaudeChannelRouteWithBinding(ctx, binding, notifyURL, routeInstance); err != nil {
+				attempt++
+				logChannel(errOut, "route registration attempt %d failed: %v", attempt, err)
+			} else {
+				logChannel(errOut, "registered route with Agen8 daemon for member %s using channel instance %s", strings.TrimSpace(binding.MemberID), routeInstance.ID)
+				return
 			}
 		}
 		select {
@@ -264,12 +266,15 @@ func registerClaudeChannelRouteOnce(ctx context.Context, projectRoot string, not
 	if err != nil {
 		return err
 	}
-	return registerClaudeChannelRouteWithBinding(ctx, binding, notifyURL)
+	return registerClaudeChannelRouteWithBinding(ctx, binding, notifyURL, newChannelRouteInstance())
 }
 
-func registerClaudeChannelRouteWithBinding(ctx context.Context, binding claudeSessionBindingFile, notifyURL string) error {
+func registerClaudeChannelRouteWithBinding(ctx context.Context, binding claudeSessionBindingFile, notifyURL string, routeInstance channelRouteInstance) error {
 	if strings.TrimSpace(binding.MCPURL) == "" || strings.TrimSpace(binding.Token) == "" || strings.TrimSpace(binding.SessionID) == "" {
 		return fmt.Errorf("claude session binding is incomplete")
+	}
+	if strings.TrimSpace(routeInstance.ID) == "" || routeInstance.StartedAt.IsZero() {
+		return fmt.Errorf("claude channel route instance is incomplete")
 	}
 	parsed, err := url.Parse(strings.TrimSpace(binding.MCPURL))
 	if err != nil {
@@ -281,10 +286,13 @@ func registerClaudeChannelRouteWithBinding(ctx context.Context, binding claudeSe
 		Path:   "/harness/claude-channel/register",
 	}
 	payload := map[string]any{
-		"token":     binding.Token,
-		"sessionId": binding.SessionID,
-		"memberId":  binding.MemberID,
-		"notifyUrl": notifyURL,
+		"token":             binding.Token,
+		"sessionId":         binding.SessionID,
+		"memberId":          binding.MemberID,
+		"notifyUrl":         notifyURL,
+		"channelInstanceId": routeInstance.ID,
+		"channelStartedAt":  routeInstance.StartedAt.UTC().Format(time.RFC3339Nano),
+		"processId":         routeInstance.ProcessID,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -305,6 +313,16 @@ func registerClaudeChannelRouteWithBinding(ctx context.Context, binding claudeSe
 		return fmt.Errorf("register route status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+func newChannelRouteInstance() channelRouteInstance {
+	startedAt := time.Now().UTC()
+	pid := os.Getpid()
+	return channelRouteInstance{
+		ID:        fmt.Sprintf("pid-%d:%d", pid, startedAt.UnixNano()),
+		StartedAt: startedAt,
+		ProcessID: pid,
+	}
 }
 
 func sendClaudeChannelMessage(ctx context.Context, binding claudeSessionBindingFile, arguments json.RawMessage) (map[string]any, error) {

@@ -1560,13 +1560,24 @@ func (s *Service) RefreshSessionMCPBinding(ctx context.Context, id string, token
 }
 
 func (s *Service) RefreshSessionClaudeChannelURL(ctx context.Context, id string, rawURL string) (*domain.Session, error) {
+	return s.RefreshSessionClaudeChannelRoute(ctx, id, rawURL, "legacy-"+rawURL, time.Now().UTC())
+}
+
+func (s *Service) RefreshSessionClaudeChannelRoute(ctx context.Context, id string, rawURL string, instanceID string, startedAt time.Time) (*domain.Session, error) {
 	id = strings.TrimSpace(id)
 	rawURL = strings.TrimSpace(rawURL)
+	instanceID = strings.TrimSpace(instanceID)
 	if id == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
 	if rawURL == "" {
 		return nil, fmt.Errorf("claude channel url is required")
+	}
+	if instanceID == "" {
+		return nil, fmt.Errorf("claude channel instance id is required")
+	}
+	if startedAt.IsZero() {
+		return nil, fmt.Errorf("claude channel started at is required")
 	}
 	session, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -1578,10 +1589,13 @@ func (s *Service) RefreshSessionClaudeChannelURL(ctx context.Context, id string,
 	if !strings.EqualFold(strings.TrimSpace(session.Kind), "claude-cli") {
 		return nil, fmt.Errorf("harness session %s is %q, not claude-cli", session.ID, session.Kind)
 	}
-	if session.ClaudeChannelURL == rawURL {
+	if session.ClaudeChannelURL == rawURL &&
+		session.ClaudeChannelInstanceID == instanceID &&
+		session.ClaudeChannelStartedAt != nil &&
+		session.ClaudeChannelStartedAt.Equal(startedAt.UTC()) {
 		return session, nil
 	}
-	if err := session.UpdateClaudeChannelURL(rawURL); err != nil {
+	if err := session.UpdateClaudeChannelRoute(rawURL, instanceID, startedAt); err != nil {
 		return nil, err
 	}
 	if err := s.repo.Save(ctx, session); err != nil {
