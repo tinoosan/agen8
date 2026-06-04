@@ -3,6 +3,8 @@ package claudecli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,6 +40,7 @@ type BindResult struct {
 	MemberID         string
 	SpaceID          string
 	SessionID        string
+	LogicalSessionID string
 	NativeSessionRef string
 }
 
@@ -104,6 +107,7 @@ type claudeSessionBindingFile struct {
 	MemberID         string `json:"memberId"`
 	SpaceID          string `json:"spaceId"`
 	SessionID        string `json:"sessionId"`
+	LogicalSessionID string `json:"logicalSessionId,omitempty"`
 	NativeSessionRef string `json:"nativeSessionRef"`
 	UpdatedAt        string `json:"updatedAt"`
 }
@@ -124,13 +128,22 @@ func writeClaudeSessionBinding(input HookInput, result BindResult, rawURL string
 	if err != nil {
 		return fmt.Errorf("parse mcp url: %w", err)
 	}
+	nativeSessionRef := strings.TrimSpace(result.NativeSessionRef)
+	if nativeSessionRef == "" {
+		nativeSessionRef = strings.TrimSpace(input.SessionID)
+	}
+	logicalSessionID := strings.TrimSpace(result.LogicalSessionID)
+	if logicalSessionID == "" {
+		logicalSessionID = strings.TrimSpace(result.SessionID)
+	}
 	binding := claudeSessionBindingFile{
 		MCPURL:           rawURL,
 		Token:            strings.TrimSpace(parsed.Query().Get("token")),
 		MemberID:         strings.TrimSpace(result.MemberID),
 		SpaceID:          strings.TrimSpace(result.SpaceID),
-		SessionID:        strings.TrimSpace(result.SessionID),
-		NativeSessionRef: strings.TrimSpace(result.NativeSessionRef),
+		SessionID:        nativeSessionRef,
+		LogicalSessionID: logicalSessionID,
+		NativeSessionRef: nativeSessionRef,
 		UpdatedAt:        time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	data, err := json.MarshalIndent(binding, "", "  ")
@@ -301,6 +314,8 @@ func (c *mcpHTTPClient) initialized(ctx context.Context, protocolSession string)
 }
 
 func (c *mcpHTTPClient) register(ctx context.Context, protocolSession string, input HookInput) (BindResult, error) {
+	logicalSessionID := stableClaudeLogicalSessionID(input, c.url)
+	nativeSessionRef := strings.TrimSpace(input.SessionID)
 	resp, _, err := c.request(ctx, protocolSession, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      c.id(),
@@ -308,10 +323,11 @@ func (c *mcpHTTPClient) register(ctx context.Context, protocolSession string, in
 		"params": map[string]any{
 			"name": "space",
 			"arguments": map[string]any{
-				"action":       "register",
-				"project_root": strings.TrimSpace(input.CWD),
-				"harness_kind": "claude-cli",
-				"session_id":   strings.TrimSpace(input.SessionID),
+				"action":             "register",
+				"project_root":       strings.TrimSpace(input.CWD),
+				"harness_kind":       "claude-cli",
+				"session_id":         logicalSessionID,
+				"native_session_ref": nativeSessionRef,
 			},
 		},
 	})
@@ -334,12 +350,46 @@ func (c *mcpHTTPClient) register(ctx context.Context, protocolSession string, in
 	if err := json.Unmarshal(resp, &out); err != nil {
 		return BindResult{}, fmt.Errorf("parse register response: %w", err)
 	}
+	resultNativeSessionRef := strings.TrimSpace(out.Result.StructuredContent.NativeSessionRef)
+	if resultNativeSessionRef == "" {
+		resultNativeSessionRef = nativeSessionRef
+	}
 	return BindResult{
 		MemberID:         strings.TrimSpace(out.Result.StructuredContent.MemberID),
 		SpaceID:          strings.TrimSpace(out.Result.StructuredContent.SpaceID),
 		SessionID:        strings.TrimSpace(out.Result.StructuredContent.SessionID),
-		NativeSessionRef: strings.TrimSpace(out.Result.StructuredContent.NativeSessionRef),
+		LogicalSessionID: logicalSessionID,
+		NativeSessionRef: resultNativeSessionRef,
 	}, nil
+}
+
+func stableClaudeLogicalSessionID(input HookInput, rawURL string) string {
+	if existing, err := readClaudeSessionBinding(strings.TrimSpace(input.CWD)); err == nil {
+		if logical := strings.TrimSpace(existing.LogicalSessionID); logical != "" {
+			return logical
+		}
+	}
+	parts := []string{"claude-cli"}
+	if transcript := strings.TrimSpace(input.TranscriptPath); transcript != "" {
+		if abs, err := filepath.Abs(transcript); err == nil {
+			transcript = abs
+		}
+		parts = append(parts, "transcript", transcript)
+	} else {
+		root := strings.TrimSpace(input.CWD)
+		if root != "" {
+			if abs, err := filepath.Abs(root); err == nil {
+				root = abs
+			}
+		}
+		token := ""
+		if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
+			token = strings.TrimSpace(parsed.Query().Get("token"))
+		}
+		parts = append(parts, "project", root, "token", token)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return "claude-logical-" + hex.EncodeToString(sum[:])[:24]
 }
 
 func (c *mcpHTTPClient) request(ctx context.Context, protocolSession string, payload map[string]any) ([]byte, string, error) {

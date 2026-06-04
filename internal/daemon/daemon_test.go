@@ -1038,6 +1038,67 @@ func TestHTTPStrategyBootstrapMCPTokenResolvesClaudeSessionHeader(t *testing.T) 
 	require.GreaterOrEqual(t, memberListRPC.Result.StructuredContent.Count, 1)
 }
 
+func TestHTTPStrategyClaudeRegisterReusesStableLogicalSessionAcrossNativeRefs(t *testing.T) {
+	d := newTestDaemon(t)
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	projectRoot := filepath.Join(t.TempDir(), "agen8-mcp-server")
+	require.NoError(t, os.MkdirAll(projectRoot, 0o755))
+	registerClaude := func(id string, nativeRef string) (memberID string, returnedNativeRef string) {
+		t.Helper()
+		req, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+			"jsonrpc": "2.0",
+			"id": %s,
+			"method": "tools/call",
+			"params": {
+				"name": "space",
+				"arguments": {"action":"register","project_root":%s,"harness_kind":"claude-cli","session_id":"claude-logical-test","native_session_ref":%s}
+			}
+		}`, quoteJSON(id), quoteJSON(projectRoot), quoteJSON(nativeRef)))))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var rpcResp struct {
+			Result struct {
+				StructuredContent struct {
+					MemberID         string `json:"memberId"`
+					SessionID        string `json:"sessionId"`
+					NativeSessionRef string `json:"nativeSessionRef"`
+				} `json:"structuredContent"`
+			} `json:"result"`
+			Error any `json:"error,omitempty"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&rpcResp))
+		require.Nil(t, rpcResp.Error)
+		require.Equal(t, "claude-logical-test", rpcResp.Result.StructuredContent.SessionID)
+		return rpcResp.Result.StructuredContent.MemberID, rpcResp.Result.StructuredContent.NativeSessionRef
+	}
+
+	firstMemberID, firstNativeRef := registerClaude("register-claude-native-1", "claude-native-1")
+	require.NotEmpty(t, firstMemberID)
+	require.Equal(t, "claude-native-1", firstNativeRef)
+	firstActive, err := d.app.HarnessSvc.GetActiveSession(context.Background(), firstMemberID)
+	require.NoError(t, err)
+	require.NotNil(t, firstActive)
+	require.Equal(t, "claude-native-1", firstActive.Ref)
+
+	secondMemberID, secondNativeRef := registerClaude("register-claude-native-2", "claude-native-2")
+	require.Equal(t, firstMemberID, secondMemberID)
+	require.Equal(t, "claude-native-2", secondNativeRef)
+	secondActive, err := d.app.HarnessSvc.GetActiveSession(context.Background(), firstMemberID)
+	require.NoError(t, err)
+	require.NotNil(t, secondActive)
+	require.Equal(t, firstActive.ID, secondActive.ID)
+	require.Equal(t, "claude-native-2", secondActive.Ref)
+}
+
 func TestHTTPStrategyBootstrapMCPTokenRejectsAmbiguousSharedTokenWithoutNativeRef(t *testing.T) {
 	d := newTestDaemon(t)
 	handler, err := d.httpHandler()

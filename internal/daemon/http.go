@@ -169,20 +169,21 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 }
 
 type mcpRegisterRequest struct {
-	ProjectID      string `json:"projectId"`
-	ProjectRoot    string `json:"projectRoot"`
-	LocationID     string `json:"locationId"`
-	SpaceID        string `json:"spaceId"`
-	MemberID       string `json:"memberId"`
-	DisplayName    string `json:"displayName"`
-	MemberType     string `json:"memberType"`
-	HarnessKind    string `json:"harnessKind"`
-	SessionID      string `json:"sessionId"`
-	ThreadID       string `json:"threadId"`
-	Model          string `json:"model"`
-	Effort         string `json:"effort"`
-	PermissionMode string `json:"permissionMode"`
-	ConfigRef      string `json:"configRef"`
+	ProjectID        string `json:"projectId"`
+	ProjectRoot      string `json:"projectRoot"`
+	LocationID       string `json:"locationId"`
+	SpaceID          string `json:"spaceId"`
+	MemberID         string `json:"memberId"`
+	DisplayName      string `json:"displayName"`
+	MemberType       string `json:"memberType"`
+	HarnessKind      string `json:"harnessKind"`
+	SessionID        string `json:"sessionId"`
+	ThreadID         string `json:"threadId"`
+	NativeSessionRef string `json:"nativeSessionRef"`
+	Model            string `json:"model"`
+	Effort           string `json:"effort"`
+	PermissionMode   string `json:"permissionMode"`
+	ConfigRef        string `json:"configRef"`
 }
 
 type mcpRegisterResponse struct {
@@ -429,18 +430,19 @@ func (d *Daemon) registerExternalMCPHarness(ctx context.Context, identity rpc.Id
 func (d *Daemon) RegisterMCPContext(ctx context.Context, req mcpspace.RegisterContextRequest) (mcpspace.RegisterContextResult, error) {
 	userID := d.currentMCPUser(ctx)
 	out, err := d.registerExternalMCPHarnessForUser(ctx, userID, mcpRegisterRequest{
-		ProjectID:      req.ProjectID,
-		ProjectRoot:    req.ProjectRoot,
-		LocationID:     req.LocationID,
-		SpaceID:        req.SpaceID,
-		DisplayName:    req.DisplayName,
-		HarnessKind:    req.HarnessKind,
-		SessionID:      req.SessionID,
-		ThreadID:       req.ThreadID,
-		Model:          req.Model,
-		Effort:         req.Effort,
-		PermissionMode: req.PermissionMode,
-		ConfigRef:      req.ConfigRef,
+		ProjectID:        req.ProjectID,
+		ProjectRoot:      req.ProjectRoot,
+		LocationID:       req.LocationID,
+		SpaceID:          req.SpaceID,
+		DisplayName:      req.DisplayName,
+		HarnessKind:      req.HarnessKind,
+		SessionID:        req.SessionID,
+		ThreadID:         req.ThreadID,
+		NativeSessionRef: req.NativeSessionRef,
+		Model:            req.Model,
+		Effort:           req.Effort,
+		PermissionMode:   req.PermissionMode,
+		ConfigRef:        req.ConfigRef,
 	}, req.Token)
 	if err != nil {
 		return mcpspace.RegisterContextResult{}, err
@@ -500,6 +502,10 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 		return mcpRegisterResponse{}, err
 	}
 	sessionKey := mcpRegisterSessionKey(req)
+	nativeSessionRef := strings.TrimSpace(req.NativeSessionRef)
+	if nativeSessionRef == "" {
+		nativeSessionRef = sessionKey
+	}
 	memberID := strings.TrimSpace(req.MemberID)
 	if memberID == "" && sessionKey == "" {
 		memberID, err = d.resolveExistingMCPRegisterMemberID(callCtx, userID, projectID, string(space.ID), harnessKind)
@@ -557,7 +563,7 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 		Effort:         rosterMember.Effort,
 		PermissionMode: rosterMember.PermissionMode,
 		ConfigRef:      rosterMember.ConfigRef,
-		SessionRef:     sessionKey,
+		SessionRef:     nativeSessionRef,
 		MCPToken:       stableMCPToken,
 	}
 	if active == nil {

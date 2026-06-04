@@ -55,19 +55,20 @@ type ContextRegistrar interface {
 }
 
 type RegisterContextRequest struct {
-	Token          string
-	ProjectID      string
-	ProjectRoot    string
-	LocationID     string
-	SpaceID        string
-	DisplayName    string
-	HarnessKind    string
-	SessionID      string
-	ThreadID       string
-	Model          string
-	Effort         string
-	PermissionMode string
-	ConfigRef      string
+	Token            string
+	ProjectID        string
+	ProjectRoot      string
+	LocationID       string
+	SpaceID          string
+	DisplayName      string
+	HarnessKind      string
+	SessionID        string
+	ThreadID         string
+	NativeSessionRef string
+	Model            string
+	Effort           string
+	PermissionMode   string
+	ConfigRef        string
 }
 
 type RegisterContextResult struct {
@@ -316,28 +317,31 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 	if harnessKind == "" {
 		harnessKind = strings.TrimSpace(call.HarnessKind)
 	}
-	sessionID := strings.TrimSpace(call.SessionID)
+	sessionID := strings.TrimSpace(input.SessionID)
 	if sessionID == "" {
-		sessionID = strings.TrimSpace(input.SessionID)
+		sessionID = strings.TrimSpace(call.SessionID)
 	}
-	threadID := strings.TrimSpace(call.ThreadID)
-	if threadID == "" {
-		threadID = strings.TrimSpace(input.ThreadID)
+	threadID := strings.TrimSpace(input.ThreadID)
+	if callThreadID := strings.TrimSpace(call.ThreadID); callThreadID != "" {
+		threadID = callThreadID
+	} else if threadID == "" {
+		threadID = strings.TrimSpace(call.ThreadID)
 	}
 	result, err := call.ContextRegistrar.RegisterMCPContext(ctx, RegisterContextRequest{
-		Token:          token,
-		ProjectID:      input.ProjectID,
-		ProjectRoot:    input.ProjectRoot,
-		LocationID:     input.LocationID,
-		SpaceID:        input.SpaceID,
-		DisplayName:    input.DisplayName,
-		HarnessKind:    harnessKind,
-		SessionID:      sessionID,
-		ThreadID:       threadID,
-		Model:          input.Model,
-		Effort:         input.Effort,
-		PermissionMode: input.PermissionMode,
-		ConfigRef:      input.ConfigRef,
+		Token:            token,
+		ProjectID:        input.ProjectID,
+		ProjectRoot:      input.ProjectRoot,
+		LocationID:       input.LocationID,
+		SpaceID:          input.SpaceID,
+		DisplayName:      input.DisplayName,
+		HarnessKind:      harnessKind,
+		SessionID:        sessionID,
+		ThreadID:         threadID,
+		NativeSessionRef: input.NativeSessionRef,
+		Model:            input.Model,
+		Effort:           input.Effort,
+		PermissionMode:   input.PermissionMode,
+		ConfigRef:        input.ConfigRef,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("space: register context: %w", err)
@@ -542,21 +546,22 @@ type memberEntry struct {
 }
 
 type request struct {
-	Action         string  `json:"action"`
-	ProjectID      *string `json:"project_id"`
-	ProjectRoot    *string `json:"project_root"`
-	LocationID     *string `json:"location_id"`
-	SpaceID        *string `json:"space_id"`
-	MemberID       *string `json:"member_id"`
-	DisplayName    *string `json:"display_name"`
-	Title          *string `json:"title"`
-	HarnessKind    *string `json:"harness_kind"`
-	SessionID      *string `json:"session_id"`
-	ThreadID       *string `json:"thread_id"`
-	Model          *string `json:"model"`
-	Effort         *string `json:"effort"`
-	PermissionMode *string `json:"permission_mode"`
-	ConfigRef      *string `json:"config_ref"`
+	Action           string  `json:"action"`
+	ProjectID        *string `json:"project_id"`
+	ProjectRoot      *string `json:"project_root"`
+	LocationID       *string `json:"location_id"`
+	SpaceID          *string `json:"space_id"`
+	MemberID         *string `json:"member_id"`
+	DisplayName      *string `json:"display_name"`
+	Title            *string `json:"title"`
+	HarnessKind      *string `json:"harness_kind"`
+	SessionID        *string `json:"session_id"`
+	ThreadID         *string `json:"thread_id"`
+	NativeSessionRef *string `json:"native_session_ref"`
+	Model            *string `json:"model"`
+	Effort           *string `json:"effort"`
+	PermissionMode   *string `json:"permission_mode"`
+	ConfigRef        *string `json:"config_ref"`
 }
 
 func decode(args json.RawMessage) (requestInput, error) {
@@ -580,21 +585,22 @@ func decode(args json.RawMessage) (requestInput, error) {
 		return requestInput{}, fmt.Errorf("space: unsupported action %q", action)
 	}
 	input := requestInput{
-		Action:         action,
-		ProjectID:      strings.TrimSpace(ptrString(raw.ProjectID)),
-		ProjectRoot:    strings.TrimSpace(ptrString(raw.ProjectRoot)),
-		LocationID:     strings.TrimSpace(ptrString(raw.LocationID)),
-		SpaceID:        strings.TrimSpace(ptrString(raw.SpaceID)),
-		MemberID:       strings.TrimSpace(ptrString(raw.MemberID)),
-		DisplayName:    strings.TrimSpace(ptrString(raw.DisplayName)),
-		Title:          strings.TrimSpace(ptrString(raw.Title)),
-		HarnessKind:    strings.TrimSpace(ptrString(raw.HarnessKind)),
-		SessionID:      strings.TrimSpace(ptrString(raw.SessionID)),
-		ThreadID:       strings.TrimSpace(ptrString(raw.ThreadID)),
-		Model:          strings.TrimSpace(ptrString(raw.Model)),
-		Effort:         strings.TrimSpace(ptrString(raw.Effort)),
-		PermissionMode: strings.TrimSpace(ptrString(raw.PermissionMode)),
-		ConfigRef:      strings.TrimSpace(ptrString(raw.ConfigRef)),
+		Action:           action,
+		ProjectID:        strings.TrimSpace(ptrString(raw.ProjectID)),
+		ProjectRoot:      strings.TrimSpace(ptrString(raw.ProjectRoot)),
+		LocationID:       strings.TrimSpace(ptrString(raw.LocationID)),
+		SpaceID:          strings.TrimSpace(ptrString(raw.SpaceID)),
+		MemberID:         strings.TrimSpace(ptrString(raw.MemberID)),
+		DisplayName:      strings.TrimSpace(ptrString(raw.DisplayName)),
+		Title:            strings.TrimSpace(ptrString(raw.Title)),
+		HarnessKind:      strings.TrimSpace(ptrString(raw.HarnessKind)),
+		SessionID:        strings.TrimSpace(ptrString(raw.SessionID)),
+		ThreadID:         strings.TrimSpace(ptrString(raw.ThreadID)),
+		NativeSessionRef: strings.TrimSpace(ptrString(raw.NativeSessionRef)),
+		Model:            strings.TrimSpace(ptrString(raw.Model)),
+		Effort:           strings.TrimSpace(ptrString(raw.Effort)),
+		PermissionMode:   strings.TrimSpace(ptrString(raw.PermissionMode)),
+		ConfigRef:        strings.TrimSpace(ptrString(raw.ConfigRef)),
 	}
 	switch action {
 	case "register":
@@ -670,7 +676,7 @@ func validateActionFields(args json.RawMessage) error {
 }
 
 var fieldsByAction = map[string]map[string]struct{}{
-	"register":             fieldSet("action", "project_id", "project_root", "location_id", "space_id", "display_name", "harness_kind", "session_id", "thread_id", "model", "effort", "permission_mode", "config_ref"),
+	"register":             fieldSet("action", "project_id", "project_root", "location_id", "space_id", "display_name", "harness_kind", "session_id", "thread_id", "native_session_ref", "model", "effort", "permission_mode", "config_ref"),
 	"list":                 fieldSet("action", "project_id"),
 	"create":               fieldSet("action", "project_id", "space_id", "title"),
 	"member_create":        fieldSet("action", "space_id", "display_name", "harness_kind", "model", "effort"),
@@ -693,21 +699,22 @@ func isJSONNull(raw json.RawMessage) bool {
 }
 
 type requestInput struct {
-	Action         string
-	ProjectID      string
-	ProjectRoot    string
-	LocationID     string
-	SpaceID        string
-	MemberID       string
-	DisplayName    string
-	Title          string
-	HarnessKind    string
-	SessionID      string
-	ThreadID       string
-	Model          string
-	Effort         string
-	PermissionMode string
-	ConfigRef      string
+	Action           string
+	ProjectID        string
+	ProjectRoot      string
+	LocationID       string
+	SpaceID          string
+	MemberID         string
+	DisplayName      string
+	Title            string
+	HarnessKind      string
+	SessionID        string
+	ThreadID         string
+	NativeSessionRef string
+	Model            string
+	Effort           string
+	PermissionMode   string
+	ConfigRef        string
 }
 
 func mustSchema(actions []string) json.RawMessage {
@@ -748,6 +755,10 @@ func mustSchema(actions []string) json.RawMessage {
 			"thread_id": map[string]any{
 				"type":        "string",
 				"description": "Optional stable harness thread id for action=register. When supplied, Agen8 creates or reuses a member for that thread.",
+			},
+			"native_session_ref": map[string]any{
+				"type":        "string",
+				"description": "Optional live native harness session reference for action=register when it differs from the stable session_id.",
 			},
 			"model": map[string]any{
 				"type":        "string",

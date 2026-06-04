@@ -145,11 +145,13 @@ func TestMCPHookBinderRegistersClaudeSession(t *testing.T) {
 			}
 			if req.Params.Arguments["action"] != "register" ||
 				req.Params.Arguments["harness_kind"] != "claude-cli" ||
-				req.Params.Arguments["session_id"] != "claude-session-1" {
+				!strings.HasPrefix(req.Params.Arguments["session_id"].(string), "claude-logical-") ||
+				req.Params.Arguments["native_session_ref"] != "claude-session-1" {
 				t.Fatalf("arguments=%#v", req.Params.Arguments)
 			}
+			logicalSessionID := req.Params.Arguments["session_id"].(string)
 			sawRegister = true
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"call","result":{"structuredContent":{"memberId":"member-1","spaceId":"space-1","sessionId":"claude-session-1","nativeSessionRef":"claude-session-1"}}}`))
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"call","result":{"structuredContent":{"memberId":"member-1","spaceId":"space-1","sessionId":` + quoteJSONString(logicalSessionID) + `,"nativeSessionRef":"claude-session-1"}}}`))
 		default:
 			t.Fatalf("unexpected method %q", req.Method)
 		}
@@ -169,4 +171,33 @@ func TestMCPHookBinderRegistersClaudeSession(t *testing.T) {
 	if result.MemberID != "member-1" || result.NativeSessionRef != "claude-session-1" {
 		t.Fatalf("result=%#v", result)
 	}
+	if !strings.HasPrefix(result.LogicalSessionID, "claude-logical-") || result.SessionID != result.LogicalSessionID {
+		t.Fatalf("logical result=%#v", result)
+	}
+}
+
+func TestWriteClaudeSessionBindingStoresNativeAndLogicalRefs(t *testing.T) {
+	root := t.TempDir()
+	err := writeClaudeSessionBinding(HookInput{CWD: root, SessionID: "native-1"}, BindResult{
+		MemberID:         "member-1",
+		SpaceID:          "space-1",
+		SessionID:        "logical-1",
+		LogicalSessionID: "logical-1",
+		NativeSessionRef: "native-1",
+	}, "http://127.0.0.1:7777/mcp?token=abc")
+	if err != nil {
+		t.Fatalf("writeClaudeSessionBinding: %v", err)
+	}
+	binding, err := readClaudeSessionBinding(root)
+	if err != nil {
+		t.Fatalf("read binding: %v", err)
+	}
+	if binding.SessionID != "native-1" || binding.NativeSessionRef != "native-1" || binding.LogicalSessionID != "logical-1" {
+		t.Fatalf("binding=%#v", binding)
+	}
+}
+
+func quoteJSONString(value string) string {
+	raw, _ := json.Marshal(value)
+	return string(raw)
 }

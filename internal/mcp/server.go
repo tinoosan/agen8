@@ -886,15 +886,19 @@ func explicitNativeSessionRefsFromSpaceRegisterArguments(req *mcp.CallToolReques
 		return "", ""
 	}
 	var raw struct {
-		Action    string `json:"action"`
-		SessionID string `json:"session_id"`
-		ThreadID  string `json:"thread_id"`
+		Action           string `json:"action"`
+		SessionID        string `json:"session_id"`
+		ThreadID         string `json:"thread_id"`
+		NativeSessionRef string `json:"native_session_ref"`
 	}
 	if err := json.Unmarshal(req.Params.Arguments, &raw); err != nil {
 		return "", ""
 	}
 	if strings.TrimSpace(raw.Action) != "register" {
 		return "", ""
+	}
+	if nativeSessionRef := strings.TrimSpace(raw.NativeSessionRef); nativeSessionRef != "" {
+		return nativeSessionRef, strings.TrimSpace(raw.ThreadID)
 	}
 	return strings.TrimSpace(raw.SessionID), strings.TrimSpace(raw.ThreadID)
 }
