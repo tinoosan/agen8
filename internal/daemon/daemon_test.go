@@ -1041,6 +1041,37 @@ func TestHTTPStrategyBootstrapMCPTokenRejectsAmbiguousSharedTokenWithoutNativeRe
 	require.NotNil(t, rpcResp.Error)
 	require.Contains(t, rpcResp.Error.Message, "multiple active harness sessions")
 	require.Contains(t, rpcResp.Error.Message, "native session metadata is required")
+
+	registerAgainReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "register-with-protocol-session-after-shared-token",
+		"method": "tools/call",
+		"params": {
+			"name": "space",
+			"arguments": {"action":"register","project_root":%s,"harness_kind":"claude-cli"}
+		}
+	}`, quoteJSON(projectRoot)))))
+	require.NoError(t, err)
+	registerAgainReq.Header.Set("Content-Type", "application/json")
+	registerAgainReq.Header.Set("Accept", "application/json, text/event-stream")
+	registerAgainResp, err := http.DefaultClient.Do(registerAgainReq)
+	require.NoError(t, err)
+	defer registerAgainResp.Body.Close()
+	require.Equal(t, http.StatusOK, registerAgainResp.StatusCode)
+
+	var registerAgainRPC struct {
+		Result struct {
+			StructuredContent struct {
+				MemberID string `json:"memberId"`
+			} `json:"structuredContent"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+		Error any `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(registerAgainResp.Body).Decode(&registerAgainRPC))
+	require.Nil(t, registerAgainRPC.Error)
+	require.False(t, registerAgainRPC.Result.IsError)
+	require.NotEmpty(t, registerAgainRPC.Result.StructuredContent.MemberID)
 }
 
 func TestHTTPStrategyBootstrapMCPTokenRoutesMessageByMCPSessionHeader(t *testing.T) {

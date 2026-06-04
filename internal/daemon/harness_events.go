@@ -287,9 +287,6 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	if strings.TrimSpace(reqCtx.ThreadID) != "" {
 		threadID = reqCtx.ThreadID
 	}
-	explicitNativeRef := mcpHeaderHasExplicitNativeRef(header) ||
-		strings.TrimSpace(reqCtx.SessionID) != "" ||
-		strings.TrimSpace(reqCtx.ThreadID) != ""
 	sessionRef := strings.TrimSpace(threadID)
 	if sessionRef == "" {
 		sessionRef = strings.TrimSpace(sessionID)
@@ -328,16 +325,7 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	}
 	if active == nil {
 		if mcpRequestAllowsBootstrapSession(body) {
-			if explicitNativeRef {
-				return base, nil
-			}
-			active, err = d.resolveUniqueMCPSessionForToken(ctx, token)
-			if err != nil {
-				return mcp.Session{}, err
-			}
-			if active == nil {
-				return base, nil
-			}
+			return base, nil
 		} else {
 			active, err = d.resolveUniqueMCPSessionForToken(ctx, token)
 			if err != nil {
@@ -413,14 +401,6 @@ func mcpRequestAllowsBootstrapSession(body []byte) bool {
 	default:
 		return false
 	}
-}
-
-func mcpHeaderHasExplicitNativeRef(header http.Header) bool {
-	if header == nil {
-		return false
-	}
-	return strings.TrimSpace(header.Get("Agen8-Native-Session-Id")) != "" ||
-		strings.TrimSpace(header.Get("Agen8-Native-Thread-Id")) != ""
 }
 
 func (d *Daemon) resolveBoundMCPSession(ctx context.Context, token string) (*harnessdomain.Session, error) {

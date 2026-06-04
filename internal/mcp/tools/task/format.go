@@ -48,6 +48,43 @@ func (h Handler) taskResult(action string, task taskdomain.Task, err error, extr
 	return Result{Text: text, Structured: structured}, nil
 }
 
+func (h Handler) taskResultForActor(action string, task taskdomain.Task, err error, extra map[string]any, actor actor) (Result, error) {
+	if err != nil {
+		return Result{}, err
+	}
+	nextAction, guidance := taskResponseGuidance(action, task, actor.MemberID)
+	if nextAction != "" || guidance != "" {
+		if extra == nil {
+			extra = map[string]any{}
+		}
+		if nextAction != "" {
+			extra["nextAction"] = nextAction
+		}
+		if guidance != "" {
+			extra["guidance"] = guidance
+		}
+	}
+	return h.taskResult(action, task, nil, extra)
+}
+
+func taskResponseGuidance(action string, task taskdomain.Task, actorID member.ID) (string, string) {
+	actorID = member.ID(strings.TrimSpace(string(actorID)))
+	if actorID == "" {
+		return "", ""
+	}
+	switch action {
+	case "create", "reassign":
+		if task.Status == taskdomain.TaskStatusPending && task.AssignedTo == actorID {
+			return "claim", "Claim the task before starting work. Fetch the task when you need the full description and acceptance criteria."
+		}
+	case "submit":
+		if task.Status == taskdomain.TaskStatusInReview && member.ID(strings.TrimSpace(task.CreatedBy)) == actorID {
+			return "review", "Fetch the task, inspect the submitted work against the acceptance criteria, then approve, retry, or fail the review."
+		}
+	}
+	return "", ""
+}
+
 func (h Handler) listResult(tasks []taskdomain.Task, err error, input requestInput) (Result, error) {
 	if err != nil {
 		return Result{}, err

@@ -853,6 +853,17 @@ func (s *Service) publishTaskMessage(ctx context.Context, kind TaskMessageKind, 
 	if target == "" {
 		return fmt.Errorf("target member id is required")
 	}
+	if actor != "" && actor == target && taskMessageKindUsesInlineResponse(kind) {
+		s.logger.Debug("self task message suppressed",
+			"message_kind", string(kind),
+			"task_id", string(task.ID),
+			"space_id", string(task.SpaceID),
+			"actor_member_id", string(actor),
+			"target_member_id", string(target),
+			"next_action", spec.NextAction,
+		)
+		return nil
+	}
 	body := map[string]any{
 		"event":          string(kind),
 		"taskId":         string(task.ID),
@@ -908,6 +919,15 @@ func (s *Service) publishTaskMessage(ctx context.Context, kind TaskMessageKind, 
 		)
 	}
 	return err
+}
+
+func taskMessageKindUsesInlineResponse(kind TaskMessageKind) bool {
+	switch kind {
+	case TaskMessageAssigned, TaskMessageReviewRequested:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) logTaskTransition(action string, task domain.Task, caller Caller) {

@@ -179,6 +179,23 @@ func TestCreatePublishesAssignedMessage(t *testing.T) {
 	assertTaskMessageDoesNotDuplicateTask(t, msg)
 }
 
+func TestCreateAssignedToSelfDoesNotPublishAssignedMessage(t *testing.T) {
+	publisher := &fakeMessagePublisher{}
+	svc := newServiceForTest(t, member.ID("member-coordinator"), newFakeTaskRepository(), publisher)
+
+	_, err := svc.Create(context.Background(), CreateTaskParams{
+		SpaceID:     spacedomain.SpaceID("space-1"),
+		AssignedTo:  member.ID("member-coordinator"),
+		Description: "write the report",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if len(publisher.messages) != 0 {
+		t.Fatalf("published messages=%d want 0 for self-assignment", len(publisher.messages))
+	}
+}
+
 func TestCreateWithKeyResultRefCreatesContextLinks(t *testing.T) {
 	publisher := &fakeMessagePublisher{}
 	links := &fakeGraphLinkWriter{}
@@ -468,6 +485,25 @@ func TestCompleteUserCreatedTaskDoesNotPublishReviewMessage(t *testing.T) {
 	}
 }
 
+func TestCompleteSelfCreatedTaskDoesNotPublishReviewMessage(t *testing.T) {
+	publisher := &fakeMessagePublisher{}
+	task := activeTask()
+	task.CreatedBy = "member-worker"
+	repo := newFakeTaskRepository(task)
+	svc := newServiceForTest(t, member.ID("member-worker"), repo, publisher)
+
+	_, err := svc.Complete(context.Background(), CompleteTaskParams{
+		TaskID:  domain.TaskID("task-1"),
+		Summary: "done",
+	})
+	if err != nil {
+		t.Fatalf("Complete returned error: %v", err)
+	}
+	if len(publisher.messages) != 0 {
+		t.Fatalf("published messages=%d want 0 for self-review", len(publisher.messages))
+	}
+}
+
 func TestCompletePublishesReviewMessageWithSummaryOnly(t *testing.T) {
 	publisher := &fakeMessagePublisher{}
 	repo := newFakeTaskRepository(activeTask())
@@ -537,6 +573,26 @@ func TestAssignPublishesAssignedMessage(t *testing.T) {
 		t.Fatalf("target=%q want member-other-worker", msg.Route.DestinationMemberID)
 	}
 	assertTaskMessageRouting(t, msg, task.ID, task.SpaceID, member.ID("member-coordinator"), member.ID("member-other-worker"), "claim")
+}
+
+func TestAssignToSelfDoesNotPublishAssignedMessage(t *testing.T) {
+	publisher := &fakeMessagePublisher{}
+	repo := newFakeTaskRepository(activeTask())
+	svc := newServiceForTest(t, member.ID("member-coordinator"), repo, publisher)
+
+	task, err := svc.Assign(context.Background(), AssignTaskParams{
+		TaskID:     domain.TaskID("task-1"),
+		AssignedTo: member.ID("member-coordinator"),
+	})
+	if err != nil {
+		t.Fatalf("Assign returned error: %v", err)
+	}
+	if task.AssignedTo != "member-coordinator" {
+		t.Fatalf("assignedTo=%q want member-coordinator", task.AssignedTo)
+	}
+	if len(publisher.messages) != 0 {
+		t.Fatalf("published messages=%d want 0 for self-reassignment", len(publisher.messages))
+	}
 }
 
 func TestReviewApprovalAndFailureDoNotPublishMessages(t *testing.T) {

@@ -56,7 +56,7 @@ func (s *stubService) Release(ctx context.Context, id taskdomain.TaskID) (taskdo
 
 func (s *stubService) Complete(ctx context.Context, req taskapp.CompleteTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "complete")
-	return taskdomain.Task{ID: req.TaskID, SpaceID: "space-1", AssignedTo: "worker-1", Summary: req.Summary, Status: taskdomain.TaskStatusInReview}, nil
+	return taskdomain.Task{ID: req.TaskID, SpaceID: "space-1", CreatedBy: "coord-1", AssignedTo: "worker-1", Summary: req.Summary, Status: taskdomain.TaskStatusInReview}, nil
 }
 
 func (s *stubService) Block(ctx context.Context, id taskdomain.TaskID, reason string) (taskdomain.Task, error) {
@@ -129,6 +129,33 @@ func TestHandleCreateCallsTaskService(t *testing.T) {
 	}
 }
 
+func TestHandleCreateAssignedToSelfReturnsClaimGuidance(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"coord-1"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	if got := structured["nextAction"]; got != "claim" {
+		t.Fatalf("nextAction=%v want claim", got)
+	}
+	if got := structured["guidance"]; got == "" {
+		t.Fatal("guidance is empty")
+	}
+}
+
+func TestHandleCreateAssignedToWorkerDoesNotReturnClaimGuidance(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	if got := structured["nextAction"]; got != nil {
+		t.Fatalf("nextAction=%v want omitted for worker assignment", got)
+	}
+}
+
 func TestHandleWorkerListScopesToAssignedMember(t *testing.T) {
 	svc := &stubService{}
 	_, err := NewHandler().Handle(context.Background(), callContext(svc, "worker-1"), json.RawMessage(`{"action":"list","limit":10}`))
@@ -140,6 +167,21 @@ func TestHandleWorkerListScopesToAssignedMember(t *testing.T) {
 	}
 	if svc.listReq.AssignedTo != "worker-1" || svc.listReq.SpaceID != "space-1" || svc.listReq.Limit != 10 {
 		t.Fatalf("list req = %+v", svc.listReq)
+	}
+}
+
+func TestHandleSubmitSelfReviewReturnsReviewGuidance(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"submit","task_id":"task-1","summary":"done"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	if got := structured["nextAction"]; got != "review" {
+		t.Fatalf("nextAction=%v want review", got)
+	}
+	if got := structured["guidance"]; got == "" {
+		t.Fatal("guidance is empty")
 	}
 }
 

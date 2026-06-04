@@ -60,7 +60,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			Metadata:           input.Metadata,
 			TaskKind:           input.TaskKind,
 		})
-		return h.taskResult("create", task, err, map[string]any{"assignee": assignee})
+		return h.taskResultForActor("create", task, err, map[string]any{"assignee": assignee}, actor)
 	case "get":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -102,7 +102,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		task, err := call.Tasks.Complete(taskCtx, taskapp.CompleteTaskParams{TaskID: id, Summary: summary, Artifacts: input.Artifacts})
-		return h.taskResult("submit", task, err, nil)
+		return h.taskResultForActor("submit", task, err, nil, actor)
 	case "block":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -131,7 +131,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		task, err := call.Tasks.Assign(taskCtx, taskapp.AssignTaskParams{TaskID: id, AssignedTo: assignee.MemberID})
-		return h.taskResult("reassign", task, err, map[string]any{"assignee": assignee})
+		return h.taskResultForActor("reassign", task, err, map[string]any{"assignee": assignee}, actor)
 	case "cancel":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
