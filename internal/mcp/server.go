@@ -552,6 +552,9 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 					s.bindProtocolSession(conn.token, protocolSessionIDFromHeader(header), resultSessionID, resultThreadID)
 					conn.observe(resultSessionID, resultThreadID)
 				}
+				if err == nil {
+					result = appendPendingAgen8Notifications(ctx, session, native.name, argumentsFromToolRequest(req), result)
+				}
 				return result, err
 			})
 			continue
@@ -737,6 +740,11 @@ type agen8MemberWakeSubscriber interface {
 	SubscribeMemberWake(member.ID) (<-chan messagedomain.MessageWake, func())
 }
 
+type agen8ToolResultNotificationSource interface {
+	ReceiveNextForDelivery(context.Context, member.ID) (types.AgentMessage, error)
+	RecordDelivered(context.Context, types.AgentMessageID, member.ID) (types.AgentMessage, error)
+}
+
 func startAgen8ResourceWatcher(server *mcp.Server, mcpSession *mcp.ServerSession, session Session, uri string) func() {
 	if server == nil || strings.TrimSpace(uri) != agen8InboxResourceURI {
 		return func() {}
@@ -870,6 +878,85 @@ func agen8InboxResourceMessages(messages []types.AgentMessage) []map[string]any 
 			"body":                msg.Body,
 		})
 	}
+	return out
+}
+
+func appendPendingAgen8Notifications(ctx context.Context, session Session, toolName string, arguments json.RawMessage, result *mcp.CallToolResult) *mcp.CallToolResult {
+	if result == nil || result.IsError || strings.TrimSpace(session.MemberID) == "" {
+		return result
+	}
+	if strings.EqualFold(strings.TrimSpace(toolName), messagetool.Name) && strings.EqualFold(mcpToolAction(arguments), "inbox") {
+		return result
+	}
+	source, ok := session.MessagePublisher.(agen8ToolResultNotificationSource)
+	if !ok || source == nil {
+		return result
+	}
+	consumerID := member.ID(strings.TrimSpace(session.MemberID))
+	delivered := make([]types.AgentMessage, 0, 3)
+	for len(delivered) < 3 {
+		next, err := source.ReceiveNextForDelivery(ctx, consumerID)
+		if err != nil {
+			if err == messagedomain.ErrMessageNotFound {
+				break
+			}
+			slog.Info("mcp tool-result notification delivery skipped", "member_id", consumerID, "error", err)
+			break
+		}
+		if next.ID == "" {
+			break
+		}
+		consumed, err := source.RecordDelivered(ctx, next.ID, consumerID)
+		if err != nil {
+			slog.Info("mcp tool-result notification consume failed", "member_id", consumerID, "message_id", next.ID, "error", err)
+			break
+		}
+		delivered = append(delivered, consumed)
+	}
+	if len(delivered) == 0 {
+		return result
+	}
+	notifications := map[string]any{
+		"delivery": "tool_result",
+		"guidance": "Agen8 delivered these queued member notifications with this tool result because the MCP client did not expose a live push/subscribe route for this session. Treat them as addressed to this registered runtime identity.",
+		"count":    len(delivered),
+		"messages": agen8InboxResourceMessages(delivered),
+	}
+	result.StructuredContent = structuredWithAgen8Notifications(result.StructuredContent, notifications)
+	textData, err := json.MarshalIndent(notifications, "", "  ")
+	if err != nil {
+		textData, _ = json.Marshal(notifications)
+	}
+	section := "Agen8 notifications delivered with this tool result:\n" + string(textData)
+	if len(result.Content) == 0 {
+		result.Content = []mcp.Content{&mcp.TextContent{Text: section}}
+		return result
+	}
+	for _, content := range result.Content {
+		if text, ok := content.(*mcp.TextContent); ok {
+			text.Text = strings.TrimSpace(text.Text) + "\n\n" + section
+			return result
+		}
+	}
+	result.Content = append(result.Content, &mcp.TextContent{Text: section})
+	return result
+}
+
+func structuredWithAgen8Notifications(existing any, notifications map[string]any) any {
+	if len(notifications) == 0 {
+		return existing
+	}
+	out := map[string]any{}
+	if existing != nil {
+		raw, err := json.Marshal(existing)
+		if err == nil {
+			_ = json.Unmarshal(raw, &out)
+		}
+	}
+	if len(out) == 0 && existing != nil {
+		out["result"] = existing
+	}
+	out["agen8Notifications"] = notifications
 	return out
 }
 

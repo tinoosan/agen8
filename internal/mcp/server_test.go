@@ -300,6 +300,8 @@ func (s stubMCPMemberRegistrar) RemoveMember(ctx context.Context, id member.ID) 
 type stubMCPMessagePublisher struct {
 	publishFn func(context.Context, messagedomain.NewMessageInput) (types.AgentMessage, error)
 	listFn    func(context.Context, messagedomain.MessageFilter) ([]types.AgentMessage, error)
+	receiveFn func(context.Context, member.ID) (types.AgentMessage, error)
+	recordFn  func(context.Context, types.AgentMessageID, member.ID) (types.AgentMessage, error)
 	wakes     <-chan messagedomain.MessageWake
 }
 
@@ -366,6 +368,20 @@ func (s stubMCPMessagePublisher) ListMessages(ctx context.Context, filter messag
 		return s.listFn(ctx, filter)
 	}
 	return nil, nil
+}
+
+func (s stubMCPMessagePublisher) ReceiveNextForDelivery(ctx context.Context, memberID member.ID) (types.AgentMessage, error) {
+	if s.receiveFn != nil {
+		return s.receiveFn(ctx, memberID)
+	}
+	return types.AgentMessage{}, fmt.Errorf("no queued messages")
+}
+
+func (s stubMCPMessagePublisher) RecordDelivered(ctx context.Context, messageID types.AgentMessageID, consumerID member.ID) (types.AgentMessage, error) {
+	if s.recordFn != nil {
+		return s.recordFn(ctx, messageID, consumerID)
+	}
+	return types.AgentMessage{}, fmt.Errorf("record delivered not configured")
 }
 
 func (s stubMCPMessagePublisher) SubscribeMemberWake(member.ID) (<-chan messagedomain.MessageWake, func()) {
@@ -1315,6 +1331,108 @@ func TestServer_ToolsCallReadsNativeMessageInbox(t *testing.T) {
 	}
 	if strings.TrimSpace(structured.Messages[0].CreatedAt) == "" {
 		t.Fatalf("createdAt missing: %+v", structured.Messages[0])
+	}
+}
+
+func TestServer_ToolsCallAppendsQueuedNotificationsToNormalToolResult(t *testing.T) {
+	queued := types.AgentMessage{
+		ID:                  "msg-notify-1",
+		SpaceID:             "space-source",
+		SourceMemberID:      "member-sender",
+		DestinationMemberID: "member-source",
+		ChannelID:           "channel:space-source:member:member-source",
+		Kind:                types.AgentMessageKindSystem,
+		Subject:             "Task assigned",
+		Body:                map[string]any{"taskId": "task-notify-1", "nextAction": "claim"},
+		Producer:            "task-service",
+		CorrelationID:       "task:task-notify-1",
+		TaskRef:             "task-notify-1",
+		Status:              types.MessageStatusQueuedTyped,
+		VisibleAt:           fixedMCPTime,
+		CreatedAt:           fixedMCPTime,
+	}
+	receiveCalls := 0
+	recorded := false
+	store := NewTokenStore()
+	store.Register("token-notification-piggyback", Session{
+		SpaceID:         "space-source",
+		MemberID:        "member-source",
+		ProjectID:       "project-session",
+		DecisionService: stubMCPDecisionService{},
+		MessagePublisher: stubMCPMessagePublisher{
+			receiveFn: func(_ context.Context, memberID member.ID) (types.AgentMessage, error) {
+				if memberID != "member-source" {
+					t.Fatalf("member id=%q", memberID)
+				}
+				receiveCalls++
+				if receiveCalls > 1 {
+					return types.AgentMessage{}, fmt.Errorf("no queued messages")
+				}
+				return queued, nil
+			},
+			recordFn: func(_ context.Context, messageID types.AgentMessageID, consumerID member.ID) (types.AgentMessage, error) {
+				if messageID != queued.ID || consumerID != "member-source" {
+					t.Fatalf("record delivered message=%q consumer=%q", messageID, consumerID)
+				}
+				recorded = true
+				queued.Status = types.MessageStatusConsumedTyped
+				queued.ConsumedBy = consumerID
+				return queued, nil
+			},
+		},
+	})
+	server, err := NewServer(store)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	resp := postMCPRequest(t, server.Handler(), "token-notification-piggyback", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "decision-log-with-notification",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "decision",
+			"arguments": map[string]any{
+				"action":    "log",
+				"title":     "Continue delivery work",
+				"rationale": "Exercise normal tool notification delivery.",
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
+	}
+	var result testMCPToolCallResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode tools/call result: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success tool result: %+v", result)
+	}
+	if !recorded {
+		t.Fatal("queued notification was not marked consumed")
+	}
+	if len(result.Content) == 0 || !strings.Contains(result.Content[0].Text, "Agen8 notifications delivered with this tool result") {
+		t.Fatalf("missing notification text: %+v", result.Content)
+	}
+	var structured map[string]any
+	if err := json.Unmarshal(result.StructuredContent, &structured); err != nil {
+		t.Fatalf("decode structuredContent: %v", err)
+	}
+	notifications, ok := structured["agen8Notifications"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing agen8Notifications: %+v", structured)
+	}
+	if notifications["delivery"] != "tool_result" || int(notifications["count"].(float64)) != 1 {
+		t.Fatalf("notifications=%+v", notifications)
+	}
+	messages, ok := notifications["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages=%T %+v", notifications["messages"], notifications["messages"])
+	}
+	message, ok := messages[0].(map[string]any)
+	if !ok || message["id"] != string(queued.ID) || message["taskRef"] != string(queued.TaskRef) {
+		t.Fatalf("message=%+v", messages[0])
 	}
 }
 
