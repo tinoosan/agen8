@@ -1,15 +1,32 @@
 {
   "mcpServers": {
     "agen8": {
-      "type": "http",
-      "url": "http://127.0.0.1:7777/mcp?token=agen8-local"
+      "args": [
+        "mcp",
+        "bridge",
+        "--mcp-url",
+        "http://127.0.0.1:7777/mcp?token=agen8-local"
+      ],
+      "command": "/Users/santinoonyeme/personal/dev/Projects/agen8-mcp-server/tmp/agen8-mcp-server",
+      "env": {
+        "AGEN8_BRIDGE_PROJECT_ROOT": "/Users/santinoonyeme/personal/dev/Projects/agen8-mcp-server",
+        "AGEN8_MCP_URL": "http://127.0.0.1:7777/mcp?token=agen8-local"
+      },
+      "type": "stdio"
+    },
+    "agen8-channel": {
+      "args": [
+        "claude",
+        "channel"
+      ],
+      "command": "/Users/santinoonyeme/personal/dev/Projects/agen8-mcp-server/tmp/agen8-mcp-server"
     },
     "shadcn": {
-      "command": "npx",
       "args": [
         "shadcn@latest",
         "mcp"
-      ]
+      ],
+      "command": "npx"
     }
   }
 }

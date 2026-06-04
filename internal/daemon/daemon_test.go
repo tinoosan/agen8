@@ -1166,6 +1166,95 @@ func TestHTTPStrategyBootstrapMCPTokenResolvesClaudeSessionHeader(t *testing.T) 
 	require.GreaterOrEqual(t, memberListRPC.Result.StructuredContent.Count, 1)
 }
 
+func TestHTTPStrategyBootstrapMCPTokenRoutesMultipleClaudeNativeSessions(t *testing.T) {
+	d := newTestDaemon(t)
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	projectRoot := filepath.Join(t.TempDir(), "agen8-mcp-server")
+	require.NoError(t, os.MkdirAll(projectRoot, 0o755))
+
+	registerClaude := func(id string, nativeSessionID string) string {
+		t.Helper()
+		req, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+			"jsonrpc": "2.0",
+			"id": %s,
+			"method": "tools/call",
+			"params": {
+				"name": "space",
+				"arguments": {"action":"register","project_root":%s,"harness_kind":"claude-cli"}
+			}
+		}`, quoteJSON(id), quoteJSON(projectRoot)))))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Agen8-Native-Session-Id", nativeSessionID)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var rpcResp struct {
+			Result struct {
+				StructuredContent struct {
+					MemberID         string `json:"memberId"`
+					NativeSessionRef string `json:"nativeSessionRef"`
+				} `json:"structuredContent"`
+			} `json:"result"`
+			Error any `json:"error,omitempty"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&rpcResp))
+		require.Nil(t, rpcResp.Error)
+		require.Equal(t, nativeSessionID, rpcResp.Result.StructuredContent.NativeSessionRef)
+		require.NotEmpty(t, rpcResp.Result.StructuredContent.MemberID)
+		return rpcResp.Result.StructuredContent.MemberID
+	}
+
+	claudeAMemberID := registerClaude("register-claude-a", "claude-native-session-a")
+	claudeBMemberID := registerClaude("register-claude-b", "claude-native-session-b")
+	require.NotEqual(t, claudeAMemberID, claudeBMemberID)
+
+	sendMessage := func(id string, nativeSessionID string, destinationMemberID string) string {
+		t.Helper()
+		req, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+			"jsonrpc": "2.0",
+			"id": %s,
+			"method": "tools/call",
+			"params": {
+				"name": "message",
+				"arguments": {"action":"send","destination_member_id":%s,"kind":"inform","subject":"native routing","body":"route check"}
+			}
+		}`, quoteJSON(id), quoteJSON(destinationMemberID)))))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Agen8-Native-Session-Id", nativeSessionID)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var rpcResp struct {
+			Result struct {
+				IsError           bool `json:"isError"`
+				StructuredContent struct {
+					SourceMemberID string `json:"sourceMemberId"`
+				} `json:"structuredContent"`
+			} `json:"result"`
+			Error any `json:"error,omitempty"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&rpcResp))
+		require.Nil(t, rpcResp.Error)
+		require.False(t, rpcResp.Result.IsError)
+		return rpcResp.Result.StructuredContent.SourceMemberID
+	}
+
+	require.Equal(t, claudeAMemberID, sendMessage("claude-a-to-b", "claude-native-session-a", claudeBMemberID))
+	require.Equal(t, claudeBMemberID, sendMessage("claude-b-to-a", "claude-native-session-b", claudeAMemberID))
+}
+
 func TestHTTPStrategyClaudeRegisterReusesStableLogicalSessionAcrossNativeRefs(t *testing.T) {
 	d := newTestDaemon(t)
 	handler, err := d.httpHandler()
@@ -1495,7 +1584,7 @@ func TestHTTPStrategyClaudeProtocolSessionRebindsWhenMCPIDChanges(t *testing.T) 
 	require.GreaterOrEqual(t, afterRPC.Result.StructuredContent.Count, 1)
 }
 
-func TestHTTPStrategyClaudeChannelBoundRegisterWinsOverSharedToken(t *testing.T) {
+func TestHTTPStrategyClaudeChannelBoundRegisterDoesNotWinOverSharedToken(t *testing.T) {
 	d := newTestDaemon(t)
 	handler, err := d.httpHandler()
 	require.NoError(t, err)
@@ -1635,9 +1724,8 @@ func TestHTTPStrategyClaudeChannelBoundRegisterWinsOverSharedToken(t *testing.T)
 	}
 	require.Nil(t, bareRPC.Error)
 	require.False(t, bareRPC.Result.IsError)
-	require.Equal(t, claudeMemberID, bareRPC.Result.StructuredContent.MemberID)
-	require.Equal(t, "claude-channel-bound-native", bareRPC.Result.StructuredContent.NativeSessionRef)
-	require.NotEqual(t, codexRPC.Result.StructuredContent.MemberID, bareRPC.Result.StructuredContent.MemberID)
+	require.NotEqual(t, claudeMemberID, bareRPC.Result.StructuredContent.MemberID)
+	require.NotEqual(t, "claude-channel-bound-native", bareRPC.Result.StructuredContent.NativeSessionRef)
 }
 
 func TestHTTPStrategyBootstrapMCPTokenRoutesMessageByMCPSessionHeader(t *testing.T) {
@@ -2751,7 +2839,7 @@ func TestHTTPStrategyRestoresClaudeChannelRegistrationAfterRestart(t *testing.T)
 	require.Equal(t, restored.ID, restarted.mcpBinding.sessionID(restored.MCPToken))
 }
 
-func TestHTTPStrategyStaleMCPProtocolSessionAfterRestartUsesPersistedClaudeChannelBinding(t *testing.T) {
+func TestHTTPStrategyStaleMCPProtocolSessionAfterRestartDoesNotUsePersistedClaudeChannelBinding(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := Config{Listener: ListenerHTTP, HTTPAddr: "127.0.0.1:0"}
 	first := newTestDaemonWithDataDir(t, cfg, dataDir)
@@ -2850,11 +2938,11 @@ func TestHTTPStrategyStaleMCPProtocolSessionAfterRestartUsesPersistedClaudeChann
 	}
 	require.Nil(t, rpcResp.Error)
 	require.False(t, rpcResp.Result.IsError, string(body))
-	require.Equal(t, claudeMemberID, rpcResp.Result.StructuredContent.MemberID)
-	require.Equal(t, "claude-native-stale-protocol", rpcResp.Result.StructuredContent.NativeSessionRef)
+	require.NotEqual(t, claudeMemberID, rpcResp.Result.StructuredContent.MemberID)
+	require.NotEqual(t, "claude-native-stale-protocol", rpcResp.Result.StructuredContent.NativeSessionRef)
 }
 
-func TestClaudeChannelRegisterBindsSharedTokenForMemberScopedMCPTools(t *testing.T) {
+func TestClaudeBridgeHeaderScopesSharedTokenForMemberScopedMCPTools(t *testing.T) {
 	d := newTestDaemon(t)
 	handler, err := d.httpHandler()
 	require.NoError(t, err)
@@ -2922,6 +3010,38 @@ func TestClaudeChannelRegisterBindsSharedTokenForMemberScopedMCPTools(t *testing
 	require.NotEmpty(t, claudeMemberID)
 	require.NotEqual(t, codexMemberID, claudeMemberID)
 
+	registerSiblingClaudeReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "register-sibling-claude",
+		"method": "tools/call",
+		"params": {
+			"name": "space",
+			"arguments": {"action":"register","project_root":%s,"harness_kind":"claude-cli","session_id":"claude-logical-sibling","native_session_ref":"claude-native-sibling"}
+		}
+	}`, quoteJSON(projectRoot)))))
+	require.NoError(t, err)
+	registerSiblingClaudeReq.Header.Set("Content-Type", "application/json")
+	registerSiblingClaudeReq.Header.Set("Accept", "application/json, text/event-stream")
+	registerSiblingClaudeReq.Header.Set("Agen8-Native-Session-Id", "claude-native-sibling")
+	registerSiblingClaudeResp, err := http.DefaultClient.Do(registerSiblingClaudeReq)
+	require.NoError(t, err)
+	defer registerSiblingClaudeResp.Body.Close()
+	require.Equal(t, http.StatusOK, registerSiblingClaudeResp.StatusCode)
+
+	var siblingClaudeRPC struct {
+		Result struct {
+			StructuredContent struct {
+				MemberID string `json:"memberId"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+		Error any `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(registerSiblingClaudeResp.Body).Decode(&siblingClaudeRPC))
+	require.Nil(t, siblingClaudeRPC.Error)
+	siblingClaudeMemberID := strings.TrimSpace(siblingClaudeRPC.Result.StructuredContent.MemberID)
+	require.NotEmpty(t, siblingClaudeMemberID)
+	require.NotEqual(t, claudeMemberID, siblingClaudeMemberID)
+
 	channelRegisterBody := fmt.Sprintf(`{
 		"token": "agen8-local",
 		"sessionId": "claude-native-shared",
@@ -2945,6 +3065,7 @@ func TestClaudeChannelRegisterBindsSharedTokenForMemberScopedMCPTools(t *testing
 	require.NoError(t, err)
 	messageReq.Header.Set("Content-Type", "application/json")
 	messageReq.Header.Set("Accept", "application/json, text/event-stream")
+	messageReq.Header.Set("Agen8-Native-Session-Id", "claude-native-shared")
 	messageResp, err := http.DefaultClient.Do(messageReq)
 	require.NoError(t, err)
 	defer messageResp.Body.Close()
@@ -2968,6 +3089,32 @@ func TestClaudeChannelRegisterBindsSharedTokenForMemberScopedMCPTools(t *testing
 	require.False(t, messageRPC.Result.IsError, "message send returned error content: %+v", messageRPC.Result.Content)
 	require.Equal(t, claudeMemberID, messageRPC.Result.StructuredContent.SourceMemberID)
 	require.Equal(t, codexMemberID, messageRPC.Result.StructuredContent.DestinationMemberID)
+
+	withoutHeaderReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "claude-message-without-native-ref",
+		"method": "tools/call",
+		"params": {
+			"name": "message",
+			"arguments": {"action":"send","destination_member_id":%s,"kind":"inform","subject":"missing native header","body":"must not borrow channel binding"}
+		}
+	}`, quoteJSON(codexMemberID)))))
+	require.NoError(t, err)
+	withoutHeaderReq.Header.Set("Content-Type", "application/json")
+	withoutHeaderReq.Header.Set("Accept", "application/json, text/event-stream")
+	withoutHeaderResp, err := http.DefaultClient.Do(withoutHeaderReq)
+	require.NoError(t, err)
+	defer withoutHeaderResp.Body.Close()
+	require.Equal(t, http.StatusOK, withoutHeaderResp.StatusCode)
+
+	var withoutHeaderRPC struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(withoutHeaderResp.Body).Decode(&withoutHeaderRPC))
+	require.NotNil(t, withoutHeaderRPC.Error)
+	require.Contains(t, withoutHeaderRPC.Error.Message, "native session metadata is required")
 }
 
 func TestHarnessSpaceMemberLifecycleHandlerReplacesSessionForHarnessKindChanges(t *testing.T) {

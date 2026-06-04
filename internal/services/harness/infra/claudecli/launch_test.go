@@ -71,7 +71,15 @@ func TestLaunchRemoteControlStartsClaudeWithDevelopmentChannel(t *testing.T) {
 	if result.SpaceID != "space-selected" {
 		t.Fatalf("space id=%q", result.SpaceID)
 	}
-	spaceRaw, err := os.ReadFile(filepath.Join(root, "space.txt"))
+	var spaceRaw []byte
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		spaceRaw, err = os.ReadFile(filepath.Join(root, "space.txt"))
+		if err == nil && strings.TrimSpace(string(spaceRaw)) != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if err != nil {
 		t.Fatalf("read space env: %v", err)
 	}

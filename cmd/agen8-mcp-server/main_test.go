@@ -80,6 +80,30 @@ func TestMCPStdioRunsStdioTransport(t *testing.T) {
 	require.True(t, called)
 }
 
+func TestMCPBridgeRunsHTTPBridge(t *testing.T) {
+	var capturedURL string
+	var capturedSessionID string
+	var capturedProjectRoot string
+	var capturedEphemeral bool
+	original := runMCPHTTPBridge
+	runMCPHTTPBridge = func(_ context.Context, rawURL string, nativeSessionID string, projectRoot string, ephemeral bool) error {
+		capturedURL = rawURL
+		capturedSessionID = nativeSessionID
+		capturedProjectRoot = projectRoot
+		capturedEphemeral = ephemeral
+		return nil
+	}
+	t.Cleanup(func() { runMCPHTTPBridge = original })
+
+	cmd := newRootCommand()
+	cmd.SetArgs([]string{"mcp", "bridge", "--mcp-url", "http://127.0.0.1:7777/mcp?token=abc", "--native-session-id", "session-1", "--project-root", "/repo", "--ephemeral"})
+	require.NoError(t, cmd.Execute())
+	require.Equal(t, "http://127.0.0.1:7777/mcp?token=abc", capturedURL)
+	require.Equal(t, "session-1", capturedSessionID)
+	require.Equal(t, "/repo", capturedProjectRoot)
+	require.True(t, capturedEphemeral)
+}
+
 func TestClaudeSetupPassesOptions(t *testing.T) {
 	var captured claudecli.SetupOptions
 	original := runClaudeSetup
@@ -104,6 +128,9 @@ func TestClaudeSetupPassesOptions(t *testing.T) {
 		"claude", "setup",
 		"--project-root", "/repo",
 		"--mcp-url", "http://127.0.0.1:7777/mcp?token=abc",
+		"--mcp-command", "/bin/agen8-mcp",
+		"--mcp-arg", "mcp",
+		"--mcp-arg", "bridge",
 		"--hook-command", "/bin/agen8",
 		"--hook-arg", "claude",
 		"--hook-arg", "hook",
@@ -114,6 +141,8 @@ func TestClaudeSetupPassesOptions(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 	require.Equal(t, "/repo", captured.ProjectRoot)
 	require.Equal(t, "http://127.0.0.1:7777/mcp?token=abc", captured.MCPURL)
+	require.Equal(t, "/bin/agen8-mcp", captured.MCPCommand)
+	require.Equal(t, []string{"mcp", "bridge"}, captured.MCPArgs)
 	require.Equal(t, "/bin/agen8", captured.HookCommand)
 	require.Equal(t, []string{"claude", "hook"}, captured.HookArgs)
 	require.Equal(t, "/bin/agen8-channel", captured.ChannelCommand)

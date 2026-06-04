@@ -240,8 +240,10 @@ func discoverAgen8MCPURL(input HookInput) (string, error) {
 func agen8URLFromMCPConfig(raw []byte) (string, bool) {
 	var cfg struct {
 		MCPServers map[string]struct {
-			Type string `json:"type"`
-			URL  string `json:"url"`
+			Type string            `json:"type"`
+			URL  string            `json:"url"`
+			Args []string          `json:"args"`
+			Env  map[string]string `json:"env"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
@@ -250,6 +252,16 @@ func agen8URLFromMCPConfig(raw []byte) (string, bool) {
 	if server, ok := cfg.MCPServers["agen8"]; ok {
 		if rawURL := strings.TrimSpace(server.URL); rawURL != "" {
 			return rawURL, true
+		}
+		if rawURL := strings.TrimSpace(server.Env["AGEN8_MCP_URL"]); rawURL != "" {
+			return rawURL, true
+		}
+		for i, arg := range server.Args {
+			if strings.TrimSpace(arg) == "--mcp-url" && i+1 < len(server.Args) {
+				if rawURL := strings.TrimSpace(server.Args[i+1]); rawURL != "" {
+					return rawURL, true
+				}
+			}
 		}
 	}
 	for _, server := range cfg.MCPServers {

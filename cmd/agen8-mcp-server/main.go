@@ -50,6 +50,15 @@ var runMCPStdio = func(ctx context.Context) error {
 	return agen8mcp.RunStdio(ctx, session)
 }
 
+var runMCPHTTPBridge = func(ctx context.Context, rawURL string, nativeSessionID string, projectRoot string, ephemeral bool) error {
+	return agen8mcp.RunHTTPBridge(ctx, agen8mcp.HTTPBridgeOptions{
+		MCPURL:          rawURL,
+		NativeSessionID: nativeSessionID,
+		ProjectRoot:     projectRoot,
+		Ephemeral:       ephemeral,
+	})
+}
+
 // claudeHookTimeout bounds the binding call so a slow or unavailable daemon
 // can never hang the Claude Code session that invoked the hook.
 const claudeHookTimeout = 15 * time.Second
@@ -218,6 +227,24 @@ func newRootCommand() *cobra.Command {
 		},
 	}
 	mcpCmd.AddCommand(mcpStdioCmd)
+	var mcpBridgeURL string
+	var mcpBridgeNativeSessionID string
+	var mcpBridgeProjectRoot string
+	var mcpBridgeEphemeral bool
+	mcpBridgeCmd := &cobra.Command{
+		Use:   "bridge",
+		Short: "Bridge stdio MCP clients to the shared Agen8 HTTP daemon",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return runMCPHTTPBridge(ctx, mcpBridgeURL, mcpBridgeNativeSessionID, mcpBridgeProjectRoot, mcpBridgeEphemeral)
+		},
+	}
+	mcpBridgeCmd.Flags().StringVar(&mcpBridgeURL, "mcp-url", "", "Agen8 daemon MCP URL; defaults to AGEN8_MCP_URL or local dev URL")
+	mcpBridgeCmd.Flags().StringVar(&mcpBridgeNativeSessionID, "native-session-id", "", "Stable native session id; defaults to AGEN8_NATIVE_SESSION_ID, CLAUDE_SESSION_ID, or a cached project id")
+	mcpBridgeCmd.Flags().StringVar(&mcpBridgeProjectRoot, "project-root", "", "Project root for cached bridge identity; defaults to AGEN8_BRIDGE_PROJECT_ROOT, CLAUDE_PROJECT_DIR, or cwd")
+	mcpBridgeCmd.Flags().BoolVar(&mcpBridgeEphemeral, "ephemeral", false, "Generate a fresh native session id instead of reusing the project cache")
+	mcpCmd.AddCommand(mcpBridgeCmd)
 	root.AddCommand(mcpCmd)
 
 	claudeCmd := &cobra.Command{
@@ -246,6 +273,8 @@ func newRootCommand() *cobra.Command {
 	claudeChannelCmd.Flags().StringVar(&claudeChannelListenAddr, "listen", "127.0.0.1:0", "Local notify listener address for daemon/channel events")
 	var claudeSetupProjectRoot string
 	var claudeSetupMCPURL string
+	var claudeSetupMCPCommand string
+	var claudeSetupMCPArgs []string
 	var claudeSetupHookCommand string
 	var claudeSetupHookArgs []string
 	var claudeSetupChannelCommand string
@@ -263,6 +292,8 @@ func newRootCommand() *cobra.Command {
 			result, err := runClaudeSetup(cmd.Context(), claudecli.SetupOptions{
 				ProjectRoot:    claudeSetupProjectRoot,
 				MCPURL:         claudeSetupMCPURL,
+				MCPCommand:     claudeSetupMCPCommand,
+				MCPArgs:        claudeSetupMCPArgs,
 				HookCommand:    claudeSetupHookCommand,
 				HookArgs:       claudeSetupHookArgs,
 				ChannelCommand: claudeSetupChannelCommand,
@@ -278,6 +309,8 @@ func newRootCommand() *cobra.Command {
 	}
 	claudeSetupCmd.Flags().StringVar(&claudeSetupProjectRoot, "project-root", "", "Project root to configure; defaults to the current working directory")
 	claudeSetupCmd.Flags().StringVar(&claudeSetupMCPURL, "mcp-url", "", "Agen8 MCP URL; defaults to AGEN8_MCP_URL, AGEN8_MCP_TOKEN, existing .mcp.json, or local dev URL")
+	claudeSetupCmd.Flags().StringVar(&claudeSetupMCPCommand, "mcp-command", "", "MCP bridge executable; defaults to the current agen8-mcp-server binary")
+	claudeSetupCmd.Flags().StringSliceVar(&claudeSetupMCPArgs, "mcp-arg", nil, "MCP bridge argument; repeat to override the default 'mcp bridge --mcp-url <url>' args")
 	claudeSetupCmd.Flags().StringVar(&claudeSetupHookCommand, "hook-command", "", "Hook executable; defaults to the current agen8-mcp-server binary")
 	claudeSetupCmd.Flags().StringSliceVar(&claudeSetupHookArgs, "hook-arg", nil, "Hook argument; repeat to override the default 'claude hook' args")
 	claudeSetupCmd.Flags().StringVar(&claudeSetupChannelCommand, "channel-command", "", "Channel executable; defaults to the hook command")

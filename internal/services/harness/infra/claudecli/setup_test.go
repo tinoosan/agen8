@@ -37,14 +37,18 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 	if !result.ChannelReady {
 		t.Fatalf("channel should be marked ready after channel server implementation")
 	}
+	if result.MCPCommand != "/usr/local/bin/agen8-mcp-server" || !equalStrings(result.MCPArgs, []string{"mcp", "bridge", "--mcp-url", "http://127.0.0.1:7777/mcp?token=abc"}) {
+		t.Fatalf("mcp bridge command=%q args=%q", result.MCPCommand, result.MCPArgs)
+	}
 
 	var mcpCfg struct {
 		MCPServers map[string]struct {
-			Type       string   `json:"type"`
-			URL        string   `json:"url"`
-			AlwaysLoad bool     `json:"alwaysLoad"`
-			Command    string   `json:"command"`
-			Args       []string `json:"args"`
+			Type       string            `json:"type"`
+			URL        string            `json:"url"`
+			AlwaysLoad bool              `json:"alwaysLoad"`
+			Command    string            `json:"command"`
+			Args       []string          `json:"args"`
+			Env        map[string]string `json:"env"`
 		} `json:"mcpServers"`
 		Other bool `json:"other"`
 	}
@@ -61,7 +65,11 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 	if mcpCfg.MCPServers["docs"].Command != "docs-server" {
 		t.Fatalf("existing MCP server not preserved: %#v", mcpCfg.MCPServers["docs"])
 	}
-	if mcpCfg.MCPServers["agen8"].Type != "http" || mcpCfg.MCPServers["agen8"].URL != "http://127.0.0.1:7777/mcp?token=abc" || !mcpCfg.MCPServers["agen8"].AlwaysLoad {
+	if mcpCfg.MCPServers["agen8"].Type != "stdio" ||
+		mcpCfg.MCPServers["agen8"].Command != "/usr/local/bin/agen8-mcp-server" ||
+		!equalStrings(mcpCfg.MCPServers["agen8"].Args, []string{"mcp", "bridge", "--mcp-url", "http://127.0.0.1:7777/mcp?token=abc"}) ||
+		mcpCfg.MCPServers["agen8"].Env["AGEN8_MCP_URL"] != "http://127.0.0.1:7777/mcp?token=abc" ||
+		mcpCfg.MCPServers["agen8"].Env["AGEN8_BRIDGE_PROJECT_ROOT"] != root {
 		t.Fatalf("agen8 server=%#v", mcpCfg.MCPServers["agen8"])
 	}
 	if mcpCfg.MCPServers["agen8-channel"].Command != "/usr/local/bin/agen8-mcp-server" || !equalStrings(mcpCfg.MCPServers["agen8-channel"].Args, []string{"claude", "channel"}) {
@@ -145,6 +153,21 @@ func TestSetupProjectUsesExistingMCPURL(t *testing.T) {
 		t.Fatalf("SetupProject: %v", err)
 	}
 	if result.MCPURL != "http://127.0.0.1:8888/mcp?token=existing" {
+		t.Fatalf("mcp url=%q", result.MCPURL)
+	}
+}
+
+func TestSetupProjectUsesExistingBridgeMCPURL(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(`{"mcpServers":{"agen8":{"type":"stdio","command":"/bin/agen8","args":["mcp","bridge","--mcp-url","http://127.0.0.1:9999/mcp?token=bridge"],"env":{"AGEN8_MCP_URL":"http://127.0.0.1:9999/mcp?token=bridge"}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := SetupProject(SetupOptions{ProjectRoot: root, HookCommand: "/bin/agen8"})
+	if err != nil {
+		t.Fatalf("SetupProject: %v", err)
+	}
+	if result.MCPURL != "http://127.0.0.1:9999/mcp?token=bridge" {
 		t.Fatalf("mcp url=%q", result.MCPURL)
 	}
 }

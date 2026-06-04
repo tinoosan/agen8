@@ -14,6 +14,8 @@ const defaultLocalMCPURL = "http://127.0.0.1:7777/mcp?token=agen8-local"
 type SetupOptions struct {
 	ProjectRoot    string
 	MCPURL         string
+	MCPCommand     string
+	MCPArgs        []string
 	HookCommand    string
 	HookArgs       []string
 	ChannelCommand string
@@ -27,6 +29,8 @@ type SetupResult struct {
 	PluginPath        string   `json:"pluginPath"`
 	PluginRef         string   `json:"pluginRef"`
 	MCPURL            string   `json:"mcpUrl"`
+	MCPCommand        string   `json:"mcpCommand"`
+	MCPArgs           []string `json:"mcpArgs"`
 	HookCommand       string   `json:"hookCommand"`
 	HookArgs          []string `json:"hookArgs"`
 	ChannelCommand    string   `json:"channelCommand"`
@@ -57,11 +61,19 @@ func SetupProject(opts SetupOptions) (SetupResult, error) {
 	if len(channelArgs) == 0 {
 		channelArgs = []string{"claude", "channel"}
 	}
+	mcpCommand := strings.TrimSpace(opts.MCPCommand)
+	if mcpCommand == "" {
+		mcpCommand = hookCommand
+	}
 	rawURL, err := resolveSetupMCPURL(projectRoot, opts.MCPURL)
 	if err != nil {
 		return SetupResult{}, err
 	}
-	if err := writeClaudeMCPProjectConfig(projectRoot, rawURL, channelCommand, channelArgs); err != nil {
+	mcpArgs := compactHookArgs(opts.MCPArgs)
+	if len(mcpArgs) == 0 {
+		mcpArgs = []string{"mcp", "bridge", "--mcp-url", rawURL}
+	}
+	if err := writeClaudeMCPProjectConfig(projectRoot, rawURL, mcpCommand, mcpArgs, channelCommand, channelArgs); err != nil {
 		return SetupResult{}, err
 	}
 	pluginPath, err := writeClaudeAgen8Plugin(channelCommand, channelArgs)
@@ -78,6 +90,8 @@ func SetupProject(opts SetupOptions) (SetupResult, error) {
 		PluginPath:     pluginPath,
 		PluginRef:      defaultClaudeChannelPluginRef,
 		MCPURL:         rawURL,
+		MCPCommand:     mcpCommand,
+		MCPArgs:        mcpArgs,
 		HookCommand:    hookCommand,
 		HookArgs:       hookArgs,
 		ChannelCommand: channelCommand,
@@ -145,7 +159,7 @@ type claudeMCPProjectConfig struct {
 	Extra      map[string]json.RawMessage `json:"-"`
 }
 
-func writeClaudeMCPProjectConfig(projectRoot string, rawURL string, channelCommand string, channelArgs []string) error {
+func writeClaudeMCPProjectConfig(projectRoot string, rawURL string, mcpCommand string, mcpArgs []string, channelCommand string, channelArgs []string) error {
 	path := filepath.Join(projectRoot, ".mcp.json")
 	cfg, err := readClaudeMCPProjectConfig(path)
 	if err != nil {
@@ -155,9 +169,13 @@ func writeClaudeMCPProjectConfig(projectRoot string, rawURL string, channelComma
 		cfg.MCPServers = map[string]map[string]any{}
 	}
 	cfg.MCPServers["agen8"] = map[string]any{
-		"type":       "http",
-		"url":        rawURL,
-		"alwaysLoad": true,
+		"type":    "stdio",
+		"command": mcpCommand,
+		"args":    mcpArgs,
+		"env": map[string]any{
+			"AGEN8_BRIDGE_PROJECT_ROOT": projectRoot,
+			"AGEN8_MCP_URL":             rawURL,
+		},
 	}
 	cfg.MCPServers["agen8-channel"] = map[string]any{
 		"command": channelCommand,

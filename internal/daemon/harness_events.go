@@ -311,16 +311,6 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	}
 	if sessionRef == "" {
 		if mcpRequestAllowsBootstrapSession(body) {
-			active, err := d.resolveChannelBoundMCPSessionForToken(ctx, token)
-			if err != nil {
-				return mcp.Session{}, err
-			}
-			if active != nil {
-				if err := d.registerMCPTokenForSession(active); err != nil {
-					return mcp.Session{}, err
-				}
-				return d.mcpSessionFor(active), nil
-			}
 			return base, nil
 		}
 		active, err := d.resolveUniqueMCPSessionForToken(ctx, token)
@@ -342,15 +332,8 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	if active == nil {
 		if mcpRequestAllowsBootstrapSession(body) {
 			return base, nil
-		} else {
-			active, err = d.resolveUniqueMCPSessionForToken(ctx, token)
-			if err != nil {
-				return mcp.Session{}, err
-			}
-			if active == nil {
-				return base, nil
-			}
 		}
+		return mcp.Session{}, fmt.Errorf("mcp native session %q is not registered for token %q", sessionRef, token)
 	}
 	if err := d.registerMCPTokenForSession(active); err != nil {
 		return mcp.Session{}, err
@@ -461,20 +444,10 @@ func (d *Daemon) resolveUniqueMCPSessionForToken(ctx context.Context, token stri
 	}
 	switch len(matches) {
 	case 0:
-		return d.resolveBoundMCPSession(ctx, token)
+		return nil, nil
 	case 1:
 		return matches[0], nil
 	default:
-		if bound, err := d.resolveBoundMCPSession(ctx, token); err != nil {
-			return nil, err
-		} else if bound != nil {
-			return bound, nil
-		}
-		if channelBound, err := d.resolveChannelBoundMCPSessionForToken(ctx, token); err != nil {
-			return nil, err
-		} else if channelBound != nil {
-			return channelBound, nil
-		}
 		return nil, fmt.Errorf("mcp token %q is bound to multiple active harness sessions; native session metadata is required", token)
 	}
 }
