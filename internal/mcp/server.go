@@ -276,6 +276,18 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if mappedThreadID != "" {
 			resolverHeader.Set("Mcp-Thread-Id", mappedThreadID)
 		}
+	} else if explicitSessionID, explicitThreadID := explicitNativeSessionRefsFromHeader(r.Header); explicitSessionID != "" || explicitThreadID != "" {
+		if explicitSessionID != "" {
+			resolverHeader.Set("Mcp-Session-Id", explicitSessionID)
+		}
+		if explicitThreadID != "" {
+			resolverHeader.Set("Mcp-Thread-Id", explicitThreadID)
+		}
+	} else {
+		resolverHeader.Del("Mcp-Session-Id")
+		resolverHeader.Del("MCP-Session-Id")
+		resolverHeader.Del("Mcp-Thread-Id")
+		resolverHeader.Del("MCP-Thread-Id")
 	}
 	requestSessionID, requestThreadID := SessionRefsFromHTTPHeader(resolverHeader)
 	ctx := contextWithSessionRefs(r.Context(), requestSessionID, requestThreadID)
@@ -433,9 +445,6 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 						headerSessionID, headerThreadID = mappedSessionID, mappedThreadID
 					}
 				}
-				if headerSessionID == "" && headerThreadID == "" {
-					headerSessionID, headerThreadID = SessionRefsFromHTTPHeader(nativeSessionResolverHeader(header, ""))
-				}
 				if sessionID == "" {
 					sessionID = headerSessionID
 				}
@@ -559,9 +568,15 @@ func (s *Server) resolveSessionForMCPCall(ctx context.Context, conn *mcpConnecti
 	resolverHeader := nativeSessionResolverHeader(header, "")
 	if storedSessionID != "" {
 		resolverHeader.Set("Mcp-Session-Id", storedSessionID)
+	} else {
+		resolverHeader.Del("Mcp-Session-Id")
+		resolverHeader.Del("MCP-Session-Id")
 	}
 	if storedThreadID != "" {
 		resolverHeader.Set("Mcp-Thread-Id", storedThreadID)
+	} else {
+		resolverHeader.Del("Mcp-Thread-Id")
+		resolverHeader.Del("MCP-Thread-Id")
 	}
 	callCtx := contextWithSessionRefs(ctx, storedSessionID, storedThreadID)
 	return s.resolveSession(callCtx, conn.token, resolverHeader, rpcBody)
