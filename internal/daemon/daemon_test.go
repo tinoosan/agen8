@@ -136,6 +136,28 @@ func TestHTTPStrategyLaunchClaudeRemoteControlHonorsApprovedChannelMode(t *testi
 	require.False(t, captured.DevelopmentChannel)
 }
 
+func TestHTTPStrategyLaunchClaudeRemoteControlHonorsDevelopmentChannelMode(t *testing.T) {
+	d := newTestDaemon(t)
+	var captured claudecli.LaunchOptions
+	original := launchClaudeRemoteControl
+	launchClaudeRemoteControl = func(_ context.Context, opts claudecli.LaunchOptions) (claudecli.LaunchResult, error) {
+		captured = opts
+		return claudecli.LaunchResult{PID: 4321}, nil
+	}
+	t.Cleanup(func() { launchClaudeRemoteControl = original })
+
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Post(srv.URL+"/harness/claude/launch", "application/json", strings.NewReader(`{"developmentChannel":true}`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.True(t, captured.DevelopmentChannel)
+}
+
 func TestHTTPStrategyProxiesWebUIToViteWhenConfigured(t *testing.T) {
 	vite := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/", r.URL.Path)

@@ -10,6 +10,7 @@ import (
 )
 
 func TestLaunchRemoteControlStartsClaudeWithDevelopmentChannel(t *testing.T) {
+	t.Setenv("AGEN8_CLAUDE_LAUNCH_FORCE_PTY", "1")
 	root := t.TempDir()
 	argsPath := filepath.Join(root, "args.txt")
 	fakeClaude := filepath.Join(root, "claude")
@@ -60,6 +61,7 @@ func TestLaunchRemoteControlStartsClaudeWithDevelopmentChannel(t *testing.T) {
 }
 
 func TestLaunchRemoteControlSupportsApprovedChannelFlag(t *testing.T) {
+	t.Setenv("AGEN8_CLAUDE_LAUNCH_FORCE_PTY", "1")
 	root := t.TempDir()
 	argsPath := filepath.Join(root, "args.txt")
 	fakeClaude := filepath.Join(root, "claude")
@@ -71,7 +73,6 @@ func TestLaunchRemoteControlSupportsApprovedChannelFlag(t *testing.T) {
 	result, err := LaunchRemoteControl(context.Background(), LaunchOptions{
 		ProjectRoot:   root,
 		ClaudeCommand: fakeClaude,
-		ChannelRef:    "plugin:agen8@local",
 	})
 	if err != nil {
 		t.Fatalf("LaunchRemoteControl: %v", err)
@@ -93,7 +94,10 @@ func TestLaunchRemoteControlSupportsApprovedChannelFlag(t *testing.T) {
 		t.Fatalf("read args: %v", err)
 	}
 	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	want := []string{"--remote-control", "Agen8: " + filepath.Base(root), "--channels", "plugin:agen8@local"}
+	if result.ChannelRef != "plugin:agen8@skills-dir" {
+		t.Fatalf("channel ref=%q", result.ChannelRef)
+	}
+	want := []string{"--remote-control", "Agen8: " + filepath.Base(root), "--channels", "plugin:agen8@skills-dir"}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("args=%#v want %#v", args, want)
 	}

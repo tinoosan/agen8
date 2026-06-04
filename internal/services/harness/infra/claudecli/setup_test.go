@@ -9,6 +9,8 @@ import (
 
 func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(`{"mcpServers":{"docs":{"command":"docs-server"}},"other":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -25,6 +27,12 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 	}
 	if result.SettingsPath != filepath.Join(root, ".claude", "settings.local.json") {
 		t.Fatalf("settings path=%q", result.SettingsPath)
+	}
+	if result.PluginPath != filepath.Join(home, ".claude", "skills", "agen8") {
+		t.Fatalf("plugin path=%q", result.PluginPath)
+	}
+	if result.PluginRef != "plugin:agen8@skills-dir" {
+		t.Fatalf("plugin ref=%q", result.PluginRef)
 	}
 	if !result.ChannelReady {
 		t.Fatalf("channel should be marked ready after channel server implementation")
@@ -58,6 +66,39 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 	if mcpCfg.MCPServers["agen8-channel"].Command != "/usr/local/bin/agen8-mcp-server" || !equalStrings(mcpCfg.MCPServers["agen8-channel"].Args, []string{"claude", "channel"}) {
 		t.Fatalf("agen8-channel server=%#v", mcpCfg.MCPServers["agen8-channel"])
 	}
+	var plugin struct {
+		Name       string `json:"name"`
+		MCPServers string `json:"mcpServers"`
+		Channels   []struct {
+			Server string `json:"server"`
+		} `json:"channels"`
+	}
+	raw, err = os.ReadFile(filepath.Join(home, ".claude", "skills", "agen8", ".claude-plugin", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &plugin); err != nil {
+		t.Fatalf("unmarshal plugin: %v", err)
+	}
+	if plugin.Name != "agen8" || plugin.MCPServers != "./mcp-config.json" || len(plugin.Channels) != 1 || plugin.Channels[0].Server != "agen8-channel" {
+		t.Fatalf("plugin=%#v", plugin)
+	}
+	var pluginMCP struct {
+		MCPServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	raw, err = os.ReadFile(filepath.Join(home, ".claude", "skills", "agen8", "mcp-config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &pluginMCP); err != nil {
+		t.Fatalf("unmarshal plugin mcp: %v", err)
+	}
+	if pluginMCP.MCPServers["agen8-channel"].Command != "/usr/local/bin/agen8-mcp-server" || !equalStrings(pluginMCP.MCPServers["agen8-channel"].Args, []string{"claude", "channel"}) {
+		t.Fatalf("plugin mcp=%#v", pluginMCP.MCPServers["agen8-channel"])
+	}
 
 	settings := readSettingsFile(t, filepath.Join(root, ".claude", "settings.local.json"))
 	groups := settings.Hooks["SessionStart"]
@@ -72,6 +113,7 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 
 func TestSetupProjectIsIdempotent(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	opts := SetupOptions{
 		ProjectRoot: root,
 		MCPURL:      "http://127.0.0.1:7777/mcp?token=abc",
@@ -93,6 +135,7 @@ func TestSetupProjectIsIdempotent(t *testing.T) {
 
 func TestSetupProjectUsesExistingMCPURL(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(`{"mcpServers":{"agen8":{"type":"http","url":"http://127.0.0.1:8888/mcp?token=existing"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}

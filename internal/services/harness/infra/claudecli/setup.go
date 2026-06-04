@@ -24,6 +24,8 @@ type SetupResult struct {
 	ProjectRoot       string   `json:"projectRoot"`
 	MCPConfigPath     string   `json:"mcpConfigPath"`
 	SettingsPath      string   `json:"settingsPath"`
+	PluginPath        string   `json:"pluginPath"`
+	PluginRef         string   `json:"pluginRef"`
 	MCPURL            string   `json:"mcpUrl"`
 	HookCommand       string   `json:"hookCommand"`
 	HookArgs          []string `json:"hookArgs"`
@@ -62,6 +64,10 @@ func SetupProject(opts SetupOptions) (SetupResult, error) {
 	if err := writeClaudeMCPProjectConfig(projectRoot, rawURL, channelCommand, channelArgs); err != nil {
 		return SetupResult{}, err
 	}
+	pluginPath, err := writeClaudeAgen8Plugin(channelCommand, channelArgs)
+	if err != nil {
+		return SetupResult{}, err
+	}
 	if err := writeClaudeHookSettings(projectRoot, hookCommand, hookArgs); err != nil {
 		return SetupResult{}, err
 	}
@@ -69,16 +75,20 @@ func SetupProject(opts SetupOptions) (SetupResult, error) {
 		ProjectRoot:    projectRoot,
 		MCPConfigPath:  filepath.Join(projectRoot, ".mcp.json"),
 		SettingsPath:   filepath.Join(projectRoot, ".claude", "settings.local.json"),
+		PluginPath:     pluginPath,
+		PluginRef:      defaultClaudeChannelPluginRef,
 		MCPURL:         rawURL,
 		HookCommand:    hookCommand,
 		HookArgs:       hookArgs,
 		ChannelCommand: channelCommand,
 		ChannelArgs:    channelArgs,
 		ChannelReady:   true,
-		ChannelStatus:  "Claude Code channel adapter installed as mcpServers.agen8-channel. Claude Code must be launched with channel support enabled during the research preview.",
+		ChannelStatus:  "Claude Code Agen8 channel adapter installed. Agen8 launches remote-control sessions with the local channel enabled so Claude desktop can attach to the running session and receive Agen8 messages.",
 		ClaudeLaunchHints: []string{
 			"Restart Claude Code in this project so it reloads .mcp.json and .claude/settings.local.json.",
-			"During the Claude Code channel research preview, launch Claude Code with the Agen8 channel enabled, for example: claude --dangerously-load-development-channels server:agen8-channel.",
+			"Launch the desktop-visible remote-control path with: agen8-mcp-server claude launch --project-root " + shellQuote(projectRoot),
+			"Equivalent current Claude Code command: claude --remote-control \"Agen8: " + filepath.Base(projectRoot) + "\" --dangerously-load-development-channels server:agen8-channel.",
+			"When Agen8 is installed from an approved Claude marketplace or org allowlist, use: agen8-mcp-server claude launch --development-channel=false --channel plugin:agen8@skills-dir.",
 		},
 	}, nil
 }
@@ -153,6 +163,56 @@ func writeClaudeMCPProjectConfig(projectRoot string, rawURL string, channelComma
 		"args":    channelArgs,
 	}
 	return writeJSONFile(path, cfg.toMap(), 0o600)
+}
+
+func writeClaudeAgen8Plugin(channelCommand string, channelArgs []string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve Claude user skills directory: %w", err)
+	}
+	pluginRoot := filepath.Join(home, ".claude", "skills", "agen8")
+	manifest := map[string]any{
+		"name":        "agen8",
+		"displayName": "Agen8",
+		"version":     "0.1.0",
+		"description": "Agen8 work-context and coordination channel for Claude Code.",
+		"author": map[string]any{
+			"name": "Agen8",
+		},
+		"mcpServers": "./mcp-config.json",
+		"channels": []map[string]any{
+			{"server": "agen8-channel"},
+		},
+	}
+	if err := writeJSONFile(filepath.Join(pluginRoot, ".claude-plugin", "plugin.json"), manifest, 0o600); err != nil {
+		return "", err
+	}
+	mcpConfig := map[string]any{
+		"mcpServers": map[string]any{
+			"agen8-channel": map[string]any{
+				"command": channelCommand,
+				"args":    channelArgs,
+			},
+		},
+	}
+	if err := writeJSONFile(filepath.Join(pluginRoot, "mcp-config.json"), mcpConfig, 0o600); err != nil {
+		return "", err
+	}
+	skill := strings.Join([]string{
+		"---",
+		"name: agen8",
+		"description: Use Agen8 for durable work context, task coordination, and channel-delivered messages.",
+		"---",
+		"",
+		"# Agen8",
+		"",
+		"Agen8 is the durable work-context layer for this project. When channel messages arrive, treat them as coordination events for this Claude Code session and respond through the Agen8 channel message tool when appropriate.",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(pluginRoot, "SKILL.md"), []byte(skill), 0o600); err != nil {
+		return "", fmt.Errorf("write %s: %w", filepath.Join(pluginRoot, "SKILL.md"), err)
+	}
+	return pluginRoot, nil
 }
 
 func readClaudeMCPProjectConfig(path string) (claudeMCPProjectConfig, error) {
