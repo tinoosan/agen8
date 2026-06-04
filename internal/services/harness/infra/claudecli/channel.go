@@ -21,7 +21,7 @@ const (
 	defaultChannelName         = "agen8-channel"
 	defaultChannelVersion      = "0.0.0"
 	defaultChannelListenAddr   = "127.0.0.1:0"
-	defaultChannelInstructions = "Agen8 coordination events arrive as <channel> messages. Treat task, decision, escalation, and operator-action messages as durable work-context updates for this Claude Code session. Reply to Agen8 channel messages with the reply tool on this channel server, passing the destination_member_id, correlation_id, subject, kind, and body for the response."
+	defaultChannelInstructions = "Agen8 coordination events arrive as <channel> messages. Treat task, decision, escalation, and operator-action messages as durable work-context updates for this Claude Code session. Send Agen8 messages from channel context with the message tool on this channel server, passing action=send plus destination_member_id, correlation_id, subject, kind, and body."
 )
 
 type ChannelOptions struct {
@@ -169,7 +169,7 @@ func RunChannel(ctx context.Context, opts ChannelOptions) error {
 		case "initialize":
 			_ = writer.result(req.ID, channelInitializeResult(name, version, instructions, req.Params))
 		case "tools/list":
-			_ = writer.result(req.ID, map[string]any{"tools": []any{channelReplyToolDefinition()}})
+			_ = writer.result(req.ID, map[string]any{"tools": []any{channelMessageToolDefinition()}})
 		case "tools/call":
 			result, err := handleChannelToolCall(ctx, opts.ProjectRoot, req.Params)
 			if err != nil {
@@ -203,14 +203,14 @@ func handleChannelToolCall(ctx context.Context, projectRoot string, rawParams js
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, fmt.Errorf("parse tool call params: %w", err)
 	}
-	if strings.TrimSpace(params.Name) != "reply" {
+	if strings.TrimSpace(params.Name) != "message" {
 		return nil, fmt.Errorf("unknown channel tool %q", params.Name)
 	}
 	binding, err := readClaudeSessionBinding(projectRoot)
 	if err != nil {
 		return nil, err
 	}
-	result, err := sendClaudeChannelReply(ctx, binding, params.Arguments)
+	result, err := sendClaudeChannelMessage(ctx, binding, params.Arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -307,21 +307,21 @@ func registerClaudeChannelRouteWithBinding(ctx context.Context, binding claudeSe
 	return nil
 }
 
-func sendClaudeChannelReply(ctx context.Context, binding claudeSessionBindingFile, arguments json.RawMessage) (map[string]any, error) {
+func sendClaudeChannelMessage(ctx context.Context, binding claudeSessionBindingFile, arguments json.RawMessage) (map[string]any, error) {
 	if strings.TrimSpace(binding.MCPURL) == "" || strings.TrimSpace(binding.Token) == "" || strings.TrimSpace(binding.SessionID) == "" || strings.TrimSpace(binding.MemberID) == "" {
 		return nil, fmt.Errorf("claude session binding is incomplete")
 	}
 	if len(arguments) == 0 {
-		return nil, fmt.Errorf("reply arguments are required")
+		return nil, fmt.Errorf("message arguments are required")
 	}
 	parsed, err := url.Parse(strings.TrimSpace(binding.MCPURL))
 	if err != nil {
 		return nil, fmt.Errorf("parse mcp url: %w", err)
 	}
-	replyURL := url.URL{
+	messageURL := url.URL{
 		Scheme: parsed.Scheme,
 		Host:   parsed.Host,
-		Path:   "/harness/claude-channel/reply",
+		Path:   "/harness/claude-channel/message",
 	}
 	payload := map[string]any{
 		"token":     binding.Token,
@@ -331,25 +331,25 @@ func sendClaudeChannelReply(ctx context.Context, binding claudeSessionBindingFil
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal reply request: %w", err)
+		return nil, fmt.Errorf("marshal message request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, replyURL.String(), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, messageURL.String(), bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("build reply request: %w", err)
+		return nil, fmt.Errorf("build message request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send reply: %w", err)
+		return nil, fmt.Errorf("send message: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("reply status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("message status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("parse reply response: %w", err)
+		return nil, fmt.Errorf("parse message response: %w", err)
 	}
 	return result, nil
 }
@@ -405,16 +405,21 @@ func channelInitializeResult(name string, version string, instructions string, r
 	}
 }
 
-func channelReplyToolDefinition() map[string]any {
+func channelMessageToolDefinition() map[string]any {
 	return map[string]any{
-		"name":        "reply",
-		"description": "Send a reply or acknowledgement back through Agen8 from this Claude Code channel session.",
+		"name":        "message",
+		"description": "Send a durable Agen8 member message from this Claude Code channel session.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"action": map[string]any{
+					"type":        "string",
+					"enum":        []string{"send"},
+					"description": "Message action. Must be send.",
+				},
 				"destination_member_id": map[string]any{
 					"type":        "string",
-					"description": "Agen8 member id to receive the reply.",
+					"description": "Destination Agen8 member id.",
 				},
 				"kind": map[string]any{
 					"type":        "string",
@@ -423,18 +428,18 @@ func channelReplyToolDefinition() map[string]any {
 				},
 				"subject": map[string]any{
 					"type":        "string",
-					"description": "Short reply subject.",
+					"description": "Short message subject.",
 				},
 				"body": map[string]any{
 					"type":        "string",
-					"description": "Reply body.",
+					"description": "Message body.",
 				},
 				"correlation_id": map[string]any{
 					"type":        "string",
-					"description": "Correlation id from the inbound Agen8 channel message when replying or acknowledging.",
+					"description": "Correlation id from the inbound Agen8 channel message when acknowledging or responding. Required for ack and response.",
 				},
 			},
-			"required": []string{"destination_member_id", "kind", "subject", "body"},
+			"required": []string{"action", "destination_member_id", "kind", "subject", "body"},
 		},
 	}
 }

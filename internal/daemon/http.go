@@ -84,7 +84,7 @@ func (d *Daemon) httpHandler() (http.Handler, error) {
 	mux.HandleFunc("POST /rpc", d.handleRPC)
 	mux.HandleFunc("POST /mcp/register", d.handleMCPRegister)
 	mux.HandleFunc("POST /harness/claude-channel/register", d.handleClaudeChannelRegister)
-	mux.HandleFunc("POST /harness/claude-channel/reply", d.handleClaudeChannelReply)
+	mux.HandleFunc("POST /harness/claude-channel/message", d.handleClaudeChannelMessage)
 	if d.mcp == nil {
 		return nil, fmt.Errorf("mcp server is required")
 	}
@@ -204,7 +204,7 @@ type claudeChannelRegisterRequest struct {
 	NotifyURL string `json:"notifyUrl"`
 }
 
-type claudeChannelReplyRequest struct {
+type claudeChannelMessageRequest struct {
 	Token     string          `json:"token"`
 	SessionID string          `json:"sessionId"`
 	MemberID  string          `json:"memberId"`
@@ -240,8 +240,8 @@ func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-func (d *Daemon) handleClaudeChannelReply(w http.ResponseWriter, r *http.Request) {
-	var req claudeChannelReplyRequest
+func (d *Daemon) handleClaudeChannelMessage(w http.ResponseWriter, r *http.Request) {
+	var req claudeChannelMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
@@ -269,7 +269,6 @@ func (d *Daemon) handleClaudeChannelReply(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid arguments", http.StatusBadRequest)
 		return
 	}
-	args["action"] = json.RawMessage(`"send"`)
 	normalizedArgs, err := json.Marshal(args)
 	if err != nil {
 		http.Error(w, "marshal arguments", http.StatusInternalServerError)
@@ -292,7 +291,7 @@ func (d *Daemon) handleClaudeChannelReply(w http.ResponseWriter, r *http.Request
 		"result": result.Structured,
 	}
 	if d.logger != nil {
-		d.logger.InfoContext(r.Context(), "claude channel reply published",
+		d.logger.InfoContext(r.Context(), "claude channel message published",
 			"member_id", session.MemberID,
 			"session_id", session.ID,
 		)

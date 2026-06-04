@@ -34,6 +34,9 @@ func TestRunChannelInitializesClaudeChannelCapabilityAndEmitsNotification(t *tes
 	if _, err := stdinWriter.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}` + "\n")); err != nil {
 		t.Fatalf("write initialize: %v", err)
 	}
+	if _, err := stdinWriter.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n")); err != nil {
+		t.Fatalf("write tools/list: %v", err)
+	}
 
 	var channelReady ChannelReady
 	select {
@@ -88,6 +91,23 @@ func TestRunChannelInitializesClaudeChannelCapabilityAndEmitsNotification(t *tes
 	}
 
 	if !scanner.Scan() {
+		t.Fatal("missing tools/list response")
+	}
+	var toolsResp struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(scanner.Bytes(), &toolsResp); err != nil {
+		t.Fatalf("decode tools/list response: %v", err)
+	}
+	if len(toolsResp.Result.Tools) != 1 || toolsResp.Result.Tools[0].Name != "message" {
+		t.Fatalf("tools=%#v", toolsResp.Result.Tools)
+	}
+
+	if !scanner.Scan() {
 		t.Fatal("missing channel notification")
 	}
 	var notification struct {
@@ -111,11 +131,11 @@ func TestRunChannelInitializesClaudeChannelCapabilityAndEmitsNotification(t *tes
 	}
 }
 
-func TestHandleChannelToolCallSendsReplyWithSessionBinding(t *testing.T) {
+func TestHandleChannelToolCallSendsMessageWithSessionBinding(t *testing.T) {
 	root := t.TempDir()
 	received := make(chan map[string]any, 1)
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/harness/claude-channel/reply" {
+		if r.URL.Path != "/harness/claude-channel/message" {
 			t.Fatalf("path=%q", r.URL.Path)
 		}
 		var payload map[string]any
@@ -134,8 +154,9 @@ func TestHandleChannelToolCallSendsReplyWithSessionBinding(t *testing.T) {
 		SessionID: "claude-session-1",
 	})
 	result, err := handleChannelToolCall(context.Background(), root, json.RawMessage(`{
-		"name":"reply",
+		"name":"message",
 		"arguments":{
+			"action":"send",
 			"destination_member_id":"member-codex",
 			"kind":"ack",
 			"subject":"Re: UAT",
@@ -158,11 +179,11 @@ func TestHandleChannelToolCallSendsReplyWithSessionBinding(t *testing.T) {
 		if !ok {
 			t.Fatalf("arguments=%#v", payload["arguments"])
 		}
-		if args["destination_member_id"] != "member-codex" || args["kind"] != "ack" || args["correlation_id"] != "corr-1" {
+		if args["action"] != "send" || args["destination_member_id"] != "member-codex" || args["kind"] != "ack" || args["correlation_id"] != "corr-1" {
 			t.Fatalf("arguments=%#v", args)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for reply request")
+		t.Fatal("timed out waiting for message request")
 	}
 }
 
