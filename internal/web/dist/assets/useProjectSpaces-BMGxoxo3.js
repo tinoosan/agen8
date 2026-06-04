@@ -1,0 +1,2 @@
+import{u as l}from"./query-vendor-CBYBK-iV.js";import{r as n}from"./index-6He0mdUn.js";function p(r,t){const a=t?.includeDeleted===!0;return l({queryKey:["project.space.list",r??"",a?"withDeleted":"active"],queryFn:async()=>r?(await n("project.space.list",{projectId:r})).spaces??[]:[],enabled:!!r,refetchInterval:t?.refetchInterval??5e3,retry:!1,select:s=>{const c=s.map(e=>({...e,spaceName:e.spaceName??e.title??e.spaceId}));return a?c:c.filter(e=>e.spaceOpen)}})}export{p as u};
+//# sourceMappingURL=useProjectSpaces-BMGxoxo3.js.map

@@ -487,7 +487,23 @@ export default function SpaceBoardTab({ spaceId, initialTaskId, onOpenTask }: Sp
               aria-label="Search tasks"
             />
           </div>
-          <span className="kb-pill kb-pill-static">Group: Status</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="kb-pill kb-pill-btn kb-group"
+                data-testid="board-group-by"
+              >
+                Group: Status
+                <ChevronDown size={12} aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="text-xs">
+              <DropdownMenuRadioGroup value="status">
+                <DropdownMenuRadioItem value="status">Status</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" className="kb-pill kb-pill-btn" data-testid="board-member-filter">

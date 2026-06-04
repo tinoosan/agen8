@@ -3,7 +3,7 @@ import { useProjects } from '../hooks/useProjects'
 import { useStore, type DefaultProjectView } from './store'
 import type { Project } from './types'
 
-export type ActiveView = 'project' | 'board' | 'dashboard' | 'decisions' | 'missions' | 'actions' | 'strategy' | 'space'
+export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'actions' | 'strategy' | 'space'
 export type DashboardPanel = 'overview' | 'missions' | 'actions' | 'decisions'
 
 /* ── Route constants ──────────────────────────────── */
@@ -11,7 +11,6 @@ export type DashboardPanel = 'overview' | 'missions' | 'actions' | 'decisions'
 export const ROUTES = {
   HOME: '/',
   PROJECT: '/project/:projectId',
-  BOARD: '/project/:projectId/board',
   DASHBOARD: '/project/:projectId/dashboard',
   SPACE: '/project/:projectId/space/:spaceId',
   MISSIONS: '/project/:projectId/missions',
@@ -120,8 +119,6 @@ function parseLocation(pathname: string): ParsedRoute {
   if (segments[2] === 'space' && segments[3]) {
     urlSpaceId = decodeURIComponent(segments[3])
     activeView = 'space'
-  } else if (segments[2] === 'board') {
-    activeView = 'board'
   } else if (segments[2] === 'dashboard') {
     activeView = 'dashboard'
   } else if (segments[2] === 'missions') {

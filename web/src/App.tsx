@@ -14,7 +14,6 @@ const Project = lazyWithRetry(() => import('./pages/Project'), 'pages/Project')
 const Login = lazyWithRetry(() => import('./pages/Login'), 'pages/Login')
 const Account = lazyWithRetry(() => import('./pages/Account'), 'pages/Account')
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'), 'pages/Dashboard')
-const Board = lazyWithRetry(() => import('./pages/Board'), 'pages/Board')
 const SpaceFocus = lazyWithRetry(() => import('./pages/SpaceFocus'), 'pages/SpaceFocus')
 const Notifications = lazyWithRetry(() => import('./pages/Notifications'), 'pages/Notifications')
 const Locations = lazyWithRetry(() => import('./pages/Locations'), 'pages/Locations')
@@ -197,7 +196,6 @@ export default function App() {
                   <Route path="/project/:projectId/heartbeats" component={HeartbeatsRouteRedirect} />
                   <Route path="/project/:projectId/builder">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/roles">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
-                  <Route path="/project/:projectId/board" component={Board} />
                   <Route path="/project/:projectId/dashboard" component={Dashboard} />
                   <Route path="/project/:projectId/metrics">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/notifications" component={Notifications} />

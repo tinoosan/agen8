@@ -10,7 +10,6 @@ import agen8IconLight from '../assets/agen8-app-icon-light.svg'
 const VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   project: 'Projects',
   dashboard: 'Dashboard',
-  board: 'Board',
   missions: 'Missions',
   decisions: 'Decision Log',
   actions: 'Actions',
