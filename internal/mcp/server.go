@@ -283,8 +283,16 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	ctx := contextWithSessionRefs(r.Context(), requestSessionID, requestThreadID)
 	session, err := s.resolveSession(ctx, r.URL.Query().Get("token"), resolverHeader, body)
 	if err != nil {
-		s.writeRPCError(w, extractRPCID(body), mcpRPCCodeInvalidToken, err.Error())
-		return
+		if !isAgen8InboxResourceRead(body) {
+			s.writeRPCError(w, extractRPCID(body), mcpRPCCodeInvalidToken, err.Error())
+			return
+		}
+		fallback, fallbackErr := s.tokenStore.Resolve(r.URL.Query().Get("token"))
+		if fallbackErr != nil {
+			s.writeRPCError(w, extractRPCID(body), mcpRPCCodeInvalidToken, fallbackErr.Error())
+			return
+		}
+		session = fallback
 	}
 	if handled := s.handleUnknownToolAsMCPResult(w, body, session); handled {
 		return
@@ -299,6 +307,19 @@ func mcpRPCMethod(body []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(req.Method)
+}
+
+func isAgen8InboxResourceRead(body []byte) bool {
+	var req struct {
+		Method string `json:"method"`
+		Params struct {
+			URI string `json:"uri"`
+		} `json:"params,omitempty"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(body), &req); err != nil {
+		return false
+	}
+	return strings.TrimSpace(req.Method) == "resources/read" && strings.TrimSpace(req.Params.URI) == agen8InboxResourceURI
 }
 
 func prepareInitialNativeSessionHeader(r *http.Request, method string) {
@@ -554,7 +575,7 @@ func addAgen8SessionResources(server *mcp.Server, owner *Server, conn *mcpConnec
 	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		session, err := owner.resolveSessionForMCPCall(ctx, conn, nativeRefsHeaderFromRequest(req), "", "", syntheticJSONRPCMethodBody("resources/read"))
 		if err != nil {
-			return nil, err
+			return readAgen8InboxUnboundResource(err), nil
 		}
 		return readAgen8InboxResource(ctx, session)
 	})
@@ -763,7 +784,7 @@ func startAgen8ResourceWatcher(server *mcp.Server, mcpSession *mcp.ServerSession
 
 func readAgen8InboxResource(ctx context.Context, session Session) (*mcp.ReadResourceResult, error) {
 	if strings.TrimSpace(session.MemberID) == "" || strings.TrimSpace(string(session.SpaceID)) == "" {
-		return nil, fmt.Errorf("mcp session is not registered; call space.register first")
+		return readAgen8InboxUnboundResource(fmt.Errorf("mcp session is not registered; call space.register first")), nil
 	}
 	if session.MessagePublisher == nil {
 		return nil, fmt.Errorf("message service is not configured")
@@ -797,6 +818,38 @@ func readAgen8InboxResource(ctx context.Context, session Session) (*mcp.ReadReso
 			Text:     string(data),
 		}},
 	}, nil
+}
+
+func readAgen8InboxUnboundResource(cause error) *mcp.ReadResourceResult {
+	message := "Agen8 MCP resource session is not registered; call space.register first."
+	if cause != nil {
+		message = strings.TrimSpace(cause.Error())
+	}
+	payload := map[string]any{
+		"resource":             agen8InboxResourceURI,
+		"registered":           false,
+		"status":               "unbound",
+		"count":                0,
+		"messages":             []map[string]any{},
+		"nextAction":           "register",
+		"requiredTool":         space.Name,
+		"requiredToolAction":   "register",
+		"reason":               message,
+		"guidance":             "Call space.register from this MCP connection, then read agen8://me/inbox again. Agen8 will not guess a member when a shared MCP token has multiple active harness sessions.",
+		"updatedAt":            time.Now().UTC().Format(time.RFC3339Nano),
+		"requiresRegistration": true,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		data = []byte(`{"resource":"agen8://me/inbox","registered":false,"status":"unbound","count":0,"messages":[],"nextAction":"register","requiredTool":"space","requiredToolAction":"register","requiresRegistration":true}`)
+	}
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{{
+			URI:      agen8InboxResourceURI,
+			MIMEType: "application/json",
+			Text:     string(data),
+		}},
+	}
 }
 
 func agen8InboxResourceMessages(messages []types.AgentMessage) []map[string]any {

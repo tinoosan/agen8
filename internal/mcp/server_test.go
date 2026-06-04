@@ -1592,11 +1592,36 @@ func TestServer_BootstrapResourcesReadRequiresRegistration(t *testing.T) {
 			"uri": agen8InboxResourceURI,
 		},
 	})
-	if resp.Error == nil {
-		t.Fatal("expected registration error")
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %+v", resp.Error)
 	}
-	if !strings.Contains(resp.Error.Message, "call space.register first") {
-		t.Fatalf("unexpected error: %+v", resp.Error)
+	var result struct {
+		Contents []struct {
+			URI  string `json:"uri"`
+			Text string `json:"text"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode resources/read result: %v", err)
+	}
+	if len(result.Contents) != 1 || result.Contents[0].URI != agen8InboxResourceURI {
+		t.Fatalf("contents=%+v", result.Contents)
+	}
+	var payload struct {
+		Resource             string `json:"resource"`
+		Registered           bool   `json:"registered"`
+		Status               string `json:"status"`
+		NextAction           string `json:"nextAction"`
+		RequiredTool         string `json:"requiredTool"`
+		RequiredToolAction   string `json:"requiredToolAction"`
+		RequiresRegistration bool   `json:"requiresRegistration"`
+		Messages             []any  `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(result.Contents[0].Text), &payload); err != nil {
+		t.Fatalf("decode unbound resource payload: %v", err)
+	}
+	if payload.Resource != agen8InboxResourceURI || payload.Registered || payload.Status != "unbound" || payload.NextAction != "register" || payload.RequiredTool != "space" || payload.RequiredToolAction != "register" || !payload.RequiresRegistration || len(payload.Messages) != 0 {
+		t.Fatalf("payload=%+v", payload)
 	}
 }
 

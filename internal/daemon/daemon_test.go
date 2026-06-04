@@ -1042,6 +1042,47 @@ func TestHTTPStrategyBootstrapMCPTokenRejectsAmbiguousSharedTokenWithoutNativeRe
 	require.Contains(t, rpcResp.Error.Message, "multiple active harness sessions")
 	require.Contains(t, rpcResp.Error.Message, "native session metadata is required")
 
+	unboundResourceReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(`{
+		"jsonrpc": "2.0",
+		"id": "read-inbox-without-native-ref",
+		"method": "resources/read",
+		"params": {"uri":"agen8://me/inbox"}
+	}`)))
+	require.NoError(t, err)
+	unboundResourceReq.Header.Set("Content-Type", "application/json")
+	unboundResourceReq.Header.Set("Accept", "application/json, text/event-stream")
+	unboundResourceResp, err := http.DefaultClient.Do(unboundResourceReq)
+	require.NoError(t, err)
+	defer unboundResourceResp.Body.Close()
+	require.Equal(t, http.StatusOK, unboundResourceResp.StatusCode)
+
+	var unboundResourceRPC struct {
+		Result struct {
+			Contents []struct {
+				URI  string `json:"uri"`
+				Text string `json:"text"`
+			} `json:"contents"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(unboundResourceResp.Body).Decode(&unboundResourceRPC))
+	require.Nil(t, unboundResourceRPC.Error)
+	require.Len(t, unboundResourceRPC.Result.Contents, 1)
+	require.Equal(t, "agen8://me/inbox", unboundResourceRPC.Result.Contents[0].URI)
+	var unboundPayload struct {
+		Registered           bool   `json:"registered"`
+		Status               string `json:"status"`
+		NextAction           string `json:"nextAction"`
+		RequiresRegistration bool   `json:"requiresRegistration"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(unboundResourceRPC.Result.Contents[0].Text), &unboundPayload))
+	require.False(t, unboundPayload.Registered)
+	require.Equal(t, "unbound", unboundPayload.Status)
+	require.Equal(t, "register", unboundPayload.NextAction)
+	require.True(t, unboundPayload.RequiresRegistration)
+
 	registerAgainReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
 		"jsonrpc": "2.0",
 		"id": "register-with-protocol-session-after-shared-token",
