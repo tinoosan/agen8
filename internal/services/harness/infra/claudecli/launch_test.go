@@ -20,10 +20,11 @@ func TestLaunchRemoteControlStartsClaudeWithDevelopmentChannel(t *testing.T) {
 	}
 
 	result, err := LaunchRemoteControl(context.Background(), LaunchOptions{
-		ProjectRoot:        root,
-		ClaudeCommand:      fakeClaude,
-		RemoteControlTitle: "Agen8 test",
-		DevelopmentChannel: true,
+		ProjectRoot:                     root,
+		ClaudeCommand:                   fakeClaude,
+		RemoteControlTitle:              "Agen8 test",
+		DevelopmentChannel:              true,
+		AllowDangerouslySkipPermissions: true,
 	})
 	if err != nil {
 		t.Fatalf("LaunchRemoteControl: %v", err)
@@ -54,9 +55,17 @@ func TestLaunchRemoteControlStartsClaudeWithDevelopmentChannel(t *testing.T) {
 		t.Fatalf("read args: %v", err)
 	}
 	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	want := []string{"--remote-control", "Agen8 test", "--dangerously-load-development-channels", "server:agen8-channel"}
+	want := []string{
+		"--remote-control", "Agen8 test",
+		"--dangerously-load-development-channels", "server:agen8-channel",
+		"--permission-mode", "bypassPermissions",
+		"--allow-dangerously-skip-permissions",
+	}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("args=%#v want %#v", args, want)
+	}
+	if !result.AllowDangerouslySkipPermissions {
+		t.Fatal("expected permission bypass flag in result")
 	}
 }
 

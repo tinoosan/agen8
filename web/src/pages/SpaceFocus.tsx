@@ -4,7 +4,7 @@ import ContextPanel from '../components/ContextPanel'
 import { useSpaceStatus } from '../hooks/useSpaceStatus'
 import { lazyWithRetry } from '../lib/lazyWithRetry'
 import type { SpaceMember, Task } from '../lib/types'
-import { Coins, Cpu, PanelRight, LayoutGrid, KanbanSquare } from 'lucide-react'
+import { Coins, Cpu, PanelRight, LayoutGrid, KanbanSquare, Rocket, ShieldAlert, X } from 'lucide-react'
 
 // Tab icons keyed by tab name. Defined alongside the tab definitions so
 // Overview/Chat/Board/Inspector/Schedule render with a consistent
@@ -26,6 +26,7 @@ import { formatCost, formatTokens } from '../lib/format'
 import { cn } from '@/lib/utils'
 import { onContextPanelOpenFile } from '../lib/contextPanelEvents'
 import { isRemovedSpaceMember } from '../lib/removedMemberLogs'
+import { getStoredSessionToken } from '../lib/rpc'
 const SpaceOverviewTab = lazyWithRetry(() => import('../components/space-focus/SpaceOverviewTab'), 'components/space-focus/SpaceOverviewTab')
 const SpaceBoardTab = lazyWithRetry(() => import('../components/space-focus/SpaceBoardTab'), 'components/space-focus/SpaceBoardTab')
 
@@ -117,9 +118,151 @@ interface SpaceFocusProps {
   spaceId: string
 }
 
+interface ClaudeLaunchResult {
+  projectRoot: string
+  claudeCommand: string
+  args: string[]
+  commandLine: string
+  pid: number
+  logPath: string
+  remoteControlTitle: string
+  channelRef: string
+  developmentChannel: boolean
+  allowDangerouslySkipPermissions: boolean
+}
+
+async function launchClaudeSession(input: {
+  projectRoot: string
+  remoteControlTitle: string
+  allowDangerouslySkipPermissions: boolean
+}): Promise<ClaudeLaunchResult> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = getStoredSessionToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch('/harness/claude/launch', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      projectRoot: input.projectRoot,
+      remoteControlTitle: input.remoteControlTitle,
+      channelRef: 'server:agen8-channel',
+      developmentChannel: true,
+      allowDangerouslySkipPermissions: input.allowDangerouslySkipPermissions,
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(await response.text())
+  }
+  return await response.json() as ClaudeLaunchResult
+}
+
+function ClaudeLaunchPanel({
+  projectRoot,
+  spaceTitle,
+  onClose,
+}: {
+  projectRoot: string | null
+  spaceTitle: string
+  onClose: () => void
+}) {
+  const [allowDangerouslySkipPermissions, setAllowDangerouslySkipPermissions] = useState(true)
+  const [result, setResult] = useState<ClaudeLaunchResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const remoteControlTitle = `Agen8: ${spaceTitle}`
+  const canLaunch = !!projectRoot && !busy
+
+  async function handleLaunch() {
+    if (!projectRoot) return
+    setBusy(true)
+    setError(null)
+    try {
+      const launch = await launchClaudeSession({
+        projectRoot,
+        remoteControlTitle,
+        allowDangerouslySkipPermissions,
+      })
+      setResult(launch)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Claude launch failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="border-b border-[color-mix(in_srgb,var(--border)_50%,transparent)] bg-[var(--bg-panel)] px-6 py-3">
+      <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--r-md)] bg-[var(--accent-dim)] text-[var(--accent)]">
+            <Rocket size={15} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-semibold text-[var(--text-1)]">Launch Claude desktop</div>
+            <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-3)]" title={projectRoot ?? undefined}>
+              {projectRoot ?? 'Project root unavailable'}
+            </div>
+          </div>
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose} aria-label="Close Claude launch">
+            <X size={14} />
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAllowDangerouslySkipPermissions(v => !v)}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-[var(--r-md)] border px-2.5 py-1.5 text-[12px] font-medium transition-colors',
+              allowDangerouslySkipPermissions
+                ? 'border-[var(--amber)] bg-[rgba(245,158,11,0.12)] text-[var(--amber)]'
+                : 'border-[var(--border)] bg-[var(--bg-panel)] text-[var(--text-3)]',
+            )}
+          >
+            <ShieldAlert size={13} />
+            Local bypass permissions
+          </button>
+          <span className="text-[11px] text-[var(--text-3)]">
+            Remote-control channel: server:agen8-channel
+          </span>
+          <span className="flex-1" />
+          <Button type="button" size="sm" onClick={handleLaunch} disabled={!canLaunch} className="gap-1.5">
+            <Rocket size={13} />
+            {busy ? 'Starting...' : 'Start Claude'}
+          </Button>
+        </div>
+
+        {error && (
+          <div className="rounded-[var(--r-md)] border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] px-3 py-2 text-[12px] text-[var(--red)]">
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div className="grid gap-2 rounded-[var(--r-md)] border border-[rgba(34,197,94,0.28)] bg-[rgba(34,197,94,0.08)] p-3 text-[12px]">
+            <div className="flex flex-wrap items-center gap-2 text-[var(--green)]">
+              <span className="font-semibold">Claude launch started</span>
+              <span className="tabular-nums">PID {result.pid}</span>
+            </div>
+            <div className="grid gap-1 text-[var(--text-2)] sm:grid-cols-2">
+              <span>Channel: <span className="font-mono">{result.channelRef}</span></span>
+              <span>Development: {result.developmentChannel ? 'enabled' : 'off'}</span>
+              <span>Bypass: {result.allowDangerouslySkipPermissions ? 'enabled' : 'off'}</span>
+              <span>Title: {result.remoteControlTitle}</span>
+            </div>
+            <div className="min-w-0 truncate font-mono text-[11px] text-[var(--text-3)]" title={result.logPath}>
+              {result.logPath}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function SpaceFocus({ spaceId: spaceIdProp }: SpaceFocusProps) {
   const [, navigate] = useLocation()
-  const { projectId: routeProjectId } = useNavigation()
+  const { projectId: routeProjectId, focusedProjectRoot } = useNavigation()
   // The space ID is always the URL prop — source of truth on /space/ routes.
   const spaceId = spaceIdProp
   // Fetch space-scoped state — planMode here is the effective execution mode
@@ -149,6 +292,7 @@ export default function SpaceFocus({ spaceId: spaceIdProp }: SpaceFocusProps) {
   const [contextWidth, setContextWidth] = useState(readContextWidth)
   const [contextFileOpenRequest, setContextFileOpenRequest] = useState<null | { id: number; path: string }>(null)
   const [contextTaskOpenRequest, setContextTaskOpenRequest] = useState<null | { id: number; task: Task; status: string }>(null)
+  const [claudeLaunchOpen, setClaudeLaunchOpen] = useState(false)
   const contextRequestCounterRef = useRef(0)
   const contextSplitRef = useRef<HTMLDivElement | null>(null)
   const contextRailRef = useRef<HTMLDivElement | null>(null)
@@ -373,43 +517,60 @@ export default function SpaceFocus({ spaceId: spaceIdProp }: SpaceFocusProps) {
           </div>
 
           <div className="relative shrink-0 flex items-center gap-1.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  title={contextCollapsed ? 'Show context panel' : 'Hide context panel'}
-                  aria-label={contextCollapsed ? 'Show context panel' : 'Hide context panel'}
-                  data-testid="context-panel-toggle"
-                  onClick={() => {
-                    const nextCollapsed = !contextCollapsed
-                    setContextCollapsed(nextCollapsed)
-                    writeContextCollapsed(nextCollapsed)
-                  }}
-                  className={cn(
-                    'relative w-8 h-8 rounded-[10px] overflow-hidden transition-[color,background,box-shadow] duration-300',
-                    contextCollapsed
-                      ? 'text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)]'
-                      : 'text-[var(--text-1)] bg-[var(--bg-hover)] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--accent)_28%,transparent)]',
-                  )}
-                >
-                  <span
-                    aria-hidden
-                    className={cn(
-                      'absolute right-1.5 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-[var(--accent)] transition-[opacity,transform] duration-300',
-                      contextCollapsed ? 'opacity-0 scale-y-50' : 'opacity-100 scale-y-100',
-                    )}
-                  />
-                  <PanelRight
-                    size={16}
-                    aria-hidden
-                    className={cn(
-                      'transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
-                      contextCollapsed ? 'translate-x-0' : '-translate-x-0.5',
-                    )}
-                  />
-                </Button>
-              </div>
+            <Button
+              type="button"
+              variant={claudeLaunchOpen ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setClaudeLaunchOpen(v => !v)}
+              className="h-8 gap-1.5 text-[12px]"
+            >
+              <Rocket size={13} />
+              Launch Claude
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title={contextCollapsed ? 'Show context panel' : 'Hide context panel'}
+              aria-label={contextCollapsed ? 'Show context panel' : 'Hide context panel'}
+              data-testid="context-panel-toggle"
+              onClick={() => {
+                const nextCollapsed = !contextCollapsed
+                setContextCollapsed(nextCollapsed)
+                writeContextCollapsed(nextCollapsed)
+              }}
+              className={cn(
+                'relative w-8 h-8 rounded-[10px] overflow-hidden transition-[color,background,box-shadow] duration-300',
+                contextCollapsed
+                  ? 'text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)]'
+                  : 'text-[var(--text-1)] bg-[var(--bg-hover)] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--accent)_28%,transparent)]',
+              )}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  'absolute right-1.5 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-[var(--accent)] transition-[opacity,transform] duration-300',
+                  contextCollapsed ? 'opacity-0 scale-y-50' : 'opacity-100 scale-y-100',
+                )}
+              />
+              <PanelRight
+                size={16}
+                aria-hidden
+                className={cn(
+                  'transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+                  contextCollapsed ? 'translate-x-0' : '-translate-x-0.5',
+                )}
+              />
+            </Button>
           </div>
+          </div>
+          {claudeLaunchOpen && (
+            <ClaudeLaunchPanel
+              projectRoot={focusedProjectRoot}
+              spaceTitle={spaceQuery.data?.title ?? spaceQuery.data?.id ?? spaceId}
+              onClose={() => setClaudeLaunchOpen(false)}
+            />
+          )}
         </div>
 
       <div ref={contextSplitRef} className="flex flex-1 min-h-0 relative">

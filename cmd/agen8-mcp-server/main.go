@@ -255,6 +255,7 @@ func newRootCommand() *cobra.Command {
 	var claudeLaunchTitle string
 	var claudeLaunchChannelRef string
 	var claudeLaunchDevelopment bool
+	var claudeLaunchAllowDangerouslySkipPermissions bool
 	claudeSetupCmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Install Agen8 Claude Code MCP, channel, and session-binding hook config for a project",
@@ -286,11 +287,12 @@ func newRootCommand() *cobra.Command {
 		Short: "Launch Claude Code remote-control with the Agen8 channel attached",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := runClaudeLaunch(cmd.Context(), claudecli.LaunchOptions{
-				ProjectRoot:        claudeLaunchProjectRoot,
-				ClaudeCommand:      claudeLaunchCommand,
-				RemoteControlTitle: claudeLaunchTitle,
-				ChannelRef:         claudeLaunchChannelRef,
-				DevelopmentChannel: claudeLaunchDevelopment,
+				ProjectRoot:                     claudeLaunchProjectRoot,
+				ClaudeCommand:                   claudeLaunchCommand,
+				RemoteControlTitle:              claudeLaunchTitle,
+				ChannelRef:                      claudeLaunchChannelRef,
+				DevelopmentChannel:              claudeLaunchDevelopment,
+				AllowDangerouslySkipPermissions: claudeLaunchAllowDangerouslySkipPermissions,
 			})
 			if err != nil {
 				return err
@@ -305,6 +307,7 @@ func newRootCommand() *cobra.Command {
 	claudeLaunchCmd.Flags().StringVar(&claudeLaunchTitle, "remote-control-title", "", "Claude remote-control session title; defaults to the project directory name")
 	claudeLaunchCmd.Flags().StringVar(&claudeLaunchChannelRef, "channel", "", "Claude channel entry to enable; defaults to server:agen8-channel")
 	claudeLaunchCmd.Flags().BoolVar(&claudeLaunchDevelopment, "development-channel", true, "Use the Claude Code research-preview development channel flag")
+	claudeLaunchCmd.Flags().BoolVar(&claudeLaunchAllowDangerouslySkipPermissions, "allow-dangerously-skip-permissions", false, "Launch Claude Code with bypassPermissions and allow-dangerously-skip-permissions for local trusted development")
 	claudeCmd.AddCommand(claudeHookCmd)
 	claudeCmd.AddCommand(claudeChannelCmd)
 	claudeCmd.AddCommand(claudeSetupCmd)

@@ -98,7 +98,8 @@ func TestHTTPStrategyLaunchesClaudeRemoteControl(t *testing.T) {
 		"projectRoot":"/repo",
 		"claudeCommand":"/bin/claude",
 		"remoteControlTitle":"Agen8 launch",
-		"channelRef":"server:agen8-channel"
+		"channelRef":"server:agen8-channel",
+		"allowDangerouslySkipPermissions":true
 	}`))
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -108,6 +109,7 @@ func TestHTTPStrategyLaunchesClaudeRemoteControl(t *testing.T) {
 	require.Equal(t, "Agen8 launch", captured.RemoteControlTitle)
 	require.Equal(t, "server:agen8-channel", captured.ChannelRef)
 	require.True(t, captured.DevelopmentChannel)
+	require.True(t, captured.AllowDangerouslySkipPermissions)
 
 	var body map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))

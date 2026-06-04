@@ -21,23 +21,25 @@ const (
 )
 
 type LaunchOptions struct {
-	ProjectRoot        string
-	ClaudeCommand      string
-	RemoteControlTitle string
-	ChannelRef         string
-	DevelopmentChannel bool
+	ProjectRoot                     string
+	ClaudeCommand                   string
+	RemoteControlTitle              string
+	ChannelRef                      string
+	DevelopmentChannel              bool
+	AllowDangerouslySkipPermissions bool
 }
 
 type LaunchResult struct {
-	ProjectRoot        string   `json:"projectRoot"`
-	ClaudeCommand      string   `json:"claudeCommand"`
-	Args               []string `json:"args"`
-	CommandLine        string   `json:"commandLine"`
-	PID                int      `json:"pid"`
-	LogPath            string   `json:"logPath"`
-	RemoteControlTitle string   `json:"remoteControlTitle"`
-	ChannelRef         string   `json:"channelRef"`
-	DevelopmentChannel bool     `json:"developmentChannel"`
+	ProjectRoot                     string   `json:"projectRoot"`
+	ClaudeCommand                   string   `json:"claudeCommand"`
+	Args                            []string `json:"args"`
+	CommandLine                     string   `json:"commandLine"`
+	PID                             int      `json:"pid"`
+	LogPath                         string   `json:"logPath"`
+	RemoteControlTitle              string   `json:"remoteControlTitle"`
+	ChannelRef                      string   `json:"channelRef"`
+	DevelopmentChannel              bool     `json:"developmentChannel"`
+	AllowDangerouslySkipPermissions bool     `json:"allowDangerouslySkipPermissions"`
 }
 
 func LaunchRemoteControl(ctx context.Context, opts LaunchOptions) (LaunchResult, error) {
@@ -74,6 +76,9 @@ func LaunchRemoteControl(ctx context.Context, opts LaunchOptions) (LaunchResult,
 	} else {
 		args = append(args, "--channels", channelRef)
 	}
+	if opts.AllowDangerouslySkipPermissions {
+		args = append(args, "--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions")
+	}
 	logPath, err := nextClaudeLaunchLogPath(projectRoot)
 	if err != nil {
 		return LaunchResult{}, err
@@ -83,15 +88,16 @@ func LaunchRemoteControl(ctx context.Context, opts LaunchOptions) (LaunchResult,
 		return LaunchResult{}, err
 	}
 	return LaunchResult{
-		ProjectRoot:        projectRoot,
-		ClaudeCommand:      claudeCommand,
-		Args:               append([]string(nil), args...),
-		CommandLine:        shellCommandLine(claudeCommand, args),
-		PID:                pid,
-		LogPath:            logPath,
-		RemoteControlTitle: title,
-		ChannelRef:         channelRef,
-		DevelopmentChannel: opts.DevelopmentChannel,
+		ProjectRoot:                     projectRoot,
+		ClaudeCommand:                   claudeCommand,
+		Args:                            append([]string(nil), args...),
+		CommandLine:                     shellCommandLine(claudeCommand, args),
+		PID:                             pid,
+		LogPath:                         logPath,
+		RemoteControlTitle:              title,
+		ChannelRef:                      channelRef,
+		DevelopmentChannel:              opts.DevelopmentChannel,
+		AllowDangerouslySkipPermissions: opts.AllowDangerouslySkipPermissions,
 	}, nil
 }
 

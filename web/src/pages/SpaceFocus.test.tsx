@@ -44,6 +44,7 @@ vi.mock('../hooks/useProjectSpaces', () => ({
 
 vi.mock('../lib/rpc', () => ({
   rpcCall: (...args: unknown[]) => mockRpcCall(...args),
+  getStoredSessionToken: () => 'test-session-token',
   onNotification: () => () => {},
 }))
 
@@ -185,6 +186,21 @@ describe('SpaceFocus', () => {
           return {}
       }
     })
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        projectRoot: '/repo',
+        claudeCommand: '/bin/claude',
+        args: ['--remote-control'],
+        commandLine: '/bin/claude --remote-control',
+        pid: 1234,
+        logPath: '/repo/.agen8/claude-launches/launch.log',
+        remoteControlTitle: 'Agen8: space-1',
+        channelRef: 'server:agen8-channel',
+        developmentChannel: true,
+        allowDangerouslySkipPermissions: true,
+      }),
+    })))
   })
 
   it('does not expose clear history from the removed More menu', () => {
@@ -359,6 +375,34 @@ describe('SpaceFocus', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('space-plan-mode-badge')).not.toBeInTheDocument()
     })
+  })
+
+  it('launches Claude desktop through the daemon with the local bypass preset', async () => {
+    const user = userEvent.setup()
+    renderSpaceFocus()
+
+    await user.click(screen.getByRole('button', { name: /launch claude/i }))
+    expect(screen.getByText('Launch Claude desktop')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /start claude/i }))
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/harness/claude/launch', expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-session-token',
+        }),
+        body: JSON.stringify({
+          projectRoot: '/repo',
+          remoteControlTitle: 'Agen8: space-1',
+          channelRef: 'server:agen8-channel',
+          developmentChannel: true,
+          allowDangerouslySkipPermissions: true,
+        }),
+      }))
+    })
+    expect(await screen.findByText(/Claude launch started/i)).toBeInTheDocument()
+    expect(screen.getByText(/PID 1234/i)).toBeInTheDocument()
   })
 
 })

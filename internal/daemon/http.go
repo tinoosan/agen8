@@ -217,11 +217,12 @@ type claudeChannelMessageRequest struct {
 }
 
 type claudeLaunchRequest struct {
-	ProjectRoot        string `json:"projectRoot"`
-	ClaudeCommand      string `json:"claudeCommand"`
-	RemoteControlTitle string `json:"remoteControlTitle"`
-	ChannelRef         string `json:"channelRef"`
-	DevelopmentChannel *bool  `json:"developmentChannel"`
+	ProjectRoot                     string `json:"projectRoot"`
+	ClaudeCommand                   string `json:"claudeCommand"`
+	RemoteControlTitle              string `json:"remoteControlTitle"`
+	ChannelRef                      string `json:"channelRef"`
+	DevelopmentChannel              *bool  `json:"developmentChannel"`
+	AllowDangerouslySkipPermissions bool   `json:"allowDangerouslySkipPermissions"`
 }
 
 func (d *Daemon) handleClaudeLaunch(w http.ResponseWriter, r *http.Request) {
@@ -235,11 +236,12 @@ func (d *Daemon) handleClaudeLaunch(w http.ResponseWriter, r *http.Request) {
 		development = *req.DevelopmentChannel
 	}
 	result, err := launchClaudeRemoteControl(r.Context(), claudecli.LaunchOptions{
-		ProjectRoot:        req.ProjectRoot,
-		ClaudeCommand:      req.ClaudeCommand,
-		RemoteControlTitle: req.RemoteControlTitle,
-		ChannelRef:         req.ChannelRef,
-		DevelopmentChannel: development,
+		ProjectRoot:                     req.ProjectRoot,
+		ClaudeCommand:                   req.ClaudeCommand,
+		RemoteControlTitle:              req.RemoteControlTitle,
+		ChannelRef:                      req.ChannelRef,
+		DevelopmentChannel:              development,
+		AllowDangerouslySkipPermissions: req.AllowDangerouslySkipPermissions,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -251,6 +253,7 @@ func (d *Daemon) handleClaudeLaunch(w http.ResponseWriter, r *http.Request) {
 			"pid", result.PID,
 			"channel_ref", result.ChannelRef,
 			"development_channel", result.DevelopmentChannel,
+			"allow_dangerously_skip_permissions", result.AllowDangerouslySkipPermissions,
 		)
 	}
 	w.Header().Set("Content-Type", "application/json")

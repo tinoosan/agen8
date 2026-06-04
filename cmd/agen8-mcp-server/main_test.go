@@ -142,12 +142,13 @@ func TestClaudeLaunchPassesOptions(t *testing.T) {
 	runClaudeLaunch = func(_ context.Context, opts claudecli.LaunchOptions) (claudecli.LaunchResult, error) {
 		captured = opts
 		return claudecli.LaunchResult{
-			ProjectRoot:        opts.ProjectRoot,
-			ClaudeCommand:      opts.ClaudeCommand,
-			RemoteControlTitle: opts.RemoteControlTitle,
-			ChannelRef:         opts.ChannelRef,
-			DevelopmentChannel: opts.DevelopmentChannel,
-			PID:                1234,
+			ProjectRoot:                     opts.ProjectRoot,
+			ClaudeCommand:                   opts.ClaudeCommand,
+			RemoteControlTitle:              opts.RemoteControlTitle,
+			ChannelRef:                      opts.ChannelRef,
+			DevelopmentChannel:              opts.DevelopmentChannel,
+			AllowDangerouslySkipPermissions: opts.AllowDangerouslySkipPermissions,
+			PID:                             1234,
 		}, nil
 	}
 	t.Cleanup(func() { runClaudeLaunch = original })
@@ -162,6 +163,7 @@ func TestClaudeLaunchPassesOptions(t *testing.T) {
 		"--remote-control-title", "Agen8 launch",
 		"--channel", "server:agen8-channel",
 		"--development-channel=false",
+		"--allow-dangerously-skip-permissions",
 	})
 	require.NoError(t, cmd.Execute())
 	require.Equal(t, "/repo", captured.ProjectRoot)
@@ -169,5 +171,6 @@ func TestClaudeLaunchPassesOptions(t *testing.T) {
 	require.Equal(t, "Agen8 launch", captured.RemoteControlTitle)
 	require.Equal(t, "server:agen8-channel", captured.ChannelRef)
 	require.False(t, captured.DevelopmentChannel)
+	require.True(t, captured.AllowDangerouslySkipPermissions)
 	require.Contains(t, out.String(), `"pid"`)
 }
