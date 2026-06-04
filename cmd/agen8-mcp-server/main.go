@@ -61,6 +61,15 @@ var runClaudeHook = func(ctx context.Context) error {
 	return nil
 }
 
+var runClaudeChannel = func(ctx context.Context, listenAddr string) error {
+	return claudecli.RunChannel(ctx, claudecli.ChannelOptions{
+		ListenAddr: listenAddr,
+		In:         os.Stdin,
+		Out:        os.Stdout,
+		ErrOut:     os.Stderr,
+	})
+}
+
 var runClaudeSetup = func(_ context.Context, opts claudecli.SetupOptions) (claudecli.SetupResult, error) {
 	if strings.TrimSpace(opts.HookCommand) == "" {
 		executable, err := os.Executable()
@@ -68,6 +77,9 @@ var runClaudeSetup = func(_ context.Context, opts claudecli.SetupOptions) (claud
 			return claudecli.SetupResult{}, err
 		}
 		opts.HookCommand = executable
+	}
+	if strings.TrimSpace(opts.ChannelCommand) == "" {
+		opts.ChannelCommand = opts.HookCommand
 	}
 	return claudecli.SetupProject(opts)
 }
@@ -217,19 +229,34 @@ func newRootCommand() *cobra.Command {
 			return runClaudeHook(ctx)
 		},
 	}
+	var claudeChannelListenAddr string
+	claudeChannelCmd := &cobra.Command{
+		Use:   "channel",
+		Short: "Run the Agen8 Claude Code channel adapter over stdio",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return runClaudeChannel(ctx, claudeChannelListenAddr)
+		},
+	}
+	claudeChannelCmd.Flags().StringVar(&claudeChannelListenAddr, "listen", "127.0.0.1:0", "Local notify listener address for daemon/channel events")
 	var claudeSetupProjectRoot string
 	var claudeSetupMCPURL string
 	var claudeSetupHookCommand string
 	var claudeSetupHookArgs []string
+	var claudeSetupChannelCommand string
+	var claudeSetupChannelArgs []string
 	claudeSetupCmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Install Agen8 Claude Code MCP and session-binding hook config for a project",
+		Short: "Install Agen8 Claude Code MCP, channel, and session-binding hook config for a project",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := runClaudeSetup(cmd.Context(), claudecli.SetupOptions{
-				ProjectRoot: claudeSetupProjectRoot,
-				MCPURL:      claudeSetupMCPURL,
-				HookCommand: claudeSetupHookCommand,
-				HookArgs:    claudeSetupHookArgs,
+				ProjectRoot:    claudeSetupProjectRoot,
+				MCPURL:         claudeSetupMCPURL,
+				HookCommand:    claudeSetupHookCommand,
+				HookArgs:       claudeSetupHookArgs,
+				ChannelCommand: claudeSetupChannelCommand,
+				ChannelArgs:    claudeSetupChannelArgs,
 			})
 			if err != nil {
 				return err
@@ -243,7 +270,10 @@ func newRootCommand() *cobra.Command {
 	claudeSetupCmd.Flags().StringVar(&claudeSetupMCPURL, "mcp-url", "", "Agen8 MCP URL; defaults to AGEN8_MCP_URL, AGEN8_MCP_TOKEN, existing .mcp.json, or local dev URL")
 	claudeSetupCmd.Flags().StringVar(&claudeSetupHookCommand, "hook-command", "", "Hook executable; defaults to the current agen8-mcp-server binary")
 	claudeSetupCmd.Flags().StringSliceVar(&claudeSetupHookArgs, "hook-arg", nil, "Hook argument; repeat to override the default 'claude hook' args")
+	claudeSetupCmd.Flags().StringVar(&claudeSetupChannelCommand, "channel-command", "", "Channel executable; defaults to the hook command")
+	claudeSetupCmd.Flags().StringSliceVar(&claudeSetupChannelArgs, "channel-arg", nil, "Channel argument; repeat to override the default 'claude channel' args")
 	claudeCmd.AddCommand(claudeHookCmd)
+	claudeCmd.AddCommand(claudeChannelCmd)
 	claudeCmd.AddCommand(claudeSetupCmd)
 	root.AddCommand(claudeCmd)
 	return root

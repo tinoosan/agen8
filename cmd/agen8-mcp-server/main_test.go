@@ -107,11 +107,31 @@ func TestClaudeSetupPassesOptions(t *testing.T) {
 		"--hook-command", "/bin/agen8",
 		"--hook-arg", "claude",
 		"--hook-arg", "hook",
+		"--channel-command", "/bin/agen8-channel",
+		"--channel-arg", "claude",
+		"--channel-arg", "channel",
 	})
 	require.NoError(t, cmd.Execute())
 	require.Equal(t, "/repo", captured.ProjectRoot)
 	require.Equal(t, "http://127.0.0.1:7777/mcp?token=abc", captured.MCPURL)
 	require.Equal(t, "/bin/agen8", captured.HookCommand)
 	require.Equal(t, []string{"claude", "hook"}, captured.HookArgs)
+	require.Equal(t, "/bin/agen8-channel", captured.ChannelCommand)
+	require.Equal(t, []string{"claude", "channel"}, captured.ChannelArgs)
 	require.Contains(t, out.String(), `"settingsPath"`)
+}
+
+func TestClaudeChannelRunsAdapter(t *testing.T) {
+	var captured string
+	original := runClaudeChannel
+	runClaudeChannel = func(_ context.Context, listenAddr string) error {
+		captured = listenAddr
+		return nil
+	}
+	t.Cleanup(func() { runClaudeChannel = original })
+
+	cmd := newRootCommand()
+	cmd.SetArgs([]string{"claude", "channel", "--listen", "127.0.0.1:9010"})
+	require.NoError(t, cmd.Execute())
+	require.Equal(t, "127.0.0.1:9010", captured)
 }

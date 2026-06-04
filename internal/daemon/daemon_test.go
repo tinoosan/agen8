@@ -24,6 +24,7 @@ import (
 	decisiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
 	harnessdomain "github.com/tinoosan/agen8-mcp-server/internal/services/harness/domain"
 	humaninputdomain "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
+	messageapp "github.com/tinoosan/agen8-mcp-server/internal/services/message/app"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/message/domain/conversation"
 	missionrpc "github.com/tinoosan/agen8-mcp-server/internal/services/mission/rpc"
 	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
@@ -2024,6 +2025,105 @@ func TestHarnessSpaceMemberLifecycleHandlerProvisionsClaudeMCPConfigFile(t *test
 	require.NoError(t, json.Unmarshal(raw, &cfg))
 	require.Equal(t, "http", cfg.MCPServers["agen8"].Type)
 	require.Contains(t, cfg.MCPServers["agen8"].URL, "/mcp?token=agen8-local")
+}
+
+func TestSendMessageDeliversClaudeSessionThroughRegisteredChannel(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	err := d.handleSpaceMemberLifecycle(ctx, eventbus.SpaceMemberLifecycleEvent{
+		ProjectID:      "project-1",
+		SpaceID:        "space-1",
+		MemberID:       "member-1",
+		ChannelID:      "channel:space-1:member:member-1",
+		DisplayName:    "Claude One",
+		MemberType:     "worker",
+		EventType:      eventbus.SpaceMemberEventRegistered,
+		LifecycleState: "active",
+		HarnessKind:    "claude-cli",
+		Model:          "claude-opus-4-7",
+		Effort:         "high",
+	})
+	require.NoError(t, err)
+	active, err := d.app.HarnessSvc.GetActiveSession(ctx, "member-1")
+	require.NoError(t, err)
+	require.NotNil(t, active)
+
+	received := make(chan struct {
+		Content string         `json:"content"`
+		Meta    map[string]any `json:"meta"`
+	}, 1)
+	channel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		var payload struct {
+			Content string         `json:"content"`
+			Meta    map[string]any `json:"meta"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		received <- payload
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(channel.Close)
+	d.mcpBinding.bindClaudeChannelURL(active.ID, channel.URL)
+
+	result, err := d.SendMessage(ctx, messageapp.HarnessChatMessage{
+		SpaceID:               "space-1",
+		MemberID:              "member-1",
+		ChannelID:             "channel:space-1:member:member-1",
+		ConversationMessageID: "msg-1",
+		SenderType:            "agent",
+		SenderID:              "member-coordinator",
+		Text:                  "Task assigned",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "claude-channel", result.Delivery)
+	require.Equal(t, active.ID, result.SessionID)
+
+	select {
+	case payload := <-received:
+		require.Equal(t, "Task assigned", payload.Content)
+		require.Equal(t, "agen8", payload.Meta["source"])
+		require.Equal(t, "msg-1", payload.Meta["conversationMessageId"])
+	case <-time.After(time.Second):
+		t.Fatal("claude channel did not receive message")
+	}
+}
+
+func TestClaudeChannelRegisterBindsRouteByMemberID(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	err := d.handleSpaceMemberLifecycle(ctx, eventbus.SpaceMemberLifecycleEvent{
+		ProjectID:      "project-1",
+		SpaceID:        "space-1",
+		MemberID:       "member-1",
+		ChannelID:      "channel:space-1:member:member-1",
+		DisplayName:    "Claude One",
+		MemberType:     "worker",
+		EventType:      eventbus.SpaceMemberEventRegistered,
+		LifecycleState: "active",
+		HarnessKind:    "claude-cli",
+		Model:          "claude-opus-4-7",
+		Effort:         "high",
+	})
+	require.NoError(t, err)
+	active, err := d.app.HarnessSvc.GetActiveSession(ctx, "member-1")
+	require.NoError(t, err)
+	require.NotNil(t, active)
+
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	body := fmt.Sprintf(`{
+		"token": %q,
+		"sessionId": %q,
+		"memberId": "member-1",
+		"notifyUrl": "http://127.0.0.1:4567/notify"
+	}`, active.MCPToken, active.Ref)
+	resp, err := http.Post(srv.URL+"/harness/claude-channel/register", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "http://127.0.0.1:4567/notify", d.mcpBinding.claudeChannelURL(active.ID))
 }
 
 func TestHarnessSpaceMemberLifecycleHandlerReplacesSessionForHarnessKindChanges(t *testing.T) {

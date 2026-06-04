@@ -26,8 +26,8 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 	if result.SettingsPath != filepath.Join(root, ".claude", "settings.local.json") {
 		t.Fatalf("settings path=%q", result.SettingsPath)
 	}
-	if result.ChannelReady {
-		t.Fatalf("channel should not be marked ready before channel server implementation")
+	if !result.ChannelReady {
+		t.Fatalf("channel should be marked ready after channel server implementation")
 	}
 
 	var mcpCfg struct {
@@ -54,6 +54,9 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 	}
 	if mcpCfg.MCPServers["agen8"].Type != "http" || mcpCfg.MCPServers["agen8"].URL != "http://127.0.0.1:7777/mcp?token=abc" {
 		t.Fatalf("agen8 server=%#v", mcpCfg.MCPServers["agen8"])
+	}
+	if mcpCfg.MCPServers["agen8-channel"].Command != "/usr/local/bin/agen8-mcp-server" || !equalStrings(mcpCfg.MCPServers["agen8-channel"].Args, []string{"claude", "channel"}) {
+		t.Fatalf("agen8-channel server=%#v", mcpCfg.MCPServers["agen8-channel"])
 	}
 
 	settings := readSettingsFile(t, filepath.Join(root, ".claude", "settings.local.json"))

@@ -12,10 +12,12 @@ import (
 const defaultLocalMCPURL = "http://127.0.0.1:7777/mcp?token=agen8-local"
 
 type SetupOptions struct {
-	ProjectRoot string
-	MCPURL      string
-	HookCommand string
-	HookArgs    []string
+	ProjectRoot    string
+	MCPURL         string
+	HookCommand    string
+	HookArgs       []string
+	ChannelCommand string
+	ChannelArgs    []string
 }
 
 type SetupResult struct {
@@ -25,6 +27,8 @@ type SetupResult struct {
 	MCPURL            string   `json:"mcpUrl"`
 	HookCommand       string   `json:"hookCommand"`
 	HookArgs          []string `json:"hookArgs"`
+	ChannelCommand    string   `json:"channelCommand"`
+	ChannelArgs       []string `json:"channelArgs"`
 	ChannelReady      bool     `json:"channelReady"`
 	ChannelStatus     string   `json:"channelStatus"`
 	ClaudeLaunchHints []string `json:"claudeLaunchHints"`
@@ -43,28 +47,38 @@ func SetupProject(opts SetupOptions) (SetupResult, error) {
 	if len(hookArgs) == 0 {
 		hookArgs = []string{"claude", "hook"}
 	}
+	channelCommand := strings.TrimSpace(opts.ChannelCommand)
+	if channelCommand == "" {
+		channelCommand = hookCommand
+	}
+	channelArgs := compactHookArgs(opts.ChannelArgs)
+	if len(channelArgs) == 0 {
+		channelArgs = []string{"claude", "channel"}
+	}
 	rawURL, err := resolveSetupMCPURL(projectRoot, opts.MCPURL)
 	if err != nil {
 		return SetupResult{}, err
 	}
-	if err := writeClaudeMCPProjectConfig(projectRoot, rawURL); err != nil {
+	if err := writeClaudeMCPProjectConfig(projectRoot, rawURL, channelCommand, channelArgs); err != nil {
 		return SetupResult{}, err
 	}
 	if err := writeClaudeHookSettings(projectRoot, hookCommand, hookArgs); err != nil {
 		return SetupResult{}, err
 	}
 	return SetupResult{
-		ProjectRoot:   projectRoot,
-		MCPConfigPath: filepath.Join(projectRoot, ".mcp.json"),
-		SettingsPath:  filepath.Join(projectRoot, ".claude", "settings.local.json"),
-		MCPURL:        rawURL,
-		HookCommand:   hookCommand,
-		HookArgs:      hookArgs,
-		ChannelReady:  false,
-		ChannelStatus: "Claude Code channel server is not installed yet; this setup installs MCP and SessionStart binding only.",
+		ProjectRoot:    projectRoot,
+		MCPConfigPath:  filepath.Join(projectRoot, ".mcp.json"),
+		SettingsPath:   filepath.Join(projectRoot, ".claude", "settings.local.json"),
+		MCPURL:         rawURL,
+		HookCommand:    hookCommand,
+		HookArgs:       hookArgs,
+		ChannelCommand: channelCommand,
+		ChannelArgs:    channelArgs,
+		ChannelReady:   true,
+		ChannelStatus:  "Claude Code channel adapter installed as mcpServers.agen8-channel. Claude Code must be launched with channel support enabled during the research preview.",
 		ClaudeLaunchHints: []string{
 			"Restart Claude Code in this project so it reloads .mcp.json and .claude/settings.local.json.",
-			"When Agen8 channel delivery is implemented, launch Claude Code with the channel entry enabled; during research preview this requires Claude Code channel support and the development-channel flag for custom channels.",
+			"During the Claude Code channel research preview, launch Claude Code with the Agen8 channel enabled, for example: claude --dangerously-load-development-channels server:agen8-channel.",
 		},
 	}, nil
 }
@@ -121,7 +135,7 @@ type claudeMCPProjectConfig struct {
 	Extra      map[string]json.RawMessage `json:"-"`
 }
 
-func writeClaudeMCPProjectConfig(projectRoot string, rawURL string) error {
+func writeClaudeMCPProjectConfig(projectRoot string, rawURL string, channelCommand string, channelArgs []string) error {
 	path := filepath.Join(projectRoot, ".mcp.json")
 	cfg, err := readClaudeMCPProjectConfig(path)
 	if err != nil {
@@ -133,6 +147,10 @@ func writeClaudeMCPProjectConfig(projectRoot string, rawURL string) error {
 	cfg.MCPServers["agen8"] = map[string]any{
 		"type": "http",
 		"url":  rawURL,
+	}
+	cfg.MCPServers["agen8-channel"] = map[string]any{
+		"command": channelCommand,
+		"args":    channelArgs,
 	}
 	return writeJSONFile(path, cfg.toMap(), 0o600)
 }

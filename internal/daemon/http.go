@@ -22,6 +22,7 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/rpc"
 	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
 	harnessapp "github.com/tinoosan/agen8-mcp-server/internal/services/harness/app"
+	harnessdomain "github.com/tinoosan/agen8-mcp-server/internal/services/harness/domain"
 	humaninputdomain "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
 	messageapp "github.com/tinoosan/agen8-mcp-server/internal/services/message/app"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/message/domain/conversation"
@@ -81,6 +82,7 @@ func (d *Daemon) httpHandler() (http.Handler, error) {
 	mux.HandleFunc("GET /healthz", d.handleHealthz)
 	mux.HandleFunc("POST /rpc", d.handleRPC)
 	mux.HandleFunc("POST /mcp/register", d.handleMCPRegister)
+	mux.HandleFunc("POST /harness/claude-channel/register", d.handleClaudeChannelRegister)
 	if d.mcp == nil {
 		return nil, fmt.Errorf("mcp server is required")
 	}
@@ -191,6 +193,94 @@ type mcpRegisterResponse struct {
 	Token            string   `json:"token"`
 	URL              string   `json:"url"`
 	MCPServers       []string `json:"mcpServers"`
+}
+
+type claudeChannelRegisterRequest struct {
+	Token     string `json:"token"`
+	SessionID string `json:"sessionId"`
+	MemberID  string `json:"memberId"`
+	NotifyURL string `json:"notifyUrl"`
+}
+
+func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Request) {
+	var req claudeChannelRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	session, err := d.resolveClaudeChannelSession(r.Context(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	d.mcpBinding.bindClaudeChannelURL(session.ID, req.NotifyURL)
+	if d.logger != nil {
+		d.logger.InfoContext(r.Context(), "claude channel registered",
+			"member_id", session.MemberID,
+			"session_id", session.ID,
+			"native_session_ref", session.Ref,
+			"notify_url", strings.TrimSpace(req.NotifyURL),
+		)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":               true,
+		"memberId":         session.MemberID,
+		"sessionId":        session.ID,
+		"nativeSessionRef": session.Ref,
+	})
+}
+
+func (d *Daemon) resolveClaudeChannelSession(ctx context.Context, req claudeChannelRegisterRequest) (*harnessdomain.Session, error) {
+	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
+		return nil, fmt.Errorf("harness service is required")
+	}
+	notifyURL := strings.TrimSpace(req.NotifyURL)
+	if notifyURL == "" {
+		return nil, fmt.Errorf("notifyUrl is required")
+	}
+	parsed, err := url.Parse(notifyURL)
+	if err != nil || parsed.Scheme != "http" || parsed.Host == "" {
+		return nil, fmt.Errorf("notifyUrl must be a local http url")
+	}
+	host := parsed.Hostname()
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		return nil, fmt.Errorf("notifyUrl must point at localhost")
+	}
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		return nil, fmt.Errorf("token is required")
+	}
+	memberID := strings.TrimSpace(req.MemberID)
+	if memberID != "" {
+		session, err := d.app.HarnessSvc.GetActiveSession(ctx, memberID)
+		if err != nil {
+			return nil, fmt.Errorf("load claude channel member session: %w", err)
+		}
+		if session == nil || strings.TrimSpace(session.MCPToken) != token || !strings.EqualFold(strings.TrimSpace(session.Kind), "claude-cli") {
+			return nil, fmt.Errorf("member is not bound to an active claude-cli MCP session")
+		}
+		return session, nil
+	}
+	sessionRef := strings.TrimSpace(req.SessionID)
+	if sessionRef != "" {
+		session, err := d.resolveActiveHarnessSessionByRef(ctx, sessionRef)
+		if err != nil {
+			return nil, fmt.Errorf("load claude channel session ref: %w", err)
+		}
+		if session == nil || strings.TrimSpace(session.MCPToken) != token || !strings.EqualFold(strings.TrimSpace(session.Kind), "claude-cli") {
+			return nil, fmt.Errorf("session ref is not an active claude-cli MCP session")
+		}
+		return session, nil
+	}
+	session, err := d.resolveUniqueMCPSessionForToken(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil || !strings.EqualFold(strings.TrimSpace(session.Kind), "claude-cli") {
+		return nil, fmt.Errorf("mcp token is not bound to an active claude-cli session")
+	}
+	return session, nil
 }
 
 func (d *Daemon) handleMCPRegister(w http.ResponseWriter, r *http.Request) {

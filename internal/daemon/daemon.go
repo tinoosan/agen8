@@ -1,11 +1,15 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/app"
 	"github.com/tinoosan/agen8-mcp-server/internal/logging"
@@ -166,8 +170,9 @@ func New(cfg Config) (*Daemon, error) {
 		mcp:       mcpServer,
 		events:    signalhub.NewPayload[string, protocol.Message](),
 		mcpBinding: mcpSessionBindingTracker{
-			byToken:            make(map[string]string),
-			appServerBySession: make(map[string]string),
+			byToken:                     make(map[string]string),
+			appServerBySession:          make(map[string]string),
+			claudeChannelURLBySessionID: make(map[string]string),
 		},
 		logger: daemonLogger.With("service", "daemon"),
 	}
@@ -190,11 +195,12 @@ func New(cfg Config) (*Daemon, error) {
 }
 
 type mcpSessionBindingTracker struct {
-	mu                  sync.RWMutex
-	byToken             map[string]string
-	appServerBySession  map[string]string
-	activeTurnBySession map[string]activeCodexTurn
-	activeTurnByRef     map[string]activeCodexTurn
+	mu                          sync.RWMutex
+	byToken                     map[string]string
+	appServerBySession          map[string]string
+	claudeChannelURLBySessionID map[string]string
+	activeTurnBySession         map[string]activeCodexTurn
+	activeTurnByRef             map[string]activeCodexTurn
 }
 
 type activeCodexTurn struct {
@@ -260,6 +266,30 @@ func (t *mcpSessionBindingTracker) appServerURL(sessionID string) string {
 	return strings.TrimSpace(t.appServerBySession[sessionID])
 }
 
+func (t *mcpSessionBindingTracker) bindClaudeChannelURL(sessionID string, notifyURL string) {
+	sessionID = strings.TrimSpace(sessionID)
+	notifyURL = strings.TrimSpace(notifyURL)
+	if sessionID == "" || notifyURL == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.claudeChannelURLBySessionID == nil {
+		t.claudeChannelURLBySessionID = make(map[string]string)
+	}
+	t.claudeChannelURLBySessionID[sessionID] = notifyURL
+}
+
+func (t *mcpSessionBindingTracker) claudeChannelURL(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return strings.TrimSpace(t.claudeChannelURLBySessionID[sessionID])
+}
+
 func (t *mcpSessionBindingTracker) bindActiveCodexTurn(sessionID string, threadID string, turnID string) {
 	sessionID = strings.TrimSpace(sessionID)
 	threadID = strings.TrimSpace(threadID)
@@ -306,6 +336,9 @@ var _ harnessapp.RuntimeHostResolver = (*Daemon)(nil)
 var _ messageapp.HarnessChatSender = (*Daemon)(nil)
 
 func (d *Daemon) SendMessage(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {
+	if d.isActiveHarnessKind(ctx, input.MemberID, "claude-cli") {
+		return d.sendClaudeChannelMessage(ctx, input)
+	}
 	if input.AllowSteering {
 		result, err := d.trySteerActiveCodexTurn(ctx, input)
 		if err == nil {
@@ -336,6 +369,77 @@ func (d *Daemon) SendMessage(ctx context.Context, input messageapp.HarnessChatMe
 		}
 	}
 	return d.sendMessageThroughHarness(ctx, input)
+}
+
+func (d *Daemon) isActiveHarnessKind(ctx context.Context, memberID string, harnessKind string) bool {
+	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
+		return false
+	}
+	session, err := d.app.HarnessSvc.GetActiveSession(ctx, strings.TrimSpace(memberID))
+	if err != nil || session == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(session.Kind), strings.TrimSpace(harnessKind))
+}
+
+func (d *Daemon) sendClaudeChannelMessage(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {
+	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("harness service is required")
+	}
+	session, err := d.app.HarnessSvc.GetActiveSession(ctx, strings.TrimSpace(input.MemberID))
+	if err != nil {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("load active claude session for member %s: %w", input.MemberID, err)
+	}
+	if session == nil || !strings.EqualFold(strings.TrimSpace(session.Kind), "claude-cli") {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("member %q has no active claude-cli session", input.MemberID)
+	}
+	notifyURL := d.mcpBinding.claudeChannelURL(session.ID)
+	if notifyURL == "" {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("claude channel is not registered for harness session %q", session.ID)
+	}
+	payload := map[string]any{
+		"content": input.Text,
+		"meta": map[string]any{
+			"source":                "agen8",
+			"memberId":              input.MemberID,
+			"spaceId":               input.SpaceID,
+			"channelId":             input.ChannelID,
+			"conversationMessageId": input.ConversationMessageID,
+			"senderType":            input.SenderType,
+			"senderId":              input.SenderID,
+		},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("marshal claude channel payload: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, notifyURL, bytes.NewReader(data))
+	if err != nil {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("build claude channel request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("send claude channel notification: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("claude channel notification status %d", resp.StatusCode)
+	}
+	if d.logger != nil {
+		d.logger.InfoContext(ctx, "agent message delivered to claude channel",
+			"member_id", input.MemberID,
+			"session_id", session.ID,
+			"notify_url", notifyURL,
+			"conversation_message_id", input.ConversationMessageID,
+		)
+	}
+	return messageapp.HarnessChatResult{
+		SessionID: session.ID,
+		TurnID:    strings.TrimSpace(session.Ref),
+		Delivery:  "claude-channel",
+	}, nil
 }
 
 func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {

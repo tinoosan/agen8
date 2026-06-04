@@ -78,6 +78,13 @@ func RunHook(ctx context.Context, binder HookBinder, r io.Reader, w io.Writer, e
 	if strings.TrimSpace(result.MemberID) == "" {
 		return
 	}
+	if mcpBinder, ok := binder.(MCPHookBinder); ok {
+		if rawURL, err := mcpBinder.resolveMCPURL(in); err == nil {
+			if err := writeClaudeSessionBinding(in, result, rawURL); err != nil {
+				logHook(errOut, "write session binding: %v", err)
+			}
+		}
+	}
 
 	contextText := fmt.Sprintf("Agen8 bound this Claude Code session to member %s in space %s.", strings.TrimSpace(result.MemberID), strings.TrimSpace(result.SpaceID))
 	event := strings.TrimSpace(in.HookEventName)
@@ -89,6 +96,56 @@ func RunHook(ctx context.Context, binder HookBinder, r io.Reader, w io.Writer, e
 		HookEventName:     event,
 		AdditionalContext: contextText,
 	}
+}
+
+type claudeSessionBindingFile struct {
+	MCPURL           string `json:"mcpUrl"`
+	Token            string `json:"token"`
+	MemberID         string `json:"memberId"`
+	SpaceID          string `json:"spaceId"`
+	SessionID        string `json:"sessionId"`
+	NativeSessionRef string `json:"nativeSessionRef"`
+	UpdatedAt        string `json:"updatedAt"`
+}
+
+func writeClaudeSessionBinding(input HookInput, result BindResult, rawURL string) error {
+	root := strings.TrimSpace(input.CWD)
+	if root == "" {
+		return nil
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("stat cwd: %w", err)
+	}
+	if !info.IsDir() {
+		root = filepath.Dir(root)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parse mcp url: %w", err)
+	}
+	binding := claudeSessionBindingFile{
+		MCPURL:           rawURL,
+		Token:            strings.TrimSpace(parsed.Query().Get("token")),
+		MemberID:         strings.TrimSpace(result.MemberID),
+		SpaceID:          strings.TrimSpace(result.SpaceID),
+		SessionID:        strings.TrimSpace(result.SessionID),
+		NativeSessionRef: strings.TrimSpace(result.NativeSessionRef),
+		UpdatedAt:        time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	data, err := json.MarshalIndent(binding, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal binding: %w", err)
+	}
+	data = append(data, '\n')
+	path := filepath.Join(root, ".agen8", "claude-session.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create binding dir: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write binding file: %w", err)
+	}
+	return nil
 }
 
 type MCPHookBinder struct {
