@@ -558,12 +558,18 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 			return mcpRegisterResponse{}, err
 		}
 	}
+	if memberID == "" && nativeSessionRef != "" {
+		memberID, err = d.resolveExistingMCPRegisterMemberIDBySession(ctx, projectID, string(space.ID), harnessKind, nativeSessionRef)
+		if err != nil {
+			return mcpRegisterResponse{}, err
+		}
+	}
 	if memberID == "" {
 		identityKey := harnessKind
 		if sessionKey != "" {
 			identityKey = harnessKind + "\x00" + sessionKey
 		}
-		memberID = "member-" + shortHash(projectID+"\x00"+userID+"\x00"+identityKey)
+		memberID = "member-" + shortHash(projectID+"\x00"+string(space.ID)+"\x00"+userID+"\x00"+identityKey)
 	}
 	memberType, err := d.resolveMCPRegisterMemberType(callCtx, string(space.ID), memberID, strings.TrimSpace(req.MemberType))
 	if err != nil {
@@ -770,6 +776,44 @@ func validateMCPRegisterSessionRefs(req mcpRegisterRequest) error {
 		}
 	}
 	return nil
+}
+
+func (d *Daemon) resolveExistingMCPRegisterMemberIDBySession(ctx context.Context, projectID string, spaceID string, harnessKind string, nativeSessionRef string) (string, error) {
+	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
+		return "", fmt.Errorf("harness service is required")
+	}
+	projectID = strings.TrimSpace(projectID)
+	spaceID = strings.TrimSpace(spaceID)
+	harnessKind = strings.TrimSpace(harnessKind)
+	nativeSessionRef = strings.TrimSpace(nativeSessionRef)
+	if projectID == "" || spaceID == "" || harnessKind == "" || nativeSessionRef == "" {
+		return "", nil
+	}
+	sessions, err := d.app.HarnessSvc.ListActiveSessions(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list active harness sessions for mcp register session: %w", err)
+	}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if strings.TrimSpace(session.ProjectID) != projectID {
+			continue
+		}
+		if strings.TrimSpace(session.SpaceID) != spaceID {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(session.Kind), harnessKind) {
+			continue
+		}
+		if strings.TrimSpace(session.Ref) != nativeSessionRef {
+			continue
+		}
+		if memberID := strings.TrimSpace(session.MemberID); memberID != "" {
+			return memberID, nil
+		}
+	}
+	return "", nil
 }
 
 func looksLikeMalformedUUID(value string) bool {

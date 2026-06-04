@@ -197,6 +197,37 @@ func TestWriteClaudeSessionBindingStoresNativeAndLogicalRefs(t *testing.T) {
 	}
 }
 
+func TestStableClaudeLogicalSessionIDIsScopedToNativeSession(t *testing.T) {
+	root := t.TempDir()
+	err := writeClaudeSessionBinding(HookInput{CWD: root, SessionID: "native-1"}, BindResult{
+		MemberID:         "member-1",
+		SpaceID:          "space-1",
+		SessionID:        "logical-existing",
+		LogicalSessionID: "logical-existing",
+		NativeSessionRef: "native-1",
+	}, "http://127.0.0.1:7777/mcp?token=abc")
+	if err != nil {
+		t.Fatalf("writeClaudeSessionBinding: %v", err)
+	}
+
+	sameNative := stableClaudeLogicalSessionID(HookInput{CWD: root, SessionID: "native-1"}, "http://127.0.0.1:7777/mcp?token=abc")
+	if sameNative != "logical-existing" {
+		t.Fatalf("same native logical=%q want logical-existing", sameNative)
+	}
+	newNative := stableClaudeLogicalSessionID(HookInput{CWD: root, SessionID: "native-2"}, "http://127.0.0.1:7777/mcp?token=abc")
+	if newNative == "" || newNative == "logical-existing" {
+		t.Fatalf("new native logical=%q should not reuse existing binding", newNative)
+	}
+	newNativeAgain := stableClaudeLogicalSessionID(HookInput{CWD: root, SessionID: "native-2"}, "http://127.0.0.1:7777/mcp?token=abc")
+	if newNativeAgain != newNative {
+		t.Fatalf("logical not stable for same native: %q != %q", newNativeAgain, newNative)
+	}
+	thirdNative := stableClaudeLogicalSessionID(HookInput{CWD: root, SessionID: "native-3"}, "http://127.0.0.1:7777/mcp?token=abc")
+	if thirdNative == newNative {
+		t.Fatalf("different native sessions collapsed to %q", thirdNative)
+	}
+}
+
 func quoteJSONString(value string) string {
 	raw, _ := json.Marshal(value)
 	return string(raw)

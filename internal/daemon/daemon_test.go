@@ -889,6 +889,108 @@ func TestHTTPStrategyBootstrapMCPTokenRegistersContextFromTool(t *testing.T) {
 	require.Equal(t, "worker", threadRPC.Result.StructuredContent.MemberType)
 }
 
+func TestHTTPStrategyMCPRegisterScopesSessionMembersBySpace(t *testing.T) {
+	d := newTestDaemon(t)
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	projectRoot := filepath.Join(t.TempDir(), "agen8-mcp-server")
+	require.NoError(t, os.MkdirAll(projectRoot, 0o755))
+
+	registerClaude := func(id string, spaceID string) (projectID string, registeredSpaceID string, memberID string) {
+		t.Helper()
+		spaceArg := ""
+		if strings.TrimSpace(spaceID) != "" {
+			spaceArg = `,"space_id":` + quoteJSON(spaceID)
+		}
+		req, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+			"jsonrpc": "2.0",
+			"id": %s,
+			"method": "tools/call",
+			"params": {
+				"name": "space",
+				"arguments": {"action":"register","project_root":%s,"harness_kind":"claude-cli","session_id":"claude-logical-1","native_session_ref":"claude-native-1"%s}
+			}
+		}`, quoteJSON(id), quoteJSON(projectRoot), spaceArg))))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var rpcResp struct {
+			Result struct {
+				StructuredContent struct {
+					ProjectID string `json:"projectId"`
+					SpaceID   string `json:"spaceId"`
+					MemberID  string `json:"memberId"`
+				} `json:"structuredContent"`
+			} `json:"result"`
+			Error any `json:"error,omitempty"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&rpcResp))
+		require.Nil(t, rpcResp.Error)
+		return rpcResp.Result.StructuredContent.ProjectID, rpcResp.Result.StructuredContent.SpaceID, rpcResp.Result.StructuredContent.MemberID
+	}
+
+	projectID, firstSpaceID, firstMemberID := registerClaude("register-space-1", "")
+	require.NotEmpty(t, projectID)
+	require.NotEmpty(t, firstSpaceID)
+	require.NotEmpty(t, firstMemberID)
+
+	createReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "create-space-2",
+		"method": "tools/call",
+		"params": {
+			"name": "space",
+			"arguments": {"action":"create","project_id":%s,"title":"Second Space"}
+		}
+	}`, quoteJSON(projectID)))))
+	require.NoError(t, err)
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Accept", "application/json, text/event-stream")
+	createResp, err := http.DefaultClient.Do(createReq)
+	require.NoError(t, err)
+	defer createResp.Body.Close()
+	require.Equal(t, http.StatusOK, createResp.StatusCode)
+	var createRPC struct {
+		Result struct {
+			StructuredContent struct {
+				Space struct {
+					ID string `json:"id"`
+				} `json:"space"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+		Error any `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(createResp.Body).Decode(&createRPC))
+	require.Nil(t, createRPC.Error)
+	secondSpaceID := createRPC.Result.StructuredContent.Space.ID
+	require.NotEmpty(t, secondSpaceID)
+	require.NotEqual(t, firstSpaceID, secondSpaceID)
+
+	_, registeredSecondSpaceID, secondMemberID := registerClaude("register-space-2", secondSpaceID)
+	require.Equal(t, secondSpaceID, registeredSecondSpaceID)
+	require.NotEqual(t, firstMemberID, secondMemberID)
+
+	_, registeredFirstSpaceID, firstMemberIDAgain := registerClaude("register-space-1-again", firstSpaceID)
+	require.Equal(t, firstSpaceID, registeredFirstSpaceID)
+	require.Equal(t, firstMemberID, firstMemberIDAgain)
+
+	firstActive, err := d.app.HarnessSvc.GetActiveSession(context.Background(), firstMemberID)
+	require.NoError(t, err)
+	require.NotNil(t, firstActive)
+	require.Equal(t, firstSpaceID, firstActive.SpaceID)
+	secondActive, err := d.app.HarnessSvc.GetActiveSession(context.Background(), secondMemberID)
+	require.NoError(t, err)
+	require.NotNil(t, secondActive)
+	require.Equal(t, secondSpaceID, secondActive.SpaceID)
+}
+
 func TestHTTPStrategyBootstrapMCPTokenRegistersContextFromCodexMetadata(t *testing.T) {
 	d := newTestDaemon(t)
 	handler, err := d.httpHandler()

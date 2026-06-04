@@ -365,31 +365,44 @@ func (c *mcpHTTPClient) register(ctx context.Context, protocolSession string, in
 
 func stableClaudeLogicalSessionID(input HookInput, rawURL string) string {
 	if existing, err := readClaudeSessionBinding(strings.TrimSpace(input.CWD)); err == nil {
-		if logical := strings.TrimSpace(existing.LogicalSessionID); logical != "" {
+		nativeSessionRef := strings.TrimSpace(input.SessionID)
+		existingNativeRef := firstNonEmptyString(existing.NativeSessionRef, existing.SessionID)
+		if logical := strings.TrimSpace(existing.LogicalSessionID); logical != "" && nativeSessionRef != "" && existingNativeRef == nativeSessionRef {
 			return logical
 		}
 	}
 	parts := []string{"claude-cli"}
+	if nativeSessionRef := strings.TrimSpace(input.SessionID); nativeSessionRef != "" {
+		parts = append(parts, "native-session", nativeSessionRef)
+	}
 	if transcript := strings.TrimSpace(input.TranscriptPath); transcript != "" {
 		if abs, err := filepath.Abs(transcript); err == nil {
 			transcript = abs
 		}
 		parts = append(parts, "transcript", transcript)
-	} else {
-		root := strings.TrimSpace(input.CWD)
-		if root != "" {
-			if abs, err := filepath.Abs(root); err == nil {
-				root = abs
-			}
-		}
-		token := ""
-		if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
-			token = strings.TrimSpace(parsed.Query().Get("token"))
-		}
-		parts = append(parts, "project", root, "token", token)
 	}
+	root := strings.TrimSpace(input.CWD)
+	if root != "" {
+		if abs, err := filepath.Abs(root); err == nil {
+			root = abs
+		}
+	}
+	token := ""
+	if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
+		token = strings.TrimSpace(parsed.Query().Get("token"))
+	}
+	parts = append(parts, "project", root, "token", token)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return "claude-logical-" + hex.EncodeToString(sum[:])[:24]
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (c *mcpHTTPClient) request(ctx context.Context, protocolSession string, payload map[string]any) ([]byte, string, error) {
