@@ -526,7 +526,7 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 	}
 	harnessKind := strings.TrimSpace(req.HarnessKind)
 	if harnessKind == "" {
-		harnessKind = "codex"
+		return mcpRegisterResponse{}, fmt.Errorf("harness_kind is required")
 	}
 	model := strings.TrimSpace(req.Model)
 	if model == "" {
