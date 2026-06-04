@@ -64,6 +64,7 @@ func TestSQLiteSessionRepository_SaveAndGet(t *testing.T) {
 
 	session, err := domain.NewSession("sess-1", runtimeContext("member-1", "space-1", "claude-cli", "claude-opus-4-7", "high"), testNow)
 	require.NoError(t, err)
+	require.NoError(t, session.UpdateClaudeChannelURL("http://127.0.0.1:4567/notify"))
 
 	require.NoError(t, repo.Save(ctx, session))
 
@@ -85,6 +86,7 @@ func TestSQLiteSessionRepository_SaveAndGet(t *testing.T) {
 	assert.Equal(t, "prompt", got.SystemPrompt)
 	assert.Equal(t, "token-member-1", got.MCPToken)
 	assert.Equal(t, []string{`mcp_servers.agen8.url="http://127.0.0.1:7777/mcp?token=token-member-1"`}, got.MCPServers)
+	assert.Equal(t, "http://127.0.0.1:4567/notify", got.ClaudeChannelURL)
 	assert.Equal(t, int64(0), got.TokensIn)
 }
 

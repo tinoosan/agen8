@@ -24,32 +24,33 @@ const (
 )
 
 type Session struct {
-	ID             string
-	ProjectID      string
-	LocationID     string
-	MemberID       string
-	SpaceID        string
-	ChannelID      string
-	DisplayName    string
-	MemberType     string
-	LifecycleState string
-	Status         SessionStatus
-	InactiveReason InactiveReason
-	InactiveError  string
-	ActivatedAt    time.Time
-	DeactivatedAt  *time.Time
-	TokensIn       int64
-	TokensOut      int64
-	Kind           string
-	Model          string
-	Effort         string
-	PermissionMode string
-	ConfigRef      string
-	Ref            string
-	Workdir        string
-	SystemPrompt   string
-	MCPToken       string
-	MCPServers     []string
+	ID               string
+	ProjectID        string
+	LocationID       string
+	MemberID         string
+	SpaceID          string
+	ChannelID        string
+	DisplayName      string
+	MemberType       string
+	LifecycleState   string
+	Status           SessionStatus
+	InactiveReason   InactiveReason
+	InactiveError    string
+	ActivatedAt      time.Time
+	DeactivatedAt    *time.Time
+	TokensIn         int64
+	TokensOut        int64
+	Kind             string
+	Model            string
+	Effort           string
+	PermissionMode   string
+	ConfigRef        string
+	Ref              string
+	Workdir          string
+	SystemPrompt     string
+	MCPToken         string
+	MCPServers       []string
+	ClaudeChannelURL string
 }
 
 type RuntimeContext struct {
@@ -293,4 +294,12 @@ func compatibilityPermissionMode(kind string) string {
 func (s *Session) AddUsage(tokensIn, tokensOut int64) {
 	s.TokensIn += tokensIn
 	s.TokensOut += tokensOut
+}
+
+func (s *Session) UpdateClaudeChannelURL(rawURL string) error {
+	if s.Status != SessionActive {
+		return fmt.Errorf("cannot update session %q claude channel url: status is %q, not active", s.ID, s.Status)
+	}
+	s.ClaudeChannelURL = rawURL
+	return nil
 }

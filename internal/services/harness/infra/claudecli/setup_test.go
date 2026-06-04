@@ -40,10 +40,11 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 
 	var mcpCfg struct {
 		MCPServers map[string]struct {
-			Type    string   `json:"type"`
-			URL     string   `json:"url"`
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
+			Type       string   `json:"type"`
+			URL        string   `json:"url"`
+			AlwaysLoad bool     `json:"alwaysLoad"`
+			Command    string   `json:"command"`
+			Args       []string `json:"args"`
 		} `json:"mcpServers"`
 		Other bool `json:"other"`
 	}
@@ -60,7 +61,7 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 	if mcpCfg.MCPServers["docs"].Command != "docs-server" {
 		t.Fatalf("existing MCP server not preserved: %#v", mcpCfg.MCPServers["docs"])
 	}
-	if mcpCfg.MCPServers["agen8"].Type != "http" || mcpCfg.MCPServers["agen8"].URL != "http://127.0.0.1:7777/mcp?token=abc" {
+	if mcpCfg.MCPServers["agen8"].Type != "http" || mcpCfg.MCPServers["agen8"].URL != "http://127.0.0.1:7777/mcp?token=abc" || !mcpCfg.MCPServers["agen8"].AlwaysLoad {
 		t.Fatalf("agen8 server=%#v", mcpCfg.MCPServers["agen8"])
 	}
 	if mcpCfg.MCPServers["agen8-channel"].Command != "/usr/local/bin/agen8-mcp-server" || !equalStrings(mcpCfg.MCPServers["agen8-channel"].Args, []string{"claude", "channel"}) {
@@ -102,12 +103,19 @@ func TestSetupProjectWritesMCPAndHookConfig(t *testing.T) {
 
 	settings := readSettingsFile(t, filepath.Join(root, ".claude", "settings.local.json"))
 	groups := settings.Hooks["SessionStart"]
-	if len(groups) != 1 || groups[0].Matcher != "*" || len(groups[0].Hooks) != 1 {
+	if len(groups) != 1 || groups[0].Matcher != "*" || len(groups[0].Hooks) != 2 {
 		t.Fatalf("SessionStart groups=%#v", groups)
 	}
 	hook := groups[0].Hooks[0]
 	if hook.Type != "command" || hook.Command != "/usr/local/bin/agen8-mcp-server" || !equalStrings(hook.Args, []string{"claude", "hook"}) {
 		t.Fatalf("hook=%#v", hook)
+	}
+	mcpHook := groups[0].Hooks[1]
+	if mcpHook.Type != "mcp_tool" || mcpHook.Server != "agen8" || mcpHook.Tool != "space" {
+		t.Fatalf("mcp hook=%#v", mcpHook)
+	}
+	if mcpHook.Input["action"] != "register" || mcpHook.Input["project_root"] != "${cwd}" || mcpHook.Input["harness_kind"] != "claude-cli" || mcpHook.Input["native_session_ref"] != "${session_id}" {
+		t.Fatalf("mcp hook input=%#v", mcpHook.Input)
 	}
 }
 
@@ -128,7 +136,7 @@ func TestSetupProjectIsIdempotent(t *testing.T) {
 	}
 	settings := readSettingsFile(t, filepath.Join(root, ".claude", "settings.local.json"))
 	groups := settings.Hooks["SessionStart"]
-	if len(groups) != 1 || len(groups[0].Hooks) != 1 {
+	if len(groups) != 1 || len(groups[0].Hooks) != 2 {
 		t.Fatalf("expected one idempotent hook, got %#v", groups)
 	}
 }

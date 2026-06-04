@@ -54,8 +54,8 @@ func (r *PostgresSessionRepository) Save(ctx context.Context, session *domain.Se
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			location_id, channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (session_id) DO UPDATE SET
 			project_id = excluded.project_id,
 			location_id = excluded.location_id,
@@ -78,7 +78,8 @@ func (r *PostgresSessionRepository) Save(ctx context.Context, session *domain.Se
 			lifecycle_state = excluded.lifecycle_state,
 			system_prompt = excluded.system_prompt,
 			mcp_token = excluded.mcp_token,
-			mcp_servers_json = excluded.mcp_servers_json`),
+			mcp_servers_json = excluded.mcp_servers_json,
+			claude_channel_url = excluded.claude_channel_url`),
 		session.ID,
 		session.ProjectID,
 		session.MemberID,
@@ -105,6 +106,7 @@ func (r *PostgresSessionRepository) Save(ctx context.Context, session *domain.Se
 		session.SystemPrompt,
 		session.MCPToken,
 		string(mcpServersJSON),
+		session.ClaudeChannelURL,
 	)
 	if err != nil {
 		return fmt.Errorf("save harness session %s: %w", session.ID, err)
@@ -119,7 +121,7 @@ func (r *PostgresSessionRepository) Get(ctx context.Context, sessionID string) (
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE session_id = ?`), sessionID)
 	return scanSession(row)
 }
@@ -131,7 +133,7 @@ func (r *PostgresSessionRepository) GetActiveByMember(ctx context.Context, membe
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE member_id = ? AND status = 'active'
 		LIMIT 1`), memberID)
 	return scanSession(row)
@@ -144,7 +146,7 @@ func (r *PostgresSessionRepository) ListActive(ctx context.Context) ([]*domain.S
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE status = 'active'
 		ORDER BY activated_at DESC`))
 	if err != nil {
@@ -170,7 +172,7 @@ func (r *PostgresSessionRepository) ListByMember(ctx context.Context, memberID s
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE member_id = ?
 		ORDER BY activated_at DESC`), memberID)
 	if err != nil {
@@ -196,7 +198,7 @@ func (r *PostgresSessionRepository) ListBySpace(ctx context.Context, spaceID str
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE space_id = ?
 		ORDER BY activated_at DESC`), spaceID)
 	if err != nil {

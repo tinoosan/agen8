@@ -30,15 +30,6 @@ func (d *Daemon) ResolveRuntimeHost(ctx context.Context, input harnessapp.Runtim
 		if harnessKind != "codex" {
 			return harnessapp.RuntimeHost{}, nil
 		}
-		if appServerURL, err := findLocalCodexAppServerURLForThread(ctx, input.MCPToken, input.SessionRef); err != nil {
-			return harnessapp.RuntimeHost{}, err
-		} else if appServerURL != "" {
-			d.mcpBinding.bindAppServerURL(input.SessionID, appServerURL)
-			return harnessapp.RuntimeHost{
-				AppServerURL: appServerURL,
-				Diagnostics:  "local codex app-server discovered from active MCP connection",
-			}, nil
-		}
 		if appServerURL, err := findLocalCodexRemoteControlSocketForThread(ctx, input.SessionRef); err != nil {
 			return harnessapp.RuntimeHost{}, err
 		} else if appServerURL != "" {
@@ -46,6 +37,15 @@ func (d *Daemon) ResolveRuntimeHost(ctx context.Context, input harnessapp.Runtim
 			return harnessapp.RuntimeHost{
 				AppServerURL: appServerURL,
 				Diagnostics:  "local codex remote-control socket",
+			}, nil
+		}
+		if appServerURL, err := findLocalCodexAppServerURLForThread(ctx, input.MCPToken, input.SessionRef); err != nil {
+			return harnessapp.RuntimeHost{}, err
+		} else if appServerURL != "" {
+			d.mcpBinding.bindAppServerURL(input.SessionID, appServerURL)
+			return harnessapp.RuntimeHost{
+				AppServerURL: appServerURL,
+				Diagnostics:  "local codex app-server discovered from active MCP connection",
 			}, nil
 		}
 		return harnessapp.RuntimeHost{}, nil
@@ -143,16 +143,7 @@ func findLocalCodexRemoteControlSocketForThread(ctx context.Context, threadID st
 	}
 	if localCodexSocketExists(socketPath) {
 		appServerURL := "unix://" + socketPath
-		if strings.TrimSpace(threadID) == "" {
-			return appServerURL, nil
-		}
-		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		loaded, err := codexruntime.AppServerHasLoadedThread(probeCtx, appServerURL, threadID)
-		cancel()
-		if err == nil && loaded {
-			return appServerURL, nil
-		}
-		return "", nil
+		return appServerURL, nil
 	}
 	codexPath := localCodexCLIPath()
 	if codexPath == "" {
@@ -179,16 +170,7 @@ func findLocalCodexRemoteControlSocketForThread(ctx context.Context, threadID st
 		return "", nil
 	}
 	appServerURL := "unix://" + socketPath
-	if strings.TrimSpace(threadID) == "" {
-		return appServerURL, nil
-	}
-	probeCtx, probeCancel := context.WithTimeout(ctx, 2*time.Second)
-	loaded, probeErr := codexruntime.AppServerHasLoadedThread(probeCtx, appServerURL, threadID)
-	probeCancel()
-	if probeErr == nil && loaded {
-		return appServerURL, nil
-	}
-	return "", nil
+	return appServerURL, nil
 }
 
 func localCodexRemoteControlSocketPath() string {

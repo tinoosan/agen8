@@ -1559,6 +1559,37 @@ func (s *Service) RefreshSessionMCPBinding(ctx context.Context, id string, token
 	return session, nil
 }
 
+func (s *Service) RefreshSessionClaudeChannelURL(ctx context.Context, id string, rawURL string) (*domain.Session, error) {
+	id = strings.TrimSpace(id)
+	rawURL = strings.TrimSpace(rawURL)
+	if id == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if rawURL == "" {
+		return nil, fmt.Errorf("claude channel url is required")
+	}
+	session, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("load harness session %s: %w", id, err)
+	}
+	if session == nil {
+		return nil, fmt.Errorf("harness session %s not found", id)
+	}
+	if !strings.EqualFold(strings.TrimSpace(session.Kind), "claude-cli") {
+		return nil, fmt.Errorf("harness session %s is %q, not claude-cli", session.ID, session.Kind)
+	}
+	if session.ClaudeChannelURL == rawURL {
+		return session, nil
+	}
+	if err := session.UpdateClaudeChannelURL(rawURL); err != nil {
+		return nil, err
+	}
+	if err := s.repo.Save(ctx, session); err != nil {
+		return nil, fmt.Errorf("save harness session %s claude channel url: %w", session.ID, err)
+	}
+	return session, nil
+}
+
 func (s *Service) RefreshSessionWorkdir(ctx context.Context, id string) (*domain.Session, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

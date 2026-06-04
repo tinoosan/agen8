@@ -271,7 +271,14 @@ func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	persisted, err := d.app.HarnessSvc.RefreshSessionClaudeChannelURL(r.Context(), session.ID, req.NotifyURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	session = persisted
 	d.mcpBinding.bindClaudeChannelURL(session.ID, req.NotifyURL)
+	d.mcpBinding.bind(req.Token, session.ID)
 	if d.logger != nil {
 		d.logger.InfoContext(r.Context(), "claude channel registered",
 			"member_id", session.MemberID,
@@ -580,7 +587,9 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 	if err := d.registerMCPTokenForSession(active); err != nil {
 		return mcpRegisterResponse{}, err
 	}
-	d.mcpBinding.bind(stableMCPToken, active.ID)
+	if shouldBindSharedTokenSession(d, active) {
+		d.mcpBinding.bind(stableMCPToken, active.ID)
+	}
 	if turn := d.mcpBinding.activeCodexTurnForRef(active.Ref); strings.TrimSpace(turn.threadID) != "" && strings.TrimSpace(turn.turnID) != "" {
 		d.mcpBinding.bindActiveCodexTurn(active.ID, turn.threadID, turn.turnID)
 		if d != nil && d.logger != nil {
@@ -593,11 +602,11 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(active.Kind), "codex") && strings.TrimSpace(active.LocationID) == "local" {
-		if appServerURL, err := findLocalCodexAppServerURLForThread(ctx, stableMCPToken, active.Ref); err != nil {
+		if appServerURL, err := findLocalCodexRemoteControlSocketForThread(ctx, active.Ref); err != nil {
 			return mcpRegisterResponse{}, err
 		} else if appServerURL != "" {
 			d.mcpBinding.bindAppServerURL(active.ID, appServerURL)
-		} else if appServerURL, err := findLocalCodexRemoteControlSocketForThread(ctx, active.Ref); err != nil {
+		} else if appServerURL, err := findLocalCodexAppServerURLForThread(ctx, stableMCPToken, active.Ref); err != nil {
 			return mcpRegisterResponse{}, err
 		} else if appServerURL != "" {
 			d.mcpBinding.bindAppServerURL(active.ID, appServerURL)

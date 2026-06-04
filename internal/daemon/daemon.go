@@ -555,7 +555,9 @@ func isStaleOrUnavailableCodexTurnError(err error) bool {
 	text := strings.ToLower(err.Error())
 	return strings.Contains(text, "expected active turn id") ||
 		strings.Contains(text, "no active turn") ||
-		strings.Contains(text, "turn not found")
+		strings.Contains(text, "turn not found") ||
+		strings.Contains(text, "thread not found") ||
+		strings.Contains(text, "is not loaded")
 }
 
 func (d *Daemon) sendMessageThroughHarness(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {

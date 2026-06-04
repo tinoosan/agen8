@@ -209,9 +209,8 @@ func (s *Service) DrainAgentMessages(ctx context.Context, memberID member.ID) er
 	}
 }
 
-// StartAgentDelivery starts a per-member delivery worker that wakes when new
-// messages are published. Existing backlog stays durable until explicitly read
-// or delivered by an operator-controlled path.
+// StartAgentDelivery starts a per-member delivery worker that drains the
+// current backlog, then wakes when new messages are published.
 func (s *Service) StartAgentDelivery(ctx context.Context, memberID member.ID) error {
 	if s == nil {
 		return fmt.Errorf("message service is required")
@@ -316,6 +315,7 @@ func (s *Service) runAgentDelivery(ctx context.Context, memberID member.ID, read
 		}
 		retry = nil
 	}
+	drain()
 	for {
 		select {
 		case <-ctx.Done():

@@ -165,7 +165,7 @@ func NewServer(tokenStore *TokenStore) (*Server, error) {
 			sessionID, threadID := sessionRefsFromContext(r.Context())
 			return out.newMCPServerForConnection(newMCPConnectionState(token, sessionID, threadID), initialSession)
 		},
-		&mcp.StreamableHTTPOptions{JSONResponse: true},
+		&mcp.StreamableHTTPOptions{JSONResponse: true, Stateless: true},
 	)
 	return out, nil
 }

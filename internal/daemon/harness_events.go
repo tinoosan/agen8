@@ -46,6 +46,9 @@ func (d *Daemon) restoreActiveMCPSessions(ctx context.Context) error {
 		if _, err := d.app.HarnessSvc.RefreshSessionMCPURL(ctx, session.ID, d.mcpURL(session.MCPToken)); err != nil {
 			return fmt.Errorf("refresh mcp config for harness session %s: %w", session.ID, err)
 		}
+		if strings.TrimSpace(session.ClaudeChannelURL) != "" {
+			d.mcpBinding.bindClaudeChannelURL(session.ID, session.ClaudeChannelURL)
+		}
 	}
 	return d.restoreUnambiguousMCPBindings(ctx)
 }
@@ -78,6 +81,9 @@ func (d *Daemon) restoreUnambiguousMCPBindings(ctx context.Context) error {
 	}
 	for token, sessions := range byToken {
 		if len(sessions) == 1 {
+			if token == bootstrapMCPToken && !shouldBindSharedTokenSession(d, sessions[0]) {
+				continue
+			}
 			d.mcpBinding.bind(token, sessions[0].ID)
 		}
 	}
@@ -305,6 +311,16 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	}
 	if sessionRef == "" {
 		if mcpRequestAllowsBootstrapSession(body) {
+			active, err := d.resolveChannelBoundMCPSessionForToken(ctx, token)
+			if err != nil {
+				return mcp.Session{}, err
+			}
+			if active != nil {
+				if err := d.registerMCPTokenForSession(active); err != nil {
+					return mcp.Session{}, err
+				}
+				return d.mcpSessionFor(active), nil
+			}
 			return base, nil
 		}
 		active, err := d.resolveUniqueMCPSessionForToken(ctx, token)
@@ -325,6 +341,16 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	}
 	if active == nil {
 		if mcpRequestAllowsBootstrapSession(body) {
+			active, err := d.resolveChannelBoundMCPSessionForToken(ctx, token)
+			if err != nil {
+				return mcp.Session{}, err
+			}
+			if active != nil {
+				if err := d.registerMCPTokenForSession(active); err != nil {
+					return mcp.Session{}, err
+				}
+				return d.mcpSessionFor(active), nil
+			}
 			return base, nil
 		} else {
 			active, err = d.resolveUniqueMCPSessionForToken(ctx, token)
@@ -449,8 +475,71 @@ func (d *Daemon) resolveUniqueMCPSessionForToken(ctx context.Context, token stri
 	case 1:
 		return matches[0], nil
 	default:
+		if bound, err := d.resolveBoundMCPSession(ctx, token); err != nil {
+			return nil, err
+		} else if bound != nil {
+			return bound, nil
+		}
+		if channelBound, err := d.resolveChannelBoundMCPSessionForToken(ctx, token); err != nil {
+			return nil, err
+		} else if channelBound != nil {
+			return channelBound, nil
+		}
 		return nil, fmt.Errorf("mcp token %q is bound to multiple active harness sessions; native session metadata is required", token)
 	}
+}
+
+func (d *Daemon) resolveChannelBoundMCPSessionForToken(ctx context.Context, token string) (*harnessdomain.Session, error) {
+	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
+		return nil, fmt.Errorf("harness service is required")
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, nil
+	}
+	if sessionID := d.mcpBinding.sessionID(token); sessionID != "" {
+		active, err := d.app.HarnessSvc.GetSession(ctx, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("load channel-bound mcp harness session %s: %w", sessionID, err)
+		}
+		if active != nil && active.Status == harnessdomain.SessionActive && shouldBindSharedTokenSession(d, active) {
+			return active, nil
+		}
+	}
+	sessions, err := d.app.HarnessSvc.ListActiveSessions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list active harness sessions for channel-bound mcp token: %w", err)
+	}
+	var matches []*harnessdomain.Session
+	for _, session := range sessions {
+		if session == nil || session.Status != harnessdomain.SessionActive {
+			continue
+		}
+		if strings.TrimSpace(session.MCPToken) != token {
+			continue
+		}
+		if shouldBindSharedTokenSession(d, session) {
+			matches = append(matches, session)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return nil, nil
+	case 1:
+		return matches[0], nil
+	default:
+		return nil, fmt.Errorf("mcp token %q has multiple active claude channel sessions; native session metadata is required", token)
+	}
+}
+
+func shouldBindSharedTokenSession(d *Daemon, session *harnessdomain.Session) bool {
+	if d == nil || session == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(session.Kind), "claude-cli") {
+		return false
+	}
+	return strings.TrimSpace(d.mcpBinding.claudeChannelURL(session.ID)) != ""
 }
 
 func (d *Daemon) resolveActiveHarnessSessionByRef(ctx context.Context, sessionRef string) (*harnessdomain.Session, error) {

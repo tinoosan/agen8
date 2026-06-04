@@ -155,8 +155,9 @@ func writeClaudeMCPProjectConfig(projectRoot string, rawURL string, channelComma
 		cfg.MCPServers = map[string]map[string]any{}
 	}
 	cfg.MCPServers["agen8"] = map[string]any{
-		"type": "http",
-		"url":  rawURL,
+		"type":       "http",
+		"url":        rawURL,
+		"alwaysLoad": true,
 	}
 	cfg.MCPServers["agen8-channel"] = map[string]any{
 		"command": channelCommand,
@@ -260,9 +261,12 @@ type claudeHookGroup struct {
 }
 
 type claudeHookCommand struct {
-	Type    string   `json:"type"`
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
+	Type    string         `json:"type"`
+	Command string         `json:"command,omitempty"`
+	Args    []string       `json:"args,omitempty"`
+	Server  string         `json:"server,omitempty"`
+	Tool    string         `json:"tool,omitempty"`
+	Input   map[string]any `json:"input,omitempty"`
 }
 
 func writeClaudeHookSettings(projectRoot string, command string, args []string) error {
@@ -278,6 +282,17 @@ func writeClaudeHookSettings(projectRoot string, command string, args []string) 
 		Type:    "command",
 		Command: command,
 		Args:    args,
+	})
+	settings.Hooks["SessionStart"] = upsertSessionStartHook(settings.Hooks["SessionStart"], claudeHookCommand{
+		Type:   "mcp_tool",
+		Server: "agen8",
+		Tool:   "space",
+		Input: map[string]any{
+			"action":             "register",
+			"project_root":       "${cwd}",
+			"harness_kind":       "claude-cli",
+			"native_session_ref": "${session_id}",
+		},
 	})
 	return writeJSONFile(path, settings.toMap(), 0o600)
 }
@@ -332,14 +347,29 @@ func upsertSessionStartHook(groups []claudeHookGroup, hook claudeHookCommand) []
 func removeMatchingHook(hooks []claudeHookCommand, hook claudeHookCommand) []claudeHookCommand {
 	out := hooks[:0]
 	for _, existing := range hooks {
-		if strings.TrimSpace(existing.Type) == strings.TrimSpace(hook.Type) &&
-			strings.TrimSpace(existing.Command) == strings.TrimSpace(hook.Command) &&
-			equalStrings(existing.Args, hook.Args) {
+		if sameClaudeHook(existing, hook) {
 			continue
 		}
 		out = append(out, existing)
 	}
 	return out
+}
+
+func sameClaudeHook(a claudeHookCommand, b claudeHookCommand) bool {
+	if strings.TrimSpace(a.Type) != strings.TrimSpace(b.Type) {
+		return false
+	}
+	switch strings.TrimSpace(a.Type) {
+	case "command":
+		return strings.TrimSpace(a.Command) == strings.TrimSpace(b.Command) && equalStrings(a.Args, b.Args)
+	case "mcp_tool":
+		return strings.TrimSpace(a.Server) == strings.TrimSpace(b.Server) && strings.TrimSpace(a.Tool) == strings.TrimSpace(b.Tool)
+	default:
+		return strings.TrimSpace(a.Command) == strings.TrimSpace(b.Command) &&
+			strings.TrimSpace(a.Server) == strings.TrimSpace(b.Server) &&
+			strings.TrimSpace(a.Tool) == strings.TrimSpace(b.Tool) &&
+			equalStrings(a.Args, b.Args)
+	}
 }
 
 func compactHookArgs(args []string) []string {

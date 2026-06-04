@@ -67,7 +67,8 @@ func MigrateSessionSchema(ctx context.Context, db *sql.DB) error {
 			lifecycle_state TEXT NOT NULL DEFAULT '',
 			system_prompt  TEXT NOT NULL DEFAULT '',
 			mcp_token      TEXT NOT NULL DEFAULT '',
-			mcp_servers_json TEXT NOT NULL DEFAULT '[]'
+			mcp_servers_json TEXT NOT NULL DEFAULT '[]',
+			claude_channel_url TEXT NOT NULL DEFAULT ''
 		)`)
 	if err != nil {
 		return fmt.Errorf("harness session migration: create table: %w", err)
@@ -104,18 +105,19 @@ func ensureSessionColumns(ctx context.Context, db *sql.DB) error {
 		existing[column] = true
 	}
 	additions := map[string]string{
-		"project_id":       "TEXT NOT NULL DEFAULT ''",
-		"location_id":      "TEXT NOT NULL DEFAULT 'local'",
-		"channel_id":       "TEXT NOT NULL DEFAULT ''",
-		"workdir":          "TEXT NOT NULL DEFAULT ''",
-		"display_name":     "TEXT NOT NULL DEFAULT ''",
-		"member_type":      "TEXT NOT NULL DEFAULT ''",
-		"lifecycle_state":  "TEXT NOT NULL DEFAULT ''",
-		"system_prompt":    "TEXT NOT NULL DEFAULT ''",
-		"mcp_token":        "TEXT NOT NULL DEFAULT ''",
-		"mcp_servers_json": "TEXT NOT NULL DEFAULT '[]'",
-		"permission_mode":  "TEXT NOT NULL DEFAULT ''",
-		"config_ref":       "TEXT NOT NULL DEFAULT ''",
+		"project_id":         "TEXT NOT NULL DEFAULT ''",
+		"location_id":        "TEXT NOT NULL DEFAULT 'local'",
+		"channel_id":         "TEXT NOT NULL DEFAULT ''",
+		"workdir":            "TEXT NOT NULL DEFAULT ''",
+		"display_name":       "TEXT NOT NULL DEFAULT ''",
+		"member_type":        "TEXT NOT NULL DEFAULT ''",
+		"lifecycle_state":    "TEXT NOT NULL DEFAULT ''",
+		"system_prompt":      "TEXT NOT NULL DEFAULT ''",
+		"mcp_token":          "TEXT NOT NULL DEFAULT ''",
+		"mcp_servers_json":   "TEXT NOT NULL DEFAULT '[]'",
+		"claude_channel_url": "TEXT NOT NULL DEFAULT ''",
+		"permission_mode":    "TEXT NOT NULL DEFAULT ''",
+		"config_ref":         "TEXT NOT NULL DEFAULT ''",
 	}
 	for column, ddl := range additions {
 		if existing[column] {
@@ -147,8 +149,8 @@ func (r *SQLiteSessionRepository) Save(ctx context.Context, session *domain.Sess
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			location_id, channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (session_id) DO UPDATE SET
 			project_id = excluded.project_id,
 			location_id = excluded.location_id,
@@ -171,7 +173,8 @@ func (r *SQLiteSessionRepository) Save(ctx context.Context, session *domain.Sess
 			lifecycle_state = excluded.lifecycle_state,
 			system_prompt = excluded.system_prompt,
 			mcp_token = excluded.mcp_token,
-			mcp_servers_json = excluded.mcp_servers_json`),
+			mcp_servers_json = excluded.mcp_servers_json,
+			claude_channel_url = excluded.claude_channel_url`),
 		session.ID,
 		session.ProjectID,
 		session.MemberID,
@@ -198,6 +201,7 @@ func (r *SQLiteSessionRepository) Save(ctx context.Context, session *domain.Sess
 		session.SystemPrompt,
 		session.MCPToken,
 		string(mcpServersJSON),
+		session.ClaudeChannelURL,
 	)
 	if err != nil {
 		return fmt.Errorf("save harness session %s: %w", session.ID, err)
@@ -212,7 +216,7 @@ func (r *SQLiteSessionRepository) Get(ctx context.Context, sessionRef string) (*
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE session_id = ?`), sessionRef)
 	return scanSession(row)
 }
@@ -224,7 +228,7 @@ func (r *SQLiteSessionRepository) GetActiveByMember(ctx context.Context, memberI
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE member_id = ? AND status = 'active'
 		LIMIT 1`), memberID)
 	return scanSession(row)
@@ -237,7 +241,7 @@ func (r *SQLiteSessionRepository) ListActive(ctx context.Context) ([]*domain.Ses
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE status = 'active'
 		ORDER BY activated_at DESC`))
 	if err != nil {
@@ -263,7 +267,7 @@ func (r *SQLiteSessionRepository) ListByMember(ctx context.Context, memberID str
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE member_id = ?
 		ORDER BY activated_at DESC`), memberID)
 	if err != nil {
@@ -289,7 +293,7 @@ func (r *SQLiteSessionRepository) ListBySpace(ctx context.Context, spaceID strin
 			activated_at, deactivated_at, tokens_in, tokens_out,
 			harness_kind, model, effort, permission_mode, config_ref, session_ref,
 			channel_id, workdir, display_name, member_type, lifecycle_state,
-			system_prompt, mcp_token, mcp_servers_json
+			system_prompt, mcp_token, mcp_servers_json, claude_channel_url
 		FROM harness_sessions WHERE space_id = ?
 		ORDER BY activated_at DESC`), spaceID)
 	if err != nil {
@@ -325,7 +329,7 @@ func scanSession(row *sql.Row) (*domain.Session, error) {
 		&s.TokensIn, &s.TokensOut,
 		&s.Kind, &s.Model, &s.Effort, &s.PermissionMode, &s.ConfigRef, &s.Ref,
 		&s.ChannelID, &s.Workdir, &s.DisplayName, &s.MemberType, &s.LifecycleState,
-		&s.SystemPrompt, &s.MCPToken, &mcpServersJSON,
+		&s.SystemPrompt, &s.MCPToken, &mcpServersJSON, &s.ClaudeChannelURL,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -349,7 +353,7 @@ func scanSessionRow(rows *sql.Rows) (*domain.Session, error) {
 		&s.TokensIn, &s.TokensOut,
 		&s.Kind, &s.Model, &s.Effort, &s.PermissionMode, &s.ConfigRef, &s.Ref,
 		&s.ChannelID, &s.Workdir, &s.DisplayName, &s.MemberType, &s.LifecycleState,
-		&s.SystemPrompt, &s.MCPToken, &mcpServersJSON,
+		&s.SystemPrompt, &s.MCPToken, &mcpServersJSON, &s.ClaudeChannelURL,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan harness session row: %w", err)

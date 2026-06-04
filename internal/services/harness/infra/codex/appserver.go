@@ -83,11 +83,6 @@ func SteerAppServerTurn(ctx context.Context, params domain.StartParams, turnID s
 	if err := client.notification(ctx, "initialized", map[string]any{}); err != nil {
 		return err
 	}
-	if strings.HasPrefix(strings.TrimSpace(params.AppServerURL), "unix://") {
-		if err := ensureAppServerThreadLoaded(ctx, client, threadID); err != nil {
-			return err
-		}
-	}
 	result, err := client.call(ctx, "turn/steer", map[string]any{
 		"threadId":       threadID,
 		"expectedTurnId": turnID,
