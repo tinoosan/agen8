@@ -75,7 +75,7 @@
 
       <rect x="624" y="144" width="220" height="62" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
       <text x="734" y="171" text-anchor="middle" fill="var(--text)" font-weight="700">collaborator services</text>
-      <text x="734" y="191" text-anchor="middle" fill="var(--text-muted)">space, task, context links</text>
+      <text x="734" y="191" text-anchor="middle" fill="var(--text-muted)">project, task, context links</text>
 
       <rect x="624" y="242" width="220" height="62" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
       <text x="734" y="269" text-anchor="middle" fill="var(--text)" font-weight="700">event publisher</text>
@@ -128,8 +128,8 @@
     <span class="tok-field">CurrentValue</span>          float64
     <span class="tok-field">ProgressPercent</span>       int
     <span class="tok-field">Status</span>                <span class="tok-type">KeyResultStatus</span>
-    <span class="tok-field">SpaceID</span>               string
-    <span class="tok-field">OwnerSpaceName</span>        string
+    <span class="tok-field">ProjectID</span>               string
+    <span class="tok-field">OwnerProjectName</span>        string
     <span class="tok-field">OwnerAssignedAt</span>       *time.Time
     <span class="tok-field">LastUpdatedBy</span>         string
     <span class="tok-field">LastUpdateNote</span>        string
@@ -154,7 +154,7 @@
     <thead><tr><th>Record</th><th>What belongs there</th><th>What does not belong there</th></tr></thead>
     <tbody>
       <tr><td><code>Mission</code></td><td>Objective identity, descriptive fields, lifecycle status, lifecycle timestamps.</td><td>Tool action names, message bodies, delivery attempts, activity feed rows.</td></tr>
-      <tr><td><code>KeyResult</code></td><td>Measurement definition, progress snapshot, assigned space, milestone notification cursor.</td><td>Task lists, plan snapshots, heartbeat runtime state.</td></tr>
+      <tr><td><code>KeyResult</code></td><td>Measurement definition, progress snapshot, assigned project, milestone notification cursor.</td><td>Task lists, plan snapshots, heartbeat runtime state.</td></tr>
       <tr><td><code>ProgressEntry</code></td><td>Append-only history of progress value changes.</td><td>Mission and KR lifecycle events.</td></tr>
       <tr><td><code>LifecycleHistoryEntry</code></td><td>Append-only mission/KR lifecycle event facts, including optional notes.</td><td>Progress value deltas; those live in <code>ProgressEntry</code>.</td></tr>
     </tbody>
@@ -209,7 +209,7 @@
     service.go              <span class="tok-comment">// service methods, orchestration, persistence, event publish calls</span>
     service_test.go         <span class="tok-comment">// lifecycle, KR gates, concurrency, event publish behavior</span>
     events.go               <span class="tok-comment">// MissionEventKind, private event specs, publish helpers</span>
-    ports.go                <span class="tok-comment">// SpaceLoader, TaskLoader, LinkedTaskLoader, EventPublisher, caller-facing interfaces</span>
+    ports.go                <span class="tok-comment">// ProjectLoader, TaskLoader, LinkedTaskLoader, EventPublisher, caller-facing interfaces</span>
   domain/
     mission/
       clock.go              <span class="tok-comment">// Clock interface and SystemClock</span>
@@ -275,7 +275,7 @@ internal/services/mission/subscribers/
     <span class="tok-field">lifecycleEvents</span> <span class="tok-type">LifecycleEventRepository</span>
     <span class="tok-field">clock</span>           <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>
     <span class="tok-field">caller</span>          <span class="tok-type">CallerResolver</span>
-    <span class="tok-field">spaces</span>          <span class="tok-type">SpaceLoader</span>
+    <span class="tok-field">projects</span>          <span class="tok-type">ProjectLoader</span>
     <span class="tok-field">tasks</span>           <span class="tok-type">TaskLoader</span>
     <span class="tok-field">linkedTasks</span>     <span class="tok-type">LinkedTaskLoader</span>
     <span class="tok-field">events</span>          <span class="tok-type">EventPublisher</span>
@@ -288,7 +288,7 @@ internal/services/mission/subscribers/
     lifecycleEvents <span class="tok-type">LifecycleEventRepository</span>,
     clock <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>,
     caller <span class="tok-type">CallerResolver</span>,
-    spaces <span class="tok-type">SpaceLoader</span>,
+    projects <span class="tok-type">ProjectLoader</span>,
     tasks <span class="tok-type">TaskLoader</span>,
     linkedTasks <span class="tok-type">LinkedTaskLoader</span>,
     events <span class="tok-type">EventPublisher</span>,
@@ -298,12 +298,12 @@ internal/services/mission/subscribers/
     <thead><tr><th>Dependency</th><th>Used for</th><th>Boundary</th></tr></thead>
     <tbody>
       <tr><td><code>MissionRepository</code></td><td>Save, load, list, archive missions.</td><td>Mission-owned persistence.</td></tr>
-      <tr><td><code>KeyResultRepository</code></td><td>Save, load, list, progress, assign owner spaces, track notified milestones.</td><td>Mission-owned persistence.</td></tr>
+      <tr><td><code>KeyResultRepository</code></td><td>Save, load, list, progress, assign owner projects, track notified milestones.</td><td>Mission-owned persistence.</td></tr>
       <tr><td><code>ProgressEntryRepository</code></td><td>Append progress audit entries and read KR history.</td><td>Mission-owned persistence.</td></tr>
       <tr><td><code>LifecycleEventRepository</code></td><td>Append lifecycle event facts and read mission lifecycle history.</td><td>Mission-owned persistence.</td></tr>
       <tr><td><code>Clock</code></td><td>All timestamps.</td><td>No direct <code>time.Now()</code> in service use cases.</td></tr>
       <tr><td><code>CallerResolver</code></td><td>User/member identity at the service boundary.</td><td>RPC and MCP stamp callers into <code>context.Context</code>.</td></tr>
-      <tr><td><code>SpaceLoader</code></td><td>Validate assigned KR space and resolve display name.</td><td>Calls the space service interface, not the space repository.</td></tr>
+      <tr><td><code>ProjectLoader</code></td><td>Validate assigned KR project and resolve display name.</td><td>Calls the project service interface, not the project repository.</td></tr>
       <tr><td><code>TaskLoader</code></td><td>Load task state for linked task completion checks.</td><td>Calls the task service read interface, not the task repository.</td></tr>
       <tr><td><code>LinkedTaskLoader</code></td><td>Resolve task ids linked to a KR before KR completion.</td><td>Temporary graph-slot port; the graph service replaces the implementation when context links are rebuilt.</td></tr>
       <tr><td><code>EventPublisher</code></td><td>Fire mission lifecycle and KR progress events after persistence succeeds.</td><td>Events are facts; subscriber workflows live outside the mission service.</td></tr>
@@ -325,7 +325,7 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
     missionRepos.<span class="tok-field">LifecycleEvents</span>,
     missiondomain.<span class="tok-type">SystemClock</span>{},
     caller.<span class="tok-type">ContextResolver</span>{},
-    spaceSvc,
+    projectSvc,
     taskSvc,
     missionLinkedTaskLoader{},
     missionEventPublisher{<span class="tok-field">bus</span>: bus},
@@ -363,13 +363,13 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
       <tr><td><code>ListMissions</code></td><td>Read missions for a project with service-owned filters.</td><td>None.</td></tr>
       <tr><td><code>UpdateMission</code></td><td>Update descriptive fields or route a named lifecycle transition with an optional note.</td><td>Persists mission and fires a lifecycle event when status changes. Repeating the current lifecycle state is an idempotent success; note-only retries are stored in lifecycle history without publishing duplicate bus events.</td></tr>
       <tr><td><code>DeleteMission</code></td><td>Archive the mission through the lifecycle boundary with an optional note.</td><td>Persists archived state and fires a lifecycle event. Archiving an already archived mission is an idempotent success; note-only retries are stored in lifecycle history without publishing duplicate bus events.</td></tr>
-      <tr><td><code>CreateKeyResult</code></td><td>Create a KR under an existing non-archived mission, optionally assign an owning space, and reactivate a completed mission when scope expands.</td><td>Persists KR and fires <code>kr.created</code>; may persist mission activation and fire <code>mission.activated</code>.</td></tr>
+      <tr><td><code>CreateKeyResult</code></td><td>Create a KR under an existing non-archived mission, optionally assign an owning project, and reactivate a completed mission when scope expands.</td><td>Persists KR and fires <code>kr.created</code>; may persist mission activation and fire <code>mission.activated</code>.</td></tr>
       <tr><td><code>GetKeyResult</code></td><td>Read one KR.</td><td>None.</td></tr>
       <tr><td><code>ListKeyResults</code></td><td>Read KRs for a mission.</td><td>None.</td></tr>
       <tr><td><code>UpdateKeyResult</code></td><td>Change KR descriptive or measurement fields and recompute progress.</td><td>Persists KR; may fire progress events.</td></tr>
       <tr><td><code>DeleteKeyResult</code></td><td>Drop/archive a KR without deleting mission history, record an optional rationale note, and recompute the parent mission from remaining live KRs.</td><td>Persists KR status and fires <code>kr.dropped</code>; may persist mission status and fire a lifecycle event. Dropping an already dropped KR is an idempotent success.</td></tr>
       <tr><td><code>ReopenKeyResult</code></td><td>Reopen a completed or dropped KR when scope has renewed work, record an optional rationale note, and reset progress to the KR starting value.</td><td>Persists KR state and fires <code>kr.reopened</code>; may reactivate the parent mission and fire <code>mission.activated</code>. Reopening an already open or in-progress KR is an idempotent success.</td></tr>
-      <tr><td><code>AssignKeyResultSpace</code></td><td>Assign an open space as the KR owner.</td><td>Persists KR owner fields and fires <code>kr.owner_assigned</code>.</td></tr>
+      <tr><td><code>AssignKeyResultProject</code></td><td>Assign an open project as the KR owner.</td><td>Persists KR owner fields and fires <code>kr.owner_assigned</code>.</td></tr>
       <tr><td><code>UpdateProgress</code></td><td>Validate progress update, enforce completion gates before writing, append progress entry, update KR progress, and update milestone cursor.</td><td>Persists progress entry and KR state; fires progress, milestone, and completion events after persistence; may complete mission.</td></tr>
       <tr><td><code>ComputeMissionProgress</code></td><td>Compute aggregate mission progress, KR status counts, and non-completed blocking KR summaries.</td><td>None.</td></tr>
       <tr><td><code>GetProgressHistory</code></td><td>Read progress entries for a KR.</td><td>None.</td></tr>
@@ -450,7 +450,7 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
   <h2 id="key-results">7. Key results and progress</h2>
 
   <p>
-    Key results are the mission's measurable work units. A KR belongs to one mission and can be owned by one space. Progress updates produce append-only history and fired events.
+    Key results are the mission's measurable work units. A KR belongs to one mission and can be owned by one project. Progress updates produce append-only history and fired events.
   </p>
 
   <h3>Measurement model</h3>
@@ -508,29 +508,29 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
     A mission can activate only when it has measurable scope and each live KR has an accountable owner. The activation predicate is:
   </p>
 
-<pre><code class="lang-go">count(nonDroppedKRs) &gt; <span class="tok-num">0</span> &amp;&amp; every(nonDroppedKRs, ownerSpaceID != <span class="tok-string">""</span> &amp;&amp; ownerSpaceStatus == <span class="tok-string">"open"</span>)</code></pre>
+<pre><code class="lang-go">count(nonDroppedKRs) &gt; <span class="tok-num">0</span> &amp;&amp; every(nonDroppedKRs, ownerProjectID != <span class="tok-string">""</span> &amp;&amp; ownerProjectStatus == <span class="tok-string">"open"</span>)</code></pre>
 
   <p>
-    These mission states do not activate: no KRs, all KRs dropped, or any non-dropped KR without an owning space. If there is no active measurable scope, the coordinator should add KRs. If a live KR has no owner, the coordinator should assign it to a space before activation.
+    These mission states do not activate: no KRs, all KRs dropped, or any non-dropped KR without an owning project. If there is no active measurable scope, the coordinator should add KRs. If a live KR has no owner, the coordinator should assign it to a project before activation.
   </p>
 
-  <h3>Owner space availability</h3>
+  <h3>Owner project availability</h3>
   <p>
-    A KR owner space is both a durable assignment and a live execution dependency. The historical <code>SpaceID</code> stays on the KR, but activation depends on that space still being open.
+    A KR owner project is both a durable assignment and a live execution dependency. The historical <code>ProjectID</code> stays on the KR, but activation depends on that project still being open.
   </p>
 
   <p>
-    Assigning a KR to an open space moves the KR from <code>draft</code> to <code>open</code>. Reassignment is allowed only while the KR is <code>draft</code> or <code>open</code>. Once progress starts and the KR becomes <code>in_progress</code>, ownership is locked to preserve accountability. <code>completed</code> and <code>dropped</code> KRs cannot be reassigned through this command.
+    Assigning a KR to an open project moves the KR from <code>draft</code> to <code>open</code>. Reassignment is allowed only while the KR is <code>draft</code> or <code>open</code>. Once progress starts and the KR becomes <code>in_progress</code>, ownership is locked to preserve accountability. <code>completed</code> and <code>dropped</code> KRs cannot be reassigned through this command.
   </p>
 
   <table>
-    <thead><tr><th>Owner space change</th><th>Mission result</th><th>Reason</th></tr></thead>
+    <thead><tr><th>Owner project change</th><th>Mission result</th><th>Reason</th></tr></thead>
     <tbody>
-      <tr><td>A KR is assigned to an open space.</td><td>Eligible for activation.</td><td>The live KR has an accountable delivery owner.</td></tr>
-      <tr><td>A KR's assigned space is closed or archived before activation.</td><td>Not eligible for activation.</td><td>The assignment remains historical, but the space cannot own live work.</td></tr>
-      <tr><td>An active mission has a live KR whose owner space closes or archives.</td><td><code>Paused</code></td><td>The mission has live scope without live execution capacity.</td></tr>
-      <tr><td>A completed mission has a completed KR whose owner space closes or archives.</td><td><code>Completed</code></td><td>The measurable outcome is already satisfied.</td></tr>
-      <tr><td>The KR is reassigned to an open space.</td><td>Eligible for activation again.</td><td>Live ownership has been restored.</td></tr>
+      <tr><td>A KR is assigned to an open project.</td><td>Eligible for activation.</td><td>The live KR has an accountable delivery owner.</td></tr>
+      <tr><td>A KR's assigned project is closed or archived before activation.</td><td>Not eligible for activation.</td><td>The assignment remains historical, but the project cannot own live work.</td></tr>
+      <tr><td>An active mission has a live KR whose owner project closes or archives.</td><td><code>Paused</code></td><td>The mission has live scope without live execution capacity.</td></tr>
+      <tr><td>A completed mission has a completed KR whose owner project closes or archives.</td><td><code>Completed</code></td><td>The measurable outcome is already satisfied.</td></tr>
+      <tr><td>The KR is reassigned to an open project.</td><td>Eligible for activation again.</td><td>Live ownership has been restored.</td></tr>
     </tbody>
   </table>
 
@@ -613,7 +613,7 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
       <tr><td>Reopen a completed or dropped KR.</td><td><code>Active</code></td><td>Previously satisfied or removed scope now has live work again.</td></tr>
       <tr><td>Add or keep a dropped/archived KR.</td><td><code>Completed</code></td><td>Dropped scope is ignored by active mission progress rules until it is explicitly reopened.</td></tr>
       <tr><td>Edit title, description, note, metadata, or display fields on a completed KR.</td><td><code>Completed</code></td><td>No new measurable work was introduced.</td></tr>
-      <tr><td>Assign or change owner space on an already-completed KR.</td><td><code>Completed</code></td><td>Ownership changed, but the measurable outcome is still satisfied.</td></tr>
+      <tr><td>Assign or change owner project on an already-completed KR.</td><td><code>Completed</code></td><td>Ownership changed, but the measurable outcome is still satisfied.</td></tr>
     </tbody>
   </table>
 
@@ -703,9 +703,9 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td>Number progress</td><td>Number KRs require baseline, target, current value, and direction to compute progress.</td></tr>
       <tr><td>Percentage progress</td><td>Percentage KRs use the current value directly, clamped to <code>0..100</code>, and support increase semantics only for now.</td></tr>
       <tr><td>Boolean progress</td><td>Boolean KRs forbid direction and map <code>false</code> to <code>0</code>, <code>true</code> to <code>100</code>.</td></tr>
-      <tr><td>Assignment</td><td>A KR can be assigned only to an open space resolved through the space service.</td></tr>
-      <tr><td>Activation gate</td><td>A mission activates only when at least one non-dropped KR exists and every non-dropped KR has an open owning space.</td></tr>
-      <tr><td>Owner availability</td><td>Closed or archived owner spaces remain historical assignments, but they do not count as live execution ownership.</td></tr>
+      <tr><td>Assignment</td><td>A KR can be assigned only to an open project resolved through the project service.</td></tr>
+      <tr><td>Activation gate</td><td>A mission activates only when at least one non-dropped KR exists and every non-dropped KR has an open owning project.</td></tr>
+      <tr><td>Owner availability</td><td>Closed or archived owner projects remain historical assignments, but they do not count as live execution ownership.</td></tr>
       <tr><td>Progress entry</td><td>Every value update appends a progress entry before the resulting KR state is returned.</td></tr>
       <tr><td>Milestone jumps</td><td>Progress jumps fire every newly crossed milestone threshold and do not re-fire thresholds already recorded in <code>LastMilestoneNotified</code>.</td></tr>
       <tr><td>Progress regression</td><td>Incomplete KRs may regress when measurement rules allow it; completed KRs must be explicitly reopened before progress can move down.</td></tr>
@@ -772,7 +772,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
         <td><code>mission.lifecycle</code></td>
         <td><code>mission.paused</code></td>
         <td>An active mission pauses.</td>
-        <td>Same lifecycle payload; includes KR count and owning-space count when available.</td>
+        <td>Same lifecycle payload; includes KR count and owning-project count when available.</td>
       </tr>
       <tr>
         <td><code>mission.lifecycle</code></td>
@@ -822,9 +822,9 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
     <span class="tok-field">OldStatus</span>      string
     <span class="tok-field">NewStatus</span>      string
     <span class="tok-field">KRCount</span>        int
-    <span class="tok-field">SpaceCount</span>     int
+    <span class="tok-field">ProjectCount</span>     int
     <span class="tok-field">Trigger</span>        string
-    <span class="tok-field">TriggerSpaceID</span> string
+    <span class="tok-field">TriggerProjectID</span> string
     <span class="tok-field">Timestamp</span>      time.Time
 }</code></pre>
 
@@ -858,7 +858,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
   <table>
     <thead><tr><th>Outcome</th><th>Event output</th><th>Default message behavior</th></tr></thead>
     <tbody>
-      <tr><td>Mission activates, pauses, completes, or archives.</td><td><code>MissionLifecycleEvent</code></td><td>Activation notifies coordinators of assigned spaces. Other lifecycle events send messages only if they create work or require intervention.</td></tr>
+      <tr><td>Mission activates, pauses, completes, or archives.</td><td><code>MissionLifecycleEvent</code></td><td>Activation notifies coordinators of assigned projects. Other lifecycle events send messages only if they create work or require intervention.</td></tr>
       <tr><td>KR progress changes.</td><td><code>KRProgressEvent</code> with <code>kr.progress_updated</code>.</td><td>No agent message. Dashboards/history consume the event.</td></tr>
       <tr><td>KR crosses milestone thresholds.</td><td>One <code>KRProgressEvent</code> per newly crossed <code>kr.milestone</code>.</td><td>No agent message by default. Subscriber may create summaries later if product behavior needs them.</td></tr>
       <tr><td>KR completes and mission may complete.</td><td><code>kr.completed</code> and optional <code>mission.completed</code>.</td><td>No agent message by default; the caller usually already knows the outcome.</td></tr>
@@ -910,7 +910,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
         <span class="tok-string">"status"</span>:          <span class="tok-string">"draft"</span>,
         <span class="tok-string">"measurementType"</span>: <span class="tok-string">"number"</span>,
         <span class="tok-string">"progressPercent"</span>: <span class="tok-string">"0"</span>,
-        <span class="tok-string">"spaceId"</span>:         <span class="tok-string">"space-..."</span>, <span class="tok-comment">// present when assigned</span>
+        <span class="tok-string">"projectId"</span>:         <span class="tok-string">"project-..."</span>, <span class="tok-comment">// present when assigned</span>
     },
 }</code></pre>
 
@@ -922,24 +922,24 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
     <thead><tr><th>Mission event</th><th>Agent message?</th><th>Reason</th></tr></thead>
     <tbody>
       <tr><td><code>kr.progress_updated</code>, <code>kr.milestone</code>, <code>kr.completed</code>, <code>mission.completed</code>, <code>mission.archived</code></td><td>No by default.</td><td>These are facts the caller or dashboard can observe; they do not inherently ask another agent to act.</td></tr>
-      <tr><td><code>mission.activated</code></td><td>Yes.</td><td>Notify the coordinator of each space assigned to a live KR so the space knows the mission is now active.</td></tr>
-      <tr><td><code>kr.owner_assigned</code>, <code>kr.reopened</code></td><td>Usually yes.</td><td>A space/agent may need to begin tracking or resume work.</td></tr>
+      <tr><td><code>mission.activated</code></td><td>Yes.</td><td>Notify the coordinator of each project assigned to a live KR so the project knows the mission is now active.</td></tr>
+      <tr><td><code>kr.owner_assigned</code>, <code>kr.reopened</code></td><td>Usually yes.</td><td>A project/agent may need to begin tracking or resume work.</td></tr>
       <tr><td>Mission paused because live KR ownership became unavailable.</td><td>Yes.</td><td>Coordinator or operator intervention is required.</td></tr>
     </tbody>
   </table>
 
   <h3>Notification idempotency</h3>
   <p>
-    Mission activation can be retried, recomputed after KR assignment, or replayed by an event subscriber. Activation messages must therefore be idempotent per mission, assigned space, and event kind.
+    Mission activation can be retried, recomputed after KR assignment, or replayed by an event subscriber. Activation messages must therefore be idempotent per mission, assigned project, and event kind.
   </p>
 
   <table>
     <thead><tr><th>Notification</th><th>Idempotency key</th><th>Duplicate rule</th></tr></thead>
     <tbody>
-      <tr><td><code>mission.activated</code> to an assigned space coordinator.</td><td><code>mission:&lt;missionId&gt;:space:&lt;spaceId&gt;:activated</code></td><td>Send at most once for the activation episode.</td></tr>
-      <tr><td><code>kr.owner_assigned</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:owner:&lt;spaceId&gt;</code></td><td>Send only when the owner space actually changes.</td></tr>
+      <tr><td><code>mission.activated</code> to an assigned coordinator.</td><td><code>mission:&lt;missionId&gt;:project:&lt;projectId&gt;:activated</code></td><td>Send at most once for the activation episode.</td></tr>
+      <tr><td><code>kr.owner_assigned</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:owner:&lt;projectId&gt;</code></td><td>Send only when the owner project actually changes.</td></tr>
       <tr><td><code>kr.reopened</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:reopened:&lt;version&gt;</code></td><td>Send once for the reopen transition, not for later progress edits.</td></tr>
-      <tr><td>Mission paused because owner space became unavailable.</td><td><code>mission:&lt;missionId&gt;:paused:owner-unavailable:&lt;spaceId&gt;</code></td><td>Send once per unavailable owner-space cause.</td></tr>
+      <tr><td>Mission paused because owner project became unavailable.</td><td><code>mission:&lt;missionId&gt;:paused:owner-unavailable:&lt;projectId&gt;</code></td><td>Send once per unavailable owner-project cause.</td></tr>
     </tbody>
   </table>
 
@@ -969,7 +969,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
 
       <rect x="588" y="202" width="190" height="82" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
       <text x="683" y="232" text-anchor="middle" fill="var(--text)" font-weight="700">Activation subscriber</text>
-      <text x="683" y="254" text-anchor="middle" fill="var(--text-muted)">resolve assigned spaces</text>
+      <text x="683" y="254" text-anchor="middle" fill="var(--text-muted)">resolve assigned projects</text>
       <text x="683" y="272" text-anchor="middle" fill="var(--text-muted)">find coordinators</text>
 
       <rect x="44" y="202" width="190" height="82" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
@@ -978,7 +978,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <text x="139" y="272" text-anchor="middle" fill="var(--text-muted)">idempotent producer ids</text>
 
       <rect x="316" y="214" width="190" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
-      <text x="411" y="238" text-anchor="middle" fill="var(--text)" font-weight="700">Space coordinator</text>
+      <text x="411" y="238" text-anchor="middle" fill="var(--text)" font-weight="700">Coordinator</text>
       <text x="411" y="258" text-anchor="middle" fill="var(--text-muted)">mission is active</text>
 
       <line x1="234" y1="93" x2="316" y2="93" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
@@ -1014,7 +1014,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td><code>mission.kr.get</code></td><td><code>GetKeyResult</code></td><td>Read one KR.</td></tr>
       <tr><td><code>mission.kr.list</code></td><td><code>ListKeyResults</code></td><td>List KRs for a mission.</td></tr>
       <tr><td><code>mission.kr.update</code></td><td><code>UpdateKeyResult</code></td><td>Patch KR fields.</td></tr>
-      <tr><td><code>mission.kr.assignSpace</code></td><td><code>AssignKeyResultSpace</code></td><td>Assign an open space as the KR owner.</td></tr>
+      <tr><td><code>mission.kr.assignProject</code></td><td><code>AssignKeyResultProject</code></td><td>Assign an open project as the KR owner.</td></tr>
       <tr><td><code>mission.kr.delete</code></td><td><code>DeleteKeyResult</code></td><td>Drop/archive KR.</td></tr>
       <tr><td><code>mission.kr.reopen</code></td><td><code>ReopenKeyResult</code></td><td>Reopen completed or dropped KR scope and reset progress.</td></tr>
       <tr><td><code>mission.kr.progress</code></td><td><code>UpdateProgress</code></td><td>Record KR progress.</td></tr>
@@ -1060,11 +1060,11 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
     <tbody>
       <tr><td>No <code>Deps</code> bag in mission service construction.</td><td>Constructor dependencies stay visible and reviewable.</td></tr>
       <tr><td>No tool request or generic action dispatcher in <code>internal/services/mission/app</code>.</td><td>MCP owns tool semantics.</td></tr>
-      <tr><td>No direct writes to task, space, heartbeat, message, or context-link repositories.</td><td>Services talk to services through narrow interfaces.</td></tr>
+      <tr><td>No direct writes to task, project, heartbeat, message, or context-link repositories.</td><td>Services talk to services through narrow interfaces.</td></tr>
       <tr><td>No lifecycle notification handlers in the mission app service package.</td><td>Event subscribers belong to the event/subscriber layer, not the mission service.</td></tr>
       <tr><td>No member-facing message registry or exported event factory in mission service.</td><td>The mission service owns typed event kinds and private publishing/spec helpers; subscribers own message wording and delivery.</td></tr>
-      <tr><td>No automatic mission-event-to-agent-message rule.</td><td>Mission events become messages only when a subscriber identifies an actionable obligation or intervention need; <code>mission.activated</code> is actionable for coordinators of assigned spaces.</td></tr>
-      <tr><td>No duplicate mission activation messages.</td><td>Activation notifications use deterministic idempotency keys per mission and assigned space.</td></tr>
+      <tr><td>No automatic mission-event-to-agent-message rule.</td><td>Mission events become messages only when a subscriber identifies an actionable obligation or intervention need; <code>mission.activated</code> is actionable for coordinators of assigned projects.</td></tr>
+      <tr><td>No duplicate mission activation messages.</td><td>Activation notifications use deterministic idempotency keys per mission and assigned project.</td></tr>
       <tr><td>No raw JSON or protocol DTOs in service methods.</td><td>Protocol adapters translate at the boundary.</td></tr>
       <tr><td>No partial progress writes.</td><td><code>UpdateProgress</code> runs completion gates before persistence and writes progress entry, KR state, mission state, and events as one use case.</td></tr>
       <tr><td>No KR progress under a draft mission.</td><td>Progress updates require the parent mission to be <code>active</code>.</td></tr>
@@ -1073,7 +1073,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td>No silent regression of completed KRs.</td><td>A completed KR must be explicitly reopened before progress can decrease, and reopening resets progress to the starting value and reactivates the parent mission.</td></tr>
       <tr><td>No milestone un-notification.</td><td>Progress regression does not clear <code>LastMilestoneNotified</code> or make already fired milestones eligible to fire again.</td></tr>
       <tr><td>No unsupported measurement semantics.</td><td><code>maintain</code> and range/tolerance KRs are not supported until their fields and progress rules are designed.</td></tr>
-      <tr><td>No mission activation without owned measurable scope.</td><td>Activation requires at least one non-dropped KR and every non-dropped KR assigned to an open owning space; no KRs, all dropped KRs, unowned live KRs, and closed/archived owner spaces fail the gate.</td></tr>
+      <tr><td>No mission activation without owned measurable scope.</td><td>Activation requires at least one non-dropped KR and every non-dropped KR assigned to an open owning project; no KRs, all dropped KRs, unowned live KRs, and closed/archived owner projects fail the gate.</td></tr>
       <tr><td>No mission completion without satisfied measurable scope.</td><td>Completion requires at least one non-dropped KR and every non-dropped KR completed; no KRs, all dropped KRs, and only draft/open/in-progress KRs fail the gate.</td></tr>
       <tr><td>No KR completion with non-terminal linked tasks.</td><td>Linked tasks in <code>pending</code>, <code>active</code>, <code>blocked</code>, or <code>in_review</code> block KR completion.</td></tr>
       <tr><td>No stale mission status after dropping KRs.</td><td>The parent mission is recomputed from remaining non-dropped KRs; previous status does not preserve an invalid active or completed state.</td></tr>

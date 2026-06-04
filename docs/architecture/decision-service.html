@@ -210,7 +210,6 @@
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Decision</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">ID</span>             <span class="tok-type">DecisionID</span>
     <span class="tok-field">ProjectID</span>      <span class="tok-type">string</span>
-    <span class="tok-field">SpaceID</span>        <span class="tok-type">string</span>
     <span class="tok-field">Source</span>         <span class="tok-type">DecisionSource</span>
     <span class="tok-field">SourceIdentity</span> <span class="tok-type">string</span>
     <span class="tok-field">Title</span>          <span class="tok-type">string</span>
@@ -243,7 +242,7 @@
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">DecisionFilter</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">ProjectID</span> <span class="tok-type">string</span>
     <span class="tok-field">Sources</span>   []<span class="tok-type">DecisionSource</span>
-    <span class="tok-field">SpaceID</span>   <span class="tok-type">string</span>
+    <span class="tok-field">ProjectID</span>   <span class="tok-type">string</span>
     <span class="tok-field">Tags</span>      []<span class="tok-type">string</span>
     <span class="tok-field">Query</span>     <span class="tok-type">string</span>
     <span class="tok-field">Since</span>     *time.<span class="tok-type">Time</span>
@@ -253,7 +252,7 @@
     <span class="tok-field">Offset</span>    <span class="tok-type">int</span>
 }</code></pre>
 
-  <p>Project scope is part of <code>DecisionFilter</code>. List, count, and export use the same filter contract, which keeps project scoping, text search, tags, space filtering, sort order, and pagination in one place.</p>
+  <p>Project scope is part of <code>DecisionFilter</code>. List, count, and export use the same filter contract, which keeps project scoping, text search, tags, project filtering, sort order, and pagination in one place.</p>
 
   <h2 id="events">6. Links, events, and notifications</h2>
 

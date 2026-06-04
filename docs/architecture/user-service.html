@@ -20,7 +20,7 @@
   <span class="eyebrow">Architecture · User Service</span>
   <h1>User Service</h1>
   <p class="lede">
-    The user service owns account identity, first-run setup, and account lifecycle. Auth owns sessions, API keys, password credential checks, and bearer-token validation. A user can sign in to agen8; a space member participates inside a space. Those are different records with different lifecycles.
+    The user service owns account identity, first-run setup, and account lifecycle. Auth owns sessions, API keys, password credential checks, and bearer-token validation. A user can sign in to agen8; a member participates inside a project. Those are different records with different lifecycles.
   </p>
 
   <nav class="toc" aria-label="On this page">
@@ -55,7 +55,7 @@
     </div>
     <div class="layer domain">
       <div class="label">Domain (account model)</div>
-      <div class="role"><code>user.User</code>, <code>user.ID</code>, and <code>user.Role</code> define account identity. The domain does not know spaces, members, projects, sessions, API keys, daemon routes, or React local storage.</div>
+      <div class="role"><code>user.User</code>, <code>user.ID</code>, and <code>user.Role</code> define account identity. The domain does not know projects, members, projects, sessions, API keys, daemon routes, or React local storage.</div>
     </div>
     <div class="layer repo">
       <div class="label">Repository</div>
@@ -128,7 +128,7 @@
 
   <h2 id="identity">3. Identity boundaries</h2>
 
-  <p>A user is an account. A project is the first durable workspace object the user creates after setup. A space is created inside a project. A member is an actor inside a space. Setup creates only the account and browser session.</p>
+  <p>A user is an account. A project is the first durable workspace object the user creates after setup. A project is created inside a project. A member is an actor inside a project. Setup creates only the account and browser session.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 940 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
@@ -139,7 +139,7 @@
     </defs>
 
     <rect x="40" y="42" width="860" height="206" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
-    <text x="470" y="76" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Account identity is not space membership</text>
+    <text x="470" y="76" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Account identity is not membership</text>
     <text x="470" y="97" text-anchor="middle" fill="var(--text-muted)">Each record answers a different product question and is created by a different flow.</text>
 
     <rect x="82" y="136" width="146" height="64" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
@@ -151,12 +151,12 @@
     <text x="359" y="180" text-anchor="middle" fill="var(--text-muted)">owned workspace</text>
 
     <rect x="490" y="136" width="146" height="64" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
-    <text x="563" y="160" text-anchor="middle" font-weight="700" fill="var(--text)">Space</text>
+    <text x="563" y="160" text-anchor="middle" font-weight="700" fill="var(--text)">Project</text>
     <text x="563" y="180" text-anchor="middle" fill="var(--text-muted)">coordination room</text>
 
     <rect x="694" y="136" width="146" height="64" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
     <text x="767" y="160" text-anchor="middle" font-weight="700" fill="var(--text)">Member</text>
-    <text x="767" y="180" text-anchor="middle" fill="var(--text-muted)">actor in a space</text>
+    <text x="767" y="180" text-anchor="middle" fill="var(--text-muted)">actor in a project</text>
 
     <line x1="228" y1="168" x2="286" y2="168" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#identity-arrow)"/>
     <line x1="432" y1="168" x2="490" y2="168" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#identity-arrow)"/>
@@ -168,15 +168,14 @@
     <thead><tr><th>Record</th><th>Owned by</th><th>Created by</th><th>What it means</th></tr></thead>
     <tbody>
       <tr><td><code>User</code></td><td>User service</td><td>Setup or account invitation flow</td><td>An authenticated account that can use agen8.</td></tr>
-      <tr><td><code>Project</code></td><td>Project service</td><td>User action after setup</td><td>A durable workspace boundary owned by a user.</td></tr>
-      <tr><td><code>Space</code></td><td>Space service</td><td>Project-scoped space creation</td><td>A coordination environment inside a project.</td></tr>
-      <tr><td><code>Member</code></td><td>Space service member roster subdomain</td><td>Space membership flow</td><td>An agent or person acting inside one space.</td></tr>
+      <tr><td><code>Project</code></td><td>Project service</td><td>User action after setup</td><td>A durable workspace and coordination boundary owned by a user.</td></tr>
+      <tr><td><code>Member</code></td><td>Project service member roster subdomain</td><td>Membership flow</td><td>An agent or person acting inside one project.</td></tr>
     </tbody>
   </table>
 
   <h2 id="setup">4. First-user setup</h2>
 
-  <p>First-run setup is the only open registration path. It is available only while the user repository is empty. It creates the first user as the account owner/admin. Auth creates the browser session for that new user. Setup does not create a project, space, member, API key, or agent.</p>
+  <p>First-run setup is the only open registration path. It is available only while the user repository is empty. It creates the first user as the account owner/admin. Auth creates the browser session for that new user. Setup does not create a project, project, member, API key, or agent.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 940 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
@@ -242,7 +241,7 @@
     <thead><tr><th>Setup creates</th><th>Setup does not create</th></tr></thead>
     <tbody>
       <tr><td>One <code>User</code> account</td><td>A project</td></tr>
-      <tr><td>One <code>User</code> lifecycle state</td><td>A space</td></tr>
+      <tr><td>One <code>User</code> lifecycle state</td><td>A project</td></tr>
       <tr><td>Account role <code>admin</code></td><td>A member or coordinator role</td></tr>
       <tr><td>Account lifecycle <code>active</code></td><td>An API key or agent credential</td></tr>
     </tbody>
@@ -265,7 +264,7 @@
 
   <h2 id="rpc">6. RPC adapter</h2>
 
-  <p>The RPC adapter exposes account-level methods. It does not create projects, spaces, or members. It maps authenticated daemon identity into response DTOs and maps login/setup payloads into user service commands.</p>
+  <p>The RPC adapter exposes account-level methods. It does not create projects, projects, or members. It maps authenticated daemon identity into response DTOs and maps login/setup payloads into user service commands.</p>
 
   <table>
     <thead><tr><th>RPC method</th><th>Service call</th><th>Boundary rule</th></tr></thead>
@@ -367,7 +366,7 @@ level=INFO msg="user closed" service=user user_id=user_... actor_user_id=user_..
     <tbody>
       <tr><td>First-run setup is open only when no users exist.</td><td>User service counts users before creating the first account.</td></tr>
       <tr><td>The first user is the account owner/admin.</td><td><code>SetupFirstUser</code> assigns the initial account role.</td></tr>
-      <tr><td>Setup creates no project, space, member, task, or agent.</td><td>Daemon setup route calls only the user service setup method.</td></tr>
+      <tr><td>Setup creates no project, project, member, task, or agent.</td><td>Daemon setup route calls only the user service setup method.</td></tr>
       <tr><td>Browser setup stores a session token, not an API key.</td><td>Daemon setup asks auth to create a browser session after user creation.</td></tr>
       <tr><td>A user id is never treated as a member id.</td><td>Caller identity keeps <code>UserID</code> and <code>MemberID</code> separate.</td></tr>
       <tr><td>User service does not create API keys.</td><td>API-key methods and repositories live under auth.</td></tr>

@@ -18,7 +18,11 @@
 <div class="page">
   <span class="eyebrow">Architecture · Project Service</span>
   <h1>Project Service</h1>
-  <p class="lede">The project service owns project identity, a location-scoped root reference, and project-scoped topology over spaces. Space records remain owned by the space service and are hydrated through a narrow loader interface.</p>
+  <p class="lede">The project service owns project identity, a location-scoped root reference, and the member roster. The project is the coordination boundary: members attach directly to a project. There is no space layer.</p>
+
+  <div class="callout">
+    <strong>Hard cutover.</strong> The space service has been retired and its member roster subdomain absorbed into the project service. Members key off <code>project_id</code>, not <code>space_id</code>. The former project-over-spaces topology (space clusters) is gone; a future <a href="./project-first-runtime-contracts.html#groups">group</a> primitive is the additive path to sub-teams and is not built.
+  </div>
 
   <nav class="toc" aria-label="On this page">
     <div class="toc-label">On this page</div>
@@ -26,7 +30,7 @@
       <li><a href="#boundary">Service boundary</a></li>
       <li><a href="#layers">Architecture layers</a></li>
       <li><a href="#domains">Domain packages</a></li>
-      <li><a href="#flow">Project space list flow</a></li>
+      <li><a href="#roster">Member roster</a></li>
       <li><a href="#rpc">RPC surface</a></li>
       <li><a href="#client-contract">Client contract</a></li>
       <li><a href="#invariants">Invariants</a></li>
@@ -34,23 +38,23 @@
   </nav>
 
   <h2 id="boundary">1. Service boundary</h2>
-  <p>Projects are durable workspace records. A project root is meaningful only inside a location, so the project stores <code>locationId</code> with <code>root</code>. A project does not run code; its location can run code. Member harness sessions execute inside the project location and root through the location and harness services. A space belongs to exactly one project through <code>Space.ProjectID</code>. The project service organizes those spaces into pinned views, clusters, and coordination scopes without owning location probing, filesystem browsing, credentials, runtime state, member roster, message channels, tasks, missions, or harness delivery. Those reachability concerns belong to the <a href="./location-service.html">location service</a>.</p>
+  <p>Projects are durable workspace records. A project root is meaningful only inside a location, so the project stores <code>locationId</code> with <code>root</code>. A project does not run code; its location can run code. Member harness sessions execute inside the project location and root through the location and harness services. A member belongs to exactly one project through <code>Member.ProjectID</code>. The project service owns the member roster directly: member identity, labels, member type, and lifecycle state. It does not own location probing, filesystem browsing, credentials, harness runtime state, message channels, tasks, missions, or harness delivery.</p>
 
   <div class="grid">
     <div class="card">
       <div class="label">Project owns</div>
       <div class="title">Composition and context</div>
-      <div class="meta">Project identity, location-scoped root reference, display metadata, pinned spaces, and project-scoped space clusters.</div>
+      <div class="meta">Project identity, location-scoped root reference, display metadata, lifecycle, and the member roster.</div>
+    </div>
+    <div class="card">
+      <div class="label">Member roster owns</div>
+      <div class="title">Actor identity</div>
+      <div class="meta">Member id, <code>(project_id, harness_kind, native_session_ref)</code>, display label, member type, channel id, and lifecycle state.</div>
     </div>
     <div class="card">
       <div class="label">Location owns</div>
       <div class="title">Reachability and capabilities</div>
       <div class="meta">Location records, filesystem browsing, remote connection setup, credentials, online status, and capability probes live outside the project service.</div>
-    </div>
-    <div class="card">
-      <div class="label">Space owns</div>
-      <div class="title">Space truth</div>
-      <div class="meta">Project membership via <code>ProjectID</code>, title, status, customization, member roster, member labels, and member runtime state.</div>
     </div>
     <div class="card">
       <div class="label">Other services own</div>
@@ -65,19 +69,19 @@
   <div class="layers">
     <div class="layer handler">
       <div class="label">Protocol</div>
-      <div class="role">RPC handlers validate transport params, resolve caller identity, call <code>app.Service</code>, and return project views.</div>
+      <div class="role">RPC handlers validate transport params, resolve caller identity, call <code>app.Service</code>, and return project and member views.</div>
     </div>
     <div class="layer service">
       <div class="label">App</div>
-      <div class="role"><code>app.Service</code> manages projects and project topology, then hydrates space display data through <code>SpaceLoader</code>.</div>
+      <div class="role"><code>app.Service</code> manages projects and the member roster, validates member runtime config, and enforces coordinator admission.</div>
     </div>
     <div class="layer domain">
       <div class="label">Domain</div>
-      <div class="role"><code>project.Project</code> owns project identity and the <code>locationId + root</code> mapping. <code>cluster.Cluster</code> and <code>cluster.SpaceRef</code> own project-scoped grouping, pinning, and coordination scope.</div>
+      <div class="role"><code>project.Project</code> owns project identity and the <code>locationId + root</code> mapping. <code>member.Member</code> owns actor identity, member type, and lifecycle.</div>
     </div>
     <div class="layer repo">
       <div class="label">Infra</div>
-      <div class="role">SQLite and Postgres repositories persist projects and topology records behind domain repository contracts.</div>
+      <div class="role">SQLite and Postgres repositories persist projects and members behind domain repository contracts.</div>
     </div>
   </div>
 
@@ -89,9 +93,9 @@
       <div class="meta">Creates and validates durable project records: id, location id, root, title, status, created time, and updated time.</div>
     </div>
     <div class="card">
-      <div class="label">Space topology</div>
-      <div class="title"><code>internal/services/project/domain/cluster</code></div>
-      <div class="meta">Creates and validates project-owned clusters, pinned spaces, and cluster space references. Topology records do not attach spaces to projects or store space runtime state.</div>
+      <div class="label">Member aggregate</div>
+      <div class="title"><code>internal/services/project/domain/member</code></div>
+      <div class="meta">Creates and validates member records: id, project id, harness kind, native session ref, display label, member type, channel id, and lifecycle state. Enforces one active coordinator per project.</div>
     </div>
   </div>
 
@@ -105,87 +109,42 @@
     <span class="tok-field">UpdatedAt</span> time.Time
 }
 
-<span class="tok-kw">type</span> <span class="tok-type">SpaceCluster</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ID</span>        ClusterID
-    <span class="tok-field">ProjectID</span> types.ProjectID
-    <span class="tok-field">Name</span>      <span class="tok-type">string</span>
-    <span class="tok-field">Status</span>    ClusterStatus
-    <span class="tok-field">CreatedAt</span> time.Time
-    <span class="tok-field">UpdatedAt</span> time.Time
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">ClusterSpace</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ClusterID</span> ClusterID
-    <span class="tok-field">SpaceID</span>   spacedomain.SpaceID
-    <span class="tok-field">SortOrder</span> <span class="tok-type">int</span>
-    <span class="tok-field">Pinned</span>    <span class="tok-type">bool</span>
+<span class="tok-kw">type</span> <span class="tok-type">Member</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>              MemberID
+    <span class="tok-field">ProjectID</span>       types.ProjectID
+    <span class="tok-field">UserID</span>          types.UserID
+    <span class="tok-field">ChannelID</span>       <span class="tok-type">string</span>
+    <span class="tok-field">DisplayName</span>     <span class="tok-type">string</span>
+    <span class="tok-field">MemberType</span>      MemberType
+    <span class="tok-field">LifecycleState</span>  LifecycleState
+    <span class="tok-field">HarnessKind</span>     <span class="tok-type">string</span>
+    <span class="tok-field">NativeSessionRef</span> <span class="tok-type">string</span>
+    <span class="tok-field">Model</span>           <span class="tok-type">string</span>
+    <span class="tok-field">Effort</span>          <span class="tok-type">string</span>
 }</code></pre>
 
-  <h2 id="flow">4. Project space list flow</h2>
-  <p>The project service loads spaces by project through <code>SpaceLoader</code>, then overlays project-owned topology such as pinned order and cluster membership. This keeps project organization durable without duplicating space-owned state.</p>
+  <h2 id="roster">4. Member roster</h2>
+  <p>The member roster is a subdomain of the project. A member is one harness session registered into the project, identified by <code>(project_id, harness_kind, native_session_ref)</code>. The channel id is deterministic: <code>channel:&lt;project&gt;:member:&lt;id&gt;</code>. Registration is the boundary where the MCP <a href="./mcp-project-tool.html">project tool</a> or the runtime supervisor binds a harness session as a managed member.</p>
 
-  <div class="diagram">
-    <svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Project space list flow">
-      <defs>
-        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
-        </marker>
-      </defs>
-      <rect x="20" y="26" width="940" height="86" rx="10" fill="var(--bg-subtle)" stroke="var(--border)"/>
-      <rect x="20" y="136" width="940" height="86" rx="10" fill="var(--bg-elevated)" stroke="var(--border)"/>
-      <rect x="20" y="246" width="940" height="86" rx="10" fill="var(--bg-subtle)" stroke="var(--border)"/>
+  <p>Coordinator admission is a project-scoped invariant: a project has at most one active coordinator member. The first member registered into a project becomes the coordinator; later session-specific members become workers. When the future group primitive is introduced, coordinator uniqueness can be re-scoped from project to group additively, without changing member identity.</p>
 
-      <text x="44" y="58" fill="var(--text-faint)" font-size="11" font-weight="700" letter-spacing="1.2">CLIENT</text>
-      <text x="44" y="168" fill="var(--text-faint)" font-size="11" font-weight="700" letter-spacing="1.2">PROJECT SERVICE</text>
-      <text x="44" y="278" fill="var(--text-faint)" font-size="11" font-weight="700" letter-spacing="1.2">SPACE SERVICE</text>
-
-      <rect x="230" y="48" width="168" height="42" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="314" y="74" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">project.space.list</text>
-
-      <rect x="230" y="158" width="168" height="42" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="314" y="184" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Load spaces</text>
-
-      <rect x="470" y="158" width="168" height="42" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="554" y="184" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Overlay topology</text>
-
-      <rect x="710" y="158" width="168" height="42" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="794" y="184" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Return view</text>
-
-      <rect x="470" y="268" width="168" height="42" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="554" y="294" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">List by project</text>
-
-      <text x="314" y="218" text-anchor="middle" fill="var(--text-muted)" font-size="12">Space.ProjectID filter</text>
-      <text x="554" y="328" text-anchor="middle" fill="var(--text-muted)" font-size="12">space-owned records</text>
-      <text x="794" y="218" text-anchor="middle" fill="var(--text-muted)" font-size="12">spaces + clusters</text>
-
-      <line x1="314" y1="90" x2="314" y2="158" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
-      <line x1="398" y1="179" x2="470" y2="179" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
-      <line x1="554" y1="200" x2="554" y2="268" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
-      <line x1="638" y1="289" x2="688" y2="200" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
-      <line x1="638" y1="179" x2="710" y2="179" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
-    </svg>
-  </div>
-
-<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">SpaceLoader</span> <span class="tok-kw">interface</span> {
-    <span class="tok-fn">Get</span>(ctx context.Context, id spacedomain.SpaceID) (spacedomain.SpaceRecord, <span class="tok-type">error</span>)
-    <span class="tok-fn">List</span>(ctx context.Context, filter SpaceFilter) ([]spacedomain.SpaceRecord, <span class="tok-type">error</span>)
+<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">MemberFilter</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> types.ProjectID
+    <span class="tok-field">IncludeInactive</span> <span class="tok-type">bool</span>
 }
 
-<span class="tok-kw">type</span> <span class="tok-type">ProjectSpaceView</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ProjectID</span> types.ProjectID
-    <span class="tok-field">SpaceID</span>   spacedomain.SpaceID
-    <span class="tok-field">Status</span>    <span class="tok-type">string</span>
-    <span class="tok-field">SortOrder</span> <span class="tok-type">int</span>
-    <span class="tok-field">Pinned</span>    <span class="tok-type">bool</span>
-
-    <span class="tok-comment">// Hydrated from the space service.</span>
-    <span class="tok-field">Title</span>     <span class="tok-type">string</span>
-    <span class="tok-field">SpaceOpen</span> <span class="tok-type">bool</span>
-    <span class="tok-field">Members</span>   []SpaceMemberView
+<span class="tok-kw">type</span> <span class="tok-type">MemberView</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>             <span class="tok-type">string</span> <span class="tok-string">`json:"id"`</span>
+    <span class="tok-field">ProjectID</span>      <span class="tok-type">string</span> <span class="tok-string">`json:"projectId"`</span>
+    <span class="tok-field">DisplayName</span>    <span class="tok-type">string</span> <span class="tok-string">`json:"displayName"`</span>
+    <span class="tok-field">MemberType</span>     <span class="tok-type">string</span> <span class="tok-string">`json:"memberType"`</span>
+    <span class="tok-field">LifecycleState</span> <span class="tok-type">string</span> <span class="tok-string">`json:"lifecycleState"`</span>
+    <span class="tok-field">ChannelID</span>      <span class="tok-type">string</span> <span class="tok-string">`json:"channelId"`</span>
+    <span class="tok-field">HarnessKind</span>    <span class="tok-type">string</span> <span class="tok-string">`json:"harnessKind"`</span>
 }</code></pre>
 
   <h2 id="rpc">5. RPC surface</h2>
-  <p>Project RPC methods expose durable project records and project-owned organization. Direct space management remains on <code>space.*</code> methods. Transport handlers validate required ids, call <code>app.Service</code>, and return frontend-ready views.</p>
+  <p>Project RPC methods expose durable project records and the member roster. Transport handlers validate required ids, call <code>app.Service</code>, and return frontend-ready views.</p>
 
   <table>
     <thead><tr><th>Method</th><th>Client need</th><th>App call</th><th>Notes</th></tr></thead>
@@ -196,11 +155,10 @@
       <tr><td><code>project.archive</code></td><td>Hide a project from active work without deleting its record immediately.</td><td><code>ArchiveProject</code></td><td>Sets project status to <code>archived</code> and keeps durable project metadata available.</td></tr>
       <tr><td><code>project.delete</code></td><td>Permanently remove an archived project record.</td><td><code>DeleteProject</code></td><td>Refuses active projects. A project must be archived before it can be deleted.</td></tr>
       <tr><td><code>project.list</code></td><td>Render project switchers and recent projects.</td><td><code>ListProjects</code></td><td>Returns durable project records, not inferred filesystem entries.</td></tr>
-      <tr><td><code>project.space.list</code></td><td>Render project sidebars, boards, dashboards, and project-scoped pickers.</td><td><code>ListProjectSpaces</code></td><td>Loads spaces by project through <code>SpaceLoader</code> and overlays pinned/cluster state.</td></tr>
-      <tr><td><code>project.cluster.save</code></td><td>Create or update a project-owned space cluster.</td><td><code>SaveCluster</code></td><td>Requires <code>clusterId</code>, <code>projectId</code>, and <code>name</code>. The cluster is organization state, not space ownership.</td></tr>
-      <tr><td><code>project.cluster.list</code></td><td>Render project-owned space groups and coordination scopes.</td><td><code>ListClusters</code></td><td>Returns clusters and their ordered/pinned space refs. Cluster commands stay separate from space lifecycle.</td></tr>
-      <tr><td><code>project.cluster.space.save</code></td><td>Pin or order a project space inside a cluster.</td><td><code>SaveClusterSpace</code></td><td>Validates that the cluster and space belong to the same project before saving the topology ref.</td></tr>
-      <tr><td><code>project.cluster.space.remove</code></td><td>Remove a space from a cluster.</td><td><code>RemoveClusterSpace</code></td><td>Removes topology only. The space remains in the project because ownership lives on <code>Space.ProjectID</code>.</td></tr>
+      <tr><td><code>project.member.list</code></td><td>Render the project roster, boards, dashboards, and pickers.</td><td><code>ListMembers</code></td><td>Lists members by project, sorted coordinator-first then by lifecycle and label.</td></tr>
+      <tr><td><code>project.member.register</code></td><td>Bind a harness session as a managed member of the project.</td><td><code>RegisterMember</code></td><td>Enforces coordinator admission. Derives the deterministic channel id.</td></tr>
+      <tr><td><code>project.member.update_config</code></td><td>Update a member's desired runtime settings.</td><td><code>UpdateMemberConfig</code></td><td>Validates harness kind, model, and effort.</td></tr>
+      <tr><td><code>project.member.remove</code></td><td>Remove a member from the project roster.</td><td><code>RemoveMember</code></td><td>Sets a terminal lifecycle state; does not delete actor attribution history.</td></tr>
     </tbody>
   </table>
 
@@ -222,14 +180,6 @@
     <span class="tok-field">Status</span>    <span class="tok-type">string</span> <span class="tok-string">`json:"status,omitempty"`</span>
 }
 
-<span class="tok-kw">type</span> <span class="tok-type">ProjectArchiveParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ProjectID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"projectId"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">ProjectDeleteParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ProjectID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"projectId"`</span>
-}
-
 <span class="tok-kw">type</span> <span class="tok-type">ProjectCreateParams</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">LocationID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"locationId,omitempty"`</span>
     <span class="tok-field">Root</span>   <span class="tok-type">string</span> <span class="tok-string">`json:"root"`</span>
@@ -247,9 +197,9 @@
       <div class="meta">Returns <code>id</code>, <code>locationId</code>, <code>root</code>, <code>title</code>, <code>status</code>, and timestamps for project switchers and the home page.</div>
     </div>
     <div class="card">
-      <div class="label">Space list</div>
-      <div class="title"><code>project.space.list</code></div>
-      <div class="meta">Accepts <code>projectId</code>. Returns spaces sorted with pinned spaces first, open spaces before closed spaces, then configured order and title.</div>
+      <div class="label">Member list</div>
+      <div class="title"><code>project.member.list</code></div>
+      <div class="meta">Accepts <code>projectId</code>. Returns members sorted coordinator-first, active before inactive, then by label.</div>
     </div>
     <div class="card">
       <div class="label">Creation command</div>
@@ -292,7 +242,7 @@
       <text x="837" y="185" text-anchor="middle" fill="var(--text-muted)" font-size="11">route identity</text>
 
       <rect x="742" y="222" width="190" height="54" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="837" y="244" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">project.space.list</text>
+      <text x="837" y="244" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">project.member.list</text>
       <text x="837" y="262" text-anchor="middle" fill="var(--text-muted)" font-size="11">{ projectId }</text>
 
       <line x1="210" y1="129" x2="270" y2="129" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#client-arrow)"/>
@@ -328,11 +278,10 @@
   <table>
     <thead><tr><th>Rule</th><th>Enforced by</th><th>Reason</th></tr></thead>
     <tbody>
-      <tr><td>A space belongs to one project through <code>Space.ProjectID</code>.</td><td>Space service domain</td><td>Project membership is space-owned, not a project attach/detach operation.</td></tr>
-      <tr><td>Project topology records only reference spaces from the same project.</td><td><code>cluster.NewSpaceRef</code> and app validation</td><td>Clusters organize project spaces without becoming cross-project ownership records.</td></tr>
-      <tr><td>Project topology does not store member labels, run ids, or lifecycle runtime state.</td><td>Domain types and repository schema</td><td>Those fields belong to the space and harness boundaries.</td></tr>
-      <tr><td>Listing project spaces loads spaces by project and overlays topology.</td><td><code>app.Service.ListProjectSpaces</code></td><td>The space service remains the source of truth for space state and member roster state.</td></tr>
-      <tr><td>Direct space updates go through <code>space.*</code>, not <code>project.*</code>.</td><td>RPC method ownership</td><td>The space service owns space state and authorization rules.</td></tr>
+      <tr><td>A member belongs to one project through <code>Member.ProjectID</code>.</td><td>Member aggregate</td><td>Members attach directly to a project; there is no space indirection.</td></tr>
+      <tr><td>A project has at most one active coordinator member.</td><td><code>app.Service.RegisterMember</code></td><td>Coordinator admission is the project-scoped coordination invariant.</td></tr>
+      <tr><td>Member identity is <code>(project_id, harness_kind, native_session_ref)</code>.</td><td>Member aggregate</td><td>One member equals one harness session; a run id is never the actor identity.</td></tr>
+      <tr><td>Channel ids are deterministic: <code>channel:&lt;project&gt;:member:&lt;id&gt;</code>.</td><td>Member aggregate</td><td>Push delivery addresses members without a separate channel registry lookup.</td></tr>
       <tr><td>Project creation uses a known harness-ready location.</td><td>Location service contract and project creation validation</td><td>A project location must be able to host member harness sessions.</td></tr>
       <tr><td>Project records store <code>locationId</code> and root, not location credentials or probe state.</td><td>Project domain schema</td><td>Reachability, credentials, and readiness belong to the location service.</td></tr>
       <tr><td>A project does not own execution.</td><td>Project, location, and harness service boundaries</td><td>The project supplies <code>locationId</code> and root; the location supplies transport; the harness adapter starts or resumes execution.</td></tr>
@@ -345,9 +294,8 @@
     project/
       project.go
       repository.go
-    cluster/
-      cluster.go
-      space_ref.go
+    member/
+      member.go
       repository.go
   app/
     clock.go

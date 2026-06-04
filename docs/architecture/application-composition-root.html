@@ -72,7 +72,7 @@
   <rect x="80" y="310" width="200" height="42" rx="5" fill="#fff" stroke="#555"/>
   <text x="180" y="336" text-anchor="middle" font-size="13" font-weight="600">ChannelSvc</text>
   <rect x="310" y="310" width="200" height="42" rx="5" fill="#fff" stroke="#555"/>
-  <text x="410" y="336" text-anchor="middle" font-size="13" font-weight="600">MessageSvc, SpaceSvc, …</text>
+  <text x="410" y="336" text-anchor="middle" font-size="13" font-weight="600">MessageSvc, ProjectSvc, …</text>
   <rect x="540" y="310" width="200" height="42" rx="5" fill="#fff" stroke="#555"/>
   <text x="640" y="336" text-anchor="middle" font-size="13" font-weight="600">EventBusSvc, LLMSvc, …</text>
 
@@ -136,7 +136,7 @@
   <tr>
     <td><code>MCPServer</code><br><span style="color:var(--text-faint);font-size:.85em">(external harness MCP)</span></td>
     <td>MCP over HTTP</td>
-    <td>Member harnesses (Codex, Claude Code, etc.) running as space members</td>
+    <td>Member harnesses (Codex, Claude Code, etc.) running as members</td>
     <td>Member identity from a session token registered when the harness is spawned</td>
   </tr>
 </table>
@@ -150,18 +150,18 @@
 <table>
   <tr><th>Tool call</th><th>Service composition</th><th>Meaning</th></tr>
   <tr>
-    <td><code>space(action="list")</code></td>
-    <td><code>SpaceSvc</code></td>
-    <td>List the spaces visible in the caller's current project scope.</td>
+    <td><code>project(action="register")</code></td>
+    <td><code>ProjectSvc</code> member roster methods</td>
+    <td>Register the calling harness session as a member of the project.</td>
   </tr>
   <tr>
-    <td><code>space(action="members")</code></td>
-    <td><code>SpaceSvc</code> space lifecycle + member roster methods</td>
-    <td>List the members registered in a space.</td>
+    <td><code>project(action="member_list")</code></td>
+    <td><code>ProjectSvc</code> member roster methods</td>
+    <td>List the members registered in the project.</td>
   </tr>
   <tr>
     <td><code>message(action="send")</code></td>
-    <td><code>SpaceSvc</code> + <code>ChannelSvc</code> + <code>MessageSvc</code></td>
+    <td><code>ProjectSvc</code> + <code>ChannelSvc</code> + <code>MessageSvc</code></td>
     <td>Resolve the destination, authorize the route, persist the message, and trigger delivery.</td>
   </tr>
   <tr>
@@ -171,7 +171,7 @@
   </tr>
   <tr>
     <td><code>task(action="create")</code></td>
-    <td><code>TaskSvc</code> + <code>SpaceSvc</code> member loader + context readers</td>
+    <td><code>TaskSvc</code> + <code>ProjectSvc</code> member loader + context readers</td>
     <td>Create a member-routed task, validate linked context, and let the task service publish the assignment message.</td>
   </tr>
   <tr>
@@ -197,7 +197,7 @@
 
   <rect x="30" y="34" width="180" height="74" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
   <text x="120" y="58" text-anchor="middle" font-size="13" font-weight="600">Application</text>
-  <text x="120" y="79" text-anchor="middle" font-size="11" fill="#555">SpaceSvc,</text>
+  <text x="120" y="79" text-anchor="middle" font-size="11" fill="#555">ProjectSvc,</text>
   <text x="120" y="96" text-anchor="middle" font-size="11" fill="#555">ChannelSvc, MessageSvc, CredentialSvc</text>
 
   <rect x="260" y="34" width="190" height="74" rx="5" fill="#fff4d6" stroke="#b58820"/>
@@ -234,24 +234,22 @@
 
 <pre><code>// MCP session bootstrap
 tokenStore.Register(token, Session{
-    SpaceReader:     app.SpaceSvc,  // space.SpaceService
-    MemberDirectory: app.SpaceSvc,  // space.MemberService
+    ProjectReader:     app.ProjectSvc,  // project.ProjectService
+    MemberDirectory: app.ProjectSvc,  // project.MemberService
     ChannelReader:   app.ChannelSvc,
     MessagePublisher: app.MessageSvc,
     CredentialResolver: app.CredentialSvc,
     TaskService:     app.TaskSvc,
-    TaskMembers:     app.SpaceSvc,
-    ProjectID:       projectID,
-    SpaceID:         spacedomain.SpaceID(spaceID),
+    TaskMembers:     app.ProjectSvc,
+    ProjectID:       projectdomain.ProjectID(projectID),
     MemberID:        memberID,
 })
 
 // internal/mcp/server.go
-space.Handler.Handle(ctx, space.CallContext{
-    Spaces:        session.SpaceReader,
+project.Handler.Handle(ctx, project.CallContext{
+    Projects:        session.ProjectReader,
     Members:       session.MemberDirectory,
-    ProjectID:     session.ProjectID,
-    SpaceID:       string(session.SpaceID),
+    ProjectID:       string(session.ProjectID),
     ActorMemberID: session.MemberID,
 }, args)</code></pre>
 
@@ -350,9 +348,9 @@ space.Handler.Handle(ctx, space.CallContext{
       types.go            // MCP request shapes and command mapping
       format.go           // deterministic MCP text and structured content
       handler_test.go     // success, validation, policy, and formatting coverage
-    space/
-      definition.go       // space(...) schema and callable definition
-      handler.go          // decode space(...) actions and compose service use cases
+    project/
+      definition.go       // project(...) schema and callable definition
+      handler.go          // decode project(...) actions and compose service use cases
       types.go            // MCP request shapes
       format.go           // deterministic MCP result shaping
     mission/
@@ -363,9 +361,9 @@ space.Handler.Handle(ctx, space.CallContext{
     http/
 </pre>
 
-<p><code>internal/mcp/tools/&lt;tool&gt;</code> is the canonical home for MCP tool behavior. Product-facing tool names live here, request/response decoding lives here, tool-action policy lives here, and cross-service orchestration lives here. Service packages remain transport-agnostic and do not define MCP tool schemas, tool actions, or raw JSON tool request envelopes. The <a href="./mcp-space-tool.html">MCP space tool</a> is the reference shape for handler-owned orchestration.</p>
+<p><code>internal/mcp/tools/&lt;tool&gt;</code> is the canonical home for MCP tool behavior. Product-facing tool names live here, request/response decoding lives here, tool-action policy lives here, and cross-service orchestration lives here. Service packages remain transport-agnostic and do not define MCP tool schemas, tool actions, or raw JSON tool request envelopes. The <a href="./mcp-project-tool.html">MCP project tool</a> is the reference shape for handler-owned orchestration.</p>
 
-<p>The <a href="./mcp-message-tool.html">MCP message tool</a> owns agent-facing message sending. Space discovery remains in <code>space(action="list")</code> and <code>space(action="members")</code>; message delivery remains in <code>message(action="send")</code>.</p>
+<p>The <a href="./mcp-message-tool.html">MCP message tool</a> owns agent-facing message sending. Member discovery remains in <code>project(action="member_list")</code>; message delivery remains in <code>message(action="send")</code>.</p>
 
 <p>The MCP adapter does not load tools through side-effect imports or a process-global module registry. The composition root builds the handler set from application services, the MCP server registers those handlers in a local registry, and the server exposes one member-authenticated MCP surface. The registry stores handlers, not domain services and not generic runtime modules.</p>
 
@@ -384,7 +382,7 @@ space.Handler.Handle(ctx, space.CallContext{
 type Application struct {
     ChannelSvc     *channelapp.Service
     MessageSvc     *messageapp.Service
-    SpaceSvc       *spaceapp.Service
+    ProjectSvc       *projectapp.Service
     CredentialSvc  *credentialapp.Service
     ContextLinkSvc *contextlinkapp.Service
     DecisionSvc    *decisionapp.Service
@@ -473,7 +471,7 @@ func NewApplication(cfg config.Config) (*Application, error) {
 </div>
 
 <div class="callout">
-<strong>R8 — Product-facing tool grouping is allowed to span services.</strong> A <code>space</code> tool may call <code>ProjectSvc</code>, <code>SpaceSvc</code> space lifecycle methods, <code>SpaceSvc</code> member roster methods, and <code>MessageSvc</code>. The grouping is a product decision at the MCP layer, not a permission for services to cross repository boundaries.
+<strong>R8 — Product-facing tool grouping is allowed to span services.</strong> A <code>project</code> tool may call <code>ProjectSvc</code>, <code>ProjectSvc</code> project lifecycle methods, <code>ProjectSvc</code> member roster methods, and <code>MessageSvc</code>. The grouping is a product decision at the MCP layer, not a permission for services to cross repository boundaries.
 </div>
 
 <div class="callout">

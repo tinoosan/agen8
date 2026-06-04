@@ -63,7 +63,7 @@
   <table>
     <thead><tr><th>The daemon owns</th><th>The daemon does not own</th></tr></thead>
     <tbody>
-      <tr><td>Listener strategy selection</td><td>Task, message, member, or space domain rules</td></tr>
+      <tr><td>Listener strategy selection</td><td>Task, message, member, or project domain rules</td></tr>
       <tr><td>HTTP routes <code>/healthz</code>, <code>/rpc</code>, <code>/events</code>, first-run setup routes, and web UI serving/proxying</td><td>RPC method DTOs or service command structs</td></tr>
       <tr><td>Bearer-token validation for HTTP requests</td><td>Agent-facing MCP tool actions</td></tr>
       <tr><td>Local user resolution for local IPC requests</td><td>Repository construction outside <code>app.NewApplication</code></td></tr>
@@ -170,11 +170,11 @@ agen8 daemon start --listener http --http-addr 127.0.0.1:7777</code></pre>
     </tbody>
   </table>
 
-  <p>The account role is a hosted account role. <code>admin</code> and <code>user</code> are not space coordinator or worker roles.</p>
+  <p>The account role is a hosted account role. <code>admin</code> and <code>user</code> are not coordinator or worker roles.</p>
 
   <h2 id="setup">5. First-run setup</h2>
 
-  <p>When the user service reports zero users, the HTTP daemon exposes first-run setup and prints a setup entrypoint without the one-time setup token. The setup token stays out of process logs while the setup routes continue to validate it before creating the first account user as <code>admin</code> and returning a real browser session token. Setup does not create a project, space, member, task, agent, or API key.</p>
+  <p>When the user service reports zero users, the HTTP daemon exposes first-run setup and prints a setup entrypoint without the one-time setup token. The setup token stays out of process logs while the setup routes continue to validate it before creating the first account user as <code>admin</code> and returning a real browser session token. Setup does not create a project, project, member, task, agent, or API key.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 900 340" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">

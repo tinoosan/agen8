@@ -71,14 +71,14 @@ next, err := current.<span class="tok-fn">Cancel</span>(reason, now)            
 err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    <span class="tok-comment">// persists the domain record</span></code></pre>
 
   <h3>The service struct</h3>
-  <p>The application service owns orchestration. It resolves the caller from <code>context.Context</code>, validates member and space boundaries, calls the pure domain transition, persists the next task state, and publishes agent messages through the message service. It does not accept a dependency bag; the constructor lists the service boundary explicitly.</p>
+  <p>The application service owns orchestration. It resolves the caller from <code>context.Context</code>, validates member and project boundaries, calls the pure domain transition, persists the next task state, and publishes agent messages through the message service. It does not accept a dependency bag; the constructor lists the service boundary explicitly.</p>
 
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">tasks</span>    <span class="tok-pkg">domain</span>.<span class="tok-type">TaskRepository</span>
     <span class="tok-field">clock</span>    <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>
     <span class="tok-field">caller</span>   <span class="tok-pkg">caller</span>.<span class="tok-type">Resolver</span>
     <span class="tok-field">members</span>  <span class="tok-type">MemberLoader</span>
-    <span class="tok-field">spaces</span>   <span class="tok-type">SpaceLoader</span>
+    <span class="tok-field">projects</span>   <span class="tok-type">ProjectLoader</span>
     <span class="tok-field">messages</span> <span class="tok-type">MessagePublisher</span>
     <span class="tok-field">logger</span>   *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>
 }
@@ -88,7 +88,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
     clock <span class="tok-pkg">domain</span>.<span class="tok-type">Clock</span>,
     caller <span class="tok-pkg">caller</span>.<span class="tok-type">Resolver</span>,
     members <span class="tok-type">MemberLoader</span>,
-    spaces <span class="tok-type">SpaceLoader</span>,
+    projects <span class="tok-type">ProjectLoader</span>,
     messages <span class="tok-type">MessagePublisher</span>,
     logger *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>,
 ) (*<span class="tok-type">Service</span>, error)</code></pre>
@@ -97,7 +97,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
 <span class="tok-kw">type</span> <span class="tok-type">Caller</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">UserID</span>   string
     <span class="tok-field">MemberID</span> <span class="tok-pkg">types</span>.<span class="tok-type">MemberID</span> <span class="tok-comment">// optional for user-owned RPC calls</span>
-    <span class="tok-field">SpaceID</span>  <span class="tok-pkg">types</span>.<span class="tok-type">SpaceID</span>
+    <span class="tok-field">ProjectID</span>  <span class="tok-pkg">types</span>.<span class="tok-type">ProjectID</span>
     <span class="tok-field">Role</span>     string
 }</code></pre>
 
@@ -123,19 +123,19 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
 
 <span class="tok-kw">func</span> (<span class="tok-type">ContextResolver</span>) <span class="tok-fn">ResolveCaller</span>(ctx context.Context) (<span class="tok-type">Caller</span>, error)</code></pre>
 
-  <p>Adapters stamp the authenticated caller into <code>context.Context</code> before invoking service methods. The task service consumes the same <code>internal/caller</code> contract as the space service, so service-to-service orchestration keeps caller identity intact. The resolver fails when both <code>UserID</code> and <code>MemberID</code> are missing. <code>MemberID</code> is optional because the human user can use RPC without acting as an agent member. The service never infers a member from a user id, space id, or runtime session.</p>
+  <p>Adapters stamp the authenticated caller into <code>context.Context</code> before invoking service methods. The task service consumes the same <code>internal/caller</code> contract as the project service, so service-to-service orchestration keeps caller identity intact. The resolver fails when both <code>UserID</code> and <code>MemberID</code> are missing. <code>MemberID</code> is optional because the human user can use RPC without acting as an agent member. The service never infers a member from a user id, project id, or runtime session.</p>
 
   <table>
     <thead><tr><th>RPC method</th><th>Service call</th><th>Boundary rule</th></tr></thead>
     <tbody>
       <tr><td><code>task.create</code></td><td><code>Service.Create</code></td><td>Creates a pending task and publishes the assignment message through the service.</td></tr>
       <tr><td><code>task.get</code></td><td><code>Service.Get</code></td><td>Reads one task and projects it to <code>TaskView</code>.</td></tr>
-      <tr><td><code>task.list</code></td><td><code>Service.List</code> + <code>Service.Count</code></td><td>Applies service-owned filters, including space, assignee, claim, status, task kind, and plan refs.</td></tr>
+      <tr><td><code>task.list</code></td><td><code>Service.List</code> + <code>Service.Count</code></td><td>Applies service-owned filters, including project, assignee, claim, status, task kind, and plan refs.</td></tr>
       <tr><td><code>task.update</code></td><td><code>Service.Update</code></td><td>Coordinator-only data edit. It updates title, description, acceptance criteria, refs, kind, and metadata; it does not run lifecycle transitions.</td></tr>
     </tbody>
   </table>
 
-  <p><code>TaskView</code> contains the task service read model: ids, space/member assignment, creator actor, description, acceptance criteria, status, artifacts, KR and plan refs, metadata, and lifecycle timestamps.</p>
+  <p><code>TaskView</code> contains the task service read model: ids, project/member assignment, creator actor, description, acceptance criteria, status, artifacts, KR and plan refs, metadata, and lifecycle timestamps.</p>
 
   <h2 id="lifecycle">3. The task lifecycle</h2>
 
@@ -252,7 +252,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
     </tbody>
   </table>
 
-  <p>Every task message body includes <code>event</code>, <code>taskId</code>, <code>spaceId</code>, <code>actorMemberId</code>, <code>targetMemberId</code>, <code>nextAction</code>, <code>guidance</code>, and a concise human-readable <code>message</code>. Review-ready messages may include the worker <code>summary</code>. Retry, blocker, and cancel messages include a short <code>reason</code>. Unblock messages may include a short <code>note</code>. Message bodies do not include task descriptions, acceptance criteria, artifacts, metadata, plan refs, or KR refs; those live behind <code>task.get</code>.</p>
+  <p>Every task message body includes <code>event</code>, <code>taskId</code>, <code>projectId</code>, <code>actorMemberId</code>, <code>targetMemberId</code>, <code>nextAction</code>, <code>guidance</code>, and a concise human-readable <code>message</code>. Review-ready messages may include the worker <code>summary</code>. Retry, blocker, and cancel messages include a short <code>reason</code>. Unblock messages may include a short <code>note</code>. Message bodies do not include task descriptions, acceptance criteria, artifacts, metadata, plan refs, or KR refs; those live behind <code>task.get</code>.</p>
 
   <h3>Domain transition methods</h3>
   <p>Each labelled arrow is a method on <code>domain.Task</code>. Assignment is a single product concept: if a task needs a different worker, the service assigns it again and emits the same <code>assigned</code> message shape.</p>
@@ -303,7 +303,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
 
   <div class="flow">
     <div class="step"><div class="marker">1</div><div class="body">Handler decodes the protocol payload and builds a typed command such as <code>CreateTaskParams</code>, <code>CompleteTaskParams</code>, or <code>ReviewTaskParams</code>.</div></div>
-    <div class="step"><div class="marker">2</div><div class="body">Service authorizes the caller. User-owned actions verify the user against the task's space; member-scoped actions verify the caller against the task's assigned or claimed member.</div></div>
+    <div class="step"><div class="marker">2</div><div class="body">Service authorizes the caller. User-owned actions verify the user against the task's project; member-scoped actions verify the caller against the task's assigned or claimed member.</div></div>
     <div class="step"><div class="marker">3</div><div class="body">Service loads the current task with the typed id: <code>current, err := repo.GetTask(ctx, taskID)</code>.</div></div>
     <div class="step"><div class="marker">4</div><div class="body">Service calls the domain transition: <code>next, err := current.Cancel(reason, clock.Now())</code>. If validation or state rules fail the call returns an error before any side effect.</div></div>
     <div class="step"><div class="marker">5</div><div class="body">Service persists the next state and, when another agent needs to act, publishes the corresponding agent message through one service-owned seam. The task service calls the message service boundary; it does not write the message repository directly.</div></div>
@@ -331,7 +331,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
       <dl>
         <dt>UserID</dt><dd>present (authenticated session)</dd>
         <dt>MemberID</dt><dd>optional / usually absent</dd>
-        <dt>Authorized for</dt><dd>create, update, assign, review, and cancel when the user owns the task's space</dd>
+        <dt>Authorized for</dt><dd>create, update, assign, review, and cancel when the user owns the task's project</dd>
       </dl>
     </div>
     <div class="caller-card ag">
@@ -339,12 +339,12 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
       <dl>
         <dt>UserID</dt><dd>project tenant</dd>
         <dt>MemberID</dt><dd>present</dd>
-        <dt>Authorized for</dt><dd>claim, complete, block, and release by assigned/claimed member; unblock by assigned/claimed member or same-space coordinator; create, assign, review, update, and cancel by coordinator members</dd>
+        <dt>Authorized for</dt><dd>claim, complete, block, and release by assigned/claimed member; unblock by assigned/claimed member or same-project coordinator; create, assign, review, update, and cancel by coordinator members</dd>
       </dl>
     </div>
   </div>
 
-  <p>User-owned calls authorize against <code>Space.UserID</code>. Member-owned calls authorize against the member record and member type. When both <code>UserID</code> and <code>MemberID</code> are present, member authorization is used so a worker cannot become a coordinator just because the owning user is also authenticated.</p>
+  <p>User-owned calls authorize against <code>Project.UserID</code>. Member-owned calls authorize against the member record and member type. When both <code>UserID</code> and <code>MemberID</code> are present, member authorization is used so a worker cannot become a coordinator just because the owning user is also authenticated.</p>
 
   <p class="meta">Authorization happens at the service boundary, before any domain transition runs. The domain assumes any caller it sees has already been authorized — it only validates state and inputs.</p>
 
@@ -396,7 +396,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
     <thead><tr><th>Column</th><th>Purpose</th></tr></thead>
     <tbody>
       <tr><td><code>task_id</code></td><td>Primary key, mirrored from <code>Task.ID</code>.</td></tr>
-      <tr><td><code>space_id</code></td><td>Space-scoped list and ownership filter.</td></tr>
+      <tr><td><code>project_id</code></td><td>Project-scoped list and ownership filter.</td></tr>
       <tr><td><code>assigned_to</code></td><td>Assigned member filter.</td></tr>
       <tr><td><code>claimed_by_member_id</code></td><td>Claimed member filter.</td></tr>
       <tr><td><code>task_kind</code></td><td>Task kind filter.</td></tr>
@@ -418,7 +418,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
   <table>
     <thead><tr><th>State that cannot occur</th><th>Enforced by</th></tr></thead>
     <tbody>
-      <tr><td>Task with empty <code>SpaceID</code>, <code>CreatedBy</code>, <code>AssignedTo</code>, or <code>Description</code></td><td><code>NewTask</code> returns an error before any repository call</td></tr>
+      <tr><td>Task with empty <code>ProjectID</code>, <code>CreatedBy</code>, <code>AssignedTo</code>, or <code>Description</code></td><td><code>NewTask</code> returns an error before any repository call</td></tr>
       <tr><td>Task claimed by the wrong member</td><td><code>Claim</code> compares the caller member id to <code>AssignedTo</code></td></tr>
       <tr><td>Task with status <code>Active</code> but no <code>ClaimedByMemberID</code></td><td><code>Claim</code> is the only normal entry to Active; <code>Complete</code> rejects unclaimed active tasks</td></tr>
       <tr><td>Worker output marked <code>Succeeded</code> without coordinator review</td><td><code>Complete</code> moves Active to In Review only; <code>ApproveReview</code> is the success transition</td></tr>

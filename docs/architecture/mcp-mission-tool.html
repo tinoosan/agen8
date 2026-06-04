@@ -61,7 +61,7 @@
   <text x="750" y="263" text-anchor="middle" font-size="12" fill="#555">lifecycle + KR rules</text>
 
   <rect x="248" y="214" width="150" height="64" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
-  <text x="323" y="240" text-anchor="middle" font-size="14" font-weight="700">space members</text>
+  <text x="323" y="240" text-anchor="middle" font-size="14" font-weight="700">members</text>
   <text x="323" y="260" text-anchor="middle" font-size="12" fill="#555">caller identity</text>
 
   <rect x="458" y="214" width="150" height="64" rx="8" fill="#f2f2f2" stroke="#888"/>
@@ -98,7 +98,7 @@ type KeyResultService interface {
     GetKeyResult(context.Context, kr.KeyResultID) (kr.KeyResult, error)
     ListKeyResults(context.Context, mission.MissionID) ([]kr.KeyResult, error)
     UpdateKeyResult(context.Context, missionapp.UpdateKeyResultParams) (kr.KeyResult, error)
-    AssignKeyResultSpace(context.Context, kr.KeyResultID, string) (kr.KeyResult, error)
+    AssignKeyResultProject(context.Context, kr.KeyResultID, string) (kr.KeyResult, error)
     DeleteKeyResult(context.Context, missionapp.DeleteKeyResultParams) (kr.KeyResult, error)
     ReopenKeyResult(context.Context, missionapp.ReopenKeyResultParams) (kr.KeyResult, error)
 }
@@ -128,7 +128,7 @@ type ProgressService interface {
   <tr><td><code>kr_get</code></td><td><code>GetKeyResult</code></td><td>Read one key result.</td></tr>
   <tr><td><code>kr_list</code></td><td><code>ListKeyResults</code></td><td>List key results for a mission; supports <code>limit</code> and <code>offset</code>.</td></tr>
   <tr><td><code>kr_update</code></td><td><code>UpdateKeyResult</code></td><td>Patch KR fields.</td></tr>
-  <tr><td><code>kr_assign_space</code></td><td><code>AssignKeyResultSpace</code></td><td>Assign an open owning space.</td></tr>
+  <tr><td><code>kr_assign_space</code></td><td><code>AssignKeyResultProject</code></td><td>Assign an open owning project.</td></tr>
   <tr><td><code>kr_drop</code></td><td><code>DeleteKeyResult</code></td><td>Drop a key result while preserving history; accepts an optional rationale <code>note</code>.</td></tr>
   <tr><td><code>kr_reopen</code></td><td><code>ReopenKeyResult</code></td><td>Reopen completed or dropped KR scope, resetting progress to its starting value; accepts an optional rationale <code>note</code>.</td></tr>
   <tr><td><code>kr_progress</code></td><td><code>UpdateProgress</code></td><td>Record KR progress.</td></tr>

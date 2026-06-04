@@ -60,7 +60,7 @@
   <text x="745" y="242" text-anchor="middle" font-size="12" fill="#555">lifecycle owner</text>
 
   <rect x="250" y="196" width="150" height="64" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
-  <text x="325" y="222" text-anchor="middle" font-size="14" font-weight="700">space members</text>
+  <text x="325" y="222" text-anchor="middle" font-size="14" font-weight="700">members</text>
   <text x="325" y="242" text-anchor="middle" font-size="12" fill="#555">caller + assignee</text>
 
   <rect x="460" y="196" width="150" height="64" rx="8" fill="#f2f2f2" stroke="#888"/>
@@ -80,14 +80,14 @@
 </svg>
 </div>
 
-<p><code>internal/mcp/toolset.go</code> registers the schema with <code>task.NewHandler().Schema()</code>. <code>internal/mcp/server.go</code> resolves the MCP token into a <code>Session</code>, dispatches the native <code>task</code> tool by name, and passes <code>Session.TaskService</code>, <code>Session.TaskMembers</code>, <code>SpaceID</code>, and <code>MemberID</code> into the handler.</p>
+<p><code>internal/mcp/toolset.go</code> registers the schema with <code>task.NewHandler().Schema()</code>. <code>internal/mcp/server.go</code> resolves the MCP token into a <code>Session</code>, dispatches the native <code>task</code> tool by name, and passes <code>Session.TaskService</code>, <code>Session.TaskMembers</code>, <code>ProjectID</code>, and <code>MemberID</code> into the handler.</p>
 
 <h2>3. Handler flow</h2>
 
 <ol>
   <li>The handler decodes the action-specific JSON payload and rejects unknown fields.</li>
   <li>The handler resolves the MCP caller through <code>TaskMembers.Get</code>.</li>
-  <li>The handler validates active member state and same-space assignee routing.</li>
+  <li>The handler validates active member state and same-project assignee routing.</li>
   <li>The handler stamps <code>taskapp.Caller{MemberID: ...}</code> into <code>context.Context</code>.</li>
   <li>The handler maps the action payload into typed task service params.</li>
   <li>The task service authorizes the caller, transitions state, persists, and publishes any required task message.</li>
@@ -141,7 +141,7 @@
 
 <table>
   <tr><th>Caller</th><th>Allowed task behavior</th></tr>
-  <tr><td>Coordinator member</td><td>Create, list same-space tasks, get same-space tasks, assign/reassign, review, cancel, and unblock same-space blocked tasks.</td></tr>
+  <tr><td>Coordinator member</td><td>Create, list same-project tasks, get same-project tasks, assign/reassign, review, cancel, and unblock same-project blocked tasks.</td></tr>
   <tr><td>Worker member</td><td>List assigned tasks, get visible assigned/claimed tasks, claim assigned tasks, release claimed tasks, submit claimed tasks, block claimed tasks, and unblock claimed tasks.</td></tr>
 </table>
 

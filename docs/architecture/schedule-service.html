@@ -292,7 +292,7 @@ internal/mcp/tools/schedule/
     <span class="tok-field">targets</span>    <span class="tok-type">TargetRegistry</span>
     <span class="tok-field">clock</span>      <span class="tok-type">Clock</span>
     <span class="tok-field">caller</span>     <span class="tok-type">CallerResolver</span>
-    <span class="tok-field">spaces</span>     <span class="tok-type">SpaceLoader</span>
+    <span class="tok-field">projects</span>     <span class="tok-type">ProjectLoader</span>
     <span class="tok-field">members</span>    <span class="tok-type">MemberLoader</span>
     <span class="tok-field">guardrails</span> <span class="tok-type">GuardrailPolicy</span>
     <span class="tok-field">events</span>     <span class="tok-type">EventPublisher</span>
@@ -302,7 +302,7 @@ internal/mcp/tools/schedule/
     <thead><tr><th>Command</th><th>What it does</th><th>What it never does</th></tr></thead>
     <tbody>
       <tr><td><code>Create</code></td><td>Validates caller, timing, target payload, context refs, dedupe key, and guardrails; stores a new schedule entry.</td><td>Creates a task before the schedule is due.</td></tr>
-      <tr><td><code>Get</code> / <code>List</code></td><td>Loads schedule entries, recent runs, target summaries, and calendar metadata inside the caller's visible spaces.</td><td>Reads task lifecycle state directly from task internals.</td></tr>
+      <tr><td><code>Get</code> / <code>List</code></td><td>Loads schedule entries, recent runs, target summaries, and calendar metadata inside the caller's visible projects.</td><td>Reads task lifecycle state directly from task internals.</td></tr>
       <tr><td><code>Update</code></td><td>Changes future timing, future target payload, title, description, expiry, pause state, or context refs.</td><td>Mutates runs that already fired or tasks already created.</td></tr>
       <tr><td><code>Cancel</code></td><td>Stops future runs.</td><td>Cancels created tasks; that remains a task service operation.</td></tr>
       <tr><td><code>RunDue</code></td><td>Finds due entries and executes a bounded batch for the background runner.</td><td>Runs unbounded work or hides per-entry errors.</td></tr>
@@ -314,21 +314,21 @@ internal/mcp/tools/schedule/
   </p>
 
   <p>
-    Validation happens at the boundary: caller identity, space membership, timing, target payload, context references, and self-scheduling policy are checked before an entry becomes active.
+    Validation happens at the boundary: caller identity, membership, timing, target payload, context references, and self-scheduling policy are checked before an entry becomes active.
   </p>
 
   <h2 id="authorization">6. Authorization model</h2>
 
   <p>
-    Schedules live inside spaces because spaces define membership, assignment, and operational authority. The schedule service authorizes the schedule operation first, then the target adapter authorizes the target payload against the owning service's rules.
+    Schedules live inside projects because projects define membership, assignment, and operational authority. The schedule service authorizes the schedule operation first, then the target adapter authorizes the target payload against the owning service's rules.
   </p>
 
   <table>
     <thead><tr><th>Caller</th><th>Can create</th><th>Can manage</th><th>Can execute due run</th></tr></thead>
     <tbody>
-      <tr><td>Human operator</td><td>Schedules in spaces they can manage.</td><td>Can update or cancel schedules in spaces they manage.</td><td>Does not execute due runs directly.</td></tr>
-      <tr><td>Coordinator agent</td><td>Schedules work for members in its space when policy allows.</td><td>Can update or cancel schedules it owns or manages.</td><td>Does not execute due runs directly.</td></tr>
-      <tr><td>Worker agent</td><td>Schedules self-follow-up tasks and permitted member handoffs inside its space.</td><td>Can update or cancel schedules it owns.</td><td>Does not execute due runs directly.</td></tr>
+      <tr><td>Human operator</td><td>Schedules in projects they can manage.</td><td>Can update or cancel schedules in projects they manage.</td><td>Does not execute due runs directly.</td></tr>
+      <tr><td>Coordinator agent</td><td>Schedules work for members in its project when policy allows.</td><td>Can update or cancel schedules it owns or manages.</td><td>Does not execute due runs directly.</td></tr>
+      <tr><td>Worker agent</td><td>Schedules self-follow-up tasks and permitted member handoffs inside its project.</td><td>Can update or cancel schedules it owns.</td><td>Does not execute due runs directly.</td></tr>
       <tr><td>System runner</td><td>Cannot create arbitrary schedules.</td><td>Cannot update user-created intent except by advancing due cursors and run state.</td><td>Executes active due entries through the runner path using schedule actor metadata.</td></tr>
     </tbody>
   </table>
@@ -340,9 +340,9 @@ internal/mcp/tools/schedule/
   <table>
     <thead><tr><th>Authorization check</th><th>Enforced where</th><th>Reason</th></tr></thead>
     <tbody>
-      <tr><td>Caller can see and write the space.</td><td>Schedule service before entry persistence.</td><td>All schedules are space-scoped.</td></tr>
-      <tr><td>Target member belongs to the same space.</td><td>Target adapter validation before activation.</td><td>Scheduled task assignment cannot cross space boundaries.</td></tr>
-      <tr><td>Context refs belong to the same space.</td><td>Schedule service and target adapter validation.</td><td>Mission, KR, plan, and related task refs must not leak across spaces.</td></tr>
+      <tr><td>Caller can see and write the project.</td><td>Schedule service before entry persistence.</td><td>All schedules are project-scoped.</td></tr>
+      <tr><td>Target member belongs to the same project.</td><td>Target adapter validation before activation.</td><td>Scheduled task assignment cannot cross project boundaries.</td></tr>
+      <tr><td>Context refs belong to the same project.</td><td>Schedule service and target adapter validation.</td><td>Mission, KR, plan, and related task refs must not leak across projects.</td></tr>
       <tr><td>Agent-created recurrence is within policy.</td><td>Guardrail policy before activation.</td><td>Agents can create future work without creating unbounded background load.</td></tr>
       <tr><td>Runner can execute only active due entries.</td><td>RunDue query, lease creation, and state transition checks.</td><td>The system runner is not a general command executor.</td></tr>
     </tbody>
@@ -357,7 +357,7 @@ internal/mcp/tools/schedule/
   <div class="target-grid">
     <div class="target-card">
       <strong>Task creation</strong>
-      <span>The supported target. A due run calls the task service to create a task assigned to a space member. The resulting task is marked with task kind <code>scheduled</code> and includes a schedule reference in metadata.</span>
+      <span>The supported target. A due run calls the task service to create a task assigned to a member. The resulting task is marked with task kind <code>scheduled</code> and includes a schedule reference in metadata.</span>
     </div>
     <div class="target-card">
       <strong>Registered service command</strong>
@@ -371,7 +371,7 @@ internal/mcp/tools/schedule/
   <table>
     <thead><tr><th>Context</th><th>Purpose</th><th>Example</th></tr></thead>
     <tbody>
-      <tr><td><code>spaceId</code></td><td>Required scope. Schedules live inside a space because agent membership, permissions, and task assignment are space-owned.</td><td>Schedule the finance worker to re-check vendor data tomorrow.</td></tr>
+      <tr><td><code>projectId</code></td><td>Required scope. Schedules live inside a project because agent membership, permissions, and task assignment are project-owned.</td><td>Schedule the finance worker to re-check vendor data tomorrow.</td></tr>
       <tr><td><code>targetMemberId</code></td><td>Required for scheduled task creation. The task service receives this as the task assignee.</td><td>Assign follow-up work to <code>member-analyst</code>.</td></tr>
       <tr><td><code>missionId</code></td><td>Optional strategic context for filtering and generated task refs.</td><td>Run a recurring adoption-risk check while a mission is active.</td></tr>
       <tr><td><code>keyResultId</code></td><td>Optional measurable-outcome context.</td><td>Check a KR source every Monday and create a task when progress needs review.</td></tr>
@@ -397,7 +397,7 @@ internal/mcp/tools/schedule/
   <table>
     <thead><tr><th>Adapter responsibility</th><th>Contract</th></tr></thead>
     <tbody>
-      <tr><td>Payload validation</td><td>Rejects missing fields, unsupported fields, invalid context refs, and cross-space assignments before an entry becomes active.</td></tr>
+      <tr><td>Payload validation</td><td>Rejects missing fields, unsupported fields, invalid context refs, and cross-project assignments before an entry becomes active.</td></tr>
       <tr><td>Display summary</td><td>Provides labels for calendar cards, schedule detail views, and audit logs without making the calendar understand target internals.</td></tr>
       <tr><td>Invocation</td><td>Calls the owning service through a public service method and returns the created or affected object id.</td></tr>
     </tbody>
@@ -415,7 +415,7 @@ internal/mcp/tools/schedule/
 
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">ScheduleEntry</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">ID</span>          <span class="tok-type">ScheduleEntryID</span>
-    <span class="tok-field">SpaceID</span>     <span class="tok-type">SpaceID</span>
+    <span class="tok-field">ProjectID</span>     <span class="tok-type">ProjectID</span>
     <span class="tok-field">CreatedBy</span>   <span class="tok-type">ActorRef</span>
     <span class="tok-field">Status</span>      <span class="tok-type">ScheduleStatus</span>
     <span class="tok-field">Title</span>       string
@@ -459,7 +459,7 @@ internal/mcp/tools/schedule/
       <tr><td>Schedule entry</td><td>Future intent, timing, target descriptor, context refs, status, next run cursor, expiry, and dedupe identity.</td><td>Task claim state, task review state, worker output, artifacts, task blockers.</td></tr>
       <tr><td>Schedule run</td><td>One due occurrence, execution attempt result, target object link, and visible error or skip reason.</td><td>The created task's lifecycle history.</td></tr>
       <tr><td>Schedule target</td><td>Typed service command to invoke later.</td><td>Generic unvalidated JSON commands.</td></tr>
-      <tr><td>Schedule context</td><td>Space, target member, mission, KR, plan, related task, and display metadata.</td><td>Authorization shortcuts or ownership overrides.</td></tr>
+      <tr><td>Schedule context</td><td>Project, target member, mission, KR, plan, related task, and display metadata.</td><td>Authorization shortcuts or ownership overrides.</td></tr>
     </tbody>
   </table>
 
@@ -540,7 +540,7 @@ internal/mcp/tools/schedule/
     <tbody>
       <tr><td><code>once</code></td><td><code>runAt</code>, optional timezone for display.</td><td><code>nextRunAt</code> is the single run timestamp. Successful execution makes the entry terminal.</td><td>Check a long-running admission tomorrow morning.</td></tr>
       <tr><td><code>interval</code></td><td><code>interval</code>, optional <code>startsAt</code>, optional <code>endsAt</code>, optional max runs.</td><td>Each successful run advances from the previous due cursor by the interval.</td><td>Re-check an external API every 30 minutes until cancelled.</td></tr>
-      <tr><td><code>cron</code></td><td><code>expression</code>, required <code>timezone</code>, optional start/end bounds.</td><td>The next cursor is computed from the previous due cursor in the entry timezone, then stored as UTC.</td><td>Every weekday at 09:00 in the space timezone.</td></tr>
+      <tr><td><code>cron</code></td><td><code>expression</code>, required <code>timezone</code>, optional start/end bounds.</td><td>The next cursor is computed from the previous due cursor in the entry timezone, then stored as UTC.</td><td>Every weekday at 09:00 in the project timezone.</td></tr>
     </tbody>
   </table>
 
@@ -582,7 +582,7 @@ internal/mcp/tools/schedule/
   <table>
     <thead><tr><th>Guardrail</th><th>Default behavior</th><th>Why it exists</th></tr></thead>
     <tbody>
-      <tr><td>Allowed target kinds</td><td>Agent-created schedules can target only registered kinds allowed by space policy; the first slice supports only <code>task.create</code>.</td><td>Prevents agents from turning the scheduler into a generic privileged command runner.</td></tr>
+      <tr><td>Allowed target kinds</td><td>Agent-created schedules can target only registered kinds allowed by project policy; the first slice supports only <code>task.create</code>.</td><td>Prevents agents from turning the scheduler into a generic privileged command runner.</td></tr>
       <tr><td>Minimum interval</td><td>Very frequent recurring schedules are rejected by policy.</td><td>Protects the task system and runner from runaway schedule creation.</td></tr>
       <tr><td>Runner batch size</td><td>Due scans process a bounded number of entries per run.</td><td>Keeps catch-up work predictable.</td></tr>
       <tr><td>Target assignee policy</td><td>Workers default to self-scheduling. Scheduling other members requires coordinator or human authority.</td><td>Prevents accidental assignment loops and unauthorized delegation.</td></tr>
@@ -598,7 +598,7 @@ internal/mcp/tools/schedule/
   </p>
 
   <div class="flow">
-    <div class="step"><div class="marker">1</div><div class="body">An agent creates a schedule entry in a space. The target kind is <code>task.create</code>; the payload contains the future task title, description, acceptance criteria, target member, and optional mission/KR/plan refs.</div></div>
+    <div class="step"><div class="marker">1</div><div class="body">An agent creates a schedule entry in a project. The target kind is <code>task.create</code>; the payload contains the future task title, description, acceptance criteria, target member, and optional mission/KR/plan refs.</div></div>
     <div class="step"><div class="marker">2</div><div class="body">The service validates timing, target payload, target member membership, caller permissions, dedupe key, and guardrails. It persists a schedule entry. No task exists yet.</div></div>
     <div class="step"><div class="marker">3</div><div class="body">When <code>nextRunAt</code> becomes due, the runner leases the occurrence and records a <code>ScheduleRun</code> row.</div></div>
     <div class="step"><div class="marker">4</div><div class="body">The task target adapter calls <code>task.Service.Create</code> with caller context stamped as a system schedule actor plus the originating creator metadata.</div></div>
@@ -612,7 +612,7 @@ internal/mcp/tools/schedule/
   <table>
     <thead><tr><th>Task field</th><th>Value</th></tr></thead>
     <tbody>
-      <tr><td><code>SpaceID</code></td><td>Copied from the schedule entry.</td></tr>
+      <tr><td><code>ProjectID</code></td><td>Copied from the schedule entry.</td></tr>
       <tr><td><code>AssignedTo</code></td><td>Copied from the target payload's target member.</td></tr>
       <tr><td><code>TaskKind</code></td><td><code>scheduled</code>.</td></tr>
       <tr><td><code>Title</code>, <code>Description</code>, <code>AcceptanceCriteria</code></td><td>Copied from the target payload, optionally rendered with safe schedule context.</td></tr>
@@ -635,12 +635,12 @@ internal/mcp/tools/schedule/
   <table>
     <thead><tr><th>Schedule value</th><th>Task create value</th><th>Validation</th></tr></thead>
     <tbody>
-      <tr><td><code>entry.SpaceID</code></td><td><code>CreateTaskParams.SpaceID</code></td><td>Space exists and caller can schedule inside it.</td></tr>
-      <tr><td><code>payload.TargetMemberID</code></td><td><code>CreateTaskParams.AssignedTo</code></td><td>Member exists in the same space and can receive tasks.</td></tr>
+      <tr><td><code>entry.ProjectID</code></td><td><code>CreateTaskParams.ProjectID</code></td><td>Project exists and caller can schedule inside it.</td></tr>
+      <tr><td><code>payload.TargetMemberID</code></td><td><code>CreateTaskParams.AssignedTo</code></td><td>Member exists in the same project and can receive tasks.</td></tr>
       <tr><td><code>payload.Title</code></td><td><code>CreateTaskParams.Title</code></td><td>Non-empty after rendering; no schedule-only placeholders remain unresolved.</td></tr>
       <tr><td><code>payload.Description</code></td><td><code>CreateTaskParams.Description</code></td><td>Optional but preserved exactly as future work instructions.</td></tr>
       <tr><td><code>payload.AcceptanceCriteria</code></td><td><code>CreateTaskParams.AcceptanceCriteria</code></td><td>Each criterion is non-empty when supplied.</td></tr>
-      <tr><td><code>context.MissionID</code>, <code>context.KeyResultID</code></td><td>Task refs and metadata</td><td>Each referenced object belongs to the same space.</td></tr>
+      <tr><td><code>context.MissionID</code>, <code>context.KeyResultID</code></td><td>Task refs and metadata</td><td>Each referenced object belongs to the same project.</td></tr>
       <tr><td><code>run.ID</code> and <code>entry.ID</code></td><td>Task metadata</td><td>Required for traceability and idempotency.</td></tr>
     </tbody>
   </table>
@@ -724,7 +724,7 @@ internal/mcp/tools/schedule/
     <tbody>
       <tr><td><code>schedule.create</code></td><td><code>Service.Create</code></td><td>Stores scheduled intent. It does not create a task immediately unless the requested time is explicitly "now".</td></tr>
       <tr><td><code>schedule.get</code></td><td><code>Service.Get</code></td><td>Reads one entry and recent runs.</td></tr>
-      <tr><td><code>schedule.list</code></td><td><code>Service.List</code></td><td>Lists entries by space, target kind, status, actor, and context refs.</td></tr>
+      <tr><td><code>schedule.list</code></td><td><code>Service.List</code></td><td>Lists entries by project, target kind, status, actor, and context refs.</td></tr>
       <tr><td><code>schedule.update</code></td><td><code>Service.Update</code></td><td>Updates future intent. It cannot mutate tasks already created by previous runs.</td></tr>
       <tr><td><code>schedule.cancel</code></td><td><code>Service.Cancel</code></td><td>Stops future runs. It does not cancel already-created tasks.</td></tr>
     </tbody>
@@ -837,7 +837,7 @@ internal/mcp/tools/schedule/
       <tr><td>Run claiming returns an explicit claimed boolean.</td><td>Concurrent runners can detect that another process already owns an occurrence without treating it as success.</td></tr>
       <tr><td>Due scans return bounded batches.</td><td>The runner remains predictable when many entries are overdue.</td></tr>
       <tr><td>Run rows store target result ids as strings with target kind.</td><td>The schedule service can link to target objects without importing target persistence schemas.</td></tr>
-      <tr><td>Queries are scoped by <code>space_id</code>.</td><td>Calendar and tool reads cannot accidentally leak cross-space schedules.</td></tr>
+      <tr><td>Queries are scoped by <code>project_id</code>.</td><td>Calendar and tool reads cannot accidentally leak cross-project schedules.</td></tr>
     </tbody>
   </table>
 
@@ -846,7 +846,7 @@ internal/mcp/tools/schedule/
   <table>
     <thead><tr><th>State that cannot occur</th><th>Enforced by</th></tr></thead>
     <tbody>
-      <tr><td>Schedule entry with no space.</td><td>Create validation rejects empty <code>spaceId</code>.</td></tr>
+      <tr><td>Schedule entry with no project.</td><td>Create validation rejects empty <code>projectId</code>.</td></tr>
       <tr><td>Scheduled task target with no assignee.</td><td><code>task.create</code> target validation rejects empty <code>targetMemberId</code>.</td></tr>
       <tr><td>Schedule entry with both interval and cron timing.</td><td>Timing parser accepts exactly one timing mode.</td></tr>
       <tr><td>Schedule entry with no target kind.</td><td>Target descriptor validation rejects empty or unsupported target kinds.</td></tr>
@@ -870,8 +870,8 @@ internal/mcp/tools/schedule/
   <table>
     <thead><tr><th>Table</th><th>Purpose</th><th>Important indexes</th></tr></thead>
     <tbody>
-      <tr><td><code>schedule_entries</code></td><td>Durable future intent and recurrence cursor.</td><td><code>(space_id, status)</code>, <code>(status, next_run_at)</code>, <code>(space_id, dedupe_key, status)</code>.</td></tr>
-      <tr><td><code>schedule_runs</code></td><td>One row per due occurrence and target invocation attempt.</td><td><code>(entry_id, due_at)</code> unique, <code>(entry_id, due_at DESC)</code>, <code>(space_id, started_at DESC)</code>.</td></tr>
+      <tr><td><code>schedule_entries</code></td><td>Durable future intent and recurrence cursor.</td><td><code>(project_id, status)</code>, <code>(status, next_run_at)</code>, <code>(project_id, dedupe_key, status)</code>.</td></tr>
+      <tr><td><code>schedule_runs</code></td><td>One row per due occurrence and target invocation attempt.</td><td><code>(entry_id, due_at)</code> unique, <code>(entry_id, due_at DESC)</code>, <code>(project_id, started_at DESC)</code>.</td></tr>
     </tbody>
   </table>
 
@@ -886,7 +886,7 @@ internal/mcp/tools/schedule/
     <tbody>
       <tr><td>Worker schedules a one-off self follow-up.</td><td>RPC or tool create stores an active entry, the calendar shows it, and no task exists until the due run creates one through the task service.</td></tr>
       <tr><td>Coordinator schedules a recurring mission monitor.</td><td>The runner creates scheduled tasks on due runs and records task ids in run history.</td></tr>
-      <tr><td>Agent requests a 1-minute infinite recurrence.</td><td>Guardrails reject the entry according to space policy.</td></tr>
+      <tr><td>Agent requests a 1-minute infinite recurrence.</td><td>Guardrails reject the entry according to project policy.</td></tr>
       <tr><td>Two runner processes see the same due entry.</td><td>Only one lease wins for the <code>entryId + dueAt</code> occurrence, so only one task create command is invoked.</td></tr>
       <tr><td>Task service rejects target creation.</td><td>The schedule run is marked failed with the target error. The failure is visible in history and the entry retry policy remains explicit.</td></tr>
       <tr><td>User cancels a schedule after it created tasks.</td><td>Future runs stop. Existing tasks remain in the task service and must be handled through task actions.</td></tr>

@@ -98,7 +98,6 @@
     <span class="tok-field">ToolCallID</span>     <span class="tok-type">string</span>
     <span class="tok-field">ToolName</span>       <span class="tok-type">string</span>
     <span class="tok-field">ProjectID</span>      <span class="tok-type">string</span>
-    <span class="tok-field">SpaceID</span>        <span class="tok-type">string</span>
     <span class="tok-field">AskerMemberID</span>  <span class="tok-type">string</span>
     <span class="tok-field">ChannelID</span>      <span class="tok-type">string</span>
     <span class="tok-field">Declaration</span>    <span class="tok-type">Declaration</span>
@@ -194,7 +193,7 @@
     tool_name TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     project_id TEXT NOT NULL,
-    space_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
     asker_member_id TEXT NOT NULL,
     channel_id TEXT NOT NULL,
     declaration_kind TEXT NOT NULL,
@@ -214,7 +213,7 @@ CREATE UNIQUE INDEX idx_human_input_idempotency
     ON human_input_requests(project_id, tool_name, tool_call_id, idempotency_key);
 
 CREATE INDEX idx_human_input_pending_scope
-    ON human_input_requests(project_id, space_id, status, created_at);
+    ON human_input_requests(project_id, project_id, status, created_at);
 
 CREATE INDEX idx_human_input_channel_pending
     ON human_input_requests(channel_id, status, created_at);
@@ -263,7 +262,7 @@ CREATE INDEX idx_human_input_expiry
       <tr><td><code>CreatePending</code></td><td>Inserts a pending request or returns the existing row for the same idempotency key. Also inserts <code>humaninput.pending</code> into the outbox.</td></tr>
       <tr><td><code>Get</code></td><td>Loads one request by id. Missing rows return a not-found error, never an empty request.</td></tr>
       <tr><td><code>FindByIdempotency</code></td><td>Reattaches retries and daemon restarts to the same request.</td></tr>
-      <tr><td><code>ListPending</code></td><td>Returns visible pending requests by project, space, channel, member, kind, and pagination.</td></tr>
+      <tr><td><code>ListPending</code></td><td>Returns visible pending requests by project, project, channel, member, kind, and pagination.</td></tr>
       <tr><td><code>Resolve</code></td><td>Atomically changes <code>pending</code> to <code>answered</code> or <code>cancelled</code> with expected version. Also inserts <code>humaninput.resolved</code>.</td></tr>
       <tr><td><code>ExpireDue</code></td><td>Claims due pending rows, marks them <code>expired</code>, and emits resolved events. Returns an aggregate report and surfaces per-row failures.</td></tr>
       <tr><td><code>AbortByToolCall</code></td><td>Marks a waiting request <code>aborted</code> when the owning runtime can no longer resume.</td></tr>
@@ -286,7 +285,7 @@ CREATE INDEX idx_human_input_expiry
     </tbody>
   </table>
 
-  <p>Delivery targets the request's <code>ChannelID</code>, <code>SpaceID</code>, and asking member identity. The UI may show pending input in a global queue and in the relevant space, but list, view, resolve, and cancel calls are authorized by the RPC/UI adapter against the project/space and human user context, not against whichever tab displays it.</p>
+  <p>Delivery targets the request's <code>ChannelID</code>, <code>ProjectID</code>, and asking member identity. The UI may show pending input in a global queue and in the relevant project, but list, view, resolve, and cancel calls are authorized by the RPC/UI adapter against the project/project and human user context, not against whichever tab displays it.</p>
 
   <h2 id="edge-cases">7. Production edge cases</h2>
 
@@ -302,7 +301,7 @@ CREATE INDEX idx_human_input_expiry
       <tr><td>Human closes browser</td><td>No state change. Request remains pending until answer, cancel, expiry, or abort.</td></tr>
       <tr><td>Expired request</td><td>Deadline worker marks <code>expired</code>, stores a terminal result payload, dismisses notifications, and wakes awaiters with an expiry error.</td></tr>
       <tr><td>Invalid answer payload</td><td>Reject at the RPC/API boundary with field-level validation errors. Do not store partial answers.</td></tr>
-      <tr><td>Missing delivery target</td><td>Creation fails loudly. No pending row is created without project, space, member, channel, declaration, and tool identity.</td></tr>
+      <tr><td>Missing delivery target</td><td>Creation fails loudly. No pending row is created without project, project, member, channel, declaration, and tool identity.</td></tr>
       <tr><td>Unauthorized resolver</td><td>The RPC/UI adapter rejects the request before calling the service mutation. The request remains pending and the attempt is auditable.</td></tr>
       <tr><td>Schema evolution</td><td>Persist primitive kind and payload version. Old pending payloads remain renderable and resolvable until terminal.</td></tr>
       <tr><td>Large form payload</td><td>Enforce payload and result size limits before persistence; return validation errors instead of truncating.</td></tr>
@@ -351,7 +350,7 @@ CREATE INDEX idx_human_input_expiry
 <span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">ExpireDue</span>(ctx context.Context, now time.<span class="tok-type">Time</span>) (<span class="tok-type">ExpireReport</span>, error)
 <span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">ListPending</span>(ctx context.Context, filter <span class="tok-type">Filter</span>) ([]<span class="tok-type">Request</span>, error)</code></pre>
 
-  <p>Every command captures domain arguments: project, space, channel, tool name, tool call ID, primitive kind, and payload. Test doubles for this service capture those arguments; they do not discard them.</p>
+  <p>Every command captures domain arguments: project, project, channel, tool name, tool call ID, primitive kind, and payload. Test doubles for this service capture those arguments; they do not discard them.</p>
 
   <h2 id="invariants">10. Invariants</h2>
 

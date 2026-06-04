@@ -181,7 +181,7 @@ internal/mcp/tools/graph/
   <h3>Read flow</h3>
   <div class="flow">
     <div class="step"><div class="marker">1</div><div class="body">The adapter validates transport shape and maps the request into a typed graph command.</div></div>
-    <div class="step"><div class="marker">2</div><div class="body">The graph service resolves caller identity from <code>context.Context</code> and verifies the caller can access the requested project and space scope.</div></div>
+    <div class="step"><div class="marker">2</div><div class="body">The graph service resolves caller identity from <code>context.Context</code> and verifies the caller can access the requested project and project scope.</div></div>
     <div class="step"><div class="marker">3</div><div class="body">The service loads the focal node through the hydrator for its node type. Missing or wrong-project nodes return an error.</div></div>
     <div class="step"><div class="marker">4</div><div class="body">The service loads all context links where the focal node is source or target, then groups neighbouring refs by node type.</div></div>
     <div class="step"><div class="marker">5</div><div class="body">Neighbour refs are hydrated through the same service ports. Missing hydrators and missing neighbour nodes become graph warnings with capped affected ids.</div></div>
@@ -233,13 +233,13 @@ internal/mcp/tools/graph/
   <table>
     <thead><tr><th>Node type</th><th>Hydrator source</th><th>Scope rule</th></tr></thead>
     <tbody>
-      <tr><td><code>task</code></td><td>Task service read port</td><td>Task belongs to a visible same-project space.</td></tr>
+      <tr><td><code>task</code></td><td>Task service read port</td><td>Task belongs to a visible same-project node.</td></tr>
       <tr><td><code>decision</code></td><td>Decision service read port</td><td>Decision <code>ProjectID</code> equals the requested project.</td></tr>
       <tr><td><code>key_result</code></td><td>Mission service key-result read port</td><td>Parent mission belongs to the requested project.</td></tr>
       <tr><td><code>mission</code></td><td>Mission service read port</td><td>Mission <code>ProjectID</code> equals the requested project.</td></tr>
-      <tr><td><code>operator_action</code></td><td>Operator service read port</td><td>Action belongs to a visible same-project space.</td></tr>
-      <tr><td><code>escalation</code></td><td>Operator service escalation read port</td><td>Escalation belongs to a visible same-project space.</td></tr>
-      <tr><td><code>plan</code></td><td>Plan service read port</td><td>Plan belongs to a visible same-project space.</td></tr>
+      <tr><td><code>operator_action</code></td><td>Operator service read port</td><td>Action belongs to a visible same-project node.</td></tr>
+      <tr><td><code>escalation</code></td><td>Operator service escalation read port</td><td>Escalation belongs to a visible same-project node.</td></tr>
+      <tr><td><code>plan</code></td><td>Plan service read port</td><td>Plan belongs to a visible same-project node.</td></tr>
     </tbody>
   </table>
 
@@ -534,13 +534,13 @@ internal/mcp/tools/graph/
   <table>
     <thead><tr><th>Caller</th><th>Allowed graph behavior</th><th>Scope basis</th></tr></thead>
     <tbody>
-      <tr><td>Authenticated user</td><td>Read and mutate graph links for projects the user owns.</td><td>User owns the project and its spaces.</td></tr>
-      <tr><td>Coordinator member</td><td>Read same-project graph context and create or remove links for visible nodes.</td><td>Active member belongs to a project space and has coordinator member type.</td></tr>
-      <tr><td>Worker member</td><td>Read visible graph context and create relation links only for nodes visible to that worker.</td><td>Active member belongs to the space and is authorized by node visibility.</td></tr>
+      <tr><td>Authenticated user</td><td>Read and mutate graph links for projects the user owns.</td><td>User owns the project.</td></tr>
+      <tr><td>Coordinator member</td><td>Read same-project graph context and create or remove links for visible nodes.</td><td>Active member belongs to the project and has coordinator member type.</td></tr>
+      <tr><td>Worker member</td><td>Read visible graph context and create relation links only for nodes visible to that worker.</td><td>Active member belongs to the project and is authorized by node visibility.</td></tr>
     </tbody>
   </table>
 
-  <p>The service never infers project scope from a node id. Every public method requires <code>ProjectID</code>. Hydrators enforce project ownership by reading through source services and checking project or space membership. A node id prefix can infer node type for convenience on <code>node</code>, <code>link</code>, and <code>unlink</code> calls, but it cannot infer project, space, user, or member authority.</p>
+  <p>The service never infers project scope from a node id. Every public method requires <code>ProjectID</code>. Hydrators enforce project ownership by reading through source services and checking project or membership. A node id prefix can infer node type for convenience on <code>node</code>, <code>link</code>, and <code>unlink</code> calls, but it cannot infer project, project, user, or member authority.</p>
 
   <h2 id="persistence">9. Persistence</h2>
 
@@ -687,7 +687,7 @@ internal/mcp/tools/graph/
     </tbody>
   </table>
 
-  <p>The MCP session supplies <code>GraphService</code>, <code>MemberDirectory</code>, <code>ProjectID</code>, <code>SpaceID</code>, and <code>ActorMemberID</code>. The handler resolves the active member before calling the service. Missing graph service, member directory, project id, or actor member id returns an MCP error result.</p>
+  <p>The MCP session supplies <code>GraphService</code>, <code>MemberDirectory</code>, <code>ProjectID</code>, <code>ProjectID</code>, and <code>ActorMemberID</code>. The handler resolves the active member before calling the service. Missing graph service, member directory, project id, or actor member id returns an MCP error result.</p>
 
   <h3>MCP schema</h3>
   <table>
@@ -720,7 +720,7 @@ internal/mcp/tools/graph/
 graphSvc, err := graphapp.NewService(graphapp.Config{
     Links:         contextLinks,
     Caller:        caller.ContextResolver{},
-    Members:       spaceSvc,
+    Members:       projectSvc,
     Hydrators:     graphapp.DefaultHydrators(taskSvc, decisionSvc, missionSvc, operatorSvc, planSvc),
     SearchTimeout: 2 * time.Second,
     Logger:        logger.With("service", "graph"),

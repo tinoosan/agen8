@@ -20,7 +20,7 @@
   <span class="eyebrow">Architecture · Channel Service</span>
   <h1>Channel Service</h1>
   <p class="lede">
-    A channel is a single conversation surface inside a space — one per active space member. The channel service owns channel records, per-user read state, and the four RPC methods (<code>channel.list</code>, <code>channel.get</code>, <code>channel.send</code>, <code>channel.markRead</code>) the frontend uses to render and drive those conversations.
+    A channel is a single conversation surface inside a project — one per active member. The channel service owns channel records, per-user read state, and the four RPC methods (<code>channel.list</code>, <code>channel.get</code>, <code>channel.send</code>, <code>channel.markRead</code>) the frontend uses to render and drive those conversations.
   </p>
 
   <nav class="toc" aria-label="On this page">
@@ -38,12 +38,12 @@
 
   <h2 id="what">1. What a channel is</h2>
 
-  <p>A channel is a record in the channel store keyed by <code>spaceId</code> + <code>memberId</code> (the id is derived deterministically by <code>MemberChannelID</code>). It carries a few small fields — status, last-message timestamp, member label, runId — and serves as the addressable target for one side of a conversation. Channels do not own messages; messages live in the message service and reference a channel by id via <code>Metadata["channelId"]</code>.</p>
+  <p>A channel is a record in the channel store keyed by <code>projectId</code> + <code>memberId</code> (the id is derived deterministically by <code>MemberChannelID</code>). It carries a few small fields — status, last-message timestamp, member label, runId — and serves as the addressable target for one side of a conversation. Channels do not own messages; messages live in the message service and reference a channel by id via <code>Metadata["channelId"]</code>.</p>
 
   <p>The channel service deliberately keeps the model thin:</p>
   <ul>
     <li><strong>Channel content</strong> (the messages themselves) lives in the message service — channel records just point at them.</li>
-    <li><strong>Routing rules</strong> (who can send to which channel, broadcast fan-out) live in the space service's <code>SpaceMessageOperation</code> — the channel service only knows how to resolve a member to its channel id and how to enforce per-channel invariants like "closed channels reject sends".</li>
+    <li><strong>Routing rules</strong> (who can send to which channel, broadcast fan-out) live in the project service's <code>ProjectMessageOperation</code> — the channel service only knows how to resolve a member to its channel id and how to enforce per-channel invariants like "closed channels reject sends".</li>
     <li><strong>Unread tracking</strong> is a join between <code>channel_reads.last_seen_at</code> and <code>channels.last_message_at</code> — computed at list time, not stored as a counter.</li>
   </ul>
 
@@ -64,16 +64,16 @@ type Service struct { ... }
 func NewService(repo domain.Repository) (*Service, error)
 
 func (s *Service) Load(ctx, channelID) (types.Channel, error)
-func (s *Service) ListBySpace(ctx, spaceID) ([]types.Channel, error)
-func (s *Service) ListWithUnread(ctx, spaceID, userID) ([]types.Channel, error)
-func (s *Service) EnsureMember(ctx, space, runID, memberID, memberType, displayName) (types.Channel, error)
+func (s *Service) ListByProject(ctx, projectID) ([]types.Channel, error)
+func (s *Service) ListWithUnread(ctx, projectID, userID) ([]types.Channel, error)
+func (s *Service) EnsureMember(ctx, project, runID, memberID, memberType, displayName) (types.Channel, error)
 func (s *Service) StampRunID(ctx, channelID, runID) error
 func (s *Service) RecordMessageActivity(ctx, channelID, at) error
 func (s *Service) MarkRead(ctx, userID, channelID, at) error
-func (s *Service) DeleteForMember(ctx, spaceID, memberID) error
+func (s *Service) DeleteForMember(ctx, projectID, memberID) error
 
 // pure value-object derivation — no I/O
-func MemberChannelID(spaceID, memberID) types.ChannelID</code></pre>
+func MemberChannelID(projectID, memberID) types.ChannelID</code></pre>
 
   <h2 id="retire">3. Retired member cleanup</h2>
 
@@ -112,7 +112,7 @@ func MemberChannelID(spaceID, memberID) types.ChannelID</code></pre>
     <rect x="260" y="56" width="160" height="100" rx="8" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>
     <text x="340" y="78" text-anchor="middle" fill="#1a1d23" font-size="12" font-weight="600">Handler.ChannelSend</text>
     <text x="340" y="94" text-anchor="middle" fill="#5b6471" font-size="10">load channel</text>
-    <text x="340" y="108" text-anchor="middle" fill="#5b6471" font-size="10">validate space exists</text>
+    <text x="340" y="108" text-anchor="middle" fill="#5b6471" font-size="10">validate project exists</text>
     <text x="340" y="122" text-anchor="middle" fill="#5b6471" font-size="10">reject closed channels</text>
     <text x="340" y="142" text-anchor="middle" fill="#8a93a0" font-size="9.5" font-style="italic">channel/rpc/handler.go</text>
 
@@ -156,7 +156,7 @@ func MemberChannelID(spaceID, memberID) types.ChannelID</code></pre>
   </svg>
   </div>
 
-  <p class="meta">Two preconditions reject the send up front: <code>channel.status == closed</code> and <code>spaceId</code> in the request mismatching the channel's own <code>spaceId</code>. Each returns a precise protocol error so the frontend can render the right message.</p>
+  <p class="meta">Two preconditions reject the send up front: <code>channel.status == closed</code> and <code>projectId</code> in the request mismatching the channel's own <code>projectId</code>. Each returns a precise protocol error so the frontend can render the right message.</p>
 
   <h2 id="unread">5. Per-user unread state</h2>
 
@@ -168,7 +168,7 @@ SELECT c.*,
 FROM channels c
 LEFT JOIN channel_reads r
   ON r.channel_id = c.id AND r.user_id = ?
-WHERE c.space_id = ?</code></pre>
+WHERE c.project_id = ?</code></pre>
 
   <p>The bump is wired as a hook on the message service. The application composition root sets it at startup:</p>
 
@@ -180,13 +180,13 @@ messageService.SetOnPublish(channelActivityOnPublish(channelSvc))</code></pre>
 
   <h2 id="host">6. The Host interface</h2>
 
-  <p>The channel RPC handler doesn't reach into <code>*RPCServer</code> directly. Instead, it declares the surface it needs from its caller — config, an existence check for spaces, a way to publish messages, and a wake signal for the runtime host — and the caller (today <code>*RPCServer</code>) provides them. The interface is named <code>Host</code> because that's literally what it represents: the methods the host has to implement.</p>
+  <p>The channel RPC handler doesn't reach into <code>*RPCServer</code> directly. Instead, it declares the surface it needs from its caller — config, an existence check for projects, a way to publish messages, and a wake signal for the runtime host — and the caller (today <code>*RPCServer</code>) provides them. The interface is named <code>Host</code> because that's literally what it represents: the methods the host has to implement.</p>
 
 <pre><code>// services/channel/rpc/handler.go
 type Host interface {
     EffectiveUserID(ctx context.Context) string
-    ValidateSpace(ctx context.Context, spaceID string) error
-    RequireSpaceService() (*spaceapp.Service, error)
+    ValidateProject(ctx context.Context, projectID string) error
+    RequireProjectService() (*projectapp.Service, error)
     PublishMessage(ctx context.Context, msg types.MemberMessage) (types.MemberMessage, error)
     Wake()
     ListRunsByStatus(ctx context.Context, statuses []string) ([]types.Run, error)
@@ -204,15 +204,15 @@ func NewHandler(host Host, channelSvc *channelapp.Service) *Handler {
     return &amp;Handler{host: host, channelSvc: channelSvc}
 }</code></pre>
 
-  <p>The channel service itself is <em>not</em> a Host method — it's an explicit constructor argument. Host is reserved for cross-service dependencies the handler can't own (the supervisor, the space service member roster, the message publisher); the channel service is the handler's own domain dependency and is passed straight in. The host side implements the remaining interface with thin accessors in <code>internal/app/rpc_channel_host.go</code>:</p>
+  <p>The channel service itself is <em>not</em> a Host method — it's an explicit constructor argument. Host is reserved for cross-service dependencies the handler can't own (the supervisor, the project service member roster, the message publisher); the channel service is the handler's own domain dependency and is passed straight in. The host side implements the remaining interface with thin accessors in <code>internal/app/rpc_channel_host.go</code>:</p>
 
 <pre><code>// internal/app/rpc_channel_host.go (excerpt)
 func (s *RPCServer) EffectiveUserID(ctx context.Context) string {
     return effectiveUserID(ctx, s.cfg)
 }
 
-func (s *RPCServer) ValidateSpace(ctx context.Context, spaceID string) error {
-    _, err := s.loadSpaceRecord(ctx, spaceID)
+func (s *RPCServer) ValidateProject(ctx context.Context, projectID string) error {
+    _, err := s.loadProjectRecord(ctx, projectID)
     return err
 }
 
@@ -234,7 +234,7 @@ var _ channelrpc.Host = (*RPCServer)(nil)</code></pre>
   </ul>
 
   <div class="callout">
-    <strong>Pattern name.</strong> In hexagonal architecture this is a <em>port</em>; in plain Go terms it's a dependency-inversion interface. It is <em>not</em> the GoF Bridge pattern. The space service uses the same shape under the same name — <code>spacerpc.Host</code>, implemented by <code>*RPCServer</code> via <code>internal/app/rpc_space_host.go</code>. Future service migrations follow the same convention.
+    <strong>Pattern name.</strong> In hexagonal architecture this is a <em>port</em>; in plain Go terms it's a dependency-inversion interface. It is <em>not</em> the GoF Bridge pattern. The project service uses the same shape under the same name — <code>projectrpc.Host</code>, implemented by <code>*RPCServer</code> via <code>internal/app/rpc_project_host.go</code>. Future service migrations follow the same convention.
   </div>
 
   <h2 id="layout">7. Where the code lives</h2>
@@ -244,7 +244,7 @@ var _ channelrpc.Host = (*RPCServer)(nil)</code></pre>
   <span class="dir">domain/</span>           <span class="note"># pure rules, no side effects</span>
     <span class="file">repository.go</span>        <span class="note"># Repository interface, ErrNotFound, MaxListChannels const</span>
   <span class="dir">app/</span>              <span class="note"># Service and the package-public builders</span>
-    <span class="file">service.go</span>           <span class="note"># Service — Load / ListBySpace / ListWithUnread / EnsureMember / StampRunID / MarkRead / DeleteForMember / RecordMessageActivity</span>
+    <span class="file">service.go</span>           <span class="note"># Service — Load / ListByProject / ListWithUnread / EnsureMember / StampRunID / MarkRead / DeleteForMember / RecordMessageActivity</span>
     <span class="file">builders.go</span>          <span class="note"># BuildService(cfg) — used only at the assembly root</span>
   <span class="dir">infra/</span>            <span class="note"># SQLite persistence</span>
     <span class="file">sqlite_repository.go</span> <span class="note"># Repository implementation + channel_reads join</span>
@@ -254,10 +254,10 @@ var _ channelrpc.Host = (*RPCServer)(nil)</code></pre>
 <span class="dir">internal/app/</span>
   <span class="file">rpc_channel_host.go</span>    <span class="note"># thin *RPCServer accessors → satisfies channelrpc.Host</span>
   <span class="file">channel_activity_hook.go</span> <span class="note"># channelActivityOnPublish — publish-path hook into message svc</span>
-  <span class="file">rpc_space_lifecycle.go</span> <span class="note"># binds protocol.MethodChannel* to ch.ChannelList / ChannelGet / ChannelSend / ChannelMarkRead</span>
+  <span class="file">rpc_project_lifecycle.go</span> <span class="note"># binds protocol.MethodChannel* to ch.ChannelList / ChannelGet / ChannelSend / ChannelMarkRead</span>
   </div>
 
-  <p class="meta">The four <code>protocol.MethodChannel*</code> bindings live in <code>rpc_space_lifecycle.go</code> alongside the space-service handlers — a single registration file currently fans out across multiple service handler structs. Splitting registration per service is a possible follow-up, but it doesn't change behaviour; only file organisation.</p>
+  <p class="meta">The four <code>protocol.MethodChannel*</code> bindings live in <code>rpc_project_lifecycle.go</code> alongside the project-service handlers — a single registration file currently fans out across multiple service handler structs. Splitting registration per service is a possible follow-up, but it doesn't change behaviour; only file organisation.</p>
 
 </div>
 </body>

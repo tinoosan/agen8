@@ -41,15 +41,15 @@
   <h2 id="boundary">1. Boundary</h2>
   <p>The event service stores facts that already happened. Producing services own the domain meaning of those facts, validate their own state transitions, and call the event appender after the source state is durable. The event service validates that each event has a stable run, type, message, timestamp, severity, category, and structured data; it does not decide whether a task should complete, a message should steer, or a mission should advance.</p>
 
-  <p>The message service remains the canonical transcript owner. User messages, assistant messages, attachments, delivery state, read markers, queued rows, steering eligibility, and assistant deltas live in <code>internal/services/message</code>. Events may refer to message ids, channel ids, space ids, and member ids, but they do not duplicate transcript text as the source of truth.</p>
+  <p>The message service remains the canonical transcript owner. User messages, assistant messages, attachments, delivery state, read markers, queued rows, steering eligibility, and assistant deltas live in <code>internal/services/message</code>. Events may refer to message ids, channel ids, project ids, and member ids, but they do not duplicate transcript text as the source of truth.</p>
 
   <table>
     <thead><tr><th>Data</th><th>Canonical owner</th><th>Event service role</th></tr></thead>
     <tbody>
-      <tr><td>User and assistant transcript rows</td><td>Message service</td><td>References message rows from product activity when another wired event needs message, channel, space, or member context.</td></tr>
+      <tr><td>User and assistant transcript rows</td><td>Message service</td><td>References message rows from product activity when another wired event needs message, channel, project, or member context.</td></tr>
       <tr><td>Harness run lifecycle and tool activity</td><td>Harness service and runtime adapters</td><td>Stores normalized activity facts such as <code>harness.run.started</code>, <code>agent.tool.call</code>, and <code>harness.run.completed</code>.</td></tr>
       <tr><td>Task lifecycle state</td><td>Task and schedule services</td><td>Stores task-adjacent facts only when a producer already emits them, such as scheduled task enqueue activity.</td></tr>
-      <tr><td>Mission, decision, operator, and human-input outcomes</td><td>The producing service</td><td>Stores product-facing facts that can be queried by space, run, work item, severity, category, or search text.</td></tr>
+      <tr><td>Mission, decision, operator, and human-input outcomes</td><td>The producing service</td><td>Stores product-facing facts that can be queried by project, run, work item, severity, category, or search text.</td></tr>
       <tr><td>Internal service coordination</td><td>Internal event bus</td><td>Receives projections when a product-facing history entry is needed. It does not replace the service-specific lifecycle event bus.</td></tr>
     </tbody>
   </table>
@@ -103,7 +103,7 @@
     <thead><tr><th>Table</th><th>Purpose</th><th>Owner</th></tr></thead>
     <tbody>
       <tr><td><code>events</code></td><td>Append-only product activity facts.</td><td>Event service.</td></tr>
-      <tr><td><code>agent_space_entries</code></td><td>Space/run activity projection for Inspector and activity feeds.</td><td>Event service read model.</td></tr>
+      <tr><td><code>agent_project_entries</code></td><td>Project/run activity projection for Inspector and activity feeds.</td><td>Event service read model.</td></tr>
       <tr><td><code>message_conversation_messages</code></td><td>Canonical chat transcript rows and delivery state.</td><td>Message service.</td></tr>
       <tr><td><code>message_conversation_activities</code></td><td>Conversation-scoped activity rows used when chat rendering needs message-owned local ordering.</td><td>Message service projection, not the canonical product activity history.</td></tr>
     </tbody>
@@ -134,7 +134,7 @@
     <span class="tok-type">Tailer</span>
 }</code></pre>
 
-  <p><code>EventFilter</code> is run-scoped at the repository boundary. Project and space aggregation is application/RPC behavior: the handler resolves project spaces and member run ids, issues run-scoped repository queries, annotates events with project/space/member data when absent, and returns one sorted page. Keeping project semantics above the repository prevents the event store from learning project membership rules.</p>
+  <p><code>EventFilter</code> is run-scoped at the repository boundary. Project aggregation is application/RPC behavior: the handler resolves project member run ids, issues run-scoped repository queries, annotates events with project/member data when absent, and returns one sorted page. Keeping project semantics above the repository prevents the event store from learning project membership rules.</p>
 
   <p>The append contract is atomic for the event row and event-owned projections. The SQL repository writes <code>events</code> and any configured event-service projection rows in one transaction. It does not mutate source-service tables such as messages or tasks. Source services write their own state through their own repositories before emitting a product event or through their own transactional outbox when the source event must be retried independently.</p>
 
@@ -167,8 +167,8 @@
   "type": "harness.run.started",
   "message": "Run started",
   "data": {
-    "spaceId": "space-...",
-    "channelId": "channel:space-...:member:member-...",
+    "projectId": "project-...",
+    "channelId": "channel:project-...:member:member-...",
     "memberId": "member-...",
     "sessionId": "session_...",
     "runId": "run-agent_inbox_msg-...",
@@ -177,40 +177,40 @@
 }</code></pre>
 
   <h2 id="catalog">6. Event catalog</h2>
-  <p>The catalog is intentionally finite. New event types are added only when a producer owns a new product fact that users need to inspect, filter, or audit. Every event carries the base identifiers that locate it: <code>projectId</code>, <code>spaceId</code>, <code>memberId</code>, <code>channelId</code>, <code>sessionId</code>, <code>runId</code>, and <code>turnId</code> when those identifiers exist for the source fact.</p>
+  <p>The catalog is intentionally finite. New event types are added only when a producer owns a new product fact that users need to inspect, filter, or audit. Every event carries the base identifiers that locate it: <code>projectId</code>, <code>memberId</code>, <code>channelId</code>, <code>sessionId</code>, <code>runId</code>, and <code>turnId</code> when those identifiers exist for the source fact.</p>
 
   <table>
     <thead><tr><th>Type</th><th>Producer</th><th>Key data</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td><code>space.member.registered</code></td><td>Space</td><td><code>projectId</code>, <code>spaceId</code>, <code>memberId</code>, <code>channelId</code>, <code>memberType</code></td><td>A member was registered into a space.</td></tr>
-      <tr><td><code>space.member.config_changed</code></td><td>Space</td><td><code>spaceId</code>, <code>memberId</code>, <code>model</code>, <code>effort</code>, <code>permissionMode</code></td><td>A managed member runtime configuration changed.</td></tr>
-      <tr><td><code>space.member.removed</code></td><td>Space</td><td><code>spaceId</code>, <code>memberId</code>, <code>lifecycleState</code></td><td>A member was removed from a space.</td></tr>
+      <tr><td><code>project.member.registered</code></td><td>Project</td><td><code>projectId</code>, <code>memberId</code>, <code>channelId</code>, <code>memberType</code></td><td>A member was registered into a project.</td></tr>
+      <tr><td><code>project.member.config_changed</code></td><td>Project</td><td><code>projectId</code>, <code>memberId</code>, <code>model</code>, <code>effort</code>, <code>permissionMode</code></td><td>A managed member runtime configuration changed.</td></tr>
+      <tr><td><code>project.member.removed</code></td><td>Project</td><td><code>projectId</code>, <code>memberId</code>, <code>lifecycleState</code></td><td>A member was removed from a project.</td></tr>
       <tr><td><code>harness.run.started</code></td><td>Harness</td><td><code>sessionId</code>, <code>runId</code>, <code>turnId</code>, <code>localTurnId</code>, <code>nativeTurnId</code>, <code>harnessKind</code>, <code>status</code></td><td>A managed-member harness turn started.</td></tr>
       <tr><td><code>harness.run.completed</code></td><td>Harness</td><td><code>sessionId</code>, <code>runId</code>, <code>turnId</code>, <code>localTurnId</code>, <code>nativeTurnId</code>, <code>status</code></td><td>A harness turn completed successfully.</td></tr>
       <tr><td><code>harness.run.canceled</code></td><td>Harness</td><td><code>sessionId</code>, <code>runId</code>, <code>turnId</code>, <code>localTurnId</code>, <code>nativeTurnId</code>, <code>status</code></td><td>A harness turn stopped because cancellation was requested.</td></tr>
       <tr><td><code>harness.run.failed</code></td><td>Harness</td><td><code>sessionId</code>, <code>runId</code>, <code>turnId</code>, <code>localTurnId</code>, <code>nativeTurnId</code>, <code>status</code>, <code>error</code></td><td>A harness turn ended with a runtime or delivery failure.</td></tr>
       <tr><td><code>agent.tool.call</code></td><td>Harness/runtime</td><td><code>sessionId</code>, <code>runId</code>, <code>turnId</code>, <code>toolCallId</code>, <code>toolName</code>, <code>status</code>, <code>seq</code></td><td>A runtime tool call or tool result was observed and normalized for product activity.</td></tr>
-      <tr><td><code>schedule.entry.created</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>spaceId</code>, <code>createdBy</code>, <code>targetKind</code>, <code>timingMode</code>, <code>nextRunAt</code></td><td>A schedule entry was created.</td></tr>
-      <tr><td><code>schedule.entry.updated</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>spaceId</code>, <code>updatedBy</code>, <code>timingMode</code>, <code>nextRunAt</code></td><td>A schedule entry changed configuration or timing.</td></tr>
-      <tr><td><code>schedule.entry.canceled</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>spaceId</code>, <code>canceledBy</code></td><td>A schedule entry was canceled.</td></tr>
-      <tr><td><code>schedule.run.started</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>scheduleRunId</code>, <code>spaceId</code>, <code>scheduledFor</code></td><td>A due schedule run was claimed for execution.</td></tr>
-      <tr><td><code>schedule.task.enqueued</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>scheduleRunId</code>, <code>spaceId</code>, <code>taskId</code>, <code>targetKind</code></td><td>A schedule run created task work.</td></tr>
-      <tr><td><code>schedule.run.succeeded</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>scheduleRunId</code>, <code>spaceId</code>, <code>targetObjectId</code></td><td>A schedule run completed successfully.</td></tr>
-      <tr><td><code>schedule.run.failed</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>scheduleRunId</code>, <code>spaceId</code>, <code>error</code></td><td>A schedule run failed.</td></tr>
-      <tr><td><code>schedule.run.skipped</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>spaceId</code>, <code>reason</code></td><td>A due schedule occurrence did not create work.</td></tr>
-      <tr><td><code>decision.logged</code></td><td>Decision</td><td><code>decisionId</code>, <code>projectId</code>, <code>spaceId</code>, <code>source</code>, <code>confidence</code></td><td>A consequential decision or structured human answer became durable.</td></tr>
+      <tr><td><code>schedule.entry.created</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>projectId</code>, <code>createdBy</code>, <code>targetKind</code>, <code>timingMode</code>, <code>nextRunAt</code></td><td>A schedule entry was created.</td></tr>
+      <tr><td><code>schedule.entry.updated</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>projectId</code>, <code>updatedBy</code>, <code>timingMode</code>, <code>nextRunAt</code></td><td>A schedule entry changed configuration or timing.</td></tr>
+      <tr><td><code>schedule.entry.canceled</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>projectId</code>, <code>canceledBy</code></td><td>A schedule entry was canceled.</td></tr>
+      <tr><td><code>schedule.run.started</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>scheduleRunId</code>, <code>projectId</code>, <code>scheduledFor</code></td><td>A due schedule run was claimed for execution.</td></tr>
+      <tr><td><code>schedule.task.enqueued</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>scheduleRunId</code>, <code>projectId</code>, <code>taskId</code>, <code>targetKind</code></td><td>A schedule run created task work.</td></tr>
+      <tr><td><code>schedule.run.succeeded</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>scheduleRunId</code>, <code>projectId</code>, <code>targetObjectId</code></td><td>A schedule run completed successfully.</td></tr>
+      <tr><td><code>schedule.run.failed</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>scheduleRunId</code>, <code>projectId</code>, <code>error</code></td><td>A schedule run failed.</td></tr>
+      <tr><td><code>schedule.run.skipped</code></td><td>Schedule</td><td><code>scheduleId</code>, <code>projectId</code>, <code>reason</code></td><td>A due schedule occurrence did not create work.</td></tr>
+      <tr><td><code>decision.logged</code></td><td>Decision</td><td><code>decisionId</code>, <code>projectId</code>, <code>source</code>, <code>confidence</code></td><td>A consequential decision or structured human answer became durable.</td></tr>
       <tr><td><code>mission.activated</code></td><td>Mission</td><td><code>missionId</code>, <code>projectId</code>, <code>status</code></td><td>A mission entered active status.</td></tr>
       <tr><td><code>mission.paused</code></td><td>Mission</td><td><code>missionId</code>, <code>projectId</code>, <code>status</code></td><td>A mission entered paused status.</td></tr>
       <tr><td><code>mission.completed</code></td><td>Mission</td><td><code>missionId</code>, <code>projectId</code>, <code>status</code></td><td>A mission reached completed status.</td></tr>
       <tr><td><code>mission.archived</code></td><td>Mission</td><td><code>missionId</code>, <code>projectId</code>, <code>status</code></td><td>A mission was archived.</td></tr>
-      <tr><td><code>kr.created</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>status</code>, <code>spaceId</code></td><td>A key result was created.</td></tr>
+      <tr><td><code>kr.created</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>status</code>, <code>projectId</code></td><td>A key result was created.</td></tr>
       <tr><td><code>kr.progress_updated</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>progressPercent</code></td><td>A key result progress value changed.</td></tr>
       <tr><td><code>kr.milestone</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>milestone</code>, <code>progressPercent</code></td><td>A progress update crossed a milestone.</td></tr>
       <tr><td><code>kr.completed</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>progressPercent</code></td><td>A key result reached completed status.</td></tr>
       <tr><td><code>kr.dropped</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>status</code>, <code>note</code></td><td>A key result was dropped.</td></tr>
       <tr><td><code>kr.reopened</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>status</code>, <code>note</code></td><td>A dropped or completed key result was reopened.</td></tr>
-      <tr><td><code>kr.owner_assigned</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>spaceId</code></td><td>A key result owner space changed.</td></tr>
-      <tr><td><code>oa.created</code></td><td>Operator</td><td><code>actionId</code>, <code>projectId</code>, <code>spaceId</code>, <code>taskRef</code>, <code>urgency</code>, <code>blocking</code></td><td>An operator action was created.</td></tr>
+      <tr><td><code>kr.owner_assigned</code></td><td>Mission</td><td><code>missionId</code>, <code>keyResultId</code>, <code>projectId</code></td><td>A key result owner project changed.</td></tr>
+      <tr><td><code>oa.created</code></td><td>Operator</td><td><code>actionId</code>, <code>projectId</code>, <code>taskRef</code>, <code>urgency</code>, <code>blocking</code></td><td>An operator action was created.</td></tr>
       <tr><td><code>oa.acknowledged</code></td><td>Operator</td><td><code>actionId</code>, <code>oldStatus</code>, <code>newStatus</code>, <code>acknowledgedBy</code></td><td>An operator action was acknowledged.</td></tr>
       <tr><td><code>oa.started</code></td><td>Operator</td><td><code>actionId</code>, <code>oldStatus</code>, <code>newStatus</code>, <code>startedBy</code></td><td>Operator work started.</td></tr>
       <tr><td><code>oa.completed</code></td><td>Operator</td><td><code>actionId</code>, <code>oldStatus</code>, <code>newStatus</code>, <code>outcomeStatus</code>, <code>outcomeRef</code></td><td>Operator work completed.</td></tr>
@@ -220,7 +220,7 @@
       <tr><td><code>oa.canceled</code></td><td>Operator</td><td><code>actionId</code>, <code>oldStatus</code>, <code>newStatus</code>, <code>reason</code></td><td>An operator action ended without completion.</td></tr>
       <tr><td><code>oa.progress_noted</code></td><td>Operator</td><td><code>actionId</code>, <code>noteId</code>, <code>notedBy</code></td><td>A progress note was added to an operator action.</td></tr>
       <tr><td><code>oa.comment</code></td><td>Operator</td><td><code>actionId</code>, <code>commentId</code>, <code>commentedBy</code></td><td>A comment was added to an operator action.</td></tr>
-      <tr><td><code>escalation.created</code></td><td>Operator</td><td><code>escalationId</code>, <code>projectId</code>, <code>spaceId</code>, <code>taskRef</code>, <code>urgency</code>, <code>category</code></td><td>An escalation requiring attention was created.</td></tr>
+      <tr><td><code>escalation.created</code></td><td>Operator</td><td><code>escalationId</code>, <code>projectId</code>, <code>taskRef</code>, <code>urgency</code>, <code>category</code></td><td>An escalation requiring attention was created.</td></tr>
       <tr><td><code>escalation.escalated</code></td><td>Operator</td><td><code>escalationId</code>, <code>oldUrgency</code>, <code>newUrgency</code>, <code>reason</code></td><td>An unresolved escalation increased in urgency.</td></tr>
       <tr><td><code>escalation.resolved</code></td><td>Operator</td><td><code>escalationId</code>, <code>resolution</code>, <code>resolvedBy</code>, <code>decisionId</code></td><td>An escalation reached a resolved state.</td></tr>
       <tr><td><code>escalation.canceled</code></td><td>Operator</td><td><code>escalationId</code>, <code>reason</code>, <code>canceledBy</code></td><td>An escalation was canceled without resolution.</td></tr>
@@ -262,7 +262,7 @@
 
       <rect x="250" y="210" width="155" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
       <text x="327" y="241" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Inspector</text>
-      <text x="327" y="263" text-anchor="middle" fill="var(--text-muted)" font-size="11">space timeline</text>
+      <text x="327" y="263" text-anchor="middle" fill="var(--text-muted)" font-size="11">project timeline</text>
 
       <rect x="465" y="210" width="155" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--line)"/>
       <text x="542" y="241" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Task history</text>
@@ -284,7 +284,7 @@
   <table>
     <thead><tr><th>Consumer</th><th>Query</th><th>Render responsibility</th></tr></thead>
     <tbody>
-      <tr><td>Inspector</td><td><code>events.listPaginated(projectRoot, spaceId)</code></td><td>Shows every product-facing fact for a space, filtered by type, category, severity, search, and time/order.</td></tr>
+      <tr><td>Inspector</td><td><code>events.listPaginated(projectRoot, projectId)</code></td><td>Shows every product-facing fact for a project, filtered by type, category, severity, search, and time/order.</td></tr>
       <tr><td>Task detail</td><td><code>events.listPaginated(projectRoot, search/filter taskId)</code></td><td>Shows lifecycle, review, blocker, assignment, and agent activity related to one task.</td></tr>
       <tr><td>Chat activity cards</td><td>Turn-scoped event projection by channel/run/turn.</td><td>Renders tool calls, run lifecycle, approval, and error activity beside transcript rows.</td></tr>
       <tr><td>Metrics</td><td>Aggregate event rows and projection rows.</td><td>Calculates counts, timelines, durations, severities, and tool usage without reading transcript bodies.</td></tr>
@@ -296,7 +296,7 @@
 
 <pre><code class="lang-go">type Handler struct {
     Events             eventdomain.EventService
-    SpaceLister        ProjectSpaceLister
+    ProjectLister        ProjectLister
     ResolveProjectRoot ProjectRootResolverFunc
 }
 
@@ -305,16 +305,16 @@ func (h *Handler) ListPaginated(
     p protocol.EventsListPaginatedParams,
 ) (protocol.EventsListPaginatedResult, error)</code></pre>
 
-  <p>The handler has two query modes. A run query requires <code>runId</code> and maps directly to one run-scoped <code>EventFilter</code>. A project query requires <code>projectRoot</code> or a resolvable <code>cwd</code>; it loads spaces for that project, narrows by <code>spaceId</code> when supplied, collects member and coordinator run ids, issues run-scoped event queries, annotates missing project/space/member metadata, and returns one sorted page.</p>
+  <p>The handler has two query modes. A run query requires <code>runId</code> and maps directly to one run-scoped <code>EventFilter</code>. A project query requires <code>projectRoot</code> or a resolvable <code>cwd</code>; it loads the project, narrows by <code>projectId</code> when supplied, collects member and coordinator run ids, issues run-scoped event queries, annotates missing project/member metadata, and returns one sorted page.</p>
 
   <table>
     <thead><tr><th>Handler concern</th><th>Rule</th></tr></thead>
     <tbody>
       <tr><td>Scope validation</td><td>Every list/count request supplies either <code>runId</code> or a resolvable project scope. Missing scope returns an invalid-params error.</td></tr>
-      <tr><td>Project aggregation</td><td>The handler resolves project spaces and run ids through injected ports. The repository remains run-scoped.</td></tr>
+      <tr><td>Project aggregation</td><td>The handler resolves project member run ids through injected ports. The repository remains run-scoped.</td></tr>
       <tr><td>Event append</td><td>No public RPC handler appends arbitrary events. Event writes come from producer services through typed app ports.</td></tr>
-      <tr><td>Authorization</td><td>RPC registration wraps handlers with caller identity and project/space access checks before event rows are returned.</td></tr>
-      <tr><td>Errors</td><td>Missing event service, missing project lister, unknown space, invalid scope, and repository failures return visible RPC errors.</td></tr>
+      <tr><td>Authorization</td><td>RPC registration wraps handlers with caller identity and project/project access checks before event rows are returned.</td></tr>
+      <tr><td>Errors</td><td>Missing event service, missing project lister, unknown project, invalid scope, and repository failures return visible RPC errors.</td></tr>
     </tbody>
   </table>
 
@@ -328,7 +328,7 @@ func (h *Handler) ListPaginated(
   <table>
     <thead><tr><th>Method</th><th>Purpose</th><th>Required scope</th></tr></thead>
     <tbody>
-      <tr><td><code>events.listPaginated</code></td><td>Return event rows with limit, cursor/offset, type, severity, category, origin, search, run, project, and space filters.</td><td><code>runId</code> or <code>projectRoot</code>; <code>spaceId</code> narrows project queries.</td></tr>
+      <tr><td><code>events.listPaginated</code></td><td>Return event rows with limit, cursor/offset, type, severity, category, origin, search, run, project, and project filters.</td><td><code>runId</code> or <code>projectRoot</code>; <code>projectId</code> narrows project queries.</td></tr>
       <tr><td><code>events.count</code></td><td>Return count for the same filter shape used by timeline badges and tabs.</td><td><code>runId</code> or <code>projectRoot</code>.</td></tr>
       <tr><td><code>events.latestSeq</code></td><td>Return the newest sequence for a run so clients can tail without replaying every row.</td><td><code>runId</code>.</td></tr>
       <tr><td><code>event.append</code></td><td>SSE notification emitted after a durable append.</td><td>Notification only; not a query or storage API.</td></tr>
@@ -336,7 +336,7 @@ func (h *Handler) ListPaginated(
   </table>
 
   <h2 id="composition">11. Composition root</h2>
-  <p>The application composition root constructs one event repository, one event app service, and one broadcasting wrapper. Producer services receive their own narrow event ports backed by composition-root adapters, never the event SQL repository. RPC receives the app service and project/space lister ports for project-wide aggregation.</p>
+  <p>The application composition root constructs one event repository, one event app service, and one broadcasting wrapper. Producer services receive their own narrow event ports backed by composition-root adapters, never the event SQL repository. RPC receives the app service and project/project lister ports for project-wide aggregation.</p>
 
 <pre><code class="lang-go">eventRepo := eventinfra.NewSQLRepository(handle)
 eventSvc := eventapp.NewService(eventRepo)
@@ -359,7 +359,7 @@ taskSvc.SetEventAppender(broadcastingEvents)</code></pre>
       <tr><td>SSE is not history.</td><td>Browser notifications only invalidate queries. Durable rows in <code>events</code> are the source of truth.</td></tr>
       <tr><td>Event RPC is read-only.</td><td>Append operations are service-owned side effects, not public RPC mutations.</td></tr>
       <tr><td>Domain lifecycle semantics stay with producing services.</td><td>The event service validates event shape and filters; task, mission, message, harness, decision, operator, and human-input services define their own facts.</td></tr>
-      <tr><td>Inspector reads product facts, not stale projections.</td><td>Inspector queries <code>events.listPaginated</code> with project and space filters and treats empty results as a real empty event history.</td></tr>
+      <tr><td>Inspector reads product facts, not stale projections.</td><td>Inspector queries <code>events.listPaginated</code> with project and project filters and treats empty results as a real empty event history.</td></tr>
     </tbody>
   </table>
 </div>

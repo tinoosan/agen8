@@ -372,7 +372,7 @@
     <tbody>
       <tr><td><code>escalation.create</code></td><td>Create pending escalation and apply block/graph side effects.</td><td><code>EscalationView</code></td></tr>
       <tr><td><code>escalation.get</code></td><td>Load one escalation.</td><td><code>EscalationView</code></td></tr>
-      <tr><td><code>escalation.list</code></td><td>List project escalations by status, urgency, category, space, limit, and offset.</td><td><code>[]EscalationView</code></td></tr>
+      <tr><td><code>escalation.list</code></td><td>List project escalations by status, urgency, category, project, limit, and offset.</td><td><code>[]EscalationView</code></td></tr>
       <tr><td><code>escalation.listPending</code></td><td>List pending escalation gates for operator dashboards.</td><td><code>[]EscalationView</code></td></tr>
       <tr><td><code>escalation.resolve</code></td><td>Resolve gate, unblock task, create decision, link graph, publish lifecycle event, notify requester.</td><td><code>EscalationView</code></td></tr>
       <tr><td><code>escalation.cancel</code></td><td>Cancel gate and unblock referenced task.</td><td><code>EscalationView</code></td></tr>
@@ -396,7 +396,7 @@
 
   <h2 id="mcp">8. MCP tool</h2>
 
-  <p>The <code>operator</code> MCP tool is the agent-facing adapter for the operator service. It supports two write actions and maps the session project, space, and member identity into typed app commands. The tool does not own lifecycle rules, graph writes, task blocking, or decision creation.</p>
+  <p>The <code>operator</code> MCP tool is the agent-facing adapter for the operator service. It supports two write actions and maps the session project, project, and member identity into typed app commands. The tool does not own lifecycle rules, graph writes, task blocking, or decision creation.</p>
 
   <table>
     <thead><tr><th>Tool action</th><th>Creates</th><th>Required input</th><th>Service path</th></tr></thead>
@@ -502,8 +502,8 @@ internal/mcp/tools/operator/
   <table>
     <thead><tr><th>Table</th><th>Meaning</th><th>Important indexes</th></tr></thead>
     <tbody>
-      <tr><td><code>escalations</code></td><td>Decision gates raised by agents or members.</td><td><code>project_id,status</code>, <code>task_ref</code>, <code>deadline</code>, <code>space_id</code></td></tr>
-      <tr><td><code>op_actions</code></td><td>Human/operator work requests and outcomes.</td><td><code>project_id,status</code>, <code>project_id,urgency</code>, <code>task_ref</code>, <code>space_id</code>, <code>created_at</code></td></tr>
+      <tr><td><code>escalations</code></td><td>Decision gates raised by agents or members.</td><td><code>project_id,status</code>, <code>task_ref</code>, <code>deadline</code>, <code>project_id</code></td></tr>
+      <tr><td><code>op_actions</code></td><td>Human/operator work requests and outcomes.</td><td><code>project_id,status</code>, <code>project_id,urgency</code>, <code>task_ref</code>, <code>project_id</code>, <code>created_at</code></td></tr>
     </tbody>
   </table>
 

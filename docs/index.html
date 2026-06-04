@@ -241,7 +241,7 @@
         </div>
         <div class="system-row">
           <span class="k">Services</span>
-          <span class="v">project, location, space, mission, task, decision</span>
+          <span class="v">project, location, mission, task, decision</span>
         </div>
         <div class="system-row">
           <span class="k">Agent API</span>
@@ -339,13 +339,13 @@
         <span class="path">internal/services/events</span>
       </a>
 
-      <a class="doc-card" href="./architecture/space-service.html">
+      <a class="doc-card" href="./architecture/project-service.html">
         <div>
           <div class="label">Service</div>
-          <div class="title">Space Service</div>
-          <div class="meta">Spaces, the member roster subdomain, project binding, lifecycle, and service/tool separation.</div>
+          <div class="title">Project Service</div>
+          <div class="meta">Durable project identity, the member roster, location-scoped root mapping, lifecycle, and the project work graph.</div>
         </div>
-        <span class="path">internal/services/space</span>
+        <span class="path">internal/services/project</span>
       </a>
 
       <a class="doc-card" href="./architecture/rpc-layer.html">
@@ -388,7 +388,7 @@
         <div>
           <div class="label">Tool</div>
           <div class="title">Message Tool</div>
-          <div class="meta">Send member and space messages through the real message service.</div>
+          <div class="meta">Send member-addressed messages through the real message service.</div>
         </div>
         <span class="path">internal/mcp/tools/message</span>
       </a>
@@ -402,13 +402,13 @@
         <span class="path">internal/mcp/tools/mission</span>
       </a>
 
-      <a class="doc-card" href="./architecture/mcp-space-tool.html">
+      <a class="doc-card" href="./architecture/mcp-project-tool.html">
         <div>
           <div class="label">Tool</div>
-          <div class="title">Space Tool</div>
-          <div class="meta">List spaces and members without owning space semantics in the tool.</div>
+          <div class="title">Project Tool</div>
+          <div class="meta">Register members and manage the project roster without owning project semantics in the tool.</div>
         </div>
-        <span class="path">internal/mcp/tools/space</span>
+        <span class="path">internal/mcp/tools/project</span>
       </a>
     </div>
   </section>

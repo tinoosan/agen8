@@ -162,7 +162,7 @@
     errors.go              # JSON-RPC error mapping
     identity.go            # request identity context shape
     auth.go                # auth.status registration
-    space.go               # space service method registration
+    project.go               # project service method registration
     task.go                # task service method registration example
     mission.go             # mission service method registration
 
@@ -174,10 +174,10 @@
       rpc/
         handler.go         # auth.status adapter
         types.go           # auth RPC status/result views
-    space/
+    project/
       rpc/
-        handler.go         # space.* and space.member.* adapter
-        types.go           # space and member roster RPC params/results/views
+        handler.go         # project.* and project.member.* adapter
+        types.go           # project and member roster RPC params/results/views
     task/
       rpc/
         handler.go         # task.create/get/list/update adapter
@@ -206,7 +206,7 @@
 
 <pre><code class="lang-go"><span class="tok-comment">// internal/services/task/rpc/types.go</span>
 <span class="tok-kw">type</span> <span class="tok-type">TaskCreateParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">SpaceID</span>     string   <span class="tok-string">`json:"spaceId"`</span>
+    <span class="tok-field">ProjectID</span>     string   <span class="tok-string">`json:"projectId"`</span>
     <span class="tok-field">AssignedTo</span>  string   <span class="tok-string">`json:"assignedTo"`</span>
     <span class="tok-field">Description</span> string   <span class="tok-string">`json:"description"`</span>
     <span class="tok-field">Title</span>       string   <span class="tok-string">`json:"title,omitempty"`</span>
@@ -214,7 +214,7 @@
 
 <span class="tok-comment">// internal/services/task/app/service.go</span>
 <span class="tok-kw">type</span> <span class="tok-type">CreateTaskParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">SpaceID</span>     <span class="tok-pkg">types</span>.<span class="tok-type">SpaceID</span>
+    <span class="tok-field">ProjectID</span>     <span class="tok-pkg">types</span>.<span class="tok-type">ProjectID</span>
     <span class="tok-field">AssignedTo</span>  <span class="tok-pkg">types</span>.<span class="tok-type">MemberID</span>
     <span class="tok-field">Description</span> string
     <span class="tok-field">Title</span>       string

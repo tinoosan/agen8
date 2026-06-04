@@ -19,14 +19,14 @@
 
 <span class="eyebrow">Architecture · MCP Message Tool</span>
 <h1>MCP message tool</h1>
-<p class="lede">The agent-facing communication tool for sending routed messages between members and spaces.</p>
+<p class="lede">The agent-facing communication tool for sending routed messages between members and projects.</p>
 
 <h2>Purpose</h2>
 
 <p><code>message</code> is an MCP tool, not a service API. It exposes the product-facing communication contract to member harnesses and maps each action to typed application service calls. The handler owns request decoding, destination resolution, role-aware policy, message-envelope construction, and deterministic result shaping.</p>
 
 <div class="callout">
-<strong>Boundary.</strong> Message tool behavior lives in <code>internal/mcp/tools/message</code>. The message service owns durable message persistence and delivery wakes. The channel service owns channel identity and routability. The space service owns space records and the member roster subdomain. The <a href="./mcp-space-tool.html">MCP space tool</a> owns discovery only; it does not send messages. No service accepts raw <code>message(...)</code> tool JSON, and no service package defines a message-tool-specific service or port.
+<strong>Boundary.</strong> Message tool behavior lives in <code>internal/mcp/tools/message</code>. The message service owns durable message persistence and delivery wakes. The channel service owns channel identity and routability. The project service owns project records and the member roster subdomain. The <a href="./mcp-project-tool.html">MCP project tool</a> owns discovery only; it does not send messages. No service accepts raw <code>message(...)</code> tool JSON, and no service package defines a message-tool-specific service or port.
 </div>
 
 <h2>Actions</h2>
@@ -36,8 +36,8 @@
   <tr>
     <td><code>send</code></td>
     <td>Validate content and destination, resolve recipient labels, build a durable member-message envelope, publish it, and return the resolved route.</td>
-    <td><code>SpaceSvc.Get</code>, <code>SpaceSvc.ListMembers</code>, <code>ChannelSvc.Load</code>, <code>MessageSvc.PublishMessage</code>.</td>
-    <td>Message id, destination member label, destination space id, destination channel id, kind, correlation id, and queued status.</td>
+    <td><code>ProjectSvc.Get</code>, <code>ProjectSvc.ListMembers</code>, <code>ChannelSvc.Load</code>, <code>MessageSvc.PublishMessage</code>.</td>
+    <td>Message id, destination member label, destination project id, destination channel id, kind, correlation id, and queued status.</td>
   </tr>
 </table>
 
@@ -65,10 +65,10 @@
   <text x="530" y="90" text-anchor="middle" font-size="11" fill="#555">resolve route + envelope</text>
 
   <rect x="700" y="20" width="160" height="48" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
-  <text x="780" y="49" text-anchor="middle" font-size="12" font-weight="600">SpaceSvc</text>
+  <text x="780" y="49" text-anchor="middle" font-size="12" font-weight="600">ProjectSvc</text>
 
   <rect x="700" y="92" width="160" height="48" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
-  <text x="780" y="121" text-anchor="middle" font-size="12" font-weight="600">Space members</text>
+  <text x="780" y="121" text-anchor="middle" font-size="12" font-weight="600">Members</text>
 
   <rect x="700" y="164" width="160" height="48" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
   <text x="780" y="193" text-anchor="middle" font-size="12" font-weight="600">ChannelSvc</text>
@@ -98,7 +98,7 @@
 
 <h2>Application wiring</h2>
 
-<p>The application composition root constructs <code>SpaceSvc</code>, <code>ChannelSvc</code>, and <code>MessageSvc</code> once. <code>SpaceSvc</code> supplies both space records and member roster lookups through narrow handler-owned interfaces. When the runtime supervisor spawns a managed harness, it registers an MCP session token that carries those interfaces. The MCP server resolves the session token and supplies the services to the native <code>message</code> handler.</p>
+<p>The application composition root constructs <code>ProjectSvc</code>, <code>ChannelSvc</code>, and <code>MessageSvc</code> once. <code>ProjectSvc</code> supplies both project records and member roster lookups through narrow handler-owned interfaces. When the runtime supervisor spawns a managed harness, it registers an MCP session token that carries those interfaces. The MCP server resolves the session token and supplies the services to the native <code>message</code> handler.</p>
 
 <div class="diagram">
 <svg viewBox="0 0 940 375" width="940" height="375" role="img" aria-label="Application to MCP message handler wiring">
@@ -110,7 +110,7 @@
 
   <rect x="24" y="34" width="210" height="94" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
   <text x="129" y="58" text-anchor="middle" font-size="13" font-weight="600">Application</text>
-  <text x="129" y="80" text-anchor="middle" font-size="11" fill="#555">SpaceSvc · members</text>
+  <text x="129" y="80" text-anchor="middle" font-size="11" fill="#555">ProjectSvc · members</text>
   <text x="129" y="98" text-anchor="middle" font-size="11" fill="#555">ChannelSvc · MessageSvc</text>
   <text x="129" y="116" text-anchor="middle" font-size="11" fill="#555">owned once</text>
 
@@ -122,7 +122,7 @@
 
   <rect x="560" y="34" width="190" height="94" rx="5" fill="#f0f0f0" stroke="#888"/>
   <text x="655" y="58" text-anchor="middle" font-size="13" font-weight="600">MCP Session</text>
-  <text x="655" y="80" text-anchor="middle" font-size="11" fill="#555">SpaceReader · Members</text>
+  <text x="655" y="80" text-anchor="middle" font-size="11" fill="#555">ProjectReader · Members</text>
   <text x="655" y="98" text-anchor="middle" font-size="11" fill="#555">ChannelReader · Publisher</text>
   <text x="655" y="116" text-anchor="middle" font-size="11" fill="#555">member identity</text>
 
@@ -155,21 +155,21 @@
 
 <pre><code>// MCP session bootstrap
 tokenStore.Register(token, agen8mcp.Session{
-    SpaceReader:      app.SpaceSvc,
-    MemberDirectory:  app.SpaceSvc,
+    ProjectReader:      app.ProjectSvc,
+    MemberDirectory:  app.ProjectSvc,
     ChannelReader:    app.ChannelSvc,
     MessagePublisher: app.MessageSvc,
-    SpaceID:          spacedomain.SpaceID(spaceID),
+    ProjectID:          projectdomain.ProjectID(projectID),
     MemberID:         memberID,
 })
 
 // internal/mcp/server.go
 message.NewHandler().Handle(ctx, message.CallContext{
-    Spaces:   session.SpaceReader,
+    Projects:   session.ProjectReader,
     Members:  session.MemberDirectory,
     Channels: session.ChannelReader,
     Messages: session.MessagePublisher,
-    SpaceID:  string(session.SpaceID),
+    ProjectID:  string(session.ProjectID),
 }, arguments)</code></pre>
 
 <h2>Handler contract</h2>
@@ -180,12 +180,11 @@ message.NewHandler().Handle(ctx, message.CallContext{
 }
 
 type CallContext struct {
-    Spaces        SpaceReader
+    Projects      ProjectReader
     Members       MemberDirectory
     Channels      ChannelReader
     Messages      Publisher
     ProjectID     string
-    SpaceID       string
     ActorMemberID string
 }
 
@@ -197,7 +196,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 <table>
   <tr><th>Field</th><th>Used by</th><th>Rule</th></tr>
   <tr><td><code>action</code></td><td>send</td><td>Required. One of <code>send</code>.</td></tr>
-  <tr><td><code>destination_member_id</code></td><td>send</td><td>Required. Routes to an active member returned by <code>space(action="members")</code> in the caller's space.</td></tr>
+  <tr><td><code>destination_member_id</code></td><td>send</td><td>Required. Routes to an active member returned by <code>project(action="member_list")</code> in the caller's project.</td></tr>
   <tr><td><code>kind</code></td><td><code>send</code></td><td>One of <code>inform</code>, <code>query</code>, <code>ack</code>, <code>response</code>.</td></tr>
   <tr><td><code>subject</code></td><td><code>send</code></td><td>Required non-empty semantic subject.</td></tr>
   <tr><td><code>body</code></td><td><code>send</code></td><td>Required non-empty message body.</td></tr>
@@ -212,8 +211,8 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
   <tr><th>Destination</th><th>Resolution</th><th>Envelope route</th></tr>
   <tr>
     <td><code>destination_member_id</code></td>
-    <td>Load the destination member, verify it is active, and verify it belongs to the caller's space.</td>
-    <td><code>SpaceID=&lt;caller space id&gt;</code>, <code>SourceMemberID=&lt;caller member id&gt;</code>, <code>DestinationMemberID=&lt;member id&gt;</code>, <code>ChannelID=channel:&lt;space id&gt;:member:&lt;member id&gt;</code>.</td>
+    <td>Load the destination member, verify it is active, and verify it belongs to the caller's project.</td>
+    <td><code>ProjectID=&lt;caller project id&gt;</code>, <code>SourceMemberID=&lt;caller member id&gt;</code>, <code>DestinationMemberID=&lt;member id&gt;</code>, <code>ChannelID=channel:&lt;project id&gt;:member:&lt;member id&gt;</code>.</td>
   </tr>
 </table>
 
@@ -221,7 +220,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 
 <table>
   <tr><th>Member type</th><th>Visible actions</th><th>Reason</th></tr>
-  <tr><td><code>coordinator</code></td><td><code>send</code></td><td>Coordinates work across spaces and members.</td></tr>
+  <tr><td><code>coordinator</code></td><td><code>send</code></td><td>Coordinates work across projects and members.</td></tr>
   <tr><td><code>worker</code></td><td><code>send</code></td><td>Replies to coordinators and peers through listed member channels.</td></tr>
 </table>
 
@@ -247,7 +246,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 <table>
   <tr><th>Test</th><th>Assertion</th></tr>
   <tr><td><code>send</code> to member channel</td><td>Resolves the destination channel through channel service, resolves the destination member, publishes through message service, and returns message id plus destination label.</td></tr>
-  <tr><td><code>send</code> to space coordinator</td><td>Resolves the destination space coordinator and coordinator channel before publishing.</td></tr>
+  <tr><td><code>send</code> to coordinator</td><td>Resolves the destination coordinator and coordinator channel before publishing.</td></tr>
   <tr><td>missing destination</td><td>Fails loudly before publish.</td></tr>
   <tr><td>invalid kind</td><td>Rejects anything outside <code>inform</code>, <code>query</code>, <code>ack</code>, and <code>response</code>.</td></tr>
   <tr><td>reply without correlation</td><td>Rejects <code>ack</code> and <code>response</code> without <code>correlation_id</code>.</td></tr>

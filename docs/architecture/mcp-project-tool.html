@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP project tool</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / mcp-project-tool</span>
+  </div>
+</nav>
+
+<div class="page">
+
+<span class="eyebrow">Architecture · MCP Project Tool</span>
+<h1>MCP project tool</h1>
+<p class="lede">The agent-facing coordination tool for projects and the members registered inside them.</p>
+
+<div class="callout">
+<strong>Hard cutover.</strong> This tool replaces the retired <code>space</code> MCP tool. The coordination boundary is the project; members attach directly to a project. There is no <code>space_id</code> and no space-listing action.
+</div>
+
+<h2>Purpose</h2>
+
+<p><code>project</code> is an MCP tool, not a service API. It exposes one product-facing coordination contract to member harnesses and maps each action to typed application service calls. The handler owns request decoding, role-aware tool policy, cross-service orchestration, and deterministic result shaping.</p>
+
+<div class="callout">
+<strong>Boundary.</strong> Project tool behavior lives in <code>internal/mcp/tools/project</code>. The tool exposes the member roster through composite actions. Message sending belongs to the separate <code>message</code> MCP tool. The project service owns project records, lifecycle, and the member roster subdomain. No service accepts raw <code>project(...)</code> tool JSON, and no service package defines a project-tool-specific service or port.
+</div>
+
+<h2>Actions</h2>
+
+<table>
+  <tr><th>Action</th><th>Handler responsibility</th><th>Service calls</th><th>Result</th></tr>
+  <tr>
+    <td><code>register</code></td>
+    <td>Resolve or create the local project, bind the MCP caller to an Agen8 member, activate the harness session, register the session token, and start durable message delivery for that member when the harness exposes a routable session reference.</td>
+    <td><code>ProjectSvc</code>, <code>HarnessSvc</code>, <code>MessageSvc.StartAgentDelivery</code>.</td>
+    <td>Project id, project root, location id, member id, member type, channel id, MCP token, and MCP URL.</td>
+  </tr>
+  <tr>
+    <td><code>member_list</code></td>
+    <td>Resolve the active actor member, stamp caller context, and list active members of the project, exposing routable channel ids.</td>
+    <td><code>ProjectSvc.GetMember</code>, <code>ProjectSvc.ListMembers</code>.</td>
+    <td>Member list with member id, display label, member type, lifecycle state, and channel id.</td>
+  </tr>
+  <tr>
+    <td><code>member_create</code></td>
+    <td>Resolve the active coordinator member, stamp caller context, validate the requested runtime config, and delegate worker registration to the project service.</td>
+    <td><code>ProjectSvc.GetMember</code>, <code>ProjectSvc.RegisterMember</code>.</td>
+    <td>Created member with member id, display label, granted member type, lifecycle state, and channel id.</td>
+  </tr>
+  <tr>
+    <td><code>member_get</code></td>
+    <td>Resolve the active actor member, stamp caller context, and read one visible member.</td>
+    <td><code>ProjectSvc.GetMember</code>.</td>
+    <td>Member record with stable id, display label, member type, lifecycle state, and channel id.</td>
+  </tr>
+  <tr>
+    <td><code>member_update_config</code></td>
+    <td>Resolve the active actor member, stamp caller context, validate runtime config, and delegate roster update to the project service.</td>
+    <td><code>ProjectSvc.GetMember</code>, <code>ProjectSvc.UpdateMemberConfig</code>.</td>
+    <td>Updated member record.</td>
+  </tr>
+  <tr>
+    <td><code>member_remove</code></td>
+    <td>Resolve the active actor member, stamp caller context, and delegate member removal to the project service.</td>
+    <td><code>ProjectSvc.GetMember</code>, <code>ProjectSvc.RemoveMember</code>.</td>
+    <td>Removed member record with terminal lifecycle state.</td>
+  </tr>
+</table>
+
+<h2>Control flow</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 880 340" width="880" height="340" role="img" aria-label="MCP project tool control flow">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <rect x="30" y="40" width="150" height="58" rx="5" fill="#e8f1fb" stroke="#3a78c2"/>
+  <text x="105" y="64" text-anchor="middle" font-size="13" font-weight="600">Member agent</text>
+  <text x="105" y="84" text-anchor="middle" font-size="11" fill="#555">project(action=...)</text>
+
+  <rect x="230" y="40" width="150" height="58" rx="5" fill="#fff4d6" stroke="#b58820"/>
+  <text x="305" y="64" text-anchor="middle" font-size="13" font-weight="600">MCP server</text>
+  <text x="305" y="84" text-anchor="middle" font-size="11" fill="#555">auth + route</text>
+
+  <rect x="430" y="26" width="170" height="86" rx="5" fill="#fff" stroke="#555"/>
+  <text x="515" y="53" text-anchor="middle" font-size="13" font-weight="600">project handler</text>
+  <text x="515" y="73" text-anchor="middle" font-size="11" fill="#555">decode + policy</text>
+  <text x="515" y="91" text-anchor="middle" font-size="11" fill="#555">orchestrate + format</text>
+
+  <rect x="680" y="20" width="160" height="48" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="760" y="49" text-anchor="middle" font-size="12" font-weight="600">ProjectSvc</text>
+
+  <rect x="680" y="92" width="160" height="48" rx="5" fill="#e6f5e8" stroke="#3d8c4a"/>
+  <text x="760" y="121" text-anchor="middle" font-size="12" font-weight="600">Project members</text>
+
+  <line x1="180" y1="69" x2="230" y2="69" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="380" y1="69" x2="430" y2="69" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="600" y1="58" x2="680" y2="44" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="600" y1="74" x2="680" y2="116" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <rect x="430" y="210" width="170" height="72" rx="5" fill="#f0f0f0" stroke="#888"/>
+  <text x="515" y="235" text-anchor="middle" font-size="12" font-weight="600">MCP result</text>
+  <text x="515" y="254" text-anchor="middle" font-size="10.5" fill="#555">semantic text + structured</text>
+  <text x="515" y="270" text-anchor="middle" font-size="10.5" fill="#555">content, no raw fallback</text>
+
+  <line x1="515" y1="112" x2="515" y2="210" stroke="#555" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <text x="105" y="318" text-anchor="middle" font-size="11" fill="#666">product-facing tool</text>
+  <text x="515" y="318" text-anchor="middle" font-size="11" fill="#666">protocol translation boundary</text>
+  <text x="760" y="318" text-anchor="middle" font-size="11" fill="#666">typed service use cases</text>
+</svg>
+</div>
+
+<h2>Application wiring</h2>
+
+<p>The application composition root constructs <code>ProjectSvc</code> once. The same concrete service exposes project lifecycle methods and member roster methods. When the runtime supervisor spawns a managed harness, it registers an MCP session token that carries that concrete service as narrow handler-owned interfaces. The MCP server stores the session and supplies those interfaces to the native <code>project</code> handler when the agent calls <code>project(...)</code>.</p>
+
+<pre><code>// MCP session bootstrap
+tokenStore.Register(token, agen8mcp.Session{
+    ProjectID:       strings.TrimSpace(projectID),
+    MemberID:        memberID,
+    MemberDirectory: app.ProjectSvc,  // typed as project.MemberService
+    MemberRegistrar: app.ProjectSvc,  // typed as project.MemberRegistrar
+})
+
+// internal/mcp/server.go
+project.NewHandler().Handle(ctx, project.CallContext{
+    Members:       session.MemberDirectory,
+    Registrar:     session.MemberRegistrar,
+    ProjectID:     session.ProjectID,
+    ActorMemberID: session.MemberID,
+}, arguments)</code></pre>
+
+<h2>Handler contract</h2>
+
+<p>The handler interface is MCP-owned. Service interfaces are consumer-owned and narrow: the handler declares only the methods it needs for the <code>member_*</code> composite actions. The MCP session token is already bound to a member id and project id, so the handler first stamps a provisional member-scoped <code>caller.Caller</code> into <code>context.Context</code>. It then resolves <code>ActorMemberID</code> through the member roster interface, requires an active member, and restamps the shared caller with the resolved member id, user id, and project id before service calls.</p>
+
+<p>Caller bootstrapping happens before actor lookup. Member roster reads are project-service methods and require caller identity themselves; calling <code>GetMember</code> on an unstamped context is a capture bug, not an authorization fallback. MCP tools may seed context from the authenticated session token, but they must still resolve the actor record and let service authorization enforce visibility.</p>
+
+<h2>Runtime-resolved identity</h2>
+
+<p>The agent supplies discovery intent. Agen8 supplies runtime identity. The MCP session token already binds the call to a project, member, and channel, so those values are not agent-required request fields. The handler uses them to stamp caller context, resolve the active actor member, and authorize service calls.</p>
+
+<h2>MCP registration and delivery</h2>
+
+<p><code>project.register</code> is the MCP-first entry point for harnesses. A harness can call it with only a working directory or project id. Agen8 resolves the project, creates or reuses the member identity, activates the durable harness session, and returns the ids the harness needs for later tool calls.</p>
+
+<p>When a harness exposes a stable native session or thread id in the MCP call metadata, the MCP server passes that value through the project tool call context. The daemon stores it as the harness session reference. For Codex, the server reads the top-level MCP metadata fields <code>threadId</code>, <code>thread_id</code>, <code>sessionId</code>, and <code>session_id</code>, plus the optional <code>x-codex-turn-metadata</code> object that Codex sends with <code>thread_id</code> and <code>session_id</code>.</p>
+
+<div class="callout">
+<strong>Boundary.</strong> MCP registration does not recreate Codex or Claude thread management. Agen8 stores a native session reference only when the connected harness exposes one. Tool calls, member ids, task ids, decisions, and graph records remain the durable Agen8 coordination surface. Native-thread delivery is an optional integration path for harnesses that can receive messages into an existing session. Registration is explicit; Agen8 does not auto-promote terminal sessions.
+</div>
+
+<p>After registration, Agen8 starts the per-member durable delivery worker. The worker drains queued member messages and wakes on new messages. If the registered harness has a routable native session reference, messages can reach that existing harness session. If no native reference exists, the same durable Agen8 records remain available through MCP tools and the inspection UI.</p>
+
+<table>
+  <tr><th>Input</th><th>Source</th><th>Behavior</th></tr>
+  <tr><td><code>project_root</code> or <code>project_id</code></td><td>Tool arguments</td><td>Creates or reuses the Agen8 project.</td></tr>
+  <tr><td><code>thread_id</code> or <code>session_id</code></td><td>Tool arguments, then MCP metadata fallback</td><td>Creates or reuses a member for that native harness session and stores the value as the harness session reference.</td></tr>
+  <tr><td>No native session reference</td><td>Absent metadata</td><td>Reuses the active coordinator for the project/harness when available, otherwise creates the first coordinator member.</td></tr>
+  <tr><td>First member in a project</td><td>Agen8 roster state</td><td>Receives the coordinator role.</td></tr>
+  <tr><td>Later session-specific members</td><td>Agen8 roster state</td><td>Receive the worker role unless an existing member already has a different valid role.</td></tr>
+</table>
+
+<table>
+  <tr><th>Value</th><th>Source</th><th>Agent supplies it?</th></tr>
+  <tr><td><code>project_id</code></td><td>MCP session</td><td>No.</td></tr>
+  <tr><td>caller <code>member_id</code></td><td>MCP session, then active member lookup</td><td>No.</td></tr>
+  <tr><td>caller <code>channel_id</code></td><td>MCP session and member roster</td><td>No.</td></tr>
+</table>
+
+<h2>Request model</h2>
+
+<table>
+  <tr><th>Field</th><th>Used by</th><th>Rule</th></tr>
+  <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>register</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update_config</code>, <code>member_remove</code>.</td></tr>
+  <tr><td><code>project_root</code></td><td><code>register</code></td><td>Optional when <code>project_id</code> is supplied. Creates or reuses a local project for the working directory.</td></tr>
+  <tr><td><code>project_id</code></td><td><code>register</code></td><td>Optional when <code>project_root</code> is supplied. Reuses an existing project.</td></tr>
+  <tr><td><code>location_id</code></td><td><code>register</code></td><td>Optional. Defaults to the local location when a project root creates a project.</td></tr>
+  <tr><td><code>session_id</code></td><td><code>register</code></td><td>Optional stable native harness session id. Explicit arguments take precedence over MCP metadata.</td></tr>
+  <tr><td><code>thread_id</code></td><td><code>register</code></td><td>Optional stable native harness thread id. Explicit arguments take precedence over MCP metadata and session id.</td></tr>
+  <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
+  <tr><td><code>display_name</code></td><td><code>member_create</code></td><td>Optional display label. Created members are workers; coordinators cannot mint another coordinator through the tool.</td></tr>
+  <tr><td><code>harness_kind</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime harness kind passed to service config validation.</td></tr>
+  <tr><td><code>model</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime model passed to service config validation.</td></tr>
+  <tr><td><code>effort</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime reasoning effort passed to service config validation.</td></tr>
+  <tr><td>permission mode</td><td><code>member_create</code>, <code>member_update_config</code></td><td>Not accepted by the MCP tool. The project service uses the loosest default for the harness kind when a member is created.</td></tr>
+</table>
+
+<h2>Role policy</h2>
+
+<table>
+  <tr><th>Member type</th><th>Visible actions</th><th>Reason</th></tr>
+  <tr><td><code>coordinator</code></td><td><code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Sees routable peers and manages the roster when coordination requires another member.</td></tr>
+  <tr><td><code>worker</code></td><td><code>member_get</code>, <code>member_list</code></td><td>Discovers routable peer identities. If a worker calls roster mutation actions, the tool rejects the request before mutation.</td></tr>
+</table>
+
+<p>Visibility is prompt/tool-surface policy. Authorization remains enforced by the handler and the underlying services using caller identity from <code>ctx</code>. The handler rejects missing or removed actor members before it calls <code>ProjectSvc</code>.</p>
+
+<h2>Result rules</h2>
+
+<table>
+  <tr><th>Rule</th><th>Why it exists</th></tr>
+  <tr><td>Results include stable ids and display labels.</td><td>Agents can reference members and projects without guessing from raw ids.</td></tr>
+  <tr><td>List actions render actual entries.</td><td>Catalog/list operations are product surfaces, not debug metadata.</td></tr>
+  <tr><td>Missing labels are explicit errors.</td><td>Generic placeholders and raw ids hide capture or lookup bugs.</td></tr>
+  <tr><td>No raw payload fallback.</td><td>Transcript cards and tool results remain deterministic and semantic.</td></tr>
+</table>
+
+<h2>Code layout</h2>
+
+<div class="tree">internal/mcp/tools/project/
+  project.go          # schema, action routing, service orchestration, result formatting
+  project_test.go     # member CRUD success and boundary error paths
+  service_assertions_test.go # compile-time checks for service-shaped interfaces
+</div>
+
+<h2>Tests</h2>
+
+<table>
+  <tr><th>Test</th><th>Assertion</th></tr>
+  <tr><td><code>member_list</code> success</td><td>Resolves the actor member, calls the roster read path, and returns routable member labels and channel ids.</td></tr>
+  <tr><td><code>member_create</code> success</td><td>Executes through the MCP server session, stamps caller identity, calls the registrar, and returns the created member payload.</td></tr>
+  <tr><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code> success</td><td>Call the same production session path and delegate to the project service roster methods.</td></tr>
+  <tr><td>member mutation validation</td><td>Rejects missing ids or runtime fields before calling the registrar.</td></tr>
+  <tr><td>missing actor</td><td>Fails loudly before calling the project service.</td></tr>
+  <tr><td>missing structured payload</td><td>Returns an explicit capture/decode error.</td></tr>
+  <tr><td>missing label</td><td>Returns an unresolved-label error, not a placeholder.</td></tr>
+  <tr><td>role policy</td><td>Every member role receives the same discovery actions; handler rejects unsupported actions defensively.</td></tr>
+</table>
+
+<div class="footnote">Architecture · agen8 · MCP project tool</div>
+
+</div>
+
+</body>
+</html>

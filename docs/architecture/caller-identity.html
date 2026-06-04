@@ -39,7 +39,7 @@
 <span class="tok-kw">type</span> <span class="tok-type">Caller</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">UserID</span>   string
     <span class="tok-field">MemberID</span> <span class="tok-pkg">types</span>.<span class="tok-type">MemberID</span>
-    <span class="tok-field">SpaceID</span>  <span class="tok-pkg">types</span>.<span class="tok-type">SpaceID</span>
+    <span class="tok-field">ProjectID</span>  <span class="tok-pkg">types</span>.<span class="tok-type">ProjectID</span>
     <span class="tok-field">Role</span>     string
 }
 
@@ -89,7 +89,7 @@
 
     <rect x="390" y="224" width="252" height="56" rx="8" fill="var(--bg-subtle)" stroke="var(--border)"/>
     <text x="516" y="247" text-anchor="middle" font-weight="700" fill="var(--text)">MCP member caller</text>
-    <text x="516" y="266" text-anchor="middle" fill="var(--text-muted)">MemberID + SpaceID + UserID</text>
+    <text x="516" y="266" text-anchor="middle" fill="var(--text-muted)">MemberID + ProjectID + UserID</text>
 
     <text x="450" y="316" text-anchor="middle" fill="var(--text-muted)">Adapters authenticate. Services authorize. Context carries one caller shape across service boundaries.</text>
   </svg>
@@ -109,13 +109,13 @@
   </table>
 
   <h2 id="storage">4. Member storage</h2>
-  <p>The canonical durable member table is <code>members</code>. A member belongs to a space, but the table name reflects the domain record, not one relationship. This is a hard-cutover schema: new local databases create <code>members</code>; old <code>space_members</code> databases are not kept alive through compatibility views or fallback reads.</p>
+  <p>The canonical durable member table is <code>members</code>. A member belongs to a project, but the table name reflects the domain record, not one relationship. This is a hard-cutover schema: new local databases create <code>members</code>; old <code>project_members</code> databases are not kept alive through compatibility views or fallback reads.</p>
 
 <pre><code class="lang-sql"><span class="tok-kw">CREATE TABLE</span> members (
     member_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT 'local',
     project_id TEXT DEFAULT '',
-    space_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
     member_type TEXT NOT NULL,
     lifecycle_state TEXT NOT NULL,
     harness_kind TEXT DEFAULT '',
