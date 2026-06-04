@@ -920,7 +920,7 @@ func TestServiceDeliverNextAgentMessageDefersUnreachableTurnAndAllowsFreshMessag
 		sendFn: func(ctx context.Context, input HarnessChatMessage) (HarnessChatResult, error) {
 			if strings.Contains(input.Text, "old unreachable") {
 				attempts <- "old"
-				return HarnessChatResult{}, fmt.Errorf("steer active codex turn: codex app-server thread %q is not loaded by the reachable remote-control server", "thread-1")
+				return HarnessChatResult{}, fmt.Errorf("steer active codex turn: codex app-server turn/steer: no active turn to steer")
 			}
 			attempts <- "fresh"
 			return HarnessChatResult{SessionID: "session-1", TurnID: "turn-1", Delivery: string(conversation.DeliveryDelivered)}, nil

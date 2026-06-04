@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -265,8 +266,10 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	base.UserID = d.currentMCPUser(ctx)
 	sessionID, threadID := mcp.SessionRefsFromHTTPHeader(header)
 	reqCtx := mcp.SessionRequestContext{}
+	rpcMethod := ""
 	if len(body) > 0 {
 		reqCtx = mcp.SessionRequestContextFromJSONRPCBody(body)
+		rpcMethod = mcpRPCMethod(body)
 	}
 	if d != nil && d.logger != nil {
 		d.logger.InfoContext(ctx, "mcp session request context resolved",
@@ -284,6 +287,9 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	if strings.TrimSpace(reqCtx.ThreadID) != "" {
 		threadID = reqCtx.ThreadID
 	}
+	explicitNativeRef := mcpHeaderHasExplicitNativeRef(header) ||
+		strings.TrimSpace(reqCtx.SessionID) != "" ||
+		strings.TrimSpace(reqCtx.ThreadID) != ""
 	sessionRef := strings.TrimSpace(threadID)
 	if sessionRef == "" {
 		sessionRef = strings.TrimSpace(sessionID)
@@ -297,8 +303,14 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 			)
 		}
 	}
+	if !mcpRequestRequiresRegisteredSession(rpcMethod) {
+		return base, nil
+	}
 	if sessionRef == "" {
-		active, err := d.resolveBoundMCPSession(ctx, token)
+		if mcpRequestAllowsBootstrapSession(body) {
+			return base, nil
+		}
+		active, err := d.resolveUniqueMCPSessionForToken(ctx, token)
 		if err != nil {
 			return mcp.Session{}, err
 		}
@@ -315,12 +327,25 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 		return mcp.Session{}, err
 	}
 	if active == nil {
-		active, err = d.resolveBoundMCPSession(ctx, token)
-		if err != nil {
-			return mcp.Session{}, err
-		}
-		if active == nil {
-			return base, nil
+		if mcpRequestAllowsBootstrapSession(body) {
+			if explicitNativeRef {
+				return base, nil
+			}
+			active, err = d.resolveUniqueMCPSessionForToken(ctx, token)
+			if err != nil {
+				return mcp.Session{}, err
+			}
+			if active == nil {
+				return base, nil
+			}
+		} else {
+			active, err = d.resolveUniqueMCPSessionForToken(ctx, token)
+			if err != nil {
+				return mcp.Session{}, err
+			}
+			if active == nil {
+				return base, nil
+			}
 		}
 	}
 	if err := d.registerMCPTokenForSession(active); err != nil {
@@ -347,6 +372,57 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	return d.mcpSessionFor(active), nil
 }
 
+func mcpRPCMethod(body []byte) string {
+	var req struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(body), &req); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(req.Method)
+}
+
+func mcpRequestRequiresRegisteredSession(method string) bool {
+	switch strings.TrimSpace(method) {
+	case "tools/call", "resources/read", "resources/subscribe", "resources/unsubscribe":
+		return true
+	default:
+		return false
+	}
+}
+
+func mcpRequestAllowsBootstrapSession(body []byte) bool {
+	var req struct {
+		Method string `json:"method"`
+		Params struct {
+			Name      string `json:"name"`
+			Arguments struct {
+				Action string `json:"action"`
+			} `json:"arguments"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(body), &req); err != nil {
+		return false
+	}
+	if strings.TrimSpace(req.Method) != "tools/call" || strings.TrimSpace(req.Params.Name) != "space" {
+		return false
+	}
+	switch strings.TrimSpace(req.Params.Arguments.Action) {
+	case "register", "create", "list":
+		return true
+	default:
+		return false
+	}
+}
+
+func mcpHeaderHasExplicitNativeRef(header http.Header) bool {
+	if header == nil {
+		return false
+	}
+	return strings.TrimSpace(header.Get("Agen8-Native-Session-Id")) != "" ||
+		strings.TrimSpace(header.Get("Agen8-Native-Thread-Id")) != ""
+}
+
 func (d *Daemon) resolveBoundMCPSession(ctx context.Context, token string) (*harnessdomain.Session, error) {
 	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
 		return nil, fmt.Errorf("harness service is required")
@@ -364,6 +440,37 @@ func (d *Daemon) resolveBoundMCPSession(ctx context.Context, token string) (*har
 		return nil, nil
 	}
 	return active, nil
+}
+
+func (d *Daemon) resolveUniqueMCPSessionForToken(ctx context.Context, token string) (*harnessdomain.Session, error) {
+	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
+		return nil, fmt.Errorf("harness service is required")
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, nil
+	}
+	sessions, err := d.app.HarnessSvc.ListActiveSessions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list active harness sessions for mcp token: %w", err)
+	}
+	var matches []*harnessdomain.Session
+	for _, session := range sessions {
+		if session == nil || session.Status != harnessdomain.SessionActive {
+			continue
+		}
+		if strings.TrimSpace(session.MCPToken) == token {
+			matches = append(matches, session)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return d.resolveBoundMCPSession(ctx, token)
+	case 1:
+		return matches[0], nil
+	default:
+		return nil, fmt.Errorf("mcp token %q is bound to multiple active harness sessions; native session metadata is required", token)
+	}
 }
 
 func (d *Daemon) resolveActiveHarnessSessionByRef(ctx context.Context, sessionRef string) (*harnessdomain.Session, error) {

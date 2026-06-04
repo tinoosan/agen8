@@ -313,10 +313,6 @@ func nativeSessionResolverHeader(header http.Header, method string) http.Header 
 	if out == nil {
 		out = http.Header{}
 	}
-	if !strings.EqualFold(strings.TrimSpace(method), "initialize") {
-		out.Del("Mcp-Session-Id")
-		out.Del("MCP-Session-Id")
-	}
 	return out
 }
 
@@ -412,7 +408,7 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 				slog.Info("mcp resource subscription rejected", "uri", agen8ResourceURIFromSubscribe(req), "error", err)
 				return err
 			}
-			session, err := s.resolveSessionForMCPCall(ctx, conn, nil, "", "")
+			session, err := s.resolveSessionForMCPCall(ctx, conn, nil, "", "", syntheticJSONRPCMethodBody("resources/subscribe"))
 			if err != nil {
 				slog.Info("mcp resource subscription session resolve failed", "uri", agen8ResourceURIFromSubscribe(req), "error", err)
 				return err
@@ -481,7 +477,7 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 				if threadID == "" {
 					threadID = headerThreadID
 				}
-				session, err := s.resolveSessionForMCPCall(ctx, conn, nativeRefsHeaderFromRequest(req), sessionID, threadID)
+				session, err := s.resolveSessionForMCPCall(ctx, conn, nativeRefsHeaderFromRequest(req), sessionID, threadID, toolCallRPCBody(req))
 				if err != nil {
 					return mcpToolCallErrorResult(err.Error()), nil
 				}
@@ -507,7 +503,7 @@ func addAgen8SessionResources(server *mcp.Server, owner *Server, conn *mcpConnec
 		Description: "Queued Agen8 notifications addressed to the registered MCP member.",
 		MIMEType:    "application/json",
 	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-		session, err := owner.resolveSessionForMCPCall(ctx, conn, nativeRefsHeaderFromRequest(req), "", "")
+		session, err := owner.resolveSessionForMCPCall(ctx, conn, nativeRefsHeaderFromRequest(req), "", "", syntheticJSONRPCMethodBody("resources/read"))
 		if err != nil {
 			return nil, err
 		}
@@ -522,7 +518,7 @@ func nativeRefsHeaderFromRequest(req interface{ GetExtra() *mcp.RequestExtra }) 
 	return req.GetExtra().Header
 }
 
-func (s *Server) resolveSessionForMCPCall(ctx context.Context, conn *mcpConnectionState, header http.Header, sessionID string, threadID string) (Session, error) {
+func (s *Server) resolveSessionForMCPCall(ctx context.Context, conn *mcpConnectionState, header http.Header, sessionID string, threadID string, rpcBody []byte) (Session, error) {
 	if conn == nil {
 		return Session{}, fmt.Errorf("mcp connection state is required")
 	}
@@ -530,13 +526,48 @@ func (s *Server) resolveSessionForMCPCall(ctx context.Context, conn *mcpConnecti
 	storedSessionID, storedThreadID := conn.nativeRefs()
 	resolverHeader := nativeSessionResolverHeader(header, "")
 	if storedSessionID != "" {
-		resolverHeader.Set(agen8NativeSessionIDHeader, storedSessionID)
+		resolverHeader.Set("Mcp-Session-Id", storedSessionID)
 	}
 	if storedThreadID != "" {
-		resolverHeader.Set(agen8NativeThreadIDHeader, storedThreadID)
+		resolverHeader.Set("Mcp-Thread-Id", storedThreadID)
 	}
 	callCtx := contextWithSessionRefs(ctx, storedSessionID, storedThreadID)
-	return s.resolveSession(callCtx, conn.token, resolverHeader, nil)
+	return s.resolveSession(callCtx, conn.token, resolverHeader, rpcBody)
+}
+
+func toolCallRPCBody(req *mcp.CallToolRequest) []byte {
+	body := syntheticJSONRPCMethodBody("tools/call")
+	if req == nil || req.Params == nil {
+		return body
+	}
+	arguments := req.Params.Arguments
+	if arguments == nil {
+		arguments = json.RawMessage(`{}`)
+	}
+	payload := map[string]any{
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      strings.TrimSpace(req.Params.Name),
+			"arguments": arguments,
+		},
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return encoded
+}
+
+func syntheticJSONRPCMethodBody(method string) []byte {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return nil
+	}
+	body, err := json.Marshal(map[string]string{"method": method})
+	if err != nil {
+		return nil
+	}
+	return body
 }
 
 func validateAgen8ResourceSubscription(req *mcp.SubscribeRequest) error {
@@ -808,10 +839,7 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 			StructuredContent: result.Structured,
 		}, nil
 	case space.Name:
-		sessionID, threadID := mcpSessionRefs(req)
-		if sessionID == "" && threadID == "" {
-			sessionID, threadID = sessionRefsFromContext(ctx)
-		}
+		sessionID, threadID := explicitNativeSessionRefsFromToolRequest(req)
 		result, err := space.NewHandler().Handle(ctx, space.CallContext{
 			Spaces:           session.SpaceReader,
 			Members:          session.MemberDirectory,
@@ -907,6 +935,18 @@ func mcpToolAction(arguments json.RawMessage) string {
 		return ""
 	}
 	return strings.TrimSpace(raw.Action)
+}
+
+func explicitNativeSessionRefsFromToolRequest(req *mcp.CallToolRequest) (sessionID, threadID string) {
+	sessionID, threadID = mcpSessionRefs(req)
+	if sessionID != "" || threadID != "" {
+		return sessionID, threadID
+	}
+	header := nativeRefsHeaderFromRequest(req)
+	if header == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(header.Get(agen8NativeSessionIDHeader)), strings.TrimSpace(header.Get(agen8NativeThreadIDHeader))
 }
 
 func mcpSessionRefs(req *mcp.CallToolRequest) (sessionID, threadID string) {
