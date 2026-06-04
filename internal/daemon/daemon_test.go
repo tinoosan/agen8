@@ -1006,7 +1006,7 @@ func TestHTTPStrategyBootstrapMCPTokenRejectsAmbiguousSharedTokenWithoutNativeRe
 		"method": "tools/call",
 		"params": {
 			"name": "space",
-			"arguments": {"action":"register","project_root":%s,"harness_kind":"claude-cli"}
+			"arguments": {"action":"register","project_root":%s,"harness_kind":"claude-cli","session_id":"claude-protocol-resource-session"}
 		}
 	}`, quoteJSON(projectRoot)))))
 	require.NoError(t, err)
@@ -1072,6 +1072,37 @@ func TestHTTPStrategyBootstrapMCPTokenRejectsAmbiguousSharedTokenWithoutNativeRe
 	require.Nil(t, registerAgainRPC.Error)
 	require.False(t, registerAgainRPC.Result.IsError)
 	require.NotEmpty(t, registerAgainRPC.Result.StructuredContent.MemberID)
+
+	readResourceReq, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(`{
+		"jsonrpc": "2.0",
+		"id": "read-inbox-after-register-args",
+		"method": "resources/read",
+		"params": {"uri":"agen8://me/inbox"}
+	}`)))
+	require.NoError(t, err)
+	readResourceReq.Header.Set("Content-Type", "application/json")
+	readResourceReq.Header.Set("Accept", "application/json, text/event-stream")
+	readResourceReq.Header.Set("Mcp-Session-Id", registerAgainReq.Header.Get("Mcp-Session-Id"))
+	readResourceResp, err := http.DefaultClient.Do(readResourceReq)
+	require.NoError(t, err)
+	defer readResourceResp.Body.Close()
+	require.Equal(t, http.StatusOK, readResourceResp.StatusCode)
+
+	var readResourceRPC struct {
+		Result struct {
+			Contents []struct {
+				URI  string `json:"uri"`
+				Text string `json:"text"`
+			} `json:"contents"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(readResourceResp.Body).Decode(&readResourceRPC))
+	require.Nil(t, readResourceRPC.Error)
+	require.Len(t, readResourceRPC.Result.Contents, 1)
+	require.Equal(t, "agen8://me/inbox", readResourceRPC.Result.Contents[0].URI)
 }
 
 func TestHTTPStrategyBootstrapMCPTokenRoutesMessageByMCPSessionHeader(t *testing.T) {

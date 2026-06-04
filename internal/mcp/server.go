@@ -130,10 +130,12 @@ func (s *TokenStore) Resolve(token string) (Session, error) {
 }
 
 type Server struct {
-	tokenStore *TokenStore
-	registry   *Registry
-	handler    http.Handler
-	resolver   SessionResolver
+	tokenStore               *TokenStore
+	registry                 *Registry
+	handler                  http.Handler
+	resolver                 SessionResolver
+	protocolSessionBindings  map[string]sessionRefs
+	protocolSessionBindingMu sync.RWMutex
 }
 
 type SessionResolver func(ctx context.Context, token string, header http.Header, body []byte) (Session, error)
@@ -147,8 +149,9 @@ func NewServer(tokenStore *TokenStore) (*Server, error) {
 		return nil, err
 	}
 	out := &Server{
-		tokenStore: tokenStore,
-		registry:   registry,
+		tokenStore:              tokenStore,
+		registry:                registry,
+		protocolSessionBindings: map[string]sessionRefs{},
 	}
 	out.handler = mcp.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcp.Server {
@@ -268,6 +271,14 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	slog.Info("mcp request received", "http_method", r.Method, "rpc_method", method, "has_body", len(bytes.TrimSpace(body)) > 0)
 	prepareInitialNativeSessionHeader(r, method)
 	resolverHeader := nativeSessionResolverHeader(r.Header, method)
+	if mappedSessionID, mappedThreadID := s.nativeRefsForProtocolSession(r.URL.Query().Get("token"), protocolSessionIDFromHeader(r.Header)); mappedSessionID != "" || mappedThreadID != "" {
+		if mappedSessionID != "" {
+			resolverHeader.Set("Mcp-Session-Id", mappedSessionID)
+		}
+		if mappedThreadID != "" {
+			resolverHeader.Set("Mcp-Thread-Id", mappedThreadID)
+		}
+	}
 	requestSessionID, requestThreadID := SessionRefsFromHTTPHeader(resolverHeader)
 	ctx := contextWithSessionRefs(r.Context(), requestSessionID, requestThreadID)
 	session, err := s.resolveSession(ctx, r.URL.Query().Get("token"), resolverHeader, body)
@@ -469,20 +480,58 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 				InputSchema: append(json.RawMessage(nil), def.inputSchema...),
 			}
 			server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				rpcBody := toolCallRPCBody(req)
 				sessionID, threadID := mcpSessionRefs(req)
-				headerSessionID, headerThreadID := SessionRefsFromHTTPHeader(nativeSessionResolverHeader(nativeRefsHeaderFromRequest(req), ""))
+				header := nativeRefsHeaderFromRequest(req)
+				headerSessionID, headerThreadID := explicitNativeSessionRefsFromHeader(header)
+				if headerSessionID == "" && headerThreadID == "" {
+					if mappedSessionID, mappedThreadID := s.nativeRefsForProtocolSession(conn.token, protocolSessionIDFromHeader(header)); mappedSessionID != "" || mappedThreadID != "" {
+						headerSessionID, headerThreadID = mappedSessionID, mappedThreadID
+					}
+				}
+				if headerSessionID == "" && headerThreadID == "" {
+					headerSessionID, headerThreadID = SessionRefsFromHTTPHeader(nativeSessionResolverHeader(header, ""))
+				}
 				if sessionID == "" {
 					sessionID = headerSessionID
 				}
 				if threadID == "" {
 					threadID = headerThreadID
 				}
-				session, err := s.resolveSessionForMCPCall(ctx, conn, nativeRefsHeaderFromRequest(req), sessionID, threadID, toolCallRPCBody(req))
+				bodyRefs := SessionRequestContextFromJSONRPCBody(rpcBody)
+				if sessionID == "" {
+					sessionID = bodyRefs.SessionID
+				}
+				if threadID == "" {
+					threadID = bodyRefs.ThreadID
+				}
+				if strings.EqualFold(strings.TrimSpace(native.name), space.Name) {
+					argSessionID, argThreadID := explicitNativeSessionRefsFromSpaceRegisterArguments(req)
+					if sessionID == "" {
+						sessionID = argSessionID
+					}
+					if threadID == "" {
+						threadID = argThreadID
+					}
+				}
+				session, err := s.resolveSessionForMCPCall(ctx, conn, nativeRefsHeaderFromRequest(req), sessionID, threadID, rpcBody)
 				if err != nil {
 					return mcpToolCallErrorResult(err.Error()), nil
 				}
 				ctx = contextWithSessionRefs(ctx, sessionID, threadID)
-				return executeNativeMCPTool(ctx, native, session, req)
+				result, err := executeNativeMCPTool(ctx, native, session, req)
+				if err == nil && strings.EqualFold(strings.TrimSpace(native.name), space.Name) && strings.EqualFold(mcpToolAction(argumentsFromToolRequest(req)), "register") {
+					resultSessionID, resultThreadID := nativeSessionRefsFromToolResult(result)
+					if resultSessionID == "" {
+						resultSessionID = sessionID
+					}
+					if resultThreadID == "" {
+						resultThreadID = threadID
+					}
+					s.bindProtocolSession(conn.token, protocolSessionIDFromHeader(header), resultSessionID, resultThreadID)
+					conn.observe(resultSessionID, resultThreadID)
+				}
+				return result, err
 			})
 			continue
 		}
@@ -518,9 +567,69 @@ func nativeRefsHeaderFromRequest(req interface{ GetExtra() *mcp.RequestExtra }) 
 	return req.GetExtra().Header
 }
 
+func protocolSessionIDFromHeader(header http.Header) string {
+	if len(header) == 0 {
+		return ""
+	}
+	sessionID := strings.TrimSpace(header.Get("Mcp-Session-Id"))
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(header.Get("MCP-Session-Id"))
+	}
+	return sessionID
+}
+
+func explicitNativeSessionRefsFromHeader(header http.Header) (sessionID, threadID string) {
+	if len(header) == 0 {
+		return "", ""
+	}
+	return strings.TrimSpace(header.Get(agen8NativeSessionIDHeader)), strings.TrimSpace(header.Get(agen8NativeThreadIDHeader))
+}
+
+func (s *Server) bindProtocolSession(token string, protocolSessionID string, sessionID string, threadID string) {
+	if s == nil {
+		return
+	}
+	token = strings.TrimSpace(token)
+	protocolSessionID = strings.TrimSpace(protocolSessionID)
+	sessionID = strings.TrimSpace(sessionID)
+	threadID = strings.TrimSpace(threadID)
+	if token == "" || protocolSessionID == "" || (sessionID == "" && threadID == "") {
+		return
+	}
+	s.protocolSessionBindingMu.Lock()
+	if s.protocolSessionBindings == nil {
+		s.protocolSessionBindings = map[string]sessionRefs{}
+	}
+	s.protocolSessionBindings[protocolSessionBindingKey(token, protocolSessionID)] = sessionRefs{sessionID: sessionID, threadID: threadID}
+	s.protocolSessionBindingMu.Unlock()
+	slog.Info("mcp protocol session bound to native refs", "protocol_session_id", protocolSessionID, "has_session_id", sessionID != "", "has_thread_id", threadID != "")
+}
+
+func (s *Server) nativeRefsForProtocolSession(token string, protocolSessionID string) (sessionID, threadID string) {
+	if s == nil {
+		return "", ""
+	}
+	token = strings.TrimSpace(token)
+	protocolSessionID = strings.TrimSpace(protocolSessionID)
+	if token == "" || protocolSessionID == "" {
+		return "", ""
+	}
+	s.protocolSessionBindingMu.RLock()
+	refs := s.protocolSessionBindings[protocolSessionBindingKey(token, protocolSessionID)]
+	s.protocolSessionBindingMu.RUnlock()
+	return strings.TrimSpace(refs.sessionID), strings.TrimSpace(refs.threadID)
+}
+
+func protocolSessionBindingKey(token string, protocolSessionID string) string {
+	return strings.TrimSpace(token) + "\x00" + strings.TrimSpace(protocolSessionID)
+}
+
 func (s *Server) resolveSessionForMCPCall(ctx context.Context, conn *mcpConnectionState, header http.Header, sessionID string, threadID string, rpcBody []byte) (Session, error) {
 	if conn == nil {
 		return Session{}, fmt.Errorf("mcp connection state is required")
+	}
+	if sessionID == "" && threadID == "" {
+		sessionID, threadID = s.nativeRefsForProtocolSession(conn.token, protocolSessionIDFromHeader(header))
 	}
 	conn.observe(sessionID, threadID)
 	storedSessionID, storedThreadID := conn.nativeRefs()
@@ -533,6 +642,13 @@ func (s *Server) resolveSessionForMCPCall(ctx context.Context, conn *mcpConnecti
 	}
 	callCtx := contextWithSessionRefs(ctx, storedSessionID, storedThreadID)
 	return s.resolveSession(callCtx, conn.token, resolverHeader, rpcBody)
+}
+
+func argumentsFromToolRequest(req *mcp.CallToolRequest) json.RawMessage {
+	if req == nil || req.Params == nil || len(req.Params.Arguments) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return req.Params.Arguments
 }
 
 func toolCallRPCBody(req *mcp.CallToolRequest) []byte {
@@ -937,8 +1053,35 @@ func mcpToolAction(arguments json.RawMessage) string {
 	return strings.TrimSpace(raw.Action)
 }
 
+func nativeSessionRefsFromToolResult(result *mcp.CallToolResult) (sessionID, threadID string) {
+	if result == nil || result.StructuredContent == nil {
+		return "", ""
+	}
+	raw, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		return "", ""
+	}
+	var structured struct {
+		NativeSessionRef string `json:"nativeSessionRef"`
+		SessionID        string `json:"sessionId"`
+		ThreadID         string `json:"threadId"`
+	}
+	if err := json.Unmarshal(raw, &structured); err != nil {
+		return "", ""
+	}
+	sessionID = strings.TrimSpace(structured.NativeSessionRef)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(structured.SessionID)
+	}
+	return sessionID, strings.TrimSpace(structured.ThreadID)
+}
+
 func explicitNativeSessionRefsFromToolRequest(req *mcp.CallToolRequest) (sessionID, threadID string) {
 	sessionID, threadID = mcpSessionRefs(req)
+	if sessionID != "" || threadID != "" {
+		return sessionID, threadID
+	}
+	sessionID, threadID = explicitNativeSessionRefsFromSpaceRegisterArguments(req)
 	if sessionID != "" || threadID != "" {
 		return sessionID, threadID
 	}
@@ -947,6 +1090,24 @@ func explicitNativeSessionRefsFromToolRequest(req *mcp.CallToolRequest) (session
 		return "", ""
 	}
 	return strings.TrimSpace(header.Get(agen8NativeSessionIDHeader)), strings.TrimSpace(header.Get(agen8NativeThreadIDHeader))
+}
+
+func explicitNativeSessionRefsFromSpaceRegisterArguments(req *mcp.CallToolRequest) (sessionID, threadID string) {
+	if req == nil || req.Params == nil || len(req.Params.Arguments) == 0 {
+		return "", ""
+	}
+	var raw struct {
+		Action    string `json:"action"`
+		SessionID string `json:"session_id"`
+		ThreadID  string `json:"thread_id"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &raw); err != nil {
+		return "", ""
+	}
+	if strings.TrimSpace(raw.Action) != "register" {
+		return "", ""
+	}
+	return strings.TrimSpace(raw.SessionID), strings.TrimSpace(raw.ThreadID)
 }
 
 func mcpSessionRefs(req *mcp.CallToolRequest) (sessionID, threadID string) {
@@ -974,17 +1135,21 @@ func SessionRefsFromJSONRPCBody(body []byte) (sessionID, threadID string) {
 
 func SessionRequestContextFromJSONRPCBody(body []byte) SessionRequestContext {
 	var envelope struct {
+		Method string `json:"method"`
 		Params struct {
-			Meta map[string]any `json:"_meta,omitempty"`
+			Name      string         `json:"name,omitempty"`
+			Meta      map[string]any `json:"_meta,omitempty"`
+			Arguments struct {
+				Action    string `json:"action"`
+				SessionID string `json:"session_id"`
+				ThreadID  string `json:"thread_id"`
+			} `json:"arguments,omitempty"`
 		} `json:"params,omitempty"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(body), &envelope); err != nil {
 		return SessionRequestContext{}
 	}
 	meta := envelope.Params.Meta
-	if len(meta) == 0 {
-		return SessionRequestContext{}
-	}
 	threadID := firstMetaString(meta, "threadId", "thread_id")
 	sessionID := firstMetaString(meta, "sessionId", "session_id")
 	turnID := firstMetaString(meta, "turnId", "turn_id")
@@ -997,6 +1162,16 @@ func SessionRequestContextFromJSONRPCBody(body []byte) SessionRequestContext {
 		}
 		if turnID == "" {
 			turnID = firstMetaString(turnMeta, "turn_id", "turnId")
+		}
+	}
+	if strings.TrimSpace(envelope.Method) == "tools/call" &&
+		strings.TrimSpace(envelope.Params.Name) == space.Name &&
+		strings.TrimSpace(envelope.Params.Arguments.Action) == "register" {
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(envelope.Params.Arguments.SessionID)
+		}
+		if threadID == "" {
+			threadID = strings.TrimSpace(envelope.Params.Arguments.ThreadID)
 		}
 	}
 	return SessionRequestContext{
