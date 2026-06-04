@@ -279,17 +279,21 @@ func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Requ
 	}
 	instanceID := strings.TrimSpace(req.ChannelInstanceID)
 	if instanceID == "" {
-		instanceID = fmt.Sprintf("legacy:%s", strings.TrimSpace(req.NotifyURL))
+		http.Error(w, "channelInstanceId is required; restart Claude Code after running Agen8 Claude setup", http.StatusBadRequest)
+		return
 	}
 	startedAt := time.Now().UTC()
-	if rawStartedAt := strings.TrimSpace(req.ChannelStartedAt); rawStartedAt != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, rawStartedAt)
-		if err != nil {
-			http.Error(w, "channelStartedAt must be RFC3339Nano", http.StatusBadRequest)
-			return
-		}
-		startedAt = parsed.UTC()
+	rawStartedAt := strings.TrimSpace(req.ChannelStartedAt)
+	if rawStartedAt == "" {
+		http.Error(w, "channelStartedAt is required; restart Claude Code after running Agen8 Claude setup", http.StatusBadRequest)
+		return
 	}
+	parsed, err := time.Parse(time.RFC3339Nano, rawStartedAt)
+	if err != nil {
+		http.Error(w, "channelStartedAt must be RFC3339Nano", http.StatusBadRequest)
+		return
+	}
+	startedAt = parsed.UTC()
 	persisted, err := d.app.HarnessSvc.RefreshSessionClaudeChannelRoute(r.Context(), session.ID, req.NotifyURL, instanceID, startedAt)
 	if err != nil {
 		status := http.StatusBadRequest

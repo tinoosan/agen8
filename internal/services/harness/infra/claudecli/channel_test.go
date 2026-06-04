@@ -153,7 +153,7 @@ func TestHandleChannelToolCallSendsMessageWithSessionBinding(t *testing.T) {
 		MemberID:  "member-claude",
 		SessionID: "claude-session-1",
 	})
-	result, err := handleChannelToolCall(context.Background(), root, json.RawMessage(`{
+	result, err := handleChannelToolCall(context.Background(), newClaudeChannelBindingState(root), json.RawMessage(`{
 		"name":"message",
 		"arguments":{
 			"action":"send",
@@ -213,7 +213,7 @@ func TestRegisterClaudeChannelRouteDoesNotFollowBindingChangesAfterSuccess(t *te
 	defer cancel()
 	startedAt := time.Date(2026, 6, 4, 10, 0, 0, 123, time.UTC)
 	instance := channelRouteInstance{ID: "channel-instance-1", StartedAt: startedAt, ProcessID: 1234}
-	go registerClaudeChannelRoute(ctx, ChannelOptions{ProjectRoot: root}, "http://127.0.0.1:4555/notify", instance)
+	go registerClaudeChannelRoute(ctx, newClaudeChannelBindingState(root), nil, "http://127.0.0.1:4555/notify", instance)
 
 	first := waitForChannelRoutePayload(t, received)
 	if first["memberId"] != "member-1" || first["sessionId"] != "session-ref-1" {
@@ -232,6 +232,62 @@ func TestRegisterClaudeChannelRouteDoesNotFollowBindingChangesAfterSuccess(t *te
 	case second := <-received:
 		t.Fatalf("stale channel process followed changed binding: %#v", second)
 	case <-time.After(250 * time.Millisecond):
+	}
+}
+
+func TestHandleChannelToolCallDoesNotFollowBindingChangesAfterFirstSend(t *testing.T) {
+	root := t.TempDir()
+	received := make(chan map[string]any, 2)
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/harness/claude-channel/message" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		received <- payload
+		_, _ = w.Write([]byte(`{"ok":true,"text":"sent","result":{"messageId":"msg-1"}}`))
+	}))
+	t.Cleanup(daemon.Close)
+
+	writeBindingForTest(t, root, claudeSessionBindingFile{
+		MCPURL:    daemon.URL + "/mcp?token=token-1",
+		Token:     "token-1",
+		MemberID:  "member-coordinator",
+		SessionID: "session-coordinator",
+	})
+	state := newClaudeChannelBindingState(root)
+	sendArgs := json.RawMessage(`{
+		"name":"message",
+		"arguments":{
+			"action":"send",
+			"destination_member_id":"member-worker",
+			"kind":"inform",
+			"subject":"UAT",
+			"body":"check"
+		}
+	}`)
+	if _, err := handleChannelToolCall(context.Background(), state, sendArgs); err != nil {
+		t.Fatalf("first handleChannelToolCall: %v", err)
+	}
+	first := waitForChannelRoutePayload(t, received)
+	if first["memberId"] != "member-coordinator" || first["sessionId"] != "session-coordinator" {
+		t.Fatalf("first payload=%#v", first)
+	}
+
+	writeBindingForTest(t, root, claudeSessionBindingFile{
+		MCPURL:    daemon.URL + "/mcp?token=token-1",
+		Token:     "token-1",
+		MemberID:  "member-worker",
+		SessionID: "session-worker",
+	})
+	if _, err := handleChannelToolCall(context.Background(), state, sendArgs); err != nil {
+		t.Fatalf("second handleChannelToolCall: %v", err)
+	}
+	second := waitForChannelRoutePayload(t, received)
+	if second["memberId"] != "member-coordinator" || second["sessionId"] != "session-coordinator" {
+		t.Fatalf("channel send followed sibling binding: %#v", second)
 	}
 }
 

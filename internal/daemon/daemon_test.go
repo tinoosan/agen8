@@ -2722,7 +2722,10 @@ func TestClaudeChannelRegisterBindsRouteByMemberID(t *testing.T) {
 		"token": %q,
 		"sessionId": %q,
 		"memberId": "member-1",
-		"notifyUrl": "http://127.0.0.1:4567/notify"
+		"notifyUrl": "http://127.0.0.1:4567/notify",
+		"channelInstanceId": "instance-1",
+		"channelStartedAt": "2026-06-04T12:00:00Z",
+		"processId": 1234
 	}`, active.MCPToken, active.Ref)
 	resp, err := http.Post(srv.URL+"/harness/claude-channel/register", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
@@ -2733,6 +2736,48 @@ func TestClaudeChannelRegisterBindsRouteByMemberID(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, persisted)
 	require.Equal(t, "http://127.0.0.1:4567/notify", persisted.ClaudeChannelURL)
+	require.Equal(t, "instance-1", persisted.ClaudeChannelInstanceID)
+}
+
+func TestClaudeChannelRegisterRejectsLegacyRoutePayload(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	err := d.handleSpaceMemberLifecycle(ctx, eventbus.SpaceMemberLifecycleEvent{
+		ProjectID:      "project-1",
+		SpaceID:        "space-1",
+		MemberID:       "member-1",
+		ChannelID:      "channel:space-1:member:member-1",
+		DisplayName:    "Claude One",
+		MemberType:     "worker",
+		EventType:      eventbus.SpaceMemberEventRegistered,
+		LifecycleState: "active",
+		HarnessKind:    "claude-cli",
+		Model:          "claude-opus-4-7",
+		Effort:         "high",
+	})
+	require.NoError(t, err)
+	active, err := d.app.HarnessSvc.GetActiveSession(ctx, "member-1")
+	require.NoError(t, err)
+	require.NotNil(t, active)
+
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	body := fmt.Sprintf(`{
+		"token": %q,
+		"sessionId": %q,
+		"memberId": "member-1",
+		"notifyUrl": "http://127.0.0.1:4567/notify"
+	}`, active.MCPToken, active.Ref)
+	resp, err := http.Post(srv.URL+"/harness/claude-channel/register", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	data, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "channelInstanceId is required")
+	require.Equal(t, "", d.mcpBinding.claudeChannelURL(active.ID))
 }
 
 func TestClaudeChannelRegisterRejectsOlderRouteInstance(t *testing.T) {
@@ -3046,7 +3091,10 @@ func TestClaudeBridgeHeaderScopesSharedTokenForMemberScopedMCPTools(t *testing.T
 		"token": "agen8-local",
 		"sessionId": "claude-native-shared",
 		"memberId": %s,
-		"notifyUrl": "http://127.0.0.1:4567/notify"
+		"notifyUrl": "http://127.0.0.1:4567/notify",
+		"channelInstanceId": "shared-claude-channel",
+		"channelStartedAt": "2026-06-04T12:00:00Z",
+		"processId": 1234
 	}`, quoteJSON(claudeMemberID))
 	channelResp, err := http.Post(srv.URL+"/harness/claude-channel/register", "application/json", strings.NewReader(channelRegisterBody))
 	require.NoError(t, err)
@@ -3089,6 +3137,80 @@ func TestClaudeBridgeHeaderScopesSharedTokenForMemberScopedMCPTools(t *testing.T
 	require.False(t, messageRPC.Result.IsError, "message send returned error content: %+v", messageRPC.Result.Content)
 	require.Equal(t, claudeMemberID, messageRPC.Result.StructuredContent.SourceMemberID)
 	require.Equal(t, codexMemberID, messageRPC.Result.StructuredContent.DestinationMemberID)
+
+	interClaudeReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "claude-to-sibling-message",
+		"method": "tools/call",
+		"params": {
+			"name": "message",
+			"arguments": {"action":"send","destination_member_id":%s,"kind":"inform","subject":"inter claude","body":"must route from first Claude to sibling"}
+		}
+	}`, quoteJSON(siblingClaudeMemberID)))))
+	require.NoError(t, err)
+	interClaudeReq.Header.Set("Content-Type", "application/json")
+	interClaudeReq.Header.Set("Accept", "application/json, text/event-stream")
+	interClaudeReq.Header.Set("Agen8-Native-Session-Id", "claude-native-shared")
+	interClaudeResp, err := http.DefaultClient.Do(interClaudeReq)
+	require.NoError(t, err)
+	defer interClaudeResp.Body.Close()
+	require.Equal(t, http.StatusOK, interClaudeResp.StatusCode)
+
+	var interClaudeRPC struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				SourceMemberID      string `json:"sourceMemberId"`
+				DestinationMemberID string `json:"destinationMemberId"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+		Error any `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(interClaudeResp.Body).Decode(&interClaudeRPC))
+	require.Nil(t, interClaudeRPC.Error)
+	require.False(t, interClaudeRPC.Result.IsError)
+	require.Equal(t, claudeMemberID, interClaudeRPC.Result.StructuredContent.SourceMemberID)
+	require.Equal(t, siblingClaudeMemberID, interClaudeRPC.Result.StructuredContent.DestinationMemberID)
+
+	siblingInboxReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(`{
+		"jsonrpc": "2.0",
+		"id": "sibling-inbox",
+		"method": "tools/call",
+		"params": {
+			"name": "message",
+			"arguments": {"action":"inbox","status":"queued","limit":10}
+		}
+	}`)))
+	require.NoError(t, err)
+	siblingInboxReq.Header.Set("Content-Type", "application/json")
+	siblingInboxReq.Header.Set("Accept", "application/json, text/event-stream")
+	siblingInboxReq.Header.Set("Agen8-Native-Session-Id", "claude-native-sibling")
+	siblingInboxResp, err := http.DefaultClient.Do(siblingInboxReq)
+	require.NoError(t, err)
+	defer siblingInboxResp.Body.Close()
+	require.Equal(t, http.StatusOK, siblingInboxResp.StatusCode)
+
+	var siblingInboxRPC struct {
+		Result struct {
+			IsError           bool `json:"isError"`
+			StructuredContent struct {
+				MemberID string `json:"memberId"`
+				Messages []struct {
+					SourceMemberID      string `json:"sourceMemberId"`
+					DestinationMemberID string `json:"destinationMemberId"`
+					Subject             string `json:"subject"`
+				} `json:"messages"`
+			} `json:"structuredContent"`
+		} `json:"result"`
+		Error any `json:"error,omitempty"`
+	}
+	require.NoError(t, json.NewDecoder(siblingInboxResp.Body).Decode(&siblingInboxRPC))
+	require.Nil(t, siblingInboxRPC.Error)
+	require.False(t, siblingInboxRPC.Result.IsError)
+	require.Equal(t, siblingClaudeMemberID, siblingInboxRPC.Result.StructuredContent.MemberID)
+	require.NotEmpty(t, siblingInboxRPC.Result.StructuredContent.Messages)
+	require.Equal(t, claudeMemberID, siblingInboxRPC.Result.StructuredContent.Messages[0].SourceMemberID)
+	require.Equal(t, siblingClaudeMemberID, siblingInboxRPC.Result.StructuredContent.Messages[0].DestinationMemberID)
 
 	withoutHeaderReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
 		"jsonrpc": "2.0",

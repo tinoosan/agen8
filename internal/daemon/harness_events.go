@@ -448,7 +448,7 @@ func (d *Daemon) resolveUniqueMCPSessionForToken(ctx context.Context, token stri
 	case 1:
 		return matches[0], nil
 	default:
-		return nil, fmt.Errorf("mcp token %q is bound to multiple active harness sessions; native session metadata is required", token)
+		return nil, fmt.Errorf("mcp token %q is bound to multiple active harness sessions; native session metadata is required. Run Agen8 Claude setup so .mcp.json uses `agen8-mcp-server mcp bridge`, or call space.register with session_id/native_session_ref before member-scoped tools", token)
 	}
 }
 

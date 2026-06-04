@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -155,7 +157,8 @@ func RunChannel(ctx context.Context, opts ChannelOptions) error {
 		}
 	}
 	logChannel(opts.ErrOut, "listening for local notifications at %s", notifyURL)
-	go registerClaudeChannelRoute(ctx, opts, notifyURL, routeInstance)
+	bindingState := newClaudeChannelBindingState(opts.ProjectRoot, routeInstance.StartedAt)
+	go registerClaudeChannelRoute(ctx, bindingState, opts.ErrOut, notifyURL, routeInstance)
 
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -178,7 +181,7 @@ func RunChannel(ctx context.Context, opts ChannelOptions) error {
 		case "tools/list":
 			_ = writer.result(req.ID, map[string]any{"tools": []any{channelMessageToolDefinition()}})
 		case "tools/call":
-			result, err := handleChannelToolCall(ctx, opts.ProjectRoot, req.Params)
+			result, err := handleChannelToolCall(ctx, bindingState, req.Params)
 			if err != nil {
 				_ = writer.error(req.ID, -32000, err.Error())
 				continue
@@ -202,7 +205,41 @@ func RunChannel(ctx context.Context, opts ChannelOptions) error {
 	return nil
 }
 
-func handleChannelToolCall(ctx context.Context, projectRoot string, rawParams json.RawMessage) (map[string]any, error) {
+type claudeChannelBindingState struct {
+	projectRoot string
+	startedAt   time.Time
+	mu          sync.Mutex
+	binding     claudeSessionBindingFile
+	bound       bool
+}
+
+func newClaudeChannelBindingState(projectRoot string, startedAt ...time.Time) *claudeChannelBindingState {
+	var start time.Time
+	if len(startedAt) > 0 {
+		start = startedAt[0]
+	}
+	return &claudeChannelBindingState{projectRoot: strings.TrimSpace(projectRoot), startedAt: start}
+}
+
+func (s *claudeChannelBindingState) Binding() (claudeSessionBindingFile, error) {
+	if s == nil {
+		return claudeSessionBindingFile{}, fmt.Errorf("claude channel binding state is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.bound {
+		return s.binding, nil
+	}
+	binding, err := readClaudeSessionBindingAt(s.projectRoot, s.startedAt)
+	if err != nil {
+		return claudeSessionBindingFile{}, err
+	}
+	s.binding = binding
+	s.bound = true
+	return binding, nil
+}
+
+func handleChannelToolCall(ctx context.Context, bindingState *claudeChannelBindingState, rawParams json.RawMessage) (map[string]any, error) {
 	var params channelCallToolParams
 	if len(rawParams) == 0 {
 		return nil, fmt.Errorf("tool call params are required")
@@ -213,7 +250,7 @@ func handleChannelToolCall(ctx context.Context, projectRoot string, rawParams js
 	if strings.TrimSpace(params.Name) != "message" {
 		return nil, fmt.Errorf("unknown channel tool %q", params.Name)
 	}
-	binding, err := readClaudeSessionBinding(projectRoot)
+	binding, err := bindingState.Binding()
 	if err != nil {
 		return nil, err
 	}
@@ -234,11 +271,10 @@ func handleChannelToolCall(ctx context.Context, projectRoot string, rawParams js
 	}, nil
 }
 
-func registerClaudeChannelRoute(ctx context.Context, opts ChannelOptions, notifyURL string, routeInstance channelRouteInstance) {
-	errOut := opts.ErrOut
+func registerClaudeChannelRoute(ctx context.Context, bindingState *claudeChannelBindingState, errOut io.Writer, notifyURL string, routeInstance channelRouteInstance) {
 	attempt := 0
 	for {
-		binding, err := readClaudeSessionBinding(opts.ProjectRoot)
+		binding, err := bindingState.Binding()
 		if err != nil {
 			attempt++
 			if attempt <= 30 || attempt%30 == 0 {
@@ -262,7 +298,7 @@ func registerClaudeChannelRoute(ctx context.Context, opts ChannelOptions, notify
 }
 
 func registerClaudeChannelRouteOnce(ctx context.Context, projectRoot string, notifyURL string) error {
-	binding, err := readClaudeSessionBinding(projectRoot)
+	binding, err := newClaudeChannelBindingState(projectRoot).Binding()
 	if err != nil {
 		return err
 	}
@@ -373,6 +409,10 @@ func sendClaudeChannelMessage(ctx context.Context, binding claudeSessionBindingF
 }
 
 func readClaudeSessionBinding(projectRoot string) (claudeSessionBindingFile, error) {
+	return readClaudeSessionBindingAt(projectRoot, time.Time{})
+}
+
+func readClaudeSessionBindingAt(projectRoot string, notAfter time.Time) (claudeSessionBindingFile, error) {
 	root := strings.TrimSpace(projectRoot)
 	if root == "" {
 		cwd, err := os.Getwd()
@@ -388,6 +428,9 @@ func readClaudeSessionBinding(projectRoot string) (claudeSessionBindingFile, err
 	if !info.IsDir() {
 		root = filepath.Dir(root)
 	}
+	if binding, ok := readBestIndexedClaudeSessionBinding(root, notAfter); ok {
+		return binding, nil
+	}
 	raw, err := os.ReadFile(filepath.Join(root, ".agen8", "claude-session.json"))
 	if err != nil {
 		return claudeSessionBindingFile{}, fmt.Errorf("read claude session binding: %w", err)
@@ -397,6 +440,92 @@ func readClaudeSessionBinding(projectRoot string) (claudeSessionBindingFile, err
 		return claudeSessionBindingFile{}, fmt.Errorf("parse claude session binding: %w", err)
 	}
 	return binding, nil
+}
+
+func readClaudeSessionBindingForNative(projectRoot string, nativeSessionRef string) (claudeSessionBindingFile, error) {
+	root := strings.TrimSpace(projectRoot)
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return claudeSessionBindingFile{}, err
+		}
+		root = cwd
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return claudeSessionBindingFile{}, fmt.Errorf("stat project root: %w", err)
+	}
+	if !info.IsDir() {
+		root = filepath.Dir(root)
+	}
+	raw, err := os.ReadFile(claudeSessionBindingPath(root, nativeSessionRef))
+	if err != nil {
+		return claudeSessionBindingFile{}, fmt.Errorf("read claude native session binding: %w", err)
+	}
+	var binding claudeSessionBindingFile
+	if err := json.Unmarshal(raw, &binding); err != nil {
+		return claudeSessionBindingFile{}, fmt.Errorf("parse claude native session binding: %w", err)
+	}
+	return binding, nil
+}
+
+func readBestIndexedClaudeSessionBinding(root string, notAfter time.Time) (claudeSessionBindingFile, bool) {
+	entries, err := os.ReadDir(filepath.Join(root, ".agen8", "claude-sessions"))
+	if err != nil {
+		return claudeSessionBindingFile{}, false
+	}
+	var selected claudeSessionBindingFile
+	var selectedAt time.Time
+	hasSelected := false
+	var newest claudeSessionBindingFile
+	var newestAt time.Time
+	hasNewest := false
+	cutoff := notAfter
+	if !cutoff.IsZero() {
+		cutoff = cutoff.Add(10 * time.Second)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, ".agen8", "claude-sessions", entry.Name()))
+		if err != nil {
+			continue
+		}
+		var binding claudeSessionBindingFile
+		if err := json.Unmarshal(raw, &binding); err != nil {
+			continue
+		}
+		updatedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(binding.UpdatedAt))
+		if err != nil {
+			continue
+		}
+		if !hasNewest || updatedAt.After(newestAt) {
+			newest = binding
+			newestAt = updatedAt
+			hasNewest = true
+		}
+		if cutoff.IsZero() || !updatedAt.After(cutoff) {
+			if !hasSelected || updatedAt.After(selectedAt) {
+				selected = binding
+				selectedAt = updatedAt
+				hasSelected = true
+			}
+		}
+	}
+	if hasSelected {
+		return selected, true
+	}
+	return newest, hasNewest
+}
+
+func claudeSessionBindingPath(projectRoot string, nativeSessionRef string) string {
+	nativeSessionRef = strings.TrimSpace(nativeSessionRef)
+	if nativeSessionRef == "" {
+		nativeSessionRef = "unknown"
+	}
+	sum := sha256.Sum256([]byte(nativeSessionRef))
+	return filepath.Join(projectRoot, ".agen8", "claude-sessions", hex.EncodeToString(sum[:])+".json")
 }
 
 func channelInitializeResult(name string, version string, instructions string, rawParams json.RawMessage) map[string]any {

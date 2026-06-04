@@ -153,12 +153,16 @@ func writeClaudeSessionBinding(input HookInput, result BindResult, rawURL string
 		return fmt.Errorf("marshal binding: %w", err)
 	}
 	data = append(data, '\n')
-	path := filepath.Join(root, ".agen8", "claude-session.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	sessionPath := claudeSessionBindingPath(root, nativeSessionRef)
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o700); err != nil {
 		return fmt.Errorf("create binding dir: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write binding file: %w", err)
+	if err := os.WriteFile(sessionPath, data, 0o600); err != nil {
+		return fmt.Errorf("write session binding file: %w", err)
+	}
+	legacyPath := filepath.Join(root, ".agen8", "claude-session.json")
+	if err := os.WriteFile(legacyPath, data, 0o600); err != nil {
+		return fmt.Errorf("write legacy binding file: %w", err)
 	}
 	return nil
 }
@@ -396,8 +400,15 @@ func resolveHookSpaceID(input HookInput) string {
 }
 
 func stableClaudeLogicalSessionID(input HookInput, rawURL string) string {
+	nativeSessionRef := strings.TrimSpace(input.SessionID)
+	if nativeSessionRef != "" {
+		if existing, err := readClaudeSessionBindingForNative(strings.TrimSpace(input.CWD), nativeSessionRef); err == nil {
+			if logical := strings.TrimSpace(existing.LogicalSessionID); logical != "" {
+				return logical
+			}
+		}
+	}
 	if existing, err := readClaudeSessionBinding(strings.TrimSpace(input.CWD)); err == nil {
-		nativeSessionRef := strings.TrimSpace(input.SessionID)
 		existingNativeRef := firstNonEmptyString(existing.NativeSessionRef, existing.SessionID)
 		if logical := strings.TrimSpace(existing.LogicalSessionID); logical != "" && nativeSessionRef != "" && existingNativeRef == nativeSessionRef {
 			return logical
