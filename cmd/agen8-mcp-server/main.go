@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/agen8-mcp-server/internal/app"
@@ -15,6 +16,7 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/daemon"
 	"github.com/tinoosan/agen8-mcp-server/internal/logging"
 	agen8mcp "github.com/tinoosan/agen8-mcp-server/internal/mcp"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/harness/infra/claudecli"
 	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
 	"github.com/tinoosan/agen8-mcp-server/pkg/protocol"
 	"github.com/tinoosan/agen8-mcp-server/pkg/types"
@@ -45,6 +47,17 @@ var runMCPStdio = func(ctx context.Context) error {
 		return err
 	}
 	return agen8mcp.RunStdio(ctx, session)
+}
+
+// claudeHookTimeout bounds the binding call so a slow or unavailable daemon
+// can never hang the Claude Code session that invoked the hook.
+const claudeHookTimeout = 15 * time.Second
+
+var runClaudeHook = func(ctx context.Context) error {
+	drainCtx, cancel := context.WithTimeout(ctx, claudeHookTimeout)
+	defer cancel()
+	claudecli.RunHook(drainCtx, claudecli.MCPHookBinder{}, os.Stdin, os.Stdout, os.Stderr)
+	return nil
 }
 
 func stdioSessionFromEnv() (agen8mcp.Session, error) {
@@ -178,6 +191,22 @@ func newRootCommand() *cobra.Command {
 	}
 	mcpCmd.AddCommand(mcpStdioCmd)
 	root.AddCommand(mcpCmd)
+
+	claudeCmd := &cobra.Command{
+		Use:   "claude",
+		Short: "Claude Code integration helpers",
+	}
+	claudeHookCmd := &cobra.Command{
+		Use:   "hook",
+		Short: "Bind the calling Claude Code session to Agen8 (reads hook payload on stdin)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return runClaudeHook(ctx)
+		},
+	}
+	claudeCmd.AddCommand(claudeHookCmd)
+	root.AddCommand(claudeCmd)
 	return root
 }
 
