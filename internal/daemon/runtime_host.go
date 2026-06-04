@@ -127,6 +127,17 @@ func findLocalCodexAppServerURLForThread(ctx context.Context, token string, thre
 				return item.url, nil
 			}
 		}
+		for _, item := range candidates {
+			probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			readable, err := codexruntime.AppServerCanReadThread(probeCtx, item.url, threadID)
+			cancel()
+			if err != nil {
+				continue
+			}
+			if readable {
+				return item.url, nil
+			}
+		}
 		return "", nil
 	}
 	return candidates[0].url, nil
@@ -137,12 +148,21 @@ func findLocalCodexRemoteControlSocket(ctx context.Context) (string, error) {
 }
 
 func findLocalCodexRemoteControlSocketForThread(ctx context.Context, threadID string) (string, error) {
+	threadID = strings.TrimSpace(threadID)
 	socketPath := localCodexRemoteControlSocketPath()
 	if socketPath == "" {
 		return "", nil
 	}
 	if localCodexSocketExists(socketPath) {
 		appServerURL := "unix://" + socketPath
+		if threadID != "" {
+			probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			loaded, err := codexruntime.AppServerHasLoadedThread(probeCtx, appServerURL, threadID)
+			cancel()
+			if err != nil || !loaded {
+				return "", nil
+			}
+		}
 		return appServerURL, nil
 	}
 	codexPath := localCodexCLIPath()
@@ -170,6 +190,14 @@ func findLocalCodexRemoteControlSocketForThread(ctx context.Context, threadID st
 		return "", nil
 	}
 	appServerURL := "unix://" + socketPath
+	if threadID != "" {
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		loaded, err := codexruntime.AppServerHasLoadedThread(probeCtx, appServerURL, threadID)
+		cancel()
+		if err != nil || !loaded {
+			return "", nil
+		}
+	}
 	return appServerURL, nil
 }
 

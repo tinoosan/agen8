@@ -1217,6 +1217,159 @@ func TestInjectAppServerThreadItemsUsesLoadedThread(t *testing.T) {
 	}
 }
 
+func TestStartAppServerThreadTurnResumesAndStartsTurn(t *testing.T) {
+	started := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		for {
+			var req jsonrpcMessage
+			if err := wsjson.Read(r.Context(), conn, &req); err != nil {
+				return
+			}
+			if req.ID == nil {
+				continue
+			}
+			switch req.Method {
+			case "initialize":
+				if err := wsjson.Write(r.Context(), conn, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  map[string]any{},
+				}); err != nil {
+					t.Errorf("write initialize response: %v", err)
+					return
+				}
+			case "thread/resume":
+				var params map[string]any
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					t.Errorf("decode resume params: %v", err)
+					return
+				}
+				if params["threadId"] != "thread-1" {
+					t.Errorf("resume threadId=%v want thread-1", params["threadId"])
+				}
+				if err := wsjson.Write(r.Context(), conn, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  map[string]any{"thread": map[string]any{"id": "thread-1"}},
+				}); err != nil {
+					t.Errorf("write resume response: %v", err)
+					return
+				}
+			case "turn/start":
+				var params map[string]any
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					t.Errorf("decode turn params: %v", err)
+					return
+				}
+				started <- params
+				if err := wsjson.Write(r.Context(), conn, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  map[string]any{"turn": map[string]any{"id": "turn-1"}},
+				}); err != nil {
+					t.Errorf("write turn response: %v", err)
+					return
+				}
+				return
+			default:
+				t.Errorf("unexpected method %q", req.Method)
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	turnID, err := StartAppServerThreadTurn(context.Background(), domain.StartParams{
+		SessionRef:   "thread-1",
+		AppServerURL: "ws" + strings.TrimPrefix(server.URL, "http"),
+	}, "Agen8 turn delivery", nil)
+	if err != nil {
+		t.Fatalf("StartAppServerThreadTurn: %v", err)
+	}
+	if turnID != "turn-1" {
+		t.Fatalf("turnID=%q want turn-1", turnID)
+	}
+	got := <-started
+	if got["threadId"] != "thread-1" {
+		t.Fatalf("threadId=%v want thread-1", got["threadId"])
+	}
+	rawItems, ok := got["input"].([]any)
+	if !ok || len(rawItems) != 1 {
+		t.Fatalf("input=%T %+v", got["input"], got["input"])
+	}
+	item, ok := rawItems[0].(map[string]any)
+	if !ok || item["type"] != "text" || item["text"] != "Agen8 turn delivery" {
+		t.Fatalf("item=%T %+v", rawItems[0], rawItems[0])
+	}
+}
+
+func TestAppServerCanReadThread(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		for {
+			var req jsonrpcMessage
+			if err := wsjson.Read(r.Context(), conn, &req); err != nil {
+				return
+			}
+			if req.ID == nil {
+				continue
+			}
+			switch req.Method {
+			case "initialize":
+				if err := wsjson.Write(r.Context(), conn, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  map[string]any{},
+				}); err != nil {
+					t.Errorf("write initialize response: %v", err)
+					return
+				}
+			case "thread/read":
+				var params map[string]any
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					t.Errorf("decode read params: %v", err)
+					return
+				}
+				if params["threadId"] != "thread-1" {
+					t.Errorf("read threadId=%v want thread-1", params["threadId"])
+				}
+				if err := wsjson.Write(r.Context(), conn, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  map[string]any{"thread": map[string]any{"id": "thread-1"}},
+				}); err != nil {
+					t.Errorf("write read response: %v", err)
+					return
+				}
+				return
+			default:
+				t.Errorf("unexpected method %q", req.Method)
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	ok, err := AppServerCanReadThread(context.Background(), "ws"+strings.TrimPrefix(server.URL, "http"), "thread-1")
+	if err != nil {
+		t.Fatalf("AppServerCanReadThread: %v", err)
+	}
+	if !ok {
+		t.Fatal("AppServerCanReadThread=false want true")
+	}
+}
+
 func TestAppServerClient_DemuxesNotificationsDuringCall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)

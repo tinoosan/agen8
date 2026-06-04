@@ -33,7 +33,7 @@ type jsonrpcError struct {
 	Message string `json:"message,omitempty"`
 }
 
-const appServerReadLimit = 8 << 20
+const appServerReadLimit = 128 << 20
 
 type appServerSession struct {
 	mu              sync.Mutex
@@ -143,6 +143,56 @@ func InjectAppServerThreadItems(ctx context.Context, params domain.StartParams, 
 	return err
 }
 
+func StartAppServerThreadTurn(ctx context.Context, params domain.StartParams, text string, attachments []domain.PromptAttachment) (string, error) {
+	threadID := strings.TrimSpace(params.SessionRef)
+	text = strings.TrimSpace(text)
+	if strings.TrimSpace(params.AppServerURL) == "" {
+		return "", fmt.Errorf("codex app-server url is required")
+	}
+	if threadID == "" {
+		return "", fmt.Errorf("codex thread id is required")
+	}
+	if text == "" && len(attachments) == 0 {
+		return "", fmt.Errorf("codex turn text or attachment is required")
+	}
+	dialURL, dialOptions, err := appServerDialTarget(params, strings.TrimSpace(params.AppServerURL))
+	if err != nil {
+		return "", err
+	}
+	conn, resp, err := websocket.Dial(ctx, dialURL, dialOptions)
+	if err != nil {
+		return "", fmt.Errorf("codex app-server dial: %w%s", err, websocketDialResponseText(resp))
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(appServerReadLimit)
+	client := newAppServerClient(conn, params.ApprovalHandler)
+	if _, err := client.call(ctx, "initialize", map[string]any{
+		"clientInfo":   map[string]string{"name": "agen8", "version": "dev"},
+		"capabilities": map[string]any{"experimentalApi": true},
+	}); err != nil {
+		return "", err
+	}
+	if err := client.notification(ctx, "initialized", map[string]any{}); err != nil {
+		return "", err
+	}
+	result, err := client.call(ctx, "thread/resume", threadResumeParams(params, threadID))
+	if err != nil {
+		return "", fmt.Errorf("codex app-server thread/resume: %w%s", err, runtimeHostDiagnosticSuffix(params))
+	}
+	if _, err := validateResumedThreadID(threadID, result); err != nil {
+		return "", err
+	}
+	result, err = client.call(ctx, "turn/start", turnStartParams(params, threadID, text, attachments))
+	if err != nil {
+		return "", fmt.Errorf("codex app-server turn/start: %w%s", err, runtimeHostDiagnosticSuffix(params))
+	}
+	turnID := strings.TrimSpace(nestedJSONRPCString(result, "turn", "id"))
+	if turnID == "" {
+		return "", fmt.Errorf("codex app-server turn/start returned no turn id")
+	}
+	return turnID, nil
+}
+
 func ensureAppServerThreadLoaded(ctx context.Context, client *appServerClient, threadID string) error {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
@@ -207,6 +257,43 @@ func AppServerHasLoadedThread(ctx context.Context, appServerURL string, threadID
 		}
 	}
 	return false, nil
+}
+
+func AppServerCanReadThread(ctx context.Context, appServerURL string, threadID string) (bool, error) {
+	appServerURL = strings.TrimSpace(appServerURL)
+	threadID = strings.TrimSpace(threadID)
+	if appServerURL == "" {
+		return false, fmt.Errorf("codex app-server url is required")
+	}
+	if threadID == "" {
+		return false, fmt.Errorf("codex thread id is required")
+	}
+	dialURL, dialOptions, err := appServerDialTarget(domain.StartParams{}, appServerURL)
+	if err != nil {
+		return false, err
+	}
+	conn, resp, err := websocket.Dial(ctx, dialURL, dialOptions)
+	if err != nil {
+		return false, fmt.Errorf("codex app-server dial: %w%s", err, websocketDialResponseText(resp))
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(appServerReadLimit)
+	client := newAppServerClient(conn, nil)
+	if _, err := client.call(ctx, "initialize", map[string]any{
+		"clientInfo":   map[string]string{"name": "agen8-probe", "version": "dev"},
+		"capabilities": map[string]any{"experimentalApi": true},
+	}); err != nil {
+		return false, err
+	}
+	if err := client.notification(ctx, "initialized", map[string]any{}); err != nil {
+		return false, err
+	}
+	if _, err := client.call(ctx, "thread/read", map[string]any{
+		"threadId": threadID,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func appServerLoadedThreadRefs(result json.RawMessage) ([]string, error) {

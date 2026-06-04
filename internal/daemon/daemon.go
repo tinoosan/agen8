@@ -507,7 +507,7 @@ func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.H
 	if err := codexruntime.SteerAppServerTurn(ctx, params, turn.turnID, input.Text, daemonDomainAttachments(input.Attachments)); err != nil {
 		if isStaleOrUnavailableCodexTurnError(err) {
 			if d.logger != nil {
-				d.logger.InfoContext(ctx, "active codex turn stale; injecting agent message into loaded thread",
+				d.logger.InfoContext(ctx, "active codex turn stale; starting new codex turn for agent message",
 					"member_id", input.MemberID,
 					"session_id", session.ID,
 					"thread_id", threadID,
@@ -530,7 +530,7 @@ func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.H
 
 func (d *Daemon) injectCodexThreadMessage(ctx context.Context, sessionID string, threadID string, appServerURL string, input messageapp.HarnessChatMessage, params harnessdomain.StartParams) (messageapp.HarnessChatResult, error) {
 	if d != nil && d.logger != nil {
-		d.logger.InfoContext(ctx, "injecting agent message into loaded codex thread",
+		d.logger.InfoContext(ctx, "starting codex turn for agent message",
 			"member_id", input.MemberID,
 			"session_id", sessionID,
 			"thread_id", threadID,
@@ -538,13 +538,14 @@ func (d *Daemon) injectCodexThreadMessage(ctx context.Context, sessionID string,
 			"conversation_message_id", input.ConversationMessageID,
 		)
 	}
-	if err := codexruntime.InjectAppServerThreadItems(ctx, params, input.Text, daemonDomainAttachments(input.Attachments)); err != nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("inject message into codex thread: %w", err)
+	turnID, err := codexruntime.StartAppServerThreadTurn(ctx, params, input.Text, daemonDomainAttachments(input.Attachments))
+	if err != nil {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("start codex turn for message: %w", err)
 	}
 	return messageapp.HarnessChatResult{
 		SessionID: sessionID,
-		TurnID:    threadID,
-		Delivery:  "injected",
+		TurnID:    turnID,
+		Delivery:  "turn_started",
 	}, nil
 }
 
