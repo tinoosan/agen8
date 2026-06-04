@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -58,6 +59,17 @@ var runClaudeHook = func(ctx context.Context) error {
 	defer cancel()
 	claudecli.RunHook(drainCtx, claudecli.MCPHookBinder{}, os.Stdin, os.Stdout, os.Stderr)
 	return nil
+}
+
+var runClaudeSetup = func(_ context.Context, opts claudecli.SetupOptions) (claudecli.SetupResult, error) {
+	if strings.TrimSpace(opts.HookCommand) == "" {
+		executable, err := os.Executable()
+		if err != nil {
+			return claudecli.SetupResult{}, err
+		}
+		opts.HookCommand = executable
+	}
+	return claudecli.SetupProject(opts)
 }
 
 func stdioSessionFromEnv() (agen8mcp.Session, error) {
@@ -205,7 +217,34 @@ func newRootCommand() *cobra.Command {
 			return runClaudeHook(ctx)
 		},
 	}
+	var claudeSetupProjectRoot string
+	var claudeSetupMCPURL string
+	var claudeSetupHookCommand string
+	var claudeSetupHookArgs []string
+	claudeSetupCmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Install Agen8 Claude Code MCP and session-binding hook config for a project",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := runClaudeSetup(cmd.Context(), claudecli.SetupOptions{
+				ProjectRoot: claudeSetupProjectRoot,
+				MCPURL:      claudeSetupMCPURL,
+				HookCommand: claudeSetupHookCommand,
+				HookArgs:    claudeSetupHookArgs,
+			})
+			if err != nil {
+				return err
+			}
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(result)
+		},
+	}
+	claudeSetupCmd.Flags().StringVar(&claudeSetupProjectRoot, "project-root", "", "Project root to configure; defaults to the current working directory")
+	claudeSetupCmd.Flags().StringVar(&claudeSetupMCPURL, "mcp-url", "", "Agen8 MCP URL; defaults to AGEN8_MCP_URL, AGEN8_MCP_TOKEN, existing .mcp.json, or local dev URL")
+	claudeSetupCmd.Flags().StringVar(&claudeSetupHookCommand, "hook-command", "", "Hook executable; defaults to the current agen8-mcp-server binary")
+	claudeSetupCmd.Flags().StringSliceVar(&claudeSetupHookArgs, "hook-arg", nil, "Hook argument; repeat to override the default 'claude hook' args")
 	claudeCmd.AddCommand(claudeHookCmd)
+	claudeCmd.AddCommand(claudeSetupCmd)
 	root.AddCommand(claudeCmd)
 	return root
 }

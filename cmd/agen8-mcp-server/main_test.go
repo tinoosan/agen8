@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinoosan/agen8-mcp-server/internal/daemon"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/harness/infra/claudecli"
 )
 
 func TestDaemonStartDefaultsToLocalListener(t *testing.T) {
@@ -76,4 +78,40 @@ func TestMCPStdioRunsStdioTransport(t *testing.T) {
 	cmd.SetArgs([]string{"mcp", "stdio"})
 	require.NoError(t, cmd.Execute())
 	require.True(t, called)
+}
+
+func TestClaudeSetupPassesOptions(t *testing.T) {
+	var captured claudecli.SetupOptions
+	original := runClaudeSetup
+	runClaudeSetup = func(_ context.Context, opts claudecli.SetupOptions) (claudecli.SetupResult, error) {
+		captured = opts
+		return claudecli.SetupResult{
+			ProjectRoot:   opts.ProjectRoot,
+			MCPConfigPath: opts.ProjectRoot + "/.mcp.json",
+			SettingsPath:  opts.ProjectRoot + "/.claude/settings.local.json",
+			MCPURL:        opts.MCPURL,
+			HookCommand:   opts.HookCommand,
+			HookArgs:      opts.HookArgs,
+			ChannelStatus: "not ready",
+		}, nil
+	}
+	t.Cleanup(func() { runClaudeSetup = original })
+
+	cmd := newRootCommand()
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"claude", "setup",
+		"--project-root", "/repo",
+		"--mcp-url", "http://127.0.0.1:7777/mcp?token=abc",
+		"--hook-command", "/bin/agen8",
+		"--hook-arg", "claude",
+		"--hook-arg", "hook",
+	})
+	require.NoError(t, cmd.Execute())
+	require.Equal(t, "/repo", captured.ProjectRoot)
+	require.Equal(t, "http://127.0.0.1:7777/mcp?token=abc", captured.MCPURL)
+	require.Equal(t, "/bin/agen8", captured.HookCommand)
+	require.Equal(t, []string{"claude", "hook"}, captured.HookArgs)
+	require.Contains(t, out.String(), `"settingsPath"`)
 }
