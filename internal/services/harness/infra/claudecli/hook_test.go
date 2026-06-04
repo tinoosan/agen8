@@ -140,6 +140,9 @@ func TestMCPHookBinderRegistersClaudeSession(t *testing.T) {
 			if r.Header.Get("Mcp-Session-Id") != "protocol-1" {
 				t.Fatalf("tools/call missing protocol session header")
 			}
+			if r.Header.Get("Agen8-Native-Session-Id") != "claude-session-1" {
+				t.Fatalf("tools/call missing native session header: %q", r.Header.Get("Agen8-Native-Session-Id"))
+			}
 			if req.Params.Name != "space" {
 				t.Fatalf("tool=%q", req.Params.Name)
 			}
@@ -173,6 +176,64 @@ func TestMCPHookBinderRegistersClaudeSession(t *testing.T) {
 	}
 	if !strings.HasPrefix(result.LogicalSessionID, "claude-logical-") || result.SessionID != result.LogicalSessionID {
 		t.Fatalf("logical result=%#v", result)
+	}
+}
+
+func TestMCPHookBinderRegistersClaudeSessionWithLaunchSpace(t *testing.T) {
+	root := t.TempDir()
+	if err := writeClaudeLaunchContext(root, claudeLaunchContext{SpaceID: "space-selected"}); err != nil {
+		t.Fatalf("write launch context: %v", err)
+	}
+	sawRegister := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Method string `json:"method"`
+			Params struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			} `json:"params"`
+		}
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		switch req.Method {
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "protocol-1")
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"init","result":{"capabilities":{}}}`))
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/call":
+			if req.Params.Name != "space" {
+				t.Fatalf("tool=%q", req.Params.Name)
+			}
+			if req.Params.Arguments["space_id"] != "space-selected" {
+				t.Fatalf("arguments=%#v", req.Params.Arguments)
+			}
+			logicalSessionID := req.Params.Arguments["session_id"].(string)
+			sawRegister = true
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"call","result":{"structuredContent":{"memberId":"member-1","spaceId":"space-selected","sessionId":` + quoteJSONString(logicalSessionID) + `,"nativeSessionRef":"claude-session-1"}}}`))
+		default:
+			t.Fatalf("unexpected method %q", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	result, err := (MCPHookBinder{MCPURL: server.URL + "/mcp?token=abc", HTTPClient: server.Client()}).Bind(context.Background(), HookInput{
+		SessionID: "claude-session-1",
+		CWD:       root,
+	})
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if !sawRegister {
+		t.Fatalf("register was not called")
+	}
+	if result.SpaceID != "space-selected" {
+		t.Fatalf("result=%#v", result)
 	}
 }
 

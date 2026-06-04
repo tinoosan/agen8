@@ -96,6 +96,7 @@ func TestHTTPStrategyLaunchesClaudeRemoteControl(t *testing.T) {
 
 	resp, err := http.Post(srv.URL+"/harness/claude/launch", "application/json", strings.NewReader(`{
 		"projectRoot":"/repo",
+		"spaceId":"space-selected",
 		"claudeCommand":"/bin/claude",
 		"remoteControlTitle":"Agen8 launch",
 		"channelRef":"server:agen8-channel",
@@ -105,6 +106,7 @@ func TestHTTPStrategyLaunchesClaudeRemoteControl(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "/repo", captured.ProjectRoot)
+	require.Equal(t, "space-selected", captured.SpaceID)
 	require.Equal(t, "/bin/claude", captured.ClaudeCommand)
 	require.Equal(t, "Agen8 launch", captured.RemoteControlTitle)
 	require.Equal(t, "server:agen8-channel", captured.ChannelRef)

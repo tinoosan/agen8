@@ -394,6 +394,7 @@ describe('SpaceFocus', () => {
         }),
         body: JSON.stringify({
           projectRoot: '/repo',
+          spaceId: 'space-1',
           remoteControlTitle: 'Agen8: space-1',
           channelRef: 'server:agen8-channel',
           developmentChannel: true,

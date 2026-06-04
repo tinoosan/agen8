@@ -221,6 +221,7 @@ type claudeChannelMessageRequest struct {
 
 type claudeLaunchRequest struct {
 	ProjectRoot                     string `json:"projectRoot"`
+	SpaceID                         string `json:"spaceId"`
 	ClaudeCommand                   string `json:"claudeCommand"`
 	RemoteControlTitle              string `json:"remoteControlTitle"`
 	ChannelRef                      string `json:"channelRef"`
@@ -240,6 +241,7 @@ func (d *Daemon) handleClaudeLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := launchClaudeRemoteControl(r.Context(), claudecli.LaunchOptions{
 		ProjectRoot:                     req.ProjectRoot,
+		SpaceID:                         req.SpaceID,
 		ClaudeCommand:                   req.ClaudeCommand,
 		RemoteControlTitle:              req.RemoteControlTitle,
 		ChannelRef:                      req.ChannelRef,
@@ -253,6 +255,7 @@ func (d *Daemon) handleClaudeLaunch(w http.ResponseWriter, r *http.Request) {
 	if d.logger != nil {
 		d.logger.InfoContext(r.Context(), "claude remote-control launch started",
 			"project_root", result.ProjectRoot,
+			"space_id", result.SpaceID,
 			"pid", result.PID,
 			"channel_ref", result.ChannelRef,
 			"development_channel", result.DevelopmentChannel,

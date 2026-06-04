@@ -283,18 +283,35 @@ func writeClaudeHookSettings(projectRoot string, command string, args []string) 
 		Command: command,
 		Args:    args,
 	})
-	settings.Hooks["SessionStart"] = upsertSessionStartHook(settings.Hooks["SessionStart"], claudeHookCommand{
-		Type:   "mcp_tool",
-		Server: "agen8",
-		Tool:   "space",
-		Input: map[string]any{
-			"action":             "register",
-			"project_root":       "${cwd}",
-			"harness_kind":       "claude-cli",
-			"native_session_ref": "${session_id}",
-		},
-	})
+	settings.Hooks["SessionStart"] = removeClaudeMCPToolHooks(settings.Hooks["SessionStart"])
 	return writeJSONFile(path, settings.toMap(), 0o600)
+}
+
+func removeClaudeMCPToolSessionStartHook(projectRoot string) error {
+	path := filepath.Join(projectRoot, ".claude", "settings.local.json")
+	settings, err := readClaudeSettings(path)
+	if err != nil {
+		return err
+	}
+	if settings.Hooks == nil {
+		return nil
+	}
+	settings.Hooks["SessionStart"] = removeClaudeMCPToolHooks(settings.Hooks["SessionStart"])
+	return writeJSONFile(path, settings.toMap(), 0o600)
+}
+
+func removeClaudeMCPToolHooks(groups []claudeHookGroup) []claudeHookGroup {
+	for i := range groups {
+		out := groups[i].Hooks[:0]
+		for _, hook := range groups[i].Hooks {
+			if hook.Type == "mcp_tool" && hook.Server == "agen8" && hook.Tool == "space" {
+				continue
+			}
+			out = append(out, hook)
+		}
+		groups[i].Hooks = out
+	}
+	return groups
 }
 
 func readClaudeSettings(path string) (claudeSettings, error) {

@@ -2,6 +2,7 @@ package claudecli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -22,6 +23,7 @@ const (
 
 type LaunchOptions struct {
 	ProjectRoot                     string
+	SpaceID                         string
 	ClaudeCommand                   string
 	RemoteControlTitle              string
 	ChannelRef                      string
@@ -31,6 +33,7 @@ type LaunchOptions struct {
 
 type LaunchResult struct {
 	ProjectRoot                     string   `json:"projectRoot"`
+	SpaceID                         string   `json:"spaceId,omitempty"`
 	ClaudeCommand                   string   `json:"claudeCommand"`
 	Args                            []string `json:"args"`
 	CommandLine                     string   `json:"commandLine"`
@@ -70,6 +73,13 @@ func LaunchRemoteControl(ctx context.Context, opts LaunchOptions) (LaunchResult,
 	if title == "" {
 		title = "Agen8: " + filepath.Base(projectRoot)
 	}
+	spaceID := strings.TrimSpace(opts.SpaceID)
+	if err := writeClaudeLaunchContext(projectRoot, claudeLaunchContext{SpaceID: spaceID}); err != nil {
+		return LaunchResult{}, err
+	}
+	if err := removeClaudeMCPToolSessionStartHook(projectRoot); err != nil {
+		return LaunchResult{}, err
+	}
 	args := []string{"--remote-control", title}
 	if opts.DevelopmentChannel {
 		args = append(args, "--dangerously-load-development-channels", channelRef)
@@ -83,12 +93,13 @@ func LaunchRemoteControl(ctx context.Context, opts LaunchOptions) (LaunchResult,
 	if err != nil {
 		return LaunchResult{}, err
 	}
-	pid, err := startClaudeDetached(projectRoot, logPath, claudeCommand, args, opts.DevelopmentChannel)
+	pid, err := startClaudeDetached(projectRoot, logPath, claudeCommand, args, opts.DevelopmentChannel, launchEnv(spaceID))
 	if err != nil {
 		return LaunchResult{}, err
 	}
 	return LaunchResult{
 		ProjectRoot:                     projectRoot,
+		SpaceID:                         spaceID,
 		ClaudeCommand:                   claudeCommand,
 		Args:                            append([]string(nil), args...),
 		CommandLine:                     shellCommandLine(claudeCommand, args),
@@ -101,14 +112,58 @@ func LaunchRemoteControl(ctx context.Context, opts LaunchOptions) (LaunchResult,
 	}, nil
 }
 
-func startClaudeDetached(projectRoot string, logPath string, claudeCommand string, args []string, developmentChannel bool) (int, error) {
-	if runtime.GOOS == "darwin" && strings.TrimSpace(os.Getenv("AGEN8_CLAUDE_LAUNCH_FORCE_PTY")) == "" {
-		return startClaudeWithScript(projectRoot, logPath, claudeCommand, args, developmentChannel)
-	}
-	return startClaudeWithPTY(projectRoot, logPath, claudeCommand, args, developmentChannel)
+type claudeLaunchContext struct {
+	SpaceID   string `json:"spaceId,omitempty"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
-func startClaudeWithScript(projectRoot string, logPath string, claudeCommand string, args []string, developmentChannel bool) (int, error) {
+func writeClaudeLaunchContext(projectRoot string, context claudeLaunchContext) error {
+	if strings.TrimSpace(context.SpaceID) == "" {
+		return nil
+	}
+	context.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	data, err := json.MarshalIndent(context, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal claude launch context: %w", err)
+	}
+	data = append(data, '\n')
+	path := filepath.Join(projectRoot, ".agen8", "claude-launch-context.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create claude launch context dir: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write claude launch context: %w", err)
+	}
+	return nil
+}
+
+func readClaudeLaunchContext(projectRoot string) (claudeLaunchContext, error) {
+	raw, err := os.ReadFile(filepath.Join(projectRoot, ".agen8", "claude-launch-context.json"))
+	if err != nil {
+		return claudeLaunchContext{}, err
+	}
+	var context claudeLaunchContext
+	if err := json.Unmarshal(raw, &context); err != nil {
+		return claudeLaunchContext{}, fmt.Errorf("parse claude launch context: %w", err)
+	}
+	return context, nil
+}
+
+func launchEnv(spaceID string) []string {
+	if spaceID = strings.TrimSpace(spaceID); spaceID == "" {
+		return nil
+	}
+	return []string{EnvAgen8SpaceID + "=" + spaceID}
+}
+
+func startClaudeDetached(projectRoot string, logPath string, claudeCommand string, args []string, developmentChannel bool, env []string) (int, error) {
+	if runtime.GOOS == "darwin" && strings.TrimSpace(os.Getenv("AGEN8_CLAUDE_LAUNCH_FORCE_PTY")) == "" {
+		return startClaudeWithScript(projectRoot, logPath, claudeCommand, args, developmentChannel, env)
+	}
+	return startClaudeWithPTY(projectRoot, logPath, claudeCommand, args, developmentChannel, env)
+}
+
+func startClaudeWithScript(projectRoot string, logPath string, claudeCommand string, args []string, developmentChannel bool, env []string) (int, error) {
 	outerLogPath := logPath + ".outer"
 	outerLogFile, err := os.OpenFile(outerLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -121,6 +176,7 @@ func startClaudeWithScript(projectRoot string, logPath string, claudeCommand str
 	}
 	cmd := exec.Command("/bin/sh", "-c", command)
 	cmd.Dir = projectRoot
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = outerLogFile
 	cmd.Stderr = outerLogFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -137,13 +193,14 @@ func startClaudeWithScript(projectRoot string, logPath string, claudeCommand str
 	return pid, nil
 }
 
-func startClaudeWithPTY(projectRoot string, logPath string, claudeCommand string, args []string, developmentChannel bool) (int, error) {
+func startClaudeWithPTY(projectRoot string, logPath string, claudeCommand string, args []string, developmentChannel bool, env []string) (int, error) {
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("open claude launch log: %w", err)
 	}
 	cmd := exec.Command(claudeCommand, args...)
 	cmd.Dir = projectRoot
+	cmd.Env = append(os.Environ(), env...)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	if err != nil {
 		_ = logFile.Close()

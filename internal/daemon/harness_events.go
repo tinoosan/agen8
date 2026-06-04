@@ -341,16 +341,6 @@ func (d *Daemon) resolveMCPSessionForRequest(ctx context.Context, token string, 
 	}
 	if active == nil {
 		if mcpRequestAllowsBootstrapSession(body) {
-			active, err := d.resolveChannelBoundMCPSessionForToken(ctx, token)
-			if err != nil {
-				return mcp.Session{}, err
-			}
-			if active != nil {
-				if err := d.registerMCPTokenForSession(active); err != nil {
-					return mcp.Session{}, err
-				}
-				return d.mcpSessionFor(active), nil
-			}
 			return base, nil
 		} else {
 			active, err = d.resolveUniqueMCPSessionForToken(ctx, token)

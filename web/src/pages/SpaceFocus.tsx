@@ -133,6 +133,7 @@ interface ClaudeLaunchResult {
 
 async function launchClaudeSession(input: {
   projectRoot: string
+  spaceId: string
   remoteControlTitle: string
   allowDangerouslySkipPermissions: boolean
 }): Promise<ClaudeLaunchResult> {
@@ -144,6 +145,7 @@ async function launchClaudeSession(input: {
     headers,
     body: JSON.stringify({
       projectRoot: input.projectRoot,
+      spaceId: input.spaceId,
       remoteControlTitle: input.remoteControlTitle,
       channelRef: 'server:agen8-channel',
       developmentChannel: true,
@@ -158,10 +160,12 @@ async function launchClaudeSession(input: {
 
 function ClaudeLaunchPanel({
   projectRoot,
+  spaceId,
   spaceTitle,
   onClose,
 }: {
   projectRoot: string | null
+  spaceId: string
   spaceTitle: string
   onClose: () => void
 }) {
@@ -179,6 +183,7 @@ function ClaudeLaunchPanel({
     try {
       const launch = await launchClaudeSession({
         projectRoot,
+        spaceId,
         remoteControlTitle,
         allowDangerouslySkipPermissions,
       })
@@ -567,6 +572,7 @@ export default function SpaceFocus({ spaceId: spaceIdProp }: SpaceFocusProps) {
           {claudeLaunchOpen && (
             <ClaudeLaunchPanel
               projectRoot={focusedProjectRoot}
+              spaceId={spaceId}
               spaceTitle={spaceQuery.data?.title ?? spaceQuery.data?.id ?? spaceId}
               onClose={() => setClaudeLaunchOpen(false)}
             />

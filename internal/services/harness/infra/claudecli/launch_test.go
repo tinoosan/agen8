@@ -14,13 +14,14 @@ func TestLaunchRemoteControlStartsClaudeWithDevelopmentChannel(t *testing.T) {
 	root := t.TempDir()
 	argsPath := filepath.Join(root, "args.txt")
 	fakeClaude := filepath.Join(root, "claude")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > args.txt\nsleep 1\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > args.txt\nprintf '%s\\n' \"$AGEN8_SPACE_ID\" > space.txt\nsleep 1\n"
 	if err := os.WriteFile(fakeClaude, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake claude: %v", err)
 	}
 
 	result, err := LaunchRemoteControl(context.Background(), LaunchOptions{
 		ProjectRoot:                     root,
+		SpaceID:                         "space-selected",
 		ClaudeCommand:                   fakeClaude,
 		RemoteControlTitle:              "Agen8 test",
 		DevelopmentChannel:              true,
@@ -66,6 +67,23 @@ func TestLaunchRemoteControlStartsClaudeWithDevelopmentChannel(t *testing.T) {
 	}
 	if !result.AllowDangerouslySkipPermissions {
 		t.Fatal("expected permission bypass flag in result")
+	}
+	if result.SpaceID != "space-selected" {
+		t.Fatalf("space id=%q", result.SpaceID)
+	}
+	spaceRaw, err := os.ReadFile(filepath.Join(root, "space.txt"))
+	if err != nil {
+		t.Fatalf("read space env: %v", err)
+	}
+	if strings.TrimSpace(string(spaceRaw)) != "space-selected" {
+		t.Fatalf("space env=%q", strings.TrimSpace(string(spaceRaw)))
+	}
+	context, err := readClaudeLaunchContext(root)
+	if err != nil {
+		t.Fatalf("read launch context: %v", err)
+	}
+	if context.SpaceID != "space-selected" {
+		t.Fatalf("launch context=%#v", context)
 	}
 }
 

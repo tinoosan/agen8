@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	EnvAgen8MCPURL = "AGEN8_MCP_URL"
-	EnvAgen8Token  = "AGEN8_MCP_TOKEN"
+	EnvAgen8MCPURL  = "AGEN8_MCP_URL"
+	EnvAgen8Token   = "AGEN8_MCP_TOKEN"
+	EnvAgen8SpaceID = "AGEN8_SPACE_ID"
 )
 
 // Claude Code hooks receive the native session_id on stdin. Agen8 uses that
@@ -30,6 +31,7 @@ type HookInput struct {
 	HookEventName  string `json:"hook_event_name"`
 	CWD            string `json:"cwd"`
 	TranscriptPath string `json:"transcript_path"`
+	SpaceID        string `json:"space_id"`
 }
 
 type HookBinder interface {
@@ -179,7 +181,7 @@ func (b MCPHookBinder) Bind(ctx context.Context, input HookInput) (BindResult, e
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
-	c := mcpHTTPClient{url: rawURL, client: client}
+	c := mcpHTTPClient{url: rawURL, client: client, nativeSessionRef: sessionID}
 	protocolSession, err := c.initialize(ctx)
 	if err != nil {
 		return BindResult{}, err
@@ -273,9 +275,10 @@ func normalizeMCPURL(raw string) (string, error) {
 }
 
 type mcpHTTPClient struct {
-	url    string
-	client *http.Client
-	nextID atomic.Int64
+	url              string
+	client           *http.Client
+	nativeSessionRef string
+	nextID           atomic.Int64
 }
 
 func (c *mcpHTTPClient) initialize(ctx context.Context) (string, error) {
@@ -316,19 +319,23 @@ func (c *mcpHTTPClient) initialized(ctx context.Context, protocolSession string)
 func (c *mcpHTTPClient) register(ctx context.Context, protocolSession string, input HookInput) (BindResult, error) {
 	logicalSessionID := stableClaudeLogicalSessionID(input, c.url)
 	nativeSessionRef := strings.TrimSpace(input.SessionID)
+	args := map[string]any{
+		"action":             "register",
+		"project_root":       strings.TrimSpace(input.CWD),
+		"harness_kind":       "claude-cli",
+		"session_id":         logicalSessionID,
+		"native_session_ref": nativeSessionRef,
+	}
+	if spaceID := resolveHookSpaceID(input); spaceID != "" {
+		args["space_id"] = spaceID
+	}
 	resp, _, err := c.request(ctx, protocolSession, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      c.id(),
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "space",
-			"arguments": map[string]any{
-				"action":             "register",
-				"project_root":       strings.TrimSpace(input.CWD),
-				"harness_kind":       "claude-cli",
-				"session_id":         logicalSessionID,
-				"native_session_ref": nativeSessionRef,
-			},
+			"name":      "space",
+			"arguments": args,
 		},
 	})
 	if err != nil {
@@ -361,6 +368,19 @@ func (c *mcpHTTPClient) register(ctx context.Context, protocolSession string, in
 		LogicalSessionID: logicalSessionID,
 		NativeSessionRef: resultNativeSessionRef,
 	}, nil
+}
+
+func resolveHookSpaceID(input HookInput) string {
+	if spaceID := strings.TrimSpace(input.SpaceID); spaceID != "" {
+		return spaceID
+	}
+	if spaceID := strings.TrimSpace(os.Getenv(EnvAgen8SpaceID)); spaceID != "" {
+		return spaceID
+	}
+	if context, err := readClaudeLaunchContext(strings.TrimSpace(input.CWD)); err == nil {
+		return strings.TrimSpace(context.SpaceID)
+	}
+	return ""
 }
 
 func stableClaudeLogicalSessionID(input HookInput, rawURL string) string {
@@ -418,6 +438,9 @@ func (c *mcpHTTPClient) request(ctx context.Context, protocolSession string, pay
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if protocolSession = strings.TrimSpace(protocolSession); protocolSession != "" {
 		req.Header.Set("Mcp-Session-Id", protocolSession)
+	}
+	if nativeSessionRef := strings.TrimSpace(c.nativeSessionRef); nativeSessionRef != "" {
+		req.Header.Set("Agen8-Native-Session-Id", nativeSessionRef)
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
