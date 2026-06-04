@@ -380,11 +380,11 @@ func (d *Daemon) registerExternalMCPHarnessForUser(ctx context.Context, userID s
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(active.Kind), "codex") && strings.TrimSpace(active.LocationID) == "local" {
-		if appServerURL, err := findLocalCodexRemoteControlSocket(ctx); err != nil {
+		if appServerURL, err := findLocalCodexAppServerURLForThread(ctx, stableMCPToken, active.Ref); err != nil {
 			return mcpRegisterResponse{}, err
 		} else if appServerURL != "" {
 			d.mcpBinding.bindAppServerURL(active.ID, appServerURL)
-		} else if appServerURL, err := findLocalCodexAppServerURL(ctx, stableMCPToken); err != nil {
+		} else if appServerURL, err := findLocalCodexRemoteControlSocketForThread(ctx, active.Ref); err != nil {
 			return mcpRegisterResponse{}, err
 		} else if appServerURL != "" {
 			d.mcpBinding.bindAppServerURL(active.ID, appServerURL)

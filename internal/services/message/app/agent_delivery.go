@@ -370,6 +370,7 @@ func isUnavailableTurnDeliveryError(err error) bool {
 	}
 	text := strings.ToLower(err.Error())
 	return strings.Contains(text, "active codex turn is not registered") ||
+		strings.Contains(text, "codex app-server url is not registered") ||
 		strings.Contains(text, "no active turn to steer") ||
 		strings.Contains(text, "thread not found") ||
 		strings.Contains(text, "not loaded by the reachable remote-control server")

@@ -127,6 +127,51 @@ func ensureAppServerThreadLoaded(ctx context.Context, client *appServerClient, t
 	return fmt.Errorf("codex app-server thread %q is not loaded by the reachable remote-control server", threadID)
 }
 
+func AppServerHasLoadedThread(ctx context.Context, appServerURL string, threadID string) (bool, error) {
+	appServerURL = strings.TrimSpace(appServerURL)
+	threadID = strings.TrimSpace(threadID)
+	if appServerURL == "" {
+		return false, fmt.Errorf("codex app-server url is required")
+	}
+	if threadID == "" {
+		return false, fmt.Errorf("codex thread id is required")
+	}
+	dialURL, dialOptions, err := appServerDialTarget(domain.StartParams{}, appServerURL)
+	if err != nil {
+		return false, err
+	}
+	conn, resp, err := websocket.Dial(ctx, dialURL, dialOptions)
+	if err != nil {
+		return false, fmt.Errorf("codex app-server dial: %w%s", err, websocketDialResponseText(resp))
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(appServerReadLimit)
+	client := newAppServerClient(conn, nil)
+	if _, err := client.call(ctx, "initialize", map[string]any{
+		"clientInfo":   map[string]string{"name": "agen8", "version": "dev"},
+		"capabilities": map[string]any{"experimentalApi": true},
+	}); err != nil {
+		return false, err
+	}
+	if err := client.notification(ctx, "initialized", map[string]any{}); err != nil {
+		return false, err
+	}
+	result, err := client.call(ctx, "thread/loaded/list", map[string]any{})
+	if err != nil {
+		return false, fmt.Errorf("codex app-server thread/loaded/list: %w", err)
+	}
+	loaded, err := appServerLoadedThreadRefs(result)
+	if err != nil {
+		return false, fmt.Errorf("codex app-server thread/loaded/list returned invalid response: %w", err)
+	}
+	for _, item := range loaded {
+		if item == threadID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func appServerLoadedThreadRefs(result json.RawMessage) ([]string, error) {
 	var parsed struct {
 		Data []json.RawMessage `json:"data"`
