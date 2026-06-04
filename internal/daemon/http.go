@@ -24,6 +24,7 @@ import (
 	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
 	harnessapp "github.com/tinoosan/agen8-mcp-server/internal/services/harness/app"
 	harnessdomain "github.com/tinoosan/agen8-mcp-server/internal/services/harness/domain"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/harness/infra/claudecli"
 	humaninputdomain "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
 	messageapp "github.com/tinoosan/agen8-mcp-server/internal/services/message/app"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/message/domain/conversation"
@@ -40,6 +41,8 @@ import (
 )
 
 type HTTPStrategy struct{}
+
+var launchClaudeRemoteControl = claudecli.LaunchRemoteControl
 
 func (HTTPStrategy) Run(ctx context.Context, d *Daemon) error {
 	ln, err := net.Listen("tcp", d.cfg.HTTPAddr)
@@ -85,6 +88,7 @@ func (d *Daemon) httpHandler() (http.Handler, error) {
 	mux.HandleFunc("POST /mcp/register", d.handleMCPRegister)
 	mux.HandleFunc("POST /harness/claude-channel/register", d.handleClaudeChannelRegister)
 	mux.HandleFunc("POST /harness/claude-channel/message", d.handleClaudeChannelMessage)
+	mux.HandleFunc("POST /harness/claude/launch", d.handleClaudeLaunch)
 	if d.mcp == nil {
 		return nil, fmt.Errorf("mcp server is required")
 	}
@@ -209,6 +213,47 @@ type claudeChannelMessageRequest struct {
 	SessionID string          `json:"sessionId"`
 	MemberID  string          `json:"memberId"`
 	Arguments json.RawMessage `json:"arguments"`
+}
+
+type claudeLaunchRequest struct {
+	ProjectRoot        string `json:"projectRoot"`
+	ClaudeCommand      string `json:"claudeCommand"`
+	RemoteControlTitle string `json:"remoteControlTitle"`
+	ChannelRef         string `json:"channelRef"`
+	DevelopmentChannel *bool  `json:"developmentChannel"`
+}
+
+func (d *Daemon) handleClaudeLaunch(w http.ResponseWriter, r *http.Request) {
+	var req claudeLaunchRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	development := true
+	if req.DevelopmentChannel != nil {
+		development = *req.DevelopmentChannel
+	}
+	result, err := launchClaudeRemoteControl(r.Context(), claudecli.LaunchOptions{
+		ProjectRoot:        req.ProjectRoot,
+		ClaudeCommand:      req.ClaudeCommand,
+		RemoteControlTitle: req.RemoteControlTitle,
+		ChannelRef:         req.ChannelRef,
+		DevelopmentChannel: development,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if d.logger != nil {
+		d.logger.InfoContext(r.Context(), "claude remote-control launch started",
+			"project_root", result.ProjectRoot,
+			"pid", result.PID,
+			"channel_ref", result.ChannelRef,
+			"development_channel", result.DevelopmentChannel,
+		)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func (d *Daemon) handleClaudeChannelRegister(w http.ResponseWriter, r *http.Request) {

@@ -23,6 +23,7 @@ import (
 	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
 	decisiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
 	harnessdomain "github.com/tinoosan/agen8-mcp-server/internal/services/harness/domain"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/harness/infra/claudecli"
 	humaninputdomain "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
 	messageapp "github.com/tinoosan/agen8-mcp-server/internal/services/message/app"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/message/domain/conversation"
@@ -69,6 +70,70 @@ func TestHTTPStrategyServesWebUI(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Contains(t, string(body), `id="root"`)
+}
+
+func TestHTTPStrategyLaunchesClaudeRemoteControl(t *testing.T) {
+	d := newTestDaemon(t)
+	var captured claudecli.LaunchOptions
+	original := launchClaudeRemoteControl
+	launchClaudeRemoteControl = func(_ context.Context, opts claudecli.LaunchOptions) (claudecli.LaunchResult, error) {
+		captured = opts
+		return claudecli.LaunchResult{
+			ProjectRoot:        opts.ProjectRoot,
+			ClaudeCommand:      opts.ClaudeCommand,
+			RemoteControlTitle: opts.RemoteControlTitle,
+			ChannelRef:         opts.ChannelRef,
+			DevelopmentChannel: opts.DevelopmentChannel,
+			PID:                4321,
+		}, nil
+	}
+	t.Cleanup(func() { launchClaudeRemoteControl = original })
+
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Post(srv.URL+"/harness/claude/launch", "application/json", strings.NewReader(`{
+		"projectRoot":"/repo",
+		"claudeCommand":"/bin/claude",
+		"remoteControlTitle":"Agen8 launch",
+		"channelRef":"server:agen8-channel"
+	}`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "/repo", captured.ProjectRoot)
+	require.Equal(t, "/bin/claude", captured.ClaudeCommand)
+	require.Equal(t, "Agen8 launch", captured.RemoteControlTitle)
+	require.Equal(t, "server:agen8-channel", captured.ChannelRef)
+	require.True(t, captured.DevelopmentChannel)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, float64(4321), body["pid"])
+}
+
+func TestHTTPStrategyLaunchClaudeRemoteControlHonorsApprovedChannelMode(t *testing.T) {
+	d := newTestDaemon(t)
+	var captured claudecli.LaunchOptions
+	original := launchClaudeRemoteControl
+	launchClaudeRemoteControl = func(_ context.Context, opts claudecli.LaunchOptions) (claudecli.LaunchResult, error) {
+		captured = opts
+		return claudecli.LaunchResult{PID: 4321}, nil
+	}
+	t.Cleanup(func() { launchClaudeRemoteControl = original })
+
+	handler, err := d.httpHandler()
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Post(srv.URL+"/harness/claude/launch", "application/json", strings.NewReader(`{"developmentChannel":false}`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.False(t, captured.DevelopmentChannel)
 }
 
 func TestHTTPStrategyProxiesWebUIToViteWhenConfigured(t *testing.T) {

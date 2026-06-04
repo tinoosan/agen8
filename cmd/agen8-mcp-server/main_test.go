@@ -135,3 +135,39 @@ func TestClaudeChannelRunsAdapter(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 	require.Equal(t, "127.0.0.1:9010", captured)
 }
+
+func TestClaudeLaunchPassesOptions(t *testing.T) {
+	var captured claudecli.LaunchOptions
+	original := runClaudeLaunch
+	runClaudeLaunch = func(_ context.Context, opts claudecli.LaunchOptions) (claudecli.LaunchResult, error) {
+		captured = opts
+		return claudecli.LaunchResult{
+			ProjectRoot:        opts.ProjectRoot,
+			ClaudeCommand:      opts.ClaudeCommand,
+			RemoteControlTitle: opts.RemoteControlTitle,
+			ChannelRef:         opts.ChannelRef,
+			DevelopmentChannel: opts.DevelopmentChannel,
+			PID:                1234,
+		}, nil
+	}
+	t.Cleanup(func() { runClaudeLaunch = original })
+
+	cmd := newRootCommand()
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"claude", "launch",
+		"--project-root", "/repo",
+		"--claude-command", "/bin/claude",
+		"--remote-control-title", "Agen8 launch",
+		"--channel", "server:agen8-channel",
+		"--development-channel=false",
+	})
+	require.NoError(t, cmd.Execute())
+	require.Equal(t, "/repo", captured.ProjectRoot)
+	require.Equal(t, "/bin/claude", captured.ClaudeCommand)
+	require.Equal(t, "Agen8 launch", captured.RemoteControlTitle)
+	require.Equal(t, "server:agen8-channel", captured.ChannelRef)
+	require.False(t, captured.DevelopmentChannel)
+	require.Contains(t, out.String(), `"pid"`)
+}

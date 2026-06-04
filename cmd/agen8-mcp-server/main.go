@@ -84,6 +84,10 @@ var runClaudeSetup = func(_ context.Context, opts claudecli.SetupOptions) (claud
 	return claudecli.SetupProject(opts)
 }
 
+var runClaudeLaunch = func(ctx context.Context, opts claudecli.LaunchOptions) (claudecli.LaunchResult, error) {
+	return claudecli.LaunchRemoteControl(ctx, opts)
+}
+
 func stdioSessionFromEnv() (agen8mcp.Session, error) {
 	resolvedDataDir, err := config.ResolveDataDir("", false)
 	if err != nil {
@@ -246,6 +250,11 @@ func newRootCommand() *cobra.Command {
 	var claudeSetupHookArgs []string
 	var claudeSetupChannelCommand string
 	var claudeSetupChannelArgs []string
+	var claudeLaunchProjectRoot string
+	var claudeLaunchCommand string
+	var claudeLaunchTitle string
+	var claudeLaunchChannelRef string
+	var claudeLaunchDevelopment bool
 	claudeSetupCmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Install Agen8 Claude Code MCP, channel, and session-binding hook config for a project",
@@ -272,9 +281,34 @@ func newRootCommand() *cobra.Command {
 	claudeSetupCmd.Flags().StringSliceVar(&claudeSetupHookArgs, "hook-arg", nil, "Hook argument; repeat to override the default 'claude hook' args")
 	claudeSetupCmd.Flags().StringVar(&claudeSetupChannelCommand, "channel-command", "", "Channel executable; defaults to the hook command")
 	claudeSetupCmd.Flags().StringSliceVar(&claudeSetupChannelArgs, "channel-arg", nil, "Channel argument; repeat to override the default 'claude channel' args")
+	claudeLaunchCmd := &cobra.Command{
+		Use:   "launch",
+		Short: "Launch Claude Code remote-control with the Agen8 channel attached",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := runClaudeLaunch(cmd.Context(), claudecli.LaunchOptions{
+				ProjectRoot:        claudeLaunchProjectRoot,
+				ClaudeCommand:      claudeLaunchCommand,
+				RemoteControlTitle: claudeLaunchTitle,
+				ChannelRef:         claudeLaunchChannelRef,
+				DevelopmentChannel: claudeLaunchDevelopment,
+			})
+			if err != nil {
+				return err
+			}
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(result)
+		},
+	}
+	claudeLaunchCmd.Flags().StringVar(&claudeLaunchProjectRoot, "project-root", "", "Project root to launch Claude in; defaults to the current working directory")
+	claudeLaunchCmd.Flags().StringVar(&claudeLaunchCommand, "claude-command", "", "Claude executable; defaults to PATH lookup")
+	claudeLaunchCmd.Flags().StringVar(&claudeLaunchTitle, "remote-control-title", "", "Claude remote-control session title; defaults to the project directory name")
+	claudeLaunchCmd.Flags().StringVar(&claudeLaunchChannelRef, "channel", "", "Claude channel entry to enable; defaults to server:agen8-channel")
+	claudeLaunchCmd.Flags().BoolVar(&claudeLaunchDevelopment, "development-channel", true, "Use the Claude Code research-preview development channel flag")
 	claudeCmd.AddCommand(claudeHookCmd)
 	claudeCmd.AddCommand(claudeChannelCmd)
 	claudeCmd.AddCommand(claudeSetupCmd)
+	claudeCmd.AddCommand(claudeLaunchCmd)
 	root.AddCommand(claudeCmd)
 	return root
 }
