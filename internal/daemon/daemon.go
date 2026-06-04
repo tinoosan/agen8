@@ -353,8 +353,12 @@ func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.H
 		return messageapp.HarnessChatResult{}, fmt.Errorf("active harness session %q is not codex", session.ID)
 	}
 	turn := d.mcpBinding.activeCodexTurn(session.ID)
-	if strings.TrimSpace(turn.threadID) == "" || strings.TrimSpace(turn.turnID) == "" {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("active codex turn is not registered for harness session %q", session.ID)
+	threadID := strings.TrimSpace(turn.threadID)
+	if threadID == "" {
+		threadID = strings.TrimSpace(session.Ref)
+	}
+	if threadID == "" {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("codex thread is not registered for harness session %q", session.ID)
 	}
 	host, err := d.ResolveRuntimeHost(ctx, harnessapp.RuntimeHostRequest{
 		LocationID:  session.LocationID,
@@ -362,7 +366,7 @@ func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.H
 		SessionID:   session.ID,
 		ProjectID:   session.ProjectID,
 		MemberID:    session.MemberID,
-		SessionRef:  session.Ref,
+		SessionRef:  threadID,
 		MCPToken:    session.MCPToken,
 	})
 	if err != nil {
@@ -376,7 +380,7 @@ func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.H
 		d.logger.InfoContext(ctx, "steering agent message to active codex turn",
 			"member_id", input.MemberID,
 			"session_id", session.ID,
-			"thread_id", turn.threadID,
+			"thread_id", threadID,
 			"turn_id", turn.turnID,
 			"app_server_url", appServerURL,
 			"conversation_message_id", input.ConversationMessageID,
@@ -390,10 +394,27 @@ func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.H
 		MCPServers:      append([]string(nil), session.MCPServers...),
 		PermissionMode:  strings.TrimSpace(session.PermissionMode),
 		ConfigRef:       strings.TrimSpace(session.ConfigRef),
-		SessionRef:      strings.TrimSpace(turn.threadID),
+		SessionRef:      threadID,
 		AppServerURL:    appServerURL,
 	}
+	if strings.TrimSpace(turn.turnID) == "" {
+		return d.injectCodexThreadMessage(ctx, session.ID, threadID, appServerURL, input, params)
+	}
 	if err := codexruntime.SteerAppServerTurn(ctx, params, turn.turnID, input.Text, daemonDomainAttachments(input.Attachments)); err != nil {
+		if isStaleOrUnavailableCodexTurnError(err) {
+			if d.logger != nil {
+				d.logger.InfoContext(ctx, "active codex turn stale; injecting agent message into loaded thread",
+					"member_id", input.MemberID,
+					"session_id", session.ID,
+					"thread_id", threadID,
+					"turn_id", turn.turnID,
+					"app_server_url", appServerURL,
+					"conversation_message_id", input.ConversationMessageID,
+					"error", err,
+				)
+			}
+			return d.injectCodexThreadMessage(ctx, session.ID, threadID, appServerURL, input, params)
+		}
 		return messageapp.HarnessChatResult{}, fmt.Errorf("steer active codex turn: %w", err)
 	}
 	return messageapp.HarnessChatResult{
@@ -401,6 +422,36 @@ func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.H
 		TurnID:    strings.TrimSpace(turn.turnID),
 		Delivery:  "steered",
 	}, nil
+}
+
+func (d *Daemon) injectCodexThreadMessage(ctx context.Context, sessionID string, threadID string, appServerURL string, input messageapp.HarnessChatMessage, params harnessdomain.StartParams) (messageapp.HarnessChatResult, error) {
+	if d != nil && d.logger != nil {
+		d.logger.InfoContext(ctx, "injecting agent message into loaded codex thread",
+			"member_id", input.MemberID,
+			"session_id", sessionID,
+			"thread_id", threadID,
+			"app_server_url", appServerURL,
+			"conversation_message_id", input.ConversationMessageID,
+		)
+	}
+	if err := codexruntime.InjectAppServerThreadItems(ctx, params, input.Text, daemonDomainAttachments(input.Attachments)); err != nil {
+		return messageapp.HarnessChatResult{}, fmt.Errorf("inject message into codex thread: %w", err)
+	}
+	return messageapp.HarnessChatResult{
+		SessionID: sessionID,
+		TurnID:    threadID,
+		Delivery:  "injected",
+	}, nil
+}
+
+func isStaleOrUnavailableCodexTurnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "expected active turn id") ||
+		strings.Contains(text, "no active turn") ||
+		strings.Contains(text, "turn not found")
 }
 
 func (d *Daemon) sendMessageThroughHarness(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {

@@ -3,6 +3,7 @@ package codex
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1123,6 +1124,96 @@ func TestPersistAppServerThreadIDPersistsSynchronously(t *testing.T) {
 	}
 	if persisted != "thread-1" {
 		t.Fatalf("persisted=%q want thread-1", persisted)
+	}
+}
+
+func TestInjectAppServerThreadItemsUsesLoadedThread(t *testing.T) {
+	injected := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		for {
+			var req jsonrpcMessage
+			if err := wsjson.Read(r.Context(), conn, &req); err != nil {
+				return
+			}
+			if req.ID == nil {
+				continue
+			}
+			switch req.Method {
+			case "initialize":
+				if err := wsjson.Write(r.Context(), conn, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  map[string]any{},
+				}); err != nil {
+					t.Errorf("write initialize response: %v", err)
+					return
+				}
+			case "thread/loaded/list":
+				if err := wsjson.Write(r.Context(), conn, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  map[string]any{"data": []string{"thread-1"}},
+				}); err != nil {
+					t.Errorf("write loaded response: %v", err)
+					return
+				}
+			case "thread/inject_items":
+				var params map[string]any
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					t.Errorf("decode inject params: %v", err)
+					return
+				}
+				injected <- params
+				if err := wsjson.Write(r.Context(), conn, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  map[string]any{},
+				}); err != nil {
+					t.Errorf("write inject response: %v", err)
+					return
+				}
+				return
+			default:
+				t.Errorf("unexpected method %q", req.Method)
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	err := InjectAppServerThreadItems(context.Background(), domain.StartParams{
+		SessionRef:   "thread-1",
+		AppServerURL: "ws" + strings.TrimPrefix(server.URL, "http"),
+	}, "Agen8 direct injection", nil)
+	if err != nil {
+		t.Fatalf("InjectAppServerThreadItems: %v", err)
+	}
+
+	got := <-injected
+	if got["threadId"] != "thread-1" {
+		t.Fatalf("threadId=%v want thread-1", got["threadId"])
+	}
+	rawItems, ok := got["items"].([]any)
+	if !ok || len(rawItems) != 1 {
+		t.Fatalf("items=%T %+v", got["items"], got["items"])
+	}
+	item, ok := rawItems[0].(map[string]any)
+	if !ok || item["type"] != "message" || item["role"] != "user" {
+		t.Fatalf("item=%T %+v", rawItems[0], rawItems[0])
+	}
+	content, ok := item["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content=%T %+v", item["content"], item["content"])
+	}
+	part, ok := content[0].(map[string]any)
+	if !ok || part["text"] != "Agen8 direct injection" {
+		t.Fatalf("part=%+v", content[0])
 	}
 }
 

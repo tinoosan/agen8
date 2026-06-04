@@ -29,8 +29,6 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/space"
 	tasktool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/task"
 	humaninput "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
-	messagedomain "github.com/tinoosan/agen8-mcp-server/internal/services/message/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
@@ -283,16 +281,8 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	ctx := contextWithSessionRefs(r.Context(), requestSessionID, requestThreadID)
 	session, err := s.resolveSession(ctx, r.URL.Query().Get("token"), resolverHeader, body)
 	if err != nil {
-		if !isAgen8InboxResourceRead(body) {
-			s.writeRPCError(w, extractRPCID(body), mcpRPCCodeInvalidToken, err.Error())
-			return
-		}
-		fallback, fallbackErr := s.tokenStore.Resolve(r.URL.Query().Get("token"))
-		if fallbackErr != nil {
-			s.writeRPCError(w, extractRPCID(body), mcpRPCCodeInvalidToken, fallbackErr.Error())
-			return
-		}
-		session = fallback
+		s.writeRPCError(w, extractRPCID(body), mcpRPCCodeInvalidToken, err.Error())
+		return
 	}
 	if handled := s.handleUnknownToolAsMCPResult(w, body, session); handled {
 		return
@@ -307,19 +297,6 @@ func mcpRPCMethod(body []byte) string {
 		return ""
 	}
 	return strings.TrimSpace(req.Method)
-}
-
-func isAgen8InboxResourceRead(body []byte) bool {
-	var req struct {
-		Method string `json:"method"`
-		Params struct {
-			URI string `json:"uri"`
-		} `json:"params,omitempty"`
-	}
-	if err := json.Unmarshal(bytes.TrimSpace(body), &req); err != nil {
-		return false
-	}
-	return strings.TrimSpace(req.Method) == "resources/read" && strings.TrimSpace(req.Params.URI) == agen8InboxResourceURI
 }
 
 func prepareInitialNativeSessionHeader(r *http.Request, method string) {
@@ -431,64 +408,10 @@ func (s *mcpConnectionState) nativeRefs() (sessionID, threadID string) {
 }
 
 func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSession Session) *mcp.Server {
-	var server *mcp.Server
-	var resourceWatchMu sync.Mutex
-	resourceWatchCancel := map[string]func(){}
-	opts := &mcp.ServerOptions{
-		SubscribeHandler: func(ctx context.Context, req *mcp.SubscribeRequest) error {
-			if err := validateAgen8ResourceSubscription(req); err != nil {
-				slog.Info("mcp resource subscription rejected", "uri", agen8ResourceURIFromSubscribe(req), "error", err)
-				return err
-			}
-			session, err := s.resolveSessionForMCPCall(ctx, conn, nil, "", "", syntheticJSONRPCMethodBody("resources/subscribe"))
-			if err != nil {
-				slog.Info("mcp resource subscription session resolve failed", "uri", agen8ResourceURIFromSubscribe(req), "error", err)
-				return err
-			}
-			if strings.TrimSpace(session.MemberID) == "" || session.MessagePublisher == nil {
-				slog.Info("mcp resource subscription rejected; session not registered", "uri", agen8ResourceURIFromSubscribe(req))
-				return fmt.Errorf("mcp session is not registered; call space.register first")
-			}
-			uri := ""
-			if req != nil && req.Params != nil {
-				uri = strings.TrimSpace(req.Params.URI)
-			}
-			resourceWatchMu.Lock()
-			defer resourceWatchMu.Unlock()
-			if resourceWatchCancel[uri] == nil {
-				resourceWatchCancel[uri] = startAgen8ResourceWatcher(server, req.Session, session, uri)
-				slog.Info("mcp resource subscription registered", "uri", uri, "space_id", session.SpaceID, "member_id", session.MemberID)
-			} else {
-				slog.Info("mcp resource subscription already registered", "uri", uri, "space_id", session.SpaceID, "member_id", session.MemberID)
-			}
-			return nil
-		},
-		UnsubscribeHandler: func(ctx context.Context, req *mcp.UnsubscribeRequest) error {
-			if err := validateAgen8ResourceUnsubscription(req); err != nil {
-				return err
-			}
-			uri := ""
-			if req != nil && req.Params != nil {
-				uri = strings.TrimSpace(req.Params.URI)
-			}
-			resourceWatchMu.Lock()
-			cancel := resourceWatchCancel[uri]
-			delete(resourceWatchCancel, uri)
-			resourceWatchMu.Unlock()
-			if cancel != nil {
-				cancel()
-				slog.Info("mcp resource subscription removed", "uri", uri)
-			} else {
-				slog.Info("mcp resource subscription remove ignored; subscription not found", "uri", uri)
-			}
-			return nil
-		},
-	}
-	server = mcp.NewServer(
+	server := mcp.NewServer(
 		&mcp.Implementation{Name: "agen8-mcp", Version: "1.0.0"},
-		opts,
+		nil,
 	)
-	addAgen8SessionResources(server, s, conn)
 	for _, def := range s.registry.Defs() {
 		if !toolVisibleForSession(def, initialSession) {
 			continue
@@ -552,36 +475,12 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 					s.bindProtocolSession(conn.token, protocolSessionIDFromHeader(header), resultSessionID, resultThreadID)
 					conn.observe(resultSessionID, resultThreadID)
 				}
-				if err == nil {
-					result = appendPendingAgen8Notifications(ctx, session, native.name, argumentsFromToolRequest(req), result)
-				}
 				return result, err
 			})
 			continue
 		}
 	}
 	return server
-}
-
-const agen8InboxResourceURI = "agen8://me/inbox"
-
-func addAgen8SessionResources(server *mcp.Server, owner *Server, conn *mcpConnectionState) {
-	if server == nil || owner == nil {
-		return
-	}
-	server.AddResource(&mcp.Resource{
-		URI:         agen8InboxResourceURI,
-		Name:        "agen8-current-member-inbox",
-		Title:       "Agen8 current member inbox",
-		Description: "Queued Agen8 notifications addressed to the registered MCP member.",
-		MIMEType:    "application/json",
-	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-		session, err := owner.resolveSessionForMCPCall(ctx, conn, nativeRefsHeaderFromRequest(req), "", "", syntheticJSONRPCMethodBody("resources/read"))
-		if err != nil {
-			return readAgen8InboxUnboundResource(err), nil
-		}
-		return readAgen8InboxResource(ctx, session)
-	})
 }
 
 func nativeRefsHeaderFromRequest(req interface{ GetExtra() *mcp.RequestExtra }) http.Header {
@@ -708,256 +607,6 @@ func syntheticJSONRPCMethodBody(method string) []byte {
 		return nil
 	}
 	return body
-}
-
-func validateAgen8ResourceSubscription(req *mcp.SubscribeRequest) error {
-	return validateAgen8ResourceURI(agen8ResourceURIFromSubscribe(req))
-}
-
-func validateAgen8ResourceUnsubscription(req *mcp.UnsubscribeRequest) error {
-	uri := ""
-	if req != nil && req.Params != nil {
-		uri = strings.TrimSpace(req.Params.URI)
-	}
-	return validateAgen8ResourceURI(uri)
-}
-
-func agen8ResourceURIFromSubscribe(req *mcp.SubscribeRequest) string {
-	if req == nil || req.Params == nil {
-		return ""
-	}
-	return strings.TrimSpace(req.Params.URI)
-}
-
-func validateAgen8ResourceURI(uri string) error {
-	if strings.TrimSpace(uri) == agen8InboxResourceURI {
-		return nil
-	}
-	return mcp.ResourceNotFoundError(uri)
-}
-
-type agen8MemberWakeSubscriber interface {
-	SubscribeMemberWake(member.ID) (<-chan messagedomain.MessageWake, func())
-}
-
-type agen8ToolResultNotificationSource interface {
-	ReceiveNextForDelivery(context.Context, member.ID) (types.AgentMessage, error)
-	RecordDelivered(context.Context, types.AgentMessageID, member.ID) (types.AgentMessage, error)
-}
-
-func startAgen8ResourceWatcher(server *mcp.Server, mcpSession *mcp.ServerSession, session Session, uri string) func() {
-	if server == nil || strings.TrimSpace(uri) != agen8InboxResourceURI {
-		return func() {}
-	}
-	subscriber, ok := session.MessagePublisher.(agen8MemberWakeSubscriber)
-	memberID := member.ID(strings.TrimSpace(session.MemberID))
-	if !ok || memberID == "" {
-		slog.Info("mcp resource watcher not started", "uri", uri, "member_id", memberID, "has_wake_subscriber", ok)
-		return func() {}
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	wakes, unsubscribe := subscriber.SubscribeMemberWake(memberID)
-	slog.Info("mcp resource watcher started", "uri", uri, "space_id", session.SpaceID, "member_id", memberID)
-	if mcpSession != nil {
-		go func() {
-			_ = mcpSession.Wait()
-			cancel()
-			slog.Info("mcp resource watcher session ended", "uri", uri, "member_id", memberID)
-		}()
-	}
-	go func() {
-		defer func() {
-			unsubscribe()
-			slog.Info("mcp resource watcher stopped", "uri", uri, "member_id", memberID)
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case wake, ok := <-wakes:
-				if !ok {
-					return
-				}
-				slog.Info("mcp resource watcher wake received", "uri", uri, "member_id", memberID, "message_id", wake.MessageID, "kind", wake.Kind)
-				if err := server.ResourceUpdated(context.Background(), &mcp.ResourceUpdatedNotificationParams{URI: uri}); err != nil {
-					slog.Info("mcp resource update notification failed", "uri", uri, "member_id", memberID, "message_id", wake.MessageID, "error", err)
-				} else {
-					slog.Info("mcp resource update notification sent", "uri", uri, "member_id", memberID, "message_id", wake.MessageID)
-				}
-			}
-		}
-	}()
-	return cancel
-}
-
-func readAgen8InboxResource(ctx context.Context, session Session) (*mcp.ReadResourceResult, error) {
-	if strings.TrimSpace(session.MemberID) == "" || strings.TrimSpace(string(session.SpaceID)) == "" {
-		return readAgen8InboxUnboundResource(fmt.Errorf("mcp session is not registered; call space.register first")), nil
-	}
-	if session.MessagePublisher == nil {
-		return nil, fmt.Errorf("message service is not configured")
-	}
-	messages, err := session.MessagePublisher.ListMessages(ctx, messagedomain.MessageFilter{
-		SpaceID:             spacedomain.SpaceID(strings.TrimSpace(string(session.SpaceID))),
-		DestinationMemberID: member.ID(strings.TrimSpace(session.MemberID)),
-		Statuses:            []types.MessageStatus{types.MessageStatusQueuedTyped},
-		Limit:               25,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list Agen8 inbox messages: %w", err)
-	}
-	payload := map[string]any{
-		"resource":  agen8InboxResourceURI,
-		"spaceId":   strings.TrimSpace(string(session.SpaceID)),
-		"memberId":  strings.TrimSpace(session.MemberID),
-		"status":    "queued",
-		"count":     len(messages),
-		"messages":  agen8InboxResourceMessages(messages),
-		"updatedAt": time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal Agen8 inbox resource: %w", err)
-	}
-	return &mcp.ReadResourceResult{
-		Contents: []*mcp.ResourceContents{{
-			URI:      agen8InboxResourceURI,
-			MIMEType: "application/json",
-			Text:     string(data),
-		}},
-	}, nil
-}
-
-func readAgen8InboxUnboundResource(cause error) *mcp.ReadResourceResult {
-	message := "Agen8 MCP resource session is not registered; call space.register first."
-	if cause != nil {
-		message = strings.TrimSpace(cause.Error())
-	}
-	payload := map[string]any{
-		"resource":             agen8InboxResourceURI,
-		"registered":           false,
-		"status":               "unbound",
-		"count":                0,
-		"messages":             []map[string]any{},
-		"nextAction":           "register",
-		"requiredTool":         space.Name,
-		"requiredToolAction":   "register",
-		"reason":               message,
-		"guidance":             "Call space.register from this MCP connection, then read agen8://me/inbox again. Agen8 will not guess a member when a shared MCP token has multiple active harness sessions.",
-		"updatedAt":            time.Now().UTC().Format(time.RFC3339Nano),
-		"requiresRegistration": true,
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		data = []byte(`{"resource":"agen8://me/inbox","registered":false,"status":"unbound","count":0,"messages":[],"nextAction":"register","requiredTool":"space","requiredToolAction":"register","requiresRegistration":true}`)
-	}
-	return &mcp.ReadResourceResult{
-		Contents: []*mcp.ResourceContents{{
-			URI:      agen8InboxResourceURI,
-			MIMEType: "application/json",
-			Text:     string(data),
-		}},
-	}
-}
-
-func agen8InboxResourceMessages(messages []types.AgentMessage) []map[string]any {
-	out := make([]map[string]any, 0, len(messages))
-	for _, msg := range messages {
-		out = append(out, map[string]any{
-			"id":                  msg.ID,
-			"kind":                msg.Kind,
-			"subject":             msg.Subject,
-			"producer":            msg.Producer,
-			"correlationId":       msg.CorrelationID,
-			"taskRef":             msg.TaskRef,
-			"sourceMemberId":      msg.SourceMemberID,
-			"destinationMemberId": msg.DestinationMemberID,
-			"channelId":           msg.ChannelID,
-			"visibleAt":           msg.VisibleAt.UTC().Format(time.RFC3339Nano),
-			"createdAt":           msg.CreatedAt.UTC().Format(time.RFC3339Nano),
-			"body":                msg.Body,
-		})
-	}
-	return out
-}
-
-func appendPendingAgen8Notifications(ctx context.Context, session Session, toolName string, arguments json.RawMessage, result *mcp.CallToolResult) *mcp.CallToolResult {
-	if result == nil || result.IsError || strings.TrimSpace(session.MemberID) == "" {
-		return result
-	}
-	if strings.EqualFold(strings.TrimSpace(toolName), messagetool.Name) && strings.EqualFold(mcpToolAction(arguments), "inbox") {
-		return result
-	}
-	source, ok := session.MessagePublisher.(agen8ToolResultNotificationSource)
-	if !ok || source == nil {
-		return result
-	}
-	consumerID := member.ID(strings.TrimSpace(session.MemberID))
-	delivered := make([]types.AgentMessage, 0, 3)
-	for len(delivered) < 3 {
-		next, err := source.ReceiveNextForDelivery(ctx, consumerID)
-		if err != nil {
-			if err == messagedomain.ErrMessageNotFound {
-				break
-			}
-			slog.Info("mcp tool-result notification delivery skipped", "member_id", consumerID, "error", err)
-			break
-		}
-		if next.ID == "" {
-			break
-		}
-		consumed, err := source.RecordDelivered(ctx, next.ID, consumerID)
-		if err != nil {
-			slog.Info("mcp tool-result notification consume failed", "member_id", consumerID, "message_id", next.ID, "error", err)
-			break
-		}
-		delivered = append(delivered, consumed)
-	}
-	if len(delivered) == 0 {
-		return result
-	}
-	notifications := map[string]any{
-		"delivery": "tool_result",
-		"guidance": "Agen8 delivered these queued member notifications with this tool result because the MCP client did not expose a live push/subscribe route for this session. Treat them as addressed to this registered runtime identity.",
-		"count":    len(delivered),
-		"messages": agen8InboxResourceMessages(delivered),
-	}
-	result.StructuredContent = structuredWithAgen8Notifications(result.StructuredContent, notifications)
-	textData, err := json.MarshalIndent(notifications, "", "  ")
-	if err != nil {
-		textData, _ = json.Marshal(notifications)
-	}
-	section := "Agen8 notifications delivered with this tool result:\n" + string(textData)
-	if len(result.Content) == 0 {
-		result.Content = []mcp.Content{&mcp.TextContent{Text: section}}
-		return result
-	}
-	for _, content := range result.Content {
-		if text, ok := content.(*mcp.TextContent); ok {
-			text.Text = strings.TrimSpace(text.Text) + "\n\n" + section
-			return result
-		}
-	}
-	result.Content = append(result.Content, &mcp.TextContent{Text: section})
-	return result
-}
-
-func structuredWithAgen8Notifications(existing any, notifications map[string]any) any {
-	if len(notifications) == 0 {
-		return existing
-	}
-	out := map[string]any{}
-	if existing != nil {
-		raw, err := json.Marshal(existing)
-		if err == nil {
-			_ = json.Unmarshal(raw, &out)
-		}
-	}
-	if len(out) == 0 && existing != nil {
-		out["result"] = existing
-	}
-	out["agen8Notifications"] = notifications
-	return out
 }
 
 func toolVisibleForSession(def toolDef, session Session) bool {

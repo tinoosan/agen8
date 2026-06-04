@@ -106,6 +106,48 @@ func SteerAppServerTurn(ctx context.Context, params domain.StartParams, turnID s
 	return nil
 }
 
+func InjectAppServerThreadItems(ctx context.Context, params domain.StartParams, text string, attachments []domain.PromptAttachment) error {
+	threadID := strings.TrimSpace(params.SessionRef)
+	text = strings.TrimSpace(text)
+	if strings.TrimSpace(params.AppServerURL) == "" {
+		return fmt.Errorf("codex app-server url is required")
+	}
+	if threadID == "" {
+		return fmt.Errorf("codex thread id is required")
+	}
+	if text == "" && len(attachments) == 0 {
+		return fmt.Errorf("codex inject text or attachment is required")
+	}
+	dialURL, dialOptions, err := appServerDialTarget(params, strings.TrimSpace(params.AppServerURL))
+	if err != nil {
+		return err
+	}
+	conn, resp, err := websocket.Dial(ctx, dialURL, dialOptions)
+	if err != nil {
+		return fmt.Errorf("codex app-server dial: %w%s", err, websocketDialResponseText(resp))
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(appServerReadLimit)
+	client := newAppServerClient(conn, params.ApprovalHandler)
+	if _, err := client.call(ctx, "initialize", map[string]any{
+		"clientInfo":   map[string]string{"name": "agen8", "version": "dev"},
+		"capabilities": map[string]any{"experimentalApi": true},
+	}); err != nil {
+		return err
+	}
+	if err := client.notification(ctx, "initialized", map[string]any{}); err != nil {
+		return err
+	}
+	if err := ensureAppServerThreadLoaded(ctx, client, threadID); err != nil {
+		return err
+	}
+	_, err = client.call(ctx, "thread/inject_items", map[string]any{
+		"threadId": threadID,
+		"items":    codexInjectedUserItems(text, attachments),
+	})
+	return err
+}
+
 func ensureAppServerThreadLoaded(ctx context.Context, client *appServerClient, threadID string) error {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
@@ -1658,6 +1700,33 @@ func codexInputItems(text string, attachments []domain.PromptAttachment) []map[s
 		}
 	}
 	return items
+}
+
+func codexInjectedUserItems(text string, attachments []domain.PromptAttachment) []map[string]any {
+	text = strings.TrimSpace(text)
+	if len(attachments) > 0 {
+		lines := []string{text}
+		for _, attachment := range attachments {
+			uri := strings.TrimSpace(attachment.URI)
+			if uri == "" {
+				continue
+			}
+			name := strings.TrimSpace(attachment.Name)
+			if name == "" {
+				name = uri
+			}
+			lines = append(lines, fmt.Sprintf("Attachment: %s (%s)", name, uri))
+		}
+		text = strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+	return []map[string]any{{
+		"type": "message",
+		"role": "user",
+		"content": []map[string]any{{
+			"type": "input_text",
+			"text": text,
+		}},
+	}}
 }
 
 func applyCodexThreadPermissionParams(out map[string]any, params domain.StartParams) {

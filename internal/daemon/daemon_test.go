@@ -1057,31 +1057,14 @@ func TestHTTPStrategyBootstrapMCPTokenRejectsAmbiguousSharedTokenWithoutNativeRe
 	require.Equal(t, http.StatusOK, unboundResourceResp.StatusCode)
 
 	var unboundResourceRPC struct {
-		Result struct {
-			Contents []struct {
-				URI  string `json:"uri"`
-				Text string `json:"text"`
-			} `json:"contents"`
-		} `json:"result"`
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error,omitempty"`
 	}
 	require.NoError(t, json.NewDecoder(unboundResourceResp.Body).Decode(&unboundResourceRPC))
-	require.Nil(t, unboundResourceRPC.Error)
-	require.Len(t, unboundResourceRPC.Result.Contents, 1)
-	require.Equal(t, "agen8://me/inbox", unboundResourceRPC.Result.Contents[0].URI)
-	var unboundPayload struct {
-		Registered           bool   `json:"registered"`
-		Status               string `json:"status"`
-		NextAction           string `json:"nextAction"`
-		RequiresRegistration bool   `json:"requiresRegistration"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(unboundResourceRPC.Result.Contents[0].Text), &unboundPayload))
-	require.False(t, unboundPayload.Registered)
-	require.Equal(t, "unbound", unboundPayload.Status)
-	require.Equal(t, "register", unboundPayload.NextAction)
-	require.True(t, unboundPayload.RequiresRegistration)
+	require.NotNil(t, unboundResourceRPC.Error)
+	require.Contains(t, unboundResourceRPC.Error.Message, "multiple active harness sessions")
+	require.Contains(t, unboundResourceRPC.Error.Message, "native session metadata is required")
 
 	registerAgainReq, err := newStatefulMCPRequest(http.MethodPost, srv.URL+"/mcp?token=agen8-local", bytes.NewReader([]byte(fmt.Sprintf(`{
 		"jsonrpc": "2.0",
@@ -1130,20 +1113,13 @@ func TestHTTPStrategyBootstrapMCPTokenRejectsAmbiguousSharedTokenWithoutNativeRe
 	require.Equal(t, http.StatusOK, readResourceResp.StatusCode)
 
 	var readResourceRPC struct {
-		Result struct {
-			Contents []struct {
-				URI  string `json:"uri"`
-				Text string `json:"text"`
-			} `json:"contents"`
-		} `json:"result"`
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error,omitempty"`
 	}
 	require.NoError(t, json.NewDecoder(readResourceResp.Body).Decode(&readResourceRPC))
-	require.Nil(t, readResourceRPC.Error)
-	require.Len(t, readResourceRPC.Result.Contents, 1)
-	require.Equal(t, "agen8://me/inbox", readResourceRPC.Result.Contents[0].URI)
+	require.NotNil(t, readResourceRPC.Error)
+	require.Contains(t, readResourceRPC.Error.Message, "Resource not found")
 }
 
 func TestHTTPStrategyBootstrapMCPTokenRoutesMessageByMCPSessionHeader(t *testing.T) {
