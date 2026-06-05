@@ -178,6 +178,90 @@ func TestRegisterProjectArchiveThenDelete(t *testing.T) {
 	}
 }
 
+func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
+	svc := newRPCProjectService(t)
+	root := filepath.Join(t.TempDir(), "repo")
+	ctx := context.Background()
+
+	legacy, err := svc.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "local",
+		ProjectRoot: root,
+		DisplayName: "codex",
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("legacy register: %v", err)
+	}
+	registered, err := svc.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "user-1",
+		ProjectRoot: root,
+		DisplayName: "Codex backend engineer",
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("register real user: %v", err)
+	}
+	if registered.MemberID != legacy.MemberID {
+		t.Fatalf("member id changed from %q to %q", legacy.MemberID, registered.MemberID)
+	}
+
+	reg := NewRegistry()
+	if err := RegisterProject(reg, svc); err != nil {
+		t.Fatalf("RegisterProject returned error: %v", err)
+	}
+	server, err := NewServer(reg)
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	rpcCtx := ContextWithIdentity(context.Background(), Identity{UserID: "user-1"})
+
+	raw, err := server.Handle(rpcCtx, []byte(`{
+		"jsonrpc": "2.0",
+		"id": "member-get",
+		"method": "project.member.get",
+		"params": { "memberId": "`+registered.MemberID+`" }
+	}`))
+	if err != nil {
+		t.Fatalf("Handle project.member.get returned error: %v", err)
+	}
+	resp := decodeRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("project.member.get response error=%+v", resp.Error)
+	}
+	var got projectrpc.MemberGetResult
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatalf("unmarshal project.member.get result: %v", err)
+	}
+	if got.Member.DisplayName != "Codex backend engineer" || got.Member.UserID != "user-1" {
+		t.Fatalf("member.get result=%+v", got.Member)
+	}
+
+	raw, err = server.Handle(rpcCtx, []byte(`{
+		"jsonrpc": "2.0",
+		"id": "member-list",
+		"method": "project.member.list",
+		"params": { "projectId": "`+registered.ProjectID+`" }
+	}`))
+	if err != nil {
+		t.Fatalf("Handle project.member.list returned error: %v", err)
+	}
+	resp = decodeRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("project.member.list response error=%+v", resp.Error)
+	}
+	var listed projectrpc.MemberListResult
+	if err := json.Unmarshal(resp.Result, &listed); err != nil {
+		t.Fatalf("unmarshal project.member.list result: %v", err)
+	}
+	if len(listed.Members) != 1 || listed.Members[0].ID != registered.MemberID || listed.Members[0].DisplayName != "Codex backend engineer" {
+		t.Fatalf("member.list result=%+v", listed.Members)
+	}
+}
+
 func newRPCProjectService(t *testing.T) *projectapp.Service {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{
