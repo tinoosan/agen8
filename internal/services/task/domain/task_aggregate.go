@@ -58,6 +58,7 @@ func (t Task) Assign(memberID member.ID, now time.Time) (Task, error) {
 	next := t
 	next.AssignedTo = memberID
 	next.ClaimedByMemberID = ""
+	next.ClaimedByMemberLabel = ""
 	next.Status = TaskStatusPending
 	next.Error = ""
 	stampUpdated(&next, now)
@@ -107,6 +108,7 @@ func (t Task) ApproveReview(criteria []CriterionReview, now time.Time) (Task, er
 	next.AcceptanceCriteria = nextCriteria
 	next.Error = ""
 	next.ClaimedByMemberID = ""
+	next.ClaimedByMemberLabel = ""
 	completed := now.UTC()
 	next.CompletedAt = &completed
 	next.UpdatedAt = &completed
@@ -154,6 +156,7 @@ func (t Task) FailReview(reason string, criteria []CriterionReview, now time.Tim
 	next.AcceptanceCriteria = nextCriteria
 	next.Error = reason
 	next.ClaimedByMemberID = ""
+	next.ClaimedByMemberLabel = ""
 	completed := now.UTC()
 	next.CompletedAt = &completed
 	next.UpdatedAt = &completed
@@ -199,6 +202,7 @@ func (t Task) Release(now time.Time) (Task, error) {
 	next := t
 	next.Status = TaskStatusPending
 	next.ClaimedByMemberID = ""
+	next.ClaimedByMemberLabel = ""
 	stampUpdated(&next, now)
 	return next, nil
 }
@@ -216,6 +220,7 @@ func (t Task) Cancel(reason string, now time.Time) (Task, error) {
 	next.Status = TaskStatusCanceled
 	next.Error = reason
 	next.ClaimedByMemberID = ""
+	next.ClaimedByMemberLabel = ""
 	completed := now.UTC()
 	next.CompletedAt = &completed
 	next.UpdatedAt = &completed

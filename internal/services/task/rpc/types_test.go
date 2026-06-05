@@ -18,14 +18,17 @@ func TestNewTaskViewMapsRebuiltTaskFields(t *testing.T) {
 	updatedAt := createdAt.Add(11 * time.Minute)
 
 	task := taskdomain.Task{
-		ID:                taskdomain.TaskID("task-1"),
-		ProjectID:         types.ProjectID("project-1"),
-		AssignedTo:        member.ID("member-worker"),
-		ClaimedByMemberID: member.ID("member-worker"),
-		TaskKind:          "implementation",
-		CreatedBy:         "member-coordinator",
-		Title:             "Build RPC contract",
-		Description:       "Create task CRUD RPC types",
+		ID:                   taskdomain.TaskID("task-1"),
+		ProjectID:            types.ProjectID("project-1"),
+		AssignedTo:           member.ID("member-worker"),
+		AssignedToLabel:      "Backend engineer",
+		ClaimedByMemberID:    member.ID("member-worker"),
+		ClaimedByMemberLabel: "Backend engineer",
+		TaskKind:             "implementation",
+		CreatedBy:            "member-coordinator",
+		CreatedByLabel:       "Coordinator",
+		Title:                "Build RPC contract",
+		Description:          "Create task CRUD RPC types",
 		AcceptanceCriteria: []taskdomain.AcceptanceCriterion{
 			{ID: "criterion-1", Text: "types are internal", Satisfied: true},
 			{ID: "criterion-2", Text: "old usage fields are absent"},
@@ -55,11 +58,20 @@ func TestNewTaskViewMapsRebuiltTaskFields(t *testing.T) {
 	if view.AssignedTo != "member-worker" {
 		t.Fatalf("assignedTo=%q want member-worker", view.AssignedTo)
 	}
+	if view.AssignedToLabel != "Backend engineer" {
+		t.Fatalf("assignedToLabel=%q want Backend engineer", view.AssignedToLabel)
+	}
 	if view.ClaimedByMemberID != "member-worker" {
 		t.Fatalf("claimedByMemberId=%q want member-worker", view.ClaimedByMemberID)
 	}
+	if view.ClaimedByLabel != "Backend engineer" {
+		t.Fatalf("claimedByMemberLabel=%q want Backend engineer", view.ClaimedByLabel)
+	}
 	if view.CreatedBy != "member-coordinator" {
 		t.Fatalf("createdBy=%q want member-coordinator", view.CreatedBy)
+	}
+	if view.CreatedByLabel != "Coordinator" {
+		t.Fatalf("createdByLabel=%q want Coordinator", view.CreatedByLabel)
 	}
 	if view.Description != "Create task CRUD RPC types" {
 		t.Fatalf("description=%q", view.Description)
@@ -122,14 +134,17 @@ func TestTaskViewJSONShape(t *testing.T) {
 	createdAt := time.Date(2026, time.May, 15, 9, 30, 0, 0, time.UTC)
 
 	view := NewTaskView(taskdomain.Task{
-		ID:                taskdomain.TaskID("task-1"),
-		ProjectID:         types.ProjectID("project-1"),
-		AssignedTo:        member.ID("member-worker"),
-		ClaimedByMemberID: member.ID("member-worker"),
-		TaskKind:          "implementation",
-		CreatedBy:         "member-coordinator",
-		Title:             "Build RPC contract",
-		Description:       "Create task CRUD RPC types",
+		ID:                   taskdomain.TaskID("task-1"),
+		ProjectID:            types.ProjectID("project-1"),
+		AssignedTo:           member.ID("member-worker"),
+		AssignedToLabel:      "Backend engineer",
+		ClaimedByMemberID:    member.ID("member-worker"),
+		ClaimedByMemberLabel: "Backend engineer",
+		TaskKind:             "implementation",
+		CreatedBy:            "member-coordinator",
+		CreatedByLabel:       "Coordinator",
+		Title:                "Build RPC contract",
+		Description:          "Create task CRUD RPC types",
 		AcceptanceCriteria: []taskdomain.AcceptanceCriterion{
 			{ID: "criterion-1", Text: "types are internal", Satisfied: true},
 		},
@@ -155,9 +170,12 @@ func TestTaskViewJSONShape(t *testing.T) {
 		"id",
 		"projectId",
 		"assignedTo",
+		"assignedToLabel",
 		"claimedByMemberId",
+		"claimedByMemberLabel",
 		"taskKind",
 		"createdBy",
+		"createdByLabel",
 		"title",
 		"description",
 		"acceptanceCriteria",

@@ -75,6 +75,7 @@ func TestClaim_RejectsNonPendingStatus(t *testing.T) {
 func TestAssign(t *testing.T) {
 	active := makeTask(TaskStatusActive)
 	active.ClaimedByMemberID = member.ID("member-fred")
+	active.ClaimedByMemberLabel = "Fred"
 	next, err := active.Assign(member.ID("member-jane"), fixedTime)
 	if err != nil {
 		t.Fatalf("Assign returned error: %v", err)
@@ -87,6 +88,9 @@ func TestAssign(t *testing.T) {
 	}
 	if next.ClaimedBy() != "" {
 		t.Fatalf("claim should be cleared")
+	}
+	if next.ClaimedByMemberLabel != "" {
+		t.Fatalf("claim label should be cleared, got %q", next.ClaimedByMemberLabel)
 	}
 }
 
@@ -149,6 +153,7 @@ func TestComplete_RejectsNonActiveStatus(t *testing.T) {
 func TestReviewApprove_HappyPath(t *testing.T) {
 	inReview := makeTask(TaskStatusInReview)
 	inReview.ClaimedByMemberID = member.ID("member-fred")
+	inReview.ClaimedByMemberLabel = "Fred"
 	inReview.Summary = "done"
 
 	next, err := inReview.ApproveReview([]CriterionReview{
@@ -163,6 +168,9 @@ func TestReviewApprove_HappyPath(t *testing.T) {
 	}
 	if next.ClaimedBy() != "" {
 		t.Fatalf("claim should be cleared on approval, got %q", next.ClaimedBy())
+	}
+	if next.ClaimedByMemberLabel != "" {
+		t.Fatalf("claim label should be cleared on approval, got %q", next.ClaimedByMemberLabel)
 	}
 	if next.CompletedAt == nil {
 		t.Fatal("CompletedAt should be stamped on approval")
@@ -286,6 +294,7 @@ func TestBlockUnblock(t *testing.T) {
 func TestRelease(t *testing.T) {
 	active := makeTask(TaskStatusActive)
 	active.ClaimedByMemberID = member.ID("member-fred")
+	active.ClaimedByMemberLabel = "Fred"
 	next, err := active.Release(fixedTime)
 	if err != nil {
 		t.Fatalf("Release returned error: %v", err)
@@ -295,6 +304,9 @@ func TestRelease(t *testing.T) {
 	}
 	if next.ClaimedBy() != "" {
 		t.Fatalf("claim should be cleared")
+	}
+	if next.ClaimedByMemberLabel != "" {
+		t.Fatalf("claim label should be cleared")
 	}
 }
 
@@ -339,7 +351,9 @@ func TestNewTask_HappyPath(t *testing.T) {
 	task, err := NewTask(NewTaskInput{
 		ProjectID:          types.ProjectID("project-1"),
 		CreatedBy:          "coordinator",
+		CreatedByLabel:     "Coordinator",
 		AssignedTo:         member.ID("member-fred"),
+		AssignedToLabel:    "Fred",
 		Description:        "ship the thing",
 		AcceptanceCriteria: []string{"done", "done", " "},
 		Title:              "Ship",
@@ -355,6 +369,12 @@ func TestNewTask_HappyPath(t *testing.T) {
 	}
 	if task.AssignedMemberID() != "member-fred" {
 		t.Fatalf("assignedTo=%q want member-fred", task.AssignedMemberID())
+	}
+	if task.AssignedToLabel != "Fred" {
+		t.Fatalf("assignedToLabel=%q want Fred", task.AssignedToLabel)
+	}
+	if task.CreatedByLabel != "Coordinator" {
+		t.Fatalf("createdByLabel=%q want Coordinator", task.CreatedByLabel)
 	}
 	if task.CleanDescription() != "ship the thing" {
 		t.Fatalf("description=%q want ship the thing", task.CleanDescription())

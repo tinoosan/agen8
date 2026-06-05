@@ -150,9 +150,15 @@ func (h *Handler) Cancel(ctx context.Context, p TaskCancelParams) (TaskCancelRes
 
 func (h *Handler) newTaskView(ctx context.Context, task domain.Task) TaskView {
 	view := NewTaskView(task)
-	view.AssignedToLabel = h.memberLabel(ctx, task.AssignedTo)
-	view.ClaimedByLabel = h.memberLabel(ctx, task.ClaimedByMemberID)
-	view.CreatedByLabel = h.memberLabel(ctx, member.ID(task.CreatedBy))
+	if view.AssignedToLabel == "" {
+		view.AssignedToLabel = h.memberLabel(ctx, task.AssignedTo)
+	}
+	if view.ClaimedByLabel == "" {
+		view.ClaimedByLabel = h.memberLabel(ctx, task.ClaimedByMemberID)
+	}
+	if view.CreatedByLabel == "" {
+		view.CreatedByLabel = h.memberLabel(ctx, member.ID(task.CreatedBy))
+	}
 	return view
 }
 
@@ -177,19 +183,7 @@ func (h *Handler) memberLabel(ctx context.Context, id member.ID) string {
 	if label := strings.TrimSpace(rosterMember.MemberType); label != "" {
 		return strings.ReplaceAll(label, "_", " ")
 	}
-	return shortMemberID(id)
-}
-
-func shortMemberID(id member.ID) string {
-	raw := strings.TrimSpace(string(id))
-	if raw == "" {
-		return ""
-	}
-	const prefix = "member-"
-	if !strings.HasPrefix(raw, prefix) || len(raw) <= len(prefix)+6 {
-		return raw
-	}
-	return "Member " + raw[len(raw)-6:]
+	return ""
 }
 
 func cloneRequestMetadata(metadata map[string]any) map[string]any {

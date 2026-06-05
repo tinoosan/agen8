@@ -148,7 +148,9 @@ func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.T
 	task, err := domain.NewTask(domain.NewTaskInput{
 		ProjectID:          params.ProjectID,
 		CreatedBy:          caller.ActorID(),
+		CreatedByLabel:     s.callerMemberLabel(ctx, caller, params.ProjectID),
 		AssignedTo:         assigned.ID,
+		AssignedToLabel:    memberRecordLabel(assigned),
 		Description:        params.Description,
 		AcceptanceCriteria: params.AcceptanceCriteria,
 		Title:              params.Title,
@@ -407,6 +409,10 @@ func (s *Service) Claim(ctx context.Context, taskID domain.TaskID) (domain.Task,
 	if err != nil {
 		return domain.Task{}, err
 	}
+	next.ClaimedByMemberLabel = s.callerMemberLabel(ctx, caller, loaded.ProjectID)
+	if next.AssignedToLabel == "" && next.AssignedTo == caller.MemberID {
+		next.AssignedToLabel = next.ClaimedByMemberLabel
+	}
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
@@ -434,6 +440,7 @@ func (s *Service) Assign(ctx context.Context, params AssignTaskParams) (domain.T
 	if err != nil {
 		return domain.Task{}, err
 	}
+	next.AssignedToLabel = memberRecordLabel(assigned)
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
@@ -705,6 +712,30 @@ func (s *Service) memberInProject(ctx context.Context, memberID member.ID, proje
 		return member.Record{}, fmt.Errorf("member %s is not active", memberID)
 	}
 	return rosterMember, nil
+}
+
+func (s *Service) callerMemberLabel(ctx context.Context, caller Caller, projectID types.ProjectID) string {
+	if caller.MemberID == "" {
+		return ""
+	}
+	rosterMember, err := s.memberInProject(ctx, caller.MemberID, projectID)
+	if err != nil {
+		return ""
+	}
+	return memberRecordLabel(rosterMember)
+}
+
+func memberRecordLabel(rosterMember member.Record) string {
+	if label := strings.TrimSpace(rosterMember.DisplayName); label != "" {
+		return label
+	}
+	if label := strings.TrimSpace(rosterMember.HarnessKind); label != "" {
+		return label
+	}
+	if label := strings.TrimSpace(rosterMember.MemberType); label != "" {
+		return strings.ReplaceAll(label, "_", " ")
+	}
+	return ""
 }
 
 func (s *Service) requireAssignedCaller(task domain.Task, memberID member.ID) error {

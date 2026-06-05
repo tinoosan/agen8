@@ -8,7 +8,7 @@ import {
   useReactFlow,
   ReactFlowProvider,
 } from '@xyflow/react'
-import { Network, GitBranch, CircleCheck, Diamond } from 'lucide-react'
+import { Network, GitBranch, CircleCheck, Diamond, Target } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { missionsPanelLink } from '../lib/routing'
 import { Button } from '@/components/ui/button'
@@ -851,10 +851,20 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
         )}
 
         {/* Dynamic Legend */}
-        <div className="absolute bottom-5 left-5 z-10 pointer-events-none flex flex-col gap-2 p-[16px] border rounded-xl shadow-sm"
-             style={{ background: 'var(--bg-panel)', opacity: 0.85 }}>
+        <div
+          className="absolute bottom-5 left-5 z-10 pointer-events-none flex flex-col gap-2 p-[14px] rounded-[8px]"
+          style={{
+            background: 'color-mix(in srgb, var(--bg-panel) 86%, transparent)',
+            boxShadow: '0 10px 28px rgba(0,0,0,0.08)',
+            opacity: 0.92,
+          }}
+        >
           <h4 className="text-[9px] font-bold text-foreground/50 uppercase tracking-[0.6px] mb-1">Map Legend</h4>
           <div className="flex flex-col gap-2.5">
+            <div className="flex items-center gap-3">
+              <Target size={13} className="text-[var(--accent)]" strokeWidth={2.2} />
+              <span className="text-[11.5px] font-medium text-foreground tracking-tight">Mission</span>
+            </div>
             <div className="flex items-center gap-3 w-full">
               <div className="w-[14px] h-[9px] flex items-center justify-start rounded-[2.5px] border border-[#0071e3]/60 bg-[#0071e3]/10 overflow-hidden relative left-[1px]">
                  <div className="h-full w-[8px] bg-[#0071e3]/80" />

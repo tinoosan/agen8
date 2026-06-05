@@ -14,7 +14,9 @@ import (
 type NewTaskInput struct {
 	ProjectID          types.ProjectID
 	CreatedBy          string
+	CreatedByLabel     string
 	AssignedTo         member.ID
+	AssignedToLabel    string
 	Description        string
 	AcceptanceCriteria []string
 
@@ -53,7 +55,9 @@ func NewTask(input NewTaskInput, now time.Time) (Task, error) {
 		ID:                 id,
 		ProjectID:          projectID,
 		AssignedTo:         assignedTo,
+		AssignedToLabel:    strings.TrimSpace(input.AssignedToLabel),
 		CreatedBy:          createdBy,
+		CreatedByLabel:     strings.TrimSpace(input.CreatedByLabel),
 		Title:              strings.TrimSpace(input.Title),
 		Description:        description,
 		AcceptanceCriteria: newAcceptanceCriteria(input.AcceptanceCriteria),

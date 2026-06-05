@@ -69,25 +69,28 @@ func (s TaskStatus) IsTerminal() bool {
 }
 
 type Task struct {
-	ID                 TaskID                `json:"id"`
-	ProjectID          types.ProjectID       `json:"projectId,omitempty"`
-	AssignedTo         member.ID             `json:"assignedTo,omitempty"`
-	ClaimedByMemberID  member.ID             `json:"claimedByMemberId,omitempty"`
-	TaskKind           string                `json:"taskKind,omitempty"`
-	CreatedBy          string                `json:"createdBy,omitempty"`
-	Title              string                `json:"title,omitempty"`
-	Description        string                `json:"description"`
-	AcceptanceCriteria []AcceptanceCriterion `json:"acceptanceCriteria,omitempty"`
-	Status             TaskStatus            `json:"status,omitempty"`
-	CreatedAt          *time.Time            `json:"createdAt,omitempty"`
-	StartedAt          *time.Time            `json:"startedAt,omitempty"`
-	CompletedAt        *time.Time            `json:"completedAt,omitempty"`
-	UpdatedAt          *time.Time            `json:"updatedAt,omitempty"`
-	Error              string                `json:"error,omitempty"`
-	Metadata           map[string]any        `json:"metadata,omitempty"`
-	Summary            string                `json:"summary,omitempty"`
-	Artifacts          []string              `json:"artifacts,omitempty"`
-	KeyResultRef       string                `json:"keyResultRef,omitempty"`
+	ID                   TaskID                `json:"id"`
+	ProjectID            types.ProjectID       `json:"projectId,omitempty"`
+	AssignedTo           member.ID             `json:"assignedTo,omitempty"`
+	AssignedToLabel      string                `json:"assignedToLabel,omitempty"`
+	ClaimedByMemberID    member.ID             `json:"claimedByMemberId,omitempty"`
+	ClaimedByMemberLabel string                `json:"claimedByMemberLabel,omitempty"`
+	TaskKind             string                `json:"taskKind,omitempty"`
+	CreatedBy            string                `json:"createdBy,omitempty"`
+	CreatedByLabel       string                `json:"createdByLabel,omitempty"`
+	Title                string                `json:"title,omitempty"`
+	Description          string                `json:"description"`
+	AcceptanceCriteria   []AcceptanceCriterion `json:"acceptanceCriteria,omitempty"`
+	Status               TaskStatus            `json:"status,omitempty"`
+	CreatedAt            *time.Time            `json:"createdAt,omitempty"`
+	StartedAt            *time.Time            `json:"startedAt,omitempty"`
+	CompletedAt          *time.Time            `json:"completedAt,omitempty"`
+	UpdatedAt            *time.Time            `json:"updatedAt,omitempty"`
+	Error                string                `json:"error,omitempty"`
+	Metadata             map[string]any        `json:"metadata,omitempty"`
+	Summary              string                `json:"summary,omitempty"`
+	Artifacts            []string              `json:"artifacts,omitempty"`
+	KeyResultRef         string                `json:"keyResultRef,omitempty"`
 }
 
 type AcceptanceCriterion struct {
