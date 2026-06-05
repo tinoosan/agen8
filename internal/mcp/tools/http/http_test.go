@@ -125,6 +125,43 @@ func TestHandleInjectsResolvedHeaderCredential(t *testing.T) {
 	}
 }
 
+func TestHandleInjectsResolvedMultiHeaderCredential(t *testing.T) {
+	resolver := &testCredentialResolver{records: map[string]HTTPCredential{
+		"paper-api.alpaca.markets": {
+			Headers: map[string]string{
+				"APCA-API-KEY-ID":     "key-id",
+				"APCA-API-SECRET-KEY": "secret-key",
+			},
+		},
+	}}
+	handler := testHandler(func(req *nethttp.Request) (*nethttp.Response, error) {
+		if got := req.Header.Get("APCA-API-KEY-ID"); got != "key-id" {
+			t.Fatalf("APCA-API-KEY-ID=%q", got)
+		}
+		if got := req.Header.Get("APCA-API-SECRET-KEY"); got != "secret-key" {
+			t.Fatalf("APCA-API-SECRET-KEY=%q", got)
+		}
+		return textResponse(req, 200, `{"status":"ACTIVE","secret":"secret-key"}`), nil
+	})
+
+	result, err := handler.Handle(context.Background(), CallContext{
+		Credentials: resolver,
+	}, json.RawMessage(`{"url":"https://paper-api.alpaca.markets:443/v2/account","method":"GET"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(resolver.calls) != 1 || resolver.calls[0] != "paper-api.alpaca.markets" {
+		t.Fatalf("credential calls=%+v", resolver.calls)
+	}
+	structured := result.Structured.(map[string]any)
+	if structured["credentialsInjected"] != true {
+		t.Fatalf("credentialsInjected=%v", structured["credentialsInjected"])
+	}
+	if strings.Contains(structured["body"].(string), "secret-key") {
+		t.Fatalf("body leaked credential: %q", structured["body"])
+	}
+}
+
 func TestHandleInjectsResolvedQueryCredential(t *testing.T) {
 	resolver := &testCredentialResolver{records: map[string]HTTPCredential{
 		"api.example.com": credential(credentialdomain.InjectionQuery, "apikey", map[string]string{"value": "query-secret"}),

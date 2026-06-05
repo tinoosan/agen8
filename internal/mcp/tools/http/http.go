@@ -32,6 +32,7 @@ type HTTPCredential struct {
 	CredentialID credentialdomain.ID
 	Injection    credentialdomain.InjectionMode
 	FieldName    string
+	Headers      map[string]string
 	Values       map[string]string
 }
 
@@ -120,7 +121,7 @@ func (h Handler) run(ctx context.Context, call CallContext, input requestInput) 
 
 	headers := cloneHeaderMap(input.Headers)
 	requestURL := parsedURL.String()
-	injected, injectedValues, err := h.injectCredential(ctx, call, parsedURL.Host, &requestURL, headers)
+	injected, injectedValues, err := h.injectCredential(ctx, call, parsedURL.Hostname(), &requestURL, headers)
 	if err != nil {
 		return Result{}, err
 	}
@@ -354,6 +355,19 @@ func (h Handler) injectCredential(ctx context.Context, call CallContext, host st
 	}
 	if !found {
 		return false, nil, nil
+	}
+	if len(record.Headers) > 0 {
+		injectedValues := make([]string, 0, len(record.Headers))
+		for key, value := range record.Headers {
+			headerName := strings.TrimSpace(key)
+			headerValue := strings.TrimSpace(value)
+			if headerName == "" || headerValue == "" {
+				return false, nil, fmt.Errorf("http: multi-header credential requires header names and values")
+			}
+			headers[headerName] = headerValue
+			injectedValues = append(injectedValues, headerValue)
+		}
+		return true, injectedValues, nil
 	}
 	switch record.Injection {
 	case credentialdomain.InjectionBearer:

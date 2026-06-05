@@ -247,6 +247,9 @@ func (d *Daemon) registerBootstrapMCPToken() error {
 		TaskMembers:     d.app.ProjectSvc,
 		DecisionService: d.app.DecisionSvc,
 		GraphService:    d.app.GraphSvc,
+		CredentialResolver: httpCredentialResolver{
+			credentials: d.app.CredentialSvc,
+		},
 		TaskService:     d.app.TaskSvc,
 		MissionService:  d.app.MissionSvc,
 		MissionKRs:      d.app.MissionSvc,
