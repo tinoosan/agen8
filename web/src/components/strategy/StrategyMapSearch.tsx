@@ -4,8 +4,9 @@ import type { Node } from '@xyflow/react'
 import { Search, Target, Diamond } from 'lucide-react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { memberDisplayName } from '../../lib/memberDisplay'
+import { normalizeTaskMembers, taskAssignedMemberLabel } from '../../lib/taskMembers'
 import { decisionActorDisplay } from '../../lib/decisionDisplay'
+import type { Task } from '../../lib/types'
 
 interface StrategyMapSearchProps {
   open: boolean
@@ -159,12 +160,13 @@ function getNodeMeta(node: Node): ResultMeta {
     }
   }
 
-  const task = data.task as { status?: string; assignedTo?: string; assignedToLabel?: string } | undefined
+  const task = data.task as (Task & { assignedToMemberId?: string }) | undefined
   if (task) {
+    const normalizedTask = normalizeTaskMembers(task)
     return {
       status: task.status,
       statusTone: STATUS_TONE[task.status ?? ''],
-      owner: memberDisplayName(task.assignedToLabel, task.assignedTo),
+      owner: taskAssignedMemberLabel(normalizedTask),
     }
   }
 

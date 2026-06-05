@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { cn } from '@/lib/utils'
 import type { Task } from '../../lib/types'
-import { memberDisplayName } from '../../lib/memberDisplay'
+import { taskAssignedMemberLabel } from '../../lib/taskMembers'
 import { useStrategyMapStore } from './strategyMapStore'
 
 export interface TaskNodeData {
@@ -85,7 +85,7 @@ function ProgressRing({ progress, tone, glyph, active }: {
 }
 
 function taskOwnerLabel(task: Task): string | null {
-  return memberDisplayName(task.assignedToLabel, task.assignedTo) ?? null
+  return taskAssignedMemberLabel(task) ?? null
 }
 
 export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps) {
@@ -190,7 +190,7 @@ export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps
             {ownerLabel && (
               <>
                 <span className="shrink-0 text-muted-foreground/50">·</span>
-                <span className="truncate capitalize">{ownerLabel}</span>
+                <span className="truncate">{ownerLabel}</span>
               </>
             )}
           </span>

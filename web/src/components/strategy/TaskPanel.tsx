@@ -18,7 +18,11 @@ import {
 import { getTaskActivities } from '../../pages/taskActivity'
 import { useRecentDecisions } from '../../hooks/useDecisions'
 import { useKeyResult, useProjectKRs, useMissions } from '../../hooks/useMissions'
-import { memberDisplayName } from '../../lib/memberDisplay'
+import {
+  taskAssignedMemberLabel,
+  taskClaimedMemberLabel,
+  taskCreatedMemberLabel,
+} from '../../lib/taskMembers'
 import type { TaskActivity } from '../../lib/types'
 import type { TaskNodeData } from './TaskNode'
 import type { NodePanelProps } from './types'
@@ -100,7 +104,9 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   const displayTitle = retry.isRetry ? retry.originalGoal : (task.title || task.description)
   const acceptanceCriteria = getAcceptanceCriteria(task)
   const duration = taskDuration(task)
-  const assigneeLabel = memberDisplayName(task.assignedToLabel, task.assignedTo)
+  const assigneeLabel = taskAssignedMemberLabel(task)
+  const claimedByLabel = taskClaimedMemberLabel(task)
+  const createdByLabel = taskCreatedMemberLabel(task)
 
   const acDone = acceptanceCriteria.filter((criterion) => criterion.satisfied).length
   const acTotal = acceptanceCriteria.length
@@ -286,6 +292,22 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
             <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Assignee</span>
             <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
               {assigneeLabel}
+            </span>
+          </div>
+        )}
+        {claimedByLabel && claimedByLabel !== assigneeLabel && (
+          <div className="flex justify-between items-baseline">
+            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Claimed</span>
+            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
+              {claimedByLabel}
+            </span>
+          </div>
+        )}
+        {createdByLabel && createdByLabel !== assigneeLabel && createdByLabel !== claimedByLabel && (
+          <div className="flex justify-between items-baseline">
+            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Created By</span>
+            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
+              {createdByLabel}
             </span>
           </div>
         )}

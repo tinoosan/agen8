@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall, onNotification } from '../lib/rpc'
 import type { Task } from '../lib/types'
+import { normalizeTaskMembers } from '../lib/taskMembers'
 
 interface TaskListResult {
   tasks: Task[]
@@ -18,7 +19,7 @@ export function useProjectTasks(projectId: string | null) {
         sortBy: 'updated_at',
         sortDesc: true,
       })
-      return result.tasks ?? []
+      return (result.tasks ?? []).map(normalizeTaskMembers)
     },
     enabled: !!projectId,
     refetchInterval: 10_000,
