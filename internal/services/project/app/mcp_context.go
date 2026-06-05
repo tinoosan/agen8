@@ -103,6 +103,10 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 			return RegisterMCPContextResult{}, fmt.Errorf("create project: %w", err)
 		}
 	}
+	loadedProject, err = s.rehomeLegacyLocalProject(ctx, loadedProject, userID)
+	if err != nil {
+		return RegisterMCPContextResult{}, err
+	}
 	projectID = loadedProject.ID()
 	root = strings.TrimSpace(loadedProject.Root())
 	locationID = loadedProject.LocationID()
@@ -174,6 +178,32 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		URL:              "",
 		MCPServers:       []string{"agen8"},
 	}, nil
+}
+
+func (s *Service) rehomeLegacyLocalProject(ctx context.Context, loaded project.Project, userID string) (project.Project, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || userID == "local" {
+		return loaded, nil
+	}
+	currentUserID := strings.TrimSpace(loaded.UserID())
+	if currentUserID == "" || currentUserID == userID {
+		return loaded, nil
+	}
+	if currentUserID != "local" {
+		return project.Project{}, fmt.Errorf("project %s belongs to a different user", loaded.ID())
+	}
+	record := loaded.Record()
+	record.UserID = userID
+	record.UpdatedAt = s.clock.Now().UTC()
+	saved, err := s.projects.Save(ctx, record)
+	if err != nil {
+		return project.Project{}, fmt.Errorf("rehome project to mcp token user: %w", err)
+	}
+	rehomed, err := project.Wrap(saved)
+	if err != nil {
+		return project.Project{}, fmt.Errorf("wrap rehomed project: %w", err)
+	}
+	return rehomed, nil
 }
 
 func (s *Service) ResolveMCPContext(ctx context.Context, input ResolveMCPContextInput) (member.Record, error) {

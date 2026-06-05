@@ -15,6 +15,7 @@ import (
 type stubService struct {
 	createReq  taskapp.CreateTaskParams
 	listReq    taskdomain.TaskFilter
+	listResp   []taskdomain.Task
 	assignReq  taskapp.AssignTaskParams
 	reviewReq  taskapp.ReviewTaskParams
 	seenCaller taskapp.Caller
@@ -41,6 +42,9 @@ func (s *stubService) Get(ctx context.Context, id taskdomain.TaskID) (taskdomain
 func (s *stubService) List(ctx context.Context, filter taskdomain.TaskFilter) ([]taskdomain.Task, error) {
 	s.capture(ctx, "list")
 	s.listReq = filter
+	if s.listResp != nil {
+		return s.listResp, nil
+	}
 	return []taskdomain.Task{{ID: "task-1", ProjectID: filter.ProjectID, AssignedTo: filter.AssignedTo, Status: taskdomain.TaskStatusPending}}, nil
 }
 
@@ -164,6 +168,62 @@ func TestHandleCreateReturnsReadableTaskMemberLabel(t *testing.T) {
 	}
 	if !strings.Contains(result.Text, `"assignedToLabel":"Worker engineer"`) {
 		t.Fatalf("result missing assignedToLabel: %s", result.Text)
+	}
+}
+
+func TestHandleListResolvesLegacyTaskMemberLabels(t *testing.T) {
+	svc := &stubService{listResp: []taskdomain.Task{{
+		ID:                "task-legacy",
+		ProjectID:         "space-1",
+		AssignedTo:        "worker-1",
+		ClaimedByMemberID: "worker-1",
+		CreatedBy:         "coord-1",
+		Status:            taskdomain.TaskStatusPending,
+	}}}
+
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"list","limit":10}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if !strings.Contains(result.Text, `"assignedToLabel":"Worker"`) {
+		t.Fatalf("result missing resolved assignedToLabel: %s", result.Text)
+	}
+	if !strings.Contains(result.Text, `"claimedByMemberLabel":"Worker"`) {
+		t.Fatalf("result missing resolved claimedByMemberLabel: %s", result.Text)
+	}
+	if !strings.Contains(result.Text, `"createdByLabel":"Coordinator"`) {
+		t.Fatalf("result missing resolved createdByLabel: %s", result.Text)
+	}
+}
+
+func TestHandleListPrefersStampedTaskMemberLabels(t *testing.T) {
+	svc := &stubService{listResp: []taskdomain.Task{{
+		ID:                   "task-stamped",
+		ProjectID:            "space-1",
+		AssignedTo:           "worker-1",
+		AssignedToLabel:      "Original assignee",
+		ClaimedByMemberID:    "worker-1",
+		ClaimedByMemberLabel: "Original claimant",
+		CreatedBy:            "coord-1",
+		CreatedByLabel:       "Original creator",
+		Status:               taskdomain.TaskStatusPending,
+	}}}
+
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"list","limit":10}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	for _, want := range []string{
+		`"assignedToLabel":"Original assignee"`,
+		`"claimedByMemberLabel":"Original claimant"`,
+		`"createdByLabel":"Original creator"`,
+	} {
+		if !strings.Contains(result.Text, want) {
+			t.Fatalf("result missing stamped label %s: %s", want, result.Text)
+		}
+	}
+	if strings.Contains(result.Text, `"assignedToLabel":"Worker"`) {
+		t.Fatalf("result overwrote stamped assigned label: %s", result.Text)
 	}
 }
 

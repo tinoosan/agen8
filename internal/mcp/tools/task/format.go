@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -31,10 +32,11 @@ type taskEntry struct {
 	Metadata           map[string]any                   `json:"metadata,omitempty"`
 }
 
-func (h Handler) taskResult(action string, task taskdomain.Task, err error, extra map[string]any) (Result, error) {
+func (h Handler) taskResult(ctx context.Context, call CallContext, action string, task taskdomain.Task, err error, extra map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	task = h.resolveTaskMemberLabels(ctx, call, task)
 	structured := map[string]any{
 		"ok":     true,
 		"tool":   Name,
@@ -51,7 +53,7 @@ func (h Handler) taskResult(action string, task taskdomain.Task, err error, extr
 	return Result{Text: text, Structured: structured}, nil
 }
 
-func (h Handler) taskResultForActor(action string, task taskdomain.Task, err error, extra map[string]any, actor actor) (Result, error) {
+func (h Handler) taskResultForActor(ctx context.Context, call CallContext, action string, task taskdomain.Task, err error, extra map[string]any, actor actor) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
@@ -67,7 +69,7 @@ func (h Handler) taskResultForActor(action string, task taskdomain.Task, err err
 			extra["guidance"] = guidance
 		}
 	}
-	return h.taskResult(action, task, nil, extra)
+	return h.taskResult(ctx, call, action, task, nil, extra)
 }
 
 func taskResponseGuidance(action string, task taskdomain.Task, actorID member.ID) (string, string) {
@@ -88,12 +90,13 @@ func taskResponseGuidance(action string, task taskdomain.Task, actorID member.ID
 	return "", ""
 }
 
-func (h Handler) listResult(tasks []taskdomain.Task, err error, input requestInput) (Result, error) {
+func (h Handler) listResult(ctx context.Context, call CallContext, tasks []taskdomain.Task, err error, input requestInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
 	rows := make([]taskEntry, 0, len(tasks))
 	for _, task := range tasks {
+		task = h.resolveTaskMemberLabels(ctx, call, task)
 		rows = append(rows, toTaskEntry(task))
 	}
 	structured := map[string]any{
@@ -110,6 +113,34 @@ func (h Handler) listResult(tasks []taskdomain.Task, err error, input requestInp
 		return Result{}, err
 	}
 	return Result{Text: text, Structured: structured}, nil
+}
+
+func (h Handler) resolveTaskMemberLabels(ctx context.Context, call CallContext, task taskdomain.Task) taskdomain.Task {
+	if call.Members == nil {
+		return task
+	}
+	if strings.TrimSpace(task.AssignedToLabel) == "" {
+		task.AssignedToLabel = h.resolveMemberLabel(ctx, call, task.AssignedTo)
+	}
+	if strings.TrimSpace(task.ClaimedByMemberLabel) == "" {
+		task.ClaimedByMemberLabel = h.resolveMemberLabel(ctx, call, task.ClaimedByMemberID)
+	}
+	if strings.TrimSpace(task.CreatedByLabel) == "" {
+		task.CreatedByLabel = h.resolveMemberLabel(ctx, call, member.ID(task.CreatedBy))
+	}
+	return task
+}
+
+func (h Handler) resolveMemberLabel(ctx context.Context, call CallContext, memberID member.ID) string {
+	memberID = member.ID(strings.TrimSpace(string(memberID)))
+	if memberID == "" || call.Members == nil {
+		return ""
+	}
+	rosterMember, err := call.Members.GetMember(ctx, memberID)
+	if err != nil {
+		return ""
+	}
+	return memberLabel(rosterMember)
 }
 
 func toTaskEntry(task taskdomain.Task) taskEntry {
