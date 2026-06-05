@@ -60,7 +60,7 @@ Call Agen8 MCP tools directly. If a wrapper or parallel call mangles the namespa
 ## Mission Discipline
 
 - Every meaningful Agen8 workstream should have a mission with one or more KRs before task execution starts.
-- KRs describe observable outcomes, not implementation chores. Dogfooding is not a KR; the result of dogfooding is.
+- KRs describe observable outcomes, not implementation chores or working methods.
 - Tasks are execution slices that move a KR; they should inherit `mission_ref` and `key_result_ref`.
 - Decisions capture why the direction changed, why an integration path was chosen, or why a tradeoff was accepted.
 - Graph/context inspection is not optional after compaction or when joining ongoing work; it prevents stale chat memory from overriding durable project state.
@@ -73,7 +73,7 @@ Call Agen8 MCP tools directly. If a wrapper or parallel call mangles the namespa
 - For exploratory work, create a task with acceptance criteria that include the decision or recommendation expected at the end.
 - For UI/product refinement, verify in the browser and think like a user: raw ids, unclear labels, broken graph relationships, and empty states are product bugs.
 - For MCP/server changes, test through the actual MCP tools whenever possible. Do not substitute curl or private service calls for agent-facing UAT unless the MCP layer is unavailable; if unavailable, say so.
-- When building Agen8 itself, dogfooding is the verification method: use Agen8 while improving it, but keep the durable records focused on product outcomes.
+- When building Agen8 itself, use Agen8 for real verification while improving it, but keep the durable records focused on product outcomes.
 - Update KR progress when a task materially moves the outcome.
 
 ## Boundaries
