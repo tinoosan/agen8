@@ -29,6 +29,7 @@ import (
 	userapp "github.com/tinoosan/agen8-mcp-server/internal/services/user/app"
 	userdomain "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
 	"github.com/tinoosan/agen8-mcp-server/internal/web"
+	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
 )
 
 type Daemon struct {
@@ -186,7 +187,13 @@ func (d *Daemon) handleWeb(next http.Handler) http.Handler {
 func (d *Daemon) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"ok":true}`))
+	_ = json.NewEncoder(w).Encode(struct {
+		OK bool `json:"ok"`
+		buildinfo.Info
+	}{
+		OK:   true,
+		Info: buildinfo.Current(),
+	})
 }
 
 func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {

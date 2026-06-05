@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/config"
+	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
 )
 
 func TestSetupRejectsMismatchedPasswordConfirmation(t *testing.T) {
@@ -37,5 +39,42 @@ func TestSetupRejectsMismatchedPasswordConfirmation(t *testing.T) {
 	}
 	if open := d.setupAvailable(req.Context()); !open {
 		t.Fatal("setup should remain open after rejected password confirmation")
+	}
+}
+
+func TestHealthzIncludesBuildInfo(t *testing.T) {
+	oldVersion, oldCommit, oldBuildDate := buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate
+	t.Cleanup(func() {
+		buildinfo.Version = oldVersion
+		buildinfo.Commit = oldCommit
+		buildinfo.BuildDate = oldBuildDate
+	})
+	buildinfo.Version = "v0.1.0"
+	buildinfo.Commit = "abc1234"
+	buildinfo.BuildDate = "2026-06-05T19:30:00Z"
+
+	d, err := New(Config{
+		AppConfig: config.Config{DataDir: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	d.handleHealthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusOK)
+	}
+	var body struct {
+		OK        bool   `json:"ok"`
+		Version   string `json:"version"`
+		Commit    string `json:"commit"`
+		BuildDate string `json:"buildDate"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode healthz: %v", err)
+	}
+	if !body.OK || body.Version != "v0.1.0" || body.Commit != "abc1234" || body.BuildDate != "2026-06-05T19:30:00Z" {
+		t.Fatalf("healthz body=%+v", body)
 	}
 }

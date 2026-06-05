@@ -57,11 +57,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          archive="agen8_${VERSION#v}_${GOOS}_${GOARCH}.tar.gz"
-          binary_dir="dist/agen8_${GOOS}_${GOARCH}"
+          archive="agen8-mcp_${VERSION#v}_${GOOS}_${GOARCH}.tar.gz"
+          binary_dir="dist/agen8-mcp_${GOOS}_${GOARCH}"
           mkdir -p "${binary_dir}"
-          go build -ldflags "-X github.com/tinoosan/agen8/pkg/buildinfo.Version=${VERSION} -X github.com/tinoosan/agen8/pkg/buildinfo.Commit=${COMMIT} -X github.com/tinoosan/agen8/pkg/buildinfo.BuildDate=${BUILD_DATE}" -o "${binary_dir}/agen8" ./cmd/agen8
-          tar -C "${binary_dir}" -czf "dist/${archive}" agen8
+          go build -ldflags "-X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.Version=${VERSION} -X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.Commit=${COMMIT} -X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.BuildDate=${BUILD_DATE}" -o "${binary_dir}/agen8-mcp" ./cmd/agen8-mcp
+          tar -C "${binary_dir}" -czf "dist/${archive}" agen8-mcp
           shasum -a 256 "dist/${archive}" > "dist/${archive}.sha256"
 
       - name: Publish release assets

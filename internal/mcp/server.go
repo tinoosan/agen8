@@ -21,6 +21,7 @@ import (
 	missiontool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/mission"
 	projecttool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/project"
 	tasktool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/task"
+	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
 )
 
 type Session struct {
@@ -401,7 +402,7 @@ func (s *mcpConnectionState) nativeRefs() (sessionID, threadID string) {
 
 func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSession Session) *mcp.Server {
 	server := mcp.NewServer(
-		&mcp.Implementation{Name: "agen8-mcp", Version: "1.0.0"},
+		&mcp.Implementation{Name: "agen8-mcp", Version: buildinfo.Current().Version},
 		nil,
 	)
 	for _, def := range s.registry.Defs() {

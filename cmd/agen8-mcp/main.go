@@ -12,6 +12,7 @@ import (
 
 	"github.com/tinoosan/agen8-mcp-server/internal/config"
 	"github.com/tinoosan/agen8-mcp-server/internal/daemon"
+	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
 )
 
 func main() {
@@ -24,6 +25,15 @@ func main() {
 func run(args []string) error {
 	if len(args) == 0 {
 		return runDaemonStart(nil)
+	}
+	switch args[0] {
+	case "version", "--version", "-v":
+		info := buildinfo.Current()
+		fmt.Printf("agen8-mcp %s\ncommit: %s\n", info.Version, info.Commit)
+		if info.BuildDate != "" {
+			fmt.Printf("built: %s\n", info.BuildDate)
+		}
+		return nil
 	}
 	if args[0] != "daemon" {
 		return fmt.Errorf("unknown command %q", args[0])

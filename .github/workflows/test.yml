@@ -41,8 +41,8 @@ jobs:
         # have rationales documented in revive.toml.
         run: GO_LINT_TOOLS=revive ./scripts/ci/check_go_lint.sh
 
-      - name: Build agen8 binary
-        run: go build -o bin/agen8 ./cmd/agen8
+      - name: Build agen8-mcp binary
+        run: go build -o bin/agen8-mcp ./cmd/agen8-mcp
 
   web:
     runs-on: ubuntu-latest
