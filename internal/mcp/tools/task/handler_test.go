@@ -317,6 +317,43 @@ func TestHandleReviewMapsDecisionToServiceMethod(t *testing.T) {
 	}
 }
 
+func TestHandleReviewAcceptsApproveSummaryAlias(t *testing.T) {
+	svc := &stubService{}
+	_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"approve","summary":"approved after inspection","criteria":[{"id":"criterion-1","satisfied":true}]}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if svc.called != "approve" {
+		t.Fatalf("called=%q want approve", svc.called)
+	}
+	if svc.reviewReq.Reason != "approved after inspection" {
+		t.Fatalf("review reason=%q want summary alias", svc.reviewReq.Reason)
+	}
+}
+
+func TestHandleReviewUsesSummaryAndNoteAsFeedbackFallbacks(t *testing.T) {
+	t.Run("summary", func(t *testing.T) {
+		svc := &stubService{}
+		_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"retry","summary":"tighten summary","criteria":[{"id":"criterion-1","satisfied":false}]}`))
+		if err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+		if svc.called != "retry" || svc.reviewReq.Reason != "tighten summary" {
+			t.Fatalf("called=%q review req=%+v", svc.called, svc.reviewReq)
+		}
+	})
+	t.Run("note", func(t *testing.T) {
+		svc := &stubService{}
+		_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"fail","note":"missing evidence","criteria":[{"id":"criterion-1","satisfied":false}]}`))
+		if err != nil {
+			t.Fatalf("handle: %v", err)
+		}
+		if svc.called != "fail" || svc.reviewReq.Reason != "missing evidence" {
+			t.Fatalf("called=%q review req=%+v", svc.called, svc.reviewReq)
+		}
+	})
+}
+
 func TestDecodeRejectsUnknownAction(t *testing.T) {
 	_, err := decode(json.RawMessage(`{"action":"force_complete"}`))
 	if err == nil || !strings.Contains(err.Error(), "unsupported action") {

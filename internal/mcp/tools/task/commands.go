@@ -113,7 +113,7 @@ var fieldsByAction = map[string]map[string]struct{}{
 	"unblock":  fieldSet("action", "task_id", "note"),
 	"reassign": fieldSet("action", "task_id", "assignee_member_id"),
 	"cancel":   fieldSet("action", "task_id", "reason"),
-	"review":   fieldSet("action", "task_id", "decision", "reason", "criteria"),
+	"review":   fieldSet("action", "task_id", "decision", "reason", "summary", "note", "criteria"),
 }
 
 func fieldSet(fields ...string) map[string]struct{} {

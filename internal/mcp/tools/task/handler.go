@@ -147,7 +147,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		if err != nil {
 			return Result{}, err
 		}
-		params := taskapp.ReviewTaskParams{TaskID: id, Reason: input.Reason, Criteria: reviewCriteria(input.Criteria)}
+		params := taskapp.ReviewTaskParams{TaskID: id, Reason: reviewText(input), Criteria: reviewCriteria(input.Criteria)}
 		var task taskdomain.Task
 		switch input.Decision {
 		case "approve":
@@ -173,6 +173,15 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	default:
 		return Result{}, fmt.Errorf("task: unsupported action %q", input.Action)
 	}
+}
+
+func reviewText(input requestInput) string {
+	for _, value := range []string{input.Reason, input.Summary, input.Note} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 type actor struct {
