@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
 	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
 )
@@ -115,6 +116,67 @@ func scanAPIKey(rawID, rawUserID, name, prefix, tokenHash string, expiresAt sql.
 		return apikey.Key{}, fmt.Errorf("scan api key record: %w", err)
 	}
 	return record, nil
+}
+
+func scanLinkToken(rawID, rawUserID, projectID, workspaceID, label, prefix, tokenHash string, expiresAt sql.NullString, revokedAt sql.NullString, createdAt string) (linktoken.LinkToken, error) {
+	id, err := linktoken.NewID(rawID)
+	if err != nil {
+		return linktoken.LinkToken{}, fmt.Errorf("scan link token id: %w", err)
+	}
+	userID, err := user.NewID(rawUserID)
+	if err != nil {
+		return linktoken.LinkToken{}, fmt.Errorf("scan link token user id: %w", err)
+	}
+	expires, err := parseNullTime(expiresAt)
+	if err != nil {
+		return linktoken.LinkToken{}, fmt.Errorf("scan link token expires at: %w", err)
+	}
+	revoked, err := parseNullTime(revokedAt)
+	if err != nil {
+		return linktoken.LinkToken{}, fmt.Errorf("scan link token revoked at: %w", err)
+	}
+	created, err := parseTime(createdAt)
+	if err != nil {
+		return linktoken.LinkToken{}, fmt.Errorf("scan link token created at: %w", err)
+	}
+	record := linktoken.LinkToken{
+		ID:          id,
+		UserID:      userID,
+		ProjectID:   strings.TrimSpace(projectID),
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		Label:       strings.TrimSpace(label),
+		Prefix:      strings.TrimSpace(prefix),
+		TokenHash:   strings.TrimSpace(tokenHash),
+		ExpiresAt:   expires,
+		RevokedAt:   revoked,
+		CreatedAt:   created,
+	}
+	if err := validateLinkToken(record); err != nil {
+		return linktoken.LinkToken{}, fmt.Errorf("scan link token record: %w", err)
+	}
+	return record, nil
+}
+
+func validateLinkToken(record linktoken.LinkToken) error {
+	if strings.TrimSpace(record.ID.String()) == "" {
+		return fmt.Errorf("link token id is required")
+	}
+	if record.UserID.IsZero() {
+		return fmt.Errorf("link token user id is required")
+	}
+	if strings.TrimSpace(record.ProjectID) == "" {
+		return fmt.Errorf("link token project id is required")
+	}
+	if strings.TrimSpace(record.Prefix) == "" {
+		return fmt.Errorf("link token prefix is required")
+	}
+	if strings.TrimSpace(record.TokenHash) == "" {
+		return fmt.Errorf("link token token hash is required")
+	}
+	if record.CreatedAt.IsZero() {
+		return fmt.Errorf("link token created at is required")
+	}
+	return nil
 }
 
 func validateSession(record session.Session) error {

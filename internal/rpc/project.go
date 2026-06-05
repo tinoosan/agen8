@@ -19,6 +19,8 @@ const (
 	MethodProjectDelete  = "project.delete"
 	MethodProjectList    = "project.list"
 
+	MethodProjectLinkTokenCreate = "project.linkToken.create"
+
 	MethodProjectMemberRegister     = "project.member.register"
 	MethodProjectMemberGet          = "project.member.get"
 	MethodProjectMemberList         = "project.member.list"
@@ -52,10 +54,10 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service) error {
 			return AddBoundHandler(reg, MethodProjectGet, false, handler.ProjectGet)
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectCreate, false, handler.ProjectCreate)
+			return AddBoundHandler(reg, MethodProjectCreate, false, withProjectCaller(handler.ProjectCreate))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectSave, false, handler.ProjectSave)
+			return AddBoundHandler(reg, MethodProjectSave, false, withProjectCaller(handler.ProjectSave))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectArchive, false, handler.ProjectArchive)
@@ -65,6 +67,9 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service) error {
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectList, true, handler.ProjectList)
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodProjectLinkTokenCreate, false, withProjectCaller(handler.LinkTokenCreate))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectMemberRegister, false, withProjectCaller(handler.MemberRegister))

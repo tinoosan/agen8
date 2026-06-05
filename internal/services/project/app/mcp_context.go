@@ -16,7 +16,12 @@ import (
 )
 
 type RegisterMCPContextInput struct {
-	Token            string
+	Token string
+	// BoundProjectID is the project bound to the session server-side from its
+	// link token (wlt_). It is authoritative and unspoofable: a caller cannot
+	// set it, only the daemon can, from a validated token. When present it wins
+	// over the caller-asserted ProjectID below.
+	BoundProjectID   string
 	UserID           string
 	ProjectID        string
 	ProjectRoot      string
@@ -74,11 +79,18 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	if locationID == "" {
 		locationID = "local"
 	}
-	projectID := types.ProjectID(strings.TrimSpace(input.ProjectID))
+	// Project identity in strict priority order (see docs: identity resolution).
+	// 1. The link-token binding carried by the session — authoritative.
+	projectID := types.ProjectID(strings.TrimSpace(input.BoundProjectID))
+	if projectID == "" {
+		// 2. An explicit caller-asserted id (e.g. the bootstrap agen8-local token).
+		projectID = types.ProjectID(strings.TrimSpace(input.ProjectID))
+	}
 	root := strings.TrimSpace(input.ProjectRoot)
 	if projectID == "" {
+		// 3. Path-hash fallback — last resort for unmarked and legacy folders.
 		if root == "" {
-			return RegisterMCPContextResult{}, fmt.Errorf("project_id or project_root is required")
+			return RegisterMCPContextResult{}, fmt.Errorf("no project binding: marker, project_id, or project_root required")
 		}
 		projectID = ProjectIDForLocationRoot(locationID, root)
 	}
@@ -110,6 +122,17 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	projectID = loadedProject.ID()
 	root = strings.TrimSpace(loadedProject.Root())
 	locationID = loadedProject.LocationID()
+	// Record the folder as a Workspace of this project — metadata, never identity.
+	// This happens in every resolution path (bound, explicit, fallback): cwd tells
+	// us where a workspace is, not which project it is.
+	if _, err := s.UpsertWorkspace(ctx, UpsertWorkspaceParams{
+		ProjectID:  string(projectID),
+		UserID:     userID,
+		LocationID: string(locationID),
+		Root:       root,
+	}); err != nil {
+		return RegisterMCPContextResult{}, fmt.Errorf("record workspace: %w", err)
+	}
 	nativeRef := nativeRefForRegister(input)
 	if nativeRef == "" {
 		nativeRef = "token:" + token

@@ -9,6 +9,7 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/workspace"
 	projectinfra "github.com/tinoosan/agen8-mcp-server/internal/services/project/infra"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
@@ -38,6 +39,38 @@ func (c fixedClock) Now() time.Time { return c.now }
 type noopPublisher struct{}
 
 func (noopPublisher) Publish(string, any) error { return nil }
+
+// fakeLinkTokenIssuer stands in for the auth-backed issuer. It records the last
+// request so tests can assert the ownership-verified binding flowed through, and
+// echoes a wlt_-prefixed token. Set err to exercise the failure path.
+type fakeLinkTokenIssuer struct {
+	last  LinkTokenRequest
+	calls int
+	err   error
+}
+
+func (f *fakeLinkTokenIssuer) IssueLinkToken(_ context.Context, req LinkTokenRequest) (LinkTokenIssued, error) {
+	f.calls++
+	f.last = req
+	if f.err != nil {
+		return LinkTokenIssued{}, f.err
+	}
+	token := "wlt_" + req.ProjectID + "secret"
+	prefix := token
+	if len(prefix) > 12 {
+		prefix = prefix[:12]
+	}
+	return LinkTokenIssued{
+		ID:        "link_token_" + req.ProjectID,
+		Prefix:    prefix,
+		Token:     token,
+		UserID:    req.UserID,
+		ProjectID: req.ProjectID,
+		Label:     req.Label,
+		ExpiresAt: req.ExpiresAt,
+		CreatedAt: time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC),
+	}, nil
+}
 
 func TestRegisterMCPContextUpdatesExistingMemberDisplayName(t *testing.T) {
 	t.Parallel()
@@ -148,6 +181,185 @@ func TestRegisterMCPContextRehomesLegacyLocalMemberToTokenUser(t *testing.T) {
 	}
 }
 
+func TestRegisterMCPContextRecordsWorkspace(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	root := filepath.Join(t.TempDir(), "repo")
+
+	result, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "user-1",
+		ProjectRoot: root,
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	workspaces, err := service.ListWorkspaces(ctx, workspace.Filter{ProjectID: result.ProjectID})
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if len(workspaces) != 1 {
+		t.Fatalf("workspaces=%d want 1", len(workspaces))
+	}
+	ws := workspaces[0]
+	if ws.ProjectID != result.ProjectID {
+		t.Fatalf("workspace project=%q want %q", ws.ProjectID, result.ProjectID)
+	}
+	if ws.Root != root {
+		t.Fatalf("workspace root=%q want %q", ws.Root, root)
+	}
+	if ws.UserID != "user-1" {
+		t.Fatalf("workspace user=%q want user-1", ws.UserID)
+	}
+}
+
+func TestRegisterMCPContextBoundProjectOverridesCallerAssertedProjectID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	rootA := filepath.Join(t.TempDir(), "repo-a")
+	rootB := filepath.Join(t.TempDir(), "repo-b")
+
+	// Stand up two distinct projects via the path-hash fallback.
+	bound, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "user-1",
+		ProjectRoot: rootA,
+		HarnessKind: "codex",
+		SessionID:   "session-a",
+	})
+	if err != nil {
+		t.Fatalf("register bound project: %v", err)
+	}
+	spoofed, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "user-1",
+		ProjectRoot: rootB,
+		HarnessKind: "codex",
+		SessionID:   "session-b",
+	})
+	if err != nil {
+		t.Fatalf("register spoofed project: %v", err)
+	}
+	if bound.ProjectID == spoofed.ProjectID {
+		t.Fatalf("expected distinct project ids, both=%q", bound.ProjectID)
+	}
+
+	// The session is bound (server-side) to bound.ProjectID, but the caller
+	// asserts spoofed.ProjectID. The unspoofable binding must win.
+	result, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:          "agen8-local",
+		UserID:         "user-1",
+		BoundProjectID: bound.ProjectID,
+		ProjectID:      spoofed.ProjectID,
+		ProjectRoot:    rootB,
+		HarnessKind:    "codex",
+		SessionID:      "session-c",
+	})
+	if err != nil {
+		t.Fatalf("register with binding: %v", err)
+	}
+	if result.ProjectID != bound.ProjectID {
+		t.Fatalf("bound project not honored: result=%q want %q (caller asserted %q)", result.ProjectID, bound.ProjectID, spoofed.ProjectID)
+	}
+}
+
+func TestRegisterMCPContextPathHashFallbackForUnmarkedFolder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	root := filepath.Join(t.TempDir(), "unmarked")
+
+	result, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "user-1",
+		ProjectRoot: root,
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	want := string(ProjectIDForLocationRoot("local", root))
+	if result.ProjectID != want {
+		t.Fatalf("fallback project=%q want %q", result.ProjectID, want)
+	}
+}
+
+func TestRegisterMCPContextRequiresSomeProjectBinding(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+
+	_, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "user-1",
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err == nil {
+		t.Fatal("expected missing marker, project_id, and project_root to fail loudly")
+	}
+}
+
+func TestUpsertWorkspaceIsIdentityStable(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	root := filepath.Join(t.TempDir(), "repo")
+
+	first, err := service.UpsertWorkspace(ctx, UpsertWorkspaceParams{
+		ProjectID:  "proj-1",
+		UserID:     "user-1",
+		LocationID: "local",
+		Root:       root,
+	})
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	second, err := service.UpsertWorkspace(ctx, UpsertWorkspaceParams{
+		ProjectID:  "proj-1",
+		UserID:     "user-1",
+		LocationID: "local",
+		Root:       root,
+	})
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("workspace id changed from %q to %q", first.ID, second.ID)
+	}
+
+	workspaces, err := service.ListWorkspaces(ctx, workspace.Filter{ProjectID: "proj-1"})
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	if len(workspaces) != 1 {
+		t.Fatalf("workspaces=%d want 1 (identity-stable upsert must not duplicate)", len(workspaces))
+	}
+}
+
+func TestUpsertWorkspaceRequiresProjectAndRoot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+
+	if _, err := service.UpsertWorkspace(ctx, UpsertWorkspaceParams{
+		Root: filepath.Join(t.TempDir(), "repo"),
+	}); err == nil {
+		t.Fatal("expected missing project id to fail loudly")
+	}
+	if _, err := service.UpsertWorkspace(ctx, UpsertWorkspaceParams{
+		ProjectID: "proj-1",
+	}); err == nil {
+		t.Fatal("expected missing root to fail loudly")
+	}
+}
+
 func newProjectServiceForMCPContextTest(t *testing.T) *Service {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{
@@ -173,6 +385,7 @@ func newProjectServiceForMCPContextTest(t *testing.T) *Service {
 		Projects:   projects,
 		Members:    members,
 		Workspaces: workspaces,
+		LinkTokens: &fakeLinkTokenIssuer{},
 		Clock:      fixedClock{now: time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)},
 		Caller:     caller.ContextResolver{},
 		Configs:    acceptingConfigValidator{},

@@ -273,11 +273,24 @@ func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
 func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header http.Header, body []byte) (mcp.Session, error) {
 	session, err := d.mcpTokens.Resolve(token)
 	if err != nil {
-		account, authErr := d.app.AuthSvc.ValidateAPIKey(ctx, token)
-		if authErr != nil {
-			return mcp.Session{}, err
+		// Token resolution priority: bootstrap/web-registered tokens (above) →
+		// wlt_ link tokens → ak_ API keys. A wlt_ token is recognised first and
+		// binds the session to a project server-side; an invalid one fails loudly
+		// rather than falling through to the API-key path.
+		if strings.HasPrefix(strings.TrimSpace(token), "wlt_") {
+			bind, bindErr := d.app.AuthSvc.ValidateLinkToken(ctx, token)
+			if bindErr != nil {
+				return mcp.Session{}, bindErr
+			}
+			session = d.mcpSession(token, bind.User.ID.String(), "")
+			session.ProjectID = strings.TrimSpace(bind.ProjectID)
+		} else {
+			account, authErr := d.app.AuthSvc.ValidateAPIKey(ctx, token)
+			if authErr != nil {
+				return mcp.Session{}, err
+			}
+			session = d.mcpSession(token, account.ID.String(), "")
 		}
-		session = d.mcpSession(token, account.ID.String(), "")
 	}
 	sessionID, threadID := mcp.SessionRefsFromHTTPHeader(header)
 	if sessionID == "" && threadID == "" {
@@ -324,6 +337,7 @@ func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req 
 	}
 	result, err := r.projects.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
 		Token:            req.Token,
+		BoundProjectID:   req.BoundProjectID,
 		UserID:           mcpUserID(ctx, r.users, r.auth, req.Token),
 		ProjectID:        req.ProjectID,
 		ProjectRoot:      req.ProjectRoot,

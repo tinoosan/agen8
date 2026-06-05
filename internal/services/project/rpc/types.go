@@ -82,6 +82,25 @@ type ProjectListResult struct {
 	Projects []ProjectView `json:"projects"`
 }
 
+type LinkTokenCreateParams struct {
+	ProjectID string `json:"projectId"`
+	Label     string `json:"label,omitempty"`
+}
+
+// LinkTokenCreateResult carries the minted wlt_ token. Token is the raw secret,
+// returned once at mint time; the client must surface it immediately and never
+// expect it again. Prefix/ID are safe to persist for display and later revocation.
+type LinkTokenCreateResult struct {
+	ID          string     `json:"id"`
+	Prefix      string     `json:"prefix"`
+	Token       string     `json:"token"`
+	ProjectID   string     `json:"projectId"`
+	WorkspaceID string     `json:"workspaceId,omitempty"`
+	Label       string     `json:"label,omitempty"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt   *time.Time `json:"createdAt,omitempty"`
+}
+
 type MemberView struct {
 	ID             string     `json:"id"`
 	UserID         string     `json:"userId,omitempty"`

@@ -4,15 +4,17 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
 
 type Repositories struct {
-	Passwords password.Repository
-	Sessions  session.Repository
-	APIKeys   apikey.Repository
+	Passwords  password.Repository
+	Sessions   session.Repository
+	APIKeys    apikey.Repository
+	LinkTokens linktoken.Repository
 }
 
 func NewRepositories(handle *storagedb.Handle) (Repositories, error) {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
 	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
@@ -260,6 +261,103 @@ func (s *sqlStore) queryAPIKey(ctx context.Context, query string, args ...any) (
 	return scanAPIKey(rawID, rawUserID, name, prefix, tokenHash, expiresAt, revokedAt, createdAt)
 }
 
+func (s *sqlStore) GetLinkTokenByTokenHash(ctx context.Context, tokenHash string) (linktoken.LinkToken, error) {
+	tokenHash = strings.TrimSpace(tokenHash)
+	if tokenHash == "" {
+		return linktoken.LinkToken{}, fmt.Errorf("link token token hash is required")
+	}
+	return s.queryLinkToken(ctx, `
+		SELECT link_token_id, user_id, project_id, workspace_id, label, prefix, token_hash, expires_at, revoked_at, created_at
+		FROM auth_link_tokens
+		WHERE token_hash = ?
+	`, tokenHash)
+}
+
+func (s *sqlStore) GetLinkToken(ctx context.Context, id linktoken.ID) (linktoken.LinkToken, error) {
+	if strings.TrimSpace(id.String()) == "" {
+		return linktoken.LinkToken{}, fmt.Errorf("link token id is required")
+	}
+	return s.queryLinkToken(ctx, `
+		SELECT link_token_id, user_id, project_id, workspace_id, label, prefix, token_hash, expires_at, revoked_at, created_at
+		FROM auth_link_tokens
+		WHERE link_token_id = ?
+	`, id.String())
+}
+
+func (s *sqlStore) CreateLinkToken(ctx context.Context, record linktoken.LinkToken) error {
+	if err := validateLinkToken(record); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, s.rebind(`
+		INSERT INTO auth_link_tokens (link_token_id, user_id, project_id, workspace_id, label, prefix, token_hash, expires_at, revoked_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`),
+		record.ID.String(),
+		record.UserID.String(),
+		strings.TrimSpace(record.ProjectID),
+		strings.TrimSpace(record.WorkspaceID),
+		strings.TrimSpace(record.Label),
+		strings.TrimSpace(record.Prefix),
+		strings.TrimSpace(record.TokenHash),
+		nullableTimeString(record.ExpiresAt),
+		nullableTimeString(record.RevokedAt),
+		timeString(record.CreatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("create link token: %w", err)
+	}
+	return nil
+}
+
+func (s *sqlStore) UpdateLinkToken(ctx context.Context, record linktoken.LinkToken) error {
+	if err := validateLinkToken(record); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, s.rebind(`
+		UPDATE auth_link_tokens
+		SET user_id = ?, project_id = ?, workspace_id = ?, label = ?, prefix = ?, token_hash = ?, expires_at = ?, revoked_at = ?
+		WHERE link_token_id = ?
+	`),
+		record.UserID.String(),
+		strings.TrimSpace(record.ProjectID),
+		strings.TrimSpace(record.WorkspaceID),
+		strings.TrimSpace(record.Label),
+		strings.TrimSpace(record.Prefix),
+		strings.TrimSpace(record.TokenHash),
+		nullableTimeString(record.ExpiresAt),
+		nullableTimeString(record.RevokedAt),
+		record.ID.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("update link token: %w", err)
+	}
+	return requireAffected(result, "link token")
+}
+
+func (s *sqlStore) queryLinkToken(ctx context.Context, query string, args ...any) (linktoken.LinkToken, error) {
+	var rawID, rawUserID, projectID, workspaceID, label, prefix, tokenHash, createdAt string
+	var expiresAt, revokedAt sql.NullString
+	err := s.db.QueryRowContext(ctx, s.rebind(query), args...).Scan(
+		&rawID,
+		&rawUserID,
+		&projectID,
+		&workspaceID,
+		&label,
+		&prefix,
+		&tokenHash,
+		&expiresAt,
+		&revokedAt,
+		&createdAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return linktoken.LinkToken{}, fmt.Errorf("link token not found")
+		}
+		return linktoken.LinkToken{}, fmt.Errorf("query link token: %w", err)
+	}
+	return scanLinkToken(rawID, rawUserID, projectID, workspaceID, label, prefix, tokenHash, expiresAt, revokedAt, createdAt)
+}
+
 func (s *sqlStore) ensureSchema(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS auth_passwords (
@@ -286,8 +384,22 @@ func (s *sqlStore) ensureSchema(ctx context.Context) error {
 			revoked_at TEXT,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS auth_link_tokens (
+			link_token_id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			project_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			label TEXT NOT NULL DEFAULT '',
+			prefix TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			expires_at TEXT,
+			revoked_at TEXT,
+			created_at TEXT NOT NULL
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_auth_api_keys_user_id ON auth_api_keys(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_link_tokens_user_id ON auth_link_tokens(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_link_tokens_project_id ON auth_link_tokens(project_id)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, s.rebind(statement)); err != nil {

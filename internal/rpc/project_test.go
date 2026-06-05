@@ -3,7 +3,9 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
@@ -262,6 +264,92 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 	}
 }
 
+func TestRegisterProjectDispatchLinkTokenCreate(t *testing.T) {
+	svc := newRPCProjectService(t)
+	reg := NewRegistry()
+	if err := RegisterProject(reg, svc); err != nil {
+		t.Fatalf("RegisterProject returned error: %v", err)
+	}
+	server, err := NewServer(reg)
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	ownerCtx := ContextWithIdentity(context.Background(), Identity{UserID: "user-1"})
+
+	raw, err := server.Handle(ownerCtx, []byte(`{
+		"jsonrpc": "2.0",
+		"id": "1",
+		"method": "project.create",
+		"params": { "root": "/tmp/link-me", "title": "Link Me" }
+	}`))
+	if err != nil {
+		t.Fatalf("Handle project.create returned error: %v", err)
+	}
+	resp := decodeRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("project.create response error=%+v", resp.Error)
+	}
+	var created projectrpc.ProjectCreateResult
+	if err := json.Unmarshal(resp.Result, &created); err != nil {
+		t.Fatalf("unmarshal project.create result: %v", err)
+	}
+
+	raw, err = server.Handle(ownerCtx, []byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "2",
+		"method": "project.linkToken.create",
+		"params": { "projectId": %q, "label": "laptop" }
+	}`, created.Project.ID)))
+	if err != nil {
+		t.Fatalf("Handle project.linkToken.create returned error: %v", err)
+	}
+	resp = decodeRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("project.linkToken.create response error=%+v", resp.Error)
+	}
+	var result projectrpc.LinkTokenCreateResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal project.linkToken.create result: %v", err)
+	}
+	if !strings.HasPrefix(result.Token, "wlt_") {
+		t.Fatalf("link token=%q want wlt_ prefix", result.Token)
+	}
+	if result.ProjectID != created.Project.ID {
+		t.Fatalf("result.ProjectID=%q want %q", result.ProjectID, created.Project.ID)
+	}
+	if result.ID == "" {
+		t.Fatalf("result.ID is empty: %+v", result)
+	}
+}
+
+func TestRegisterProjectLinkTokenCreateRequiresIdentity(t *testing.T) {
+	svc := newRPCProjectService(t)
+	reg := NewRegistry()
+	if err := RegisterProject(reg, svc); err != nil {
+		t.Fatalf("RegisterProject returned error: %v", err)
+	}
+	server, err := NewServer(reg)
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+
+	// No identity in context: the withProjectCaller guard must reject it before
+	// any token is minted.
+	raw, err := server.Handle(context.Background(), []byte(`{
+		"jsonrpc": "2.0",
+		"id": "1",
+		"method": "project.linkToken.create",
+		"params": { "projectId": "any-project" }
+	}`))
+	if err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+	resp := decodeRPCResponse(t, raw)
+	if resp.Error == nil || resp.Error.Code != CodeInvalidRequest {
+		t.Fatalf("response error=%+v want invalid request for missing identity", resp.Error)
+	}
+}
+
 func newRPCProjectService(t *testing.T) *projectapp.Service {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{
@@ -287,6 +375,7 @@ func newRPCProjectService(t *testing.T) *projectapp.Service {
 		Projects:   projects,
 		Members:    members,
 		Workspaces: workspaces,
+		LinkTokens: rpcProjectLinkTokenIssuer{},
 		Caller:     caller.ContextResolver{},
 		Configs:    rpcProjectConfigValidator{},
 		Events:     rpcProjectEventPublisher{},
@@ -304,3 +393,21 @@ func (rpcProjectConfigValidator) ValidateConfig(string, string, string) error { 
 type rpcProjectEventPublisher struct{}
 
 func (rpcProjectEventPublisher) Publish(string, any) error { return nil }
+
+type rpcProjectLinkTokenIssuer struct{}
+
+func (rpcProjectLinkTokenIssuer) IssueLinkToken(_ context.Context, req projectapp.LinkTokenRequest) (projectapp.LinkTokenIssued, error) {
+	token := "wlt_" + req.ProjectID + "secret"
+	prefix := token
+	if len(prefix) > 12 {
+		prefix = prefix[:12]
+	}
+	return projectapp.LinkTokenIssued{
+		ID:        "link_token_" + req.ProjectID,
+		Prefix:    prefix,
+		Token:     token,
+		UserID:    req.UserID,
+		ProjectID: req.ProjectID,
+		Label:     req.Label,
+	}, nil
+}

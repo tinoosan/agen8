@@ -16,28 +16,33 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/workspace"
 )
 
 type Service struct {
-	projects project.Repository
-	members  member.Repository
-	clock    Clock
-	caller   caller.Resolver
-	configs  ConfigValidator
-	events   EventPublisher
-	logger   *slog.Logger
+	projects   project.Repository
+	members    member.Repository
+	workspaces workspace.Repository
+	linkTokens LinkTokenIssuer
+	clock      Clock
+	caller     caller.Resolver
+	configs    ConfigValidator
+	events     EventPublisher
+	logger     *slog.Logger
 }
 
 type Caller = caller.Caller
 
 type Config struct {
-	Projects project.Repository
-	Members  member.Repository
-	Clock    Clock
-	Caller   caller.Resolver
-	Configs  ConfigValidator
-	Events   EventPublisher
-	Logger   *slog.Logger
+	Projects   project.Repository
+	Members    member.Repository
+	Workspaces workspace.Repository
+	LinkTokens LinkTokenIssuer
+	Clock      Clock
+	Caller     caller.Resolver
+	Configs    ConfigValidator
+	Events     EventPublisher
+	Logger     *slog.Logger
 }
 
 func NewService(cfg Config) (*Service, error) {
@@ -46,6 +51,12 @@ func NewService(cfg Config) (*Service, error) {
 	}
 	if cfg.Members == nil {
 		return nil, fmt.Errorf("project member repository is required")
+	}
+	if cfg.Workspaces == nil {
+		return nil, fmt.Errorf("project workspace repository is required")
+	}
+	if cfg.LinkTokens == nil {
+		return nil, fmt.Errorf("project link token issuer is required")
 	}
 	if cfg.Caller == nil {
 		return nil, fmt.Errorf("project caller resolver is required")
@@ -65,13 +76,15 @@ func NewService(cfg Config) (*Service, error) {
 		logger = slog.Default().With("service", "project")
 	}
 	return &Service{
-		projects: cfg.Projects,
-		members:  cfg.Members,
-		clock:    clock,
-		caller:   cfg.Caller,
-		configs:  cfg.Configs,
-		events:   cfg.Events,
-		logger:   logger,
+		projects:   cfg.Projects,
+		members:    cfg.Members,
+		workspaces: cfg.Workspaces,
+		linkTokens: cfg.LinkTokens,
+		clock:      clock,
+		caller:     cfg.Caller,
+		configs:    cfg.Configs,
+		events:     cfg.Events,
+		logger:     logger,
 	}, nil
 }
 

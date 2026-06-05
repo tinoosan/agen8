@@ -167,6 +167,127 @@ func TestCredentialLifecycleLogsOmitCredentialIdentifiersAndTokens(t *testing.T)
 	}
 }
 
+func TestCreateLinkTokenBindsProjectAndValidateResolvesIt(t *testing.T) {
+	account := authUserRecord(t, "user-1", user.LifecycleActive)
+	svc, _ := newAuthServiceForTest(t, account)
+
+	created, err := svc.CreateLinkToken(context.Background(), CreateLinkTokenParams{
+		UserID:      account.ID,
+		ProjectID:   "proj-abc",
+		WorkspaceID: "ws-123",
+		Label:       "laptop",
+	})
+	if err != nil {
+		t.Fatalf("CreateLinkToken: %v", err)
+	}
+	if !strings.HasPrefix(created.Token, "wlt_") {
+		t.Fatalf("link token=%q want wlt_ prefix", created.Token)
+	}
+	if created.LinkToken.TokenHash == created.Token {
+		t.Fatal("stored token hash must not equal the raw token")
+	}
+
+	binding, err := svc.ValidateLinkToken(context.Background(), created.Token)
+	if err != nil {
+		t.Fatalf("ValidateLinkToken: %v", err)
+	}
+	if binding.User.ID != account.ID {
+		t.Fatalf("binding user=%q want %q", binding.User.ID.String(), account.ID.String())
+	}
+	if binding.ProjectID != "proj-abc" {
+		t.Fatalf("binding project=%q want proj-abc", binding.ProjectID)
+	}
+	if binding.WorkspaceID != "ws-123" {
+		t.Fatalf("binding workspace=%q want ws-123", binding.WorkspaceID)
+	}
+}
+
+func TestCreateLinkTokenRequiresProjectID(t *testing.T) {
+	account := authUserRecord(t, "user-1", user.LifecycleActive)
+	svc, _ := newAuthServiceForTest(t, account)
+
+	_, err := svc.CreateLinkToken(context.Background(), CreateLinkTokenParams{
+		UserID:    account.ID,
+		ProjectID: "   ",
+	})
+	if err == nil {
+		t.Fatal("expected missing project id to fail loudly")
+	}
+}
+
+func TestValidateLinkTokenRejectsUnknownToken(t *testing.T) {
+	account := authUserRecord(t, "user-1", user.LifecycleActive)
+	svc, _ := newAuthServiceForTest(t, account)
+
+	_, err := svc.ValidateLinkToken(context.Background(), "wlt_does-not-exist")
+	if err != auth.ErrTokenNotFound {
+		t.Fatalf("ValidateLinkToken error=%v want token not found", err)
+	}
+}
+
+func TestValidateLinkTokenRejectsExpiredToken(t *testing.T) {
+	account := authUserRecord(t, "user-1", user.LifecycleActive)
+	svc, _ := newAuthServiceForTest(t, account)
+	expired := authTestNow.Add(-time.Hour)
+
+	created, err := svc.CreateLinkToken(context.Background(), CreateLinkTokenParams{
+		UserID:    account.ID,
+		ProjectID: "proj-abc",
+		ExpiresAt: &expired,
+	})
+	if err != nil {
+		t.Fatalf("CreateLinkToken: %v", err)
+	}
+
+	_, err = svc.ValidateLinkToken(context.Background(), created.Token)
+	if err != auth.ErrTokenExpired {
+		t.Fatalf("ValidateLinkToken error=%v want token expired", err)
+	}
+}
+
+func TestRevokeLinkTokenInvalidatesIt(t *testing.T) {
+	account := authUserRecord(t, "user-1", user.LifecycleActive)
+	svc, _ := newAuthServiceForTest(t, account)
+
+	created, err := svc.CreateLinkToken(context.Background(), CreateLinkTokenParams{
+		UserID:    account.ID,
+		ProjectID: "proj-abc",
+	})
+	if err != nil {
+		t.Fatalf("CreateLinkToken: %v", err)
+	}
+	if err := svc.RevokeLinkToken(context.Background(), created.LinkToken.ID); err != nil {
+		t.Fatalf("RevokeLinkToken: %v", err)
+	}
+
+	_, err = svc.ValidateLinkToken(context.Background(), created.Token)
+	if err != auth.ErrTokenExpired {
+		t.Fatalf("ValidateLinkToken after revoke error=%v want token expired", err)
+	}
+}
+
+func TestValidateLinkTokenRejectsInactiveUser(t *testing.T) {
+	account := authUserRecord(t, "user-1", user.LifecycleActive)
+	svc, deps := newAuthServiceForTest(t, account)
+
+	created, err := svc.CreateLinkToken(context.Background(), CreateLinkTokenParams{
+		UserID:    account.ID,
+		ProjectID: "proj-abc",
+	})
+	if err != nil {
+		t.Fatalf("CreateLinkToken: %v", err)
+	}
+
+	suspended := account
+	suspended.Lifecycle = user.LifecycleSuspended
+	deps.users.users[account.ID.String()] = suspended
+
+	_, err = svc.ValidateLinkToken(context.Background(), created.Token)
+	if err != auth.ErrUserInactive {
+		t.Fatalf("ValidateLinkToken inactive user error=%v want user inactive", err)
+	}
+}
+
 type authTestDeps struct {
 	passwords  *memoryPasswordRepo
 	sessions   *memorySessionRepo

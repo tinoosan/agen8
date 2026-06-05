@@ -112,6 +112,30 @@ func (h *Handler) ProjectDelete(ctx context.Context, p ProjectDeleteParams) (str
 	return struct{}{}, nil
 }
 
+func (h *Handler) LinkTokenCreate(ctx context.Context, p LinkTokenCreateParams) (LinkTokenCreateResult, error) {
+	projectID, err := requireProjectID(p.ProjectID)
+	if err != nil {
+		return LinkTokenCreateResult{}, err
+	}
+	issued, err := h.svc.CreateLinkToken(ctx, projectapp.CreateLinkTokenInput{
+		ProjectID: projectID,
+		Label:     strings.TrimSpace(p.Label),
+	})
+	if err != nil {
+		return LinkTokenCreateResult{}, internalError("create link token", err)
+	}
+	return LinkTokenCreateResult{
+		ID:          issued.ID,
+		Prefix:      issued.Prefix,
+		Token:       issued.Token,
+		ProjectID:   issued.ProjectID,
+		WorkspaceID: issued.WorkspaceID,
+		Label:       issued.Label,
+		ExpiresAt:   issued.ExpiresAt,
+		CreatedAt:   cloneTime(issued.CreatedAt),
+	}, nil
+}
+
 func (h *Handler) MemberRegister(ctx context.Context, p MemberRegisterParams) (MemberRegisterResult, error) {
 	projectID := strings.TrimSpace(p.ProjectID)
 	if projectID == "" {

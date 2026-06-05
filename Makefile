@@ -12,6 +12,13 @@ AIR ?= air
 GO_PACKAGES ?= ./cmd/... ./internal/... ./pkg/...
 VITE_HOST := $(word 1,$(subst :, ,$(VITE_ADDR)))
 VITE_PORT := $(word 2,$(subst :, ,$(VITE_ADDR)))
+LAN_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $$1}' || echo 127.0.0.1)
+REMOTE_HTTP_ADDR ?= 0.0.0.0:$(word 2,$(subst :, ,$(HTTP_ADDR)))
+REMOTE_VITE_ADDR ?= 0.0.0.0:$(VITE_PORT)
+REMOTE_HTTP_HOST := $(word 1,$(subst :, ,$(REMOTE_HTTP_ADDR)))
+REMOTE_HTTP_PORT := $(word 2,$(subst :, ,$(REMOTE_HTTP_ADDR)))
+REMOTE_VITE_HOST := $(word 1,$(subst :, ,$(REMOTE_VITE_ADDR)))
+REMOTE_VITE_PORT := $(word 2,$(subst :, ,$(REMOTE_VITE_ADDR)))
 
 .PHONY: run clean seed-clean seed-list ensure-air web-install web-build build-go build dev remote dev-remote daemon-remote test test-go test-web lint lint-go lint-web fmt-check guardrails ci race install-hooks worktree-create worktree-clean
 
@@ -100,16 +107,16 @@ daemon-remote:
 dev-remote: ensure-air web-install
 	@set -e; \
 	AIR_BIN="$(AIR)"; \
-	cd web; $(WEB_NPM) run dev -- --host "$(VITE_HOST)" --port "$(VITE_PORT)" & web_pid=$$!; cd ..; \
+	cd web; AGEN8_WEB_PROXY_TARGET="http://127.0.0.1:$(REMOTE_HTTP_PORT)" $(WEB_NPM) run dev -- --host "$(REMOTE_VITE_HOST)" --port "$(REMOTE_VITE_PORT)" & web_pid=$$!; cd ..; \
 	trap 'kill $$web_pid 2>/dev/null || true; wait $$web_pid 2>/dev/null || true' EXIT INT TERM; \
-	printf 'daemon: http://%s\n' "$(HTTP_ADDR)"; \
-	printf 'vite:   %s\n' "$(DEV_WEB_URL)"; \
+	printf 'daemon: http://%s:%s\n' "$(LAN_IP)" "$(REMOTE_HTTP_PORT)"; \
+	printf 'vite:   http://%s:%s\n' "$(LAN_IP)" "$(REMOTE_VITE_PORT)"; \
 	AGEN8_DAEMON_LISTENER=http \
-	AGEN8_HTTP_ADDR="$(HTTP_ADDR)" \
+	AGEN8_HTTP_ADDR="$(REMOTE_HTTP_ADDR)" \
 	AGEN8_LOG_FILE="tmp/daemon.log" \
-	AGEN8_DEV_WEB_URL="$(DEV_WEB_URL)" \
+	AGEN8_DEV_WEB_URL="http://127.0.0.1:$(REMOTE_VITE_PORT)" \
 	"$$AIR_BIN" \
-		-build.full_bin "./tmp/agen8-mcp daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(HTTP_ADDR)\""
+		-build.full_bin "./tmp/agen8-mcp daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(REMOTE_HTTP_ADDR)\""
 
 worktree-create:
 	@./scripts/worktree/create.sh "$(KIND)" "$(TASK)" "$(SLUG)" "$(or $(BASE),dev)"

@@ -5,6 +5,7 @@ import (
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/workspace"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
 
@@ -39,5 +40,22 @@ func NewMemberRepository(handle *storagedb.Handle) (member.Repository, error) {
 		return NewMemberPostgresRepository(handle)
 	default:
 		return nil, fmt.Errorf("project member repository: unsupported storage driver %q", handle.Driver())
+	}
+}
+
+// NewWorkspaceRepository is the storage-strategy entry point for project
+// workspaces: the (location, root, machine) places a project is linked. A
+// project owns many workspaces, selected from the same configured DB driver.
+func NewWorkspaceRepository(handle *storagedb.Handle) (workspace.Repository, error) {
+	if handle == nil {
+		return nil, fmt.Errorf("project workspace repository: db handle is required")
+	}
+	switch handle.Driver() {
+	case storagedb.DriverSQLite:
+		return NewWorkspaceSQLiteRepository(handle.DB())
+	case storagedb.DriverPostgres:
+		return NewWorkspacePostgresRepository(handle)
+	default:
+		return nil, fmt.Errorf("project workspace repository: unsupported storage driver %q", handle.Driver())
 	}
 }

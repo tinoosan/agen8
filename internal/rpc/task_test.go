@@ -128,6 +128,7 @@ func newRPCTaskStack(t *testing.T) (*projectapp.Service, *taskinfra.SQLiteReposi
 		Projects:   projects,
 		Members:    members,
 		Workspaces: workspaces,
+		LinkTokens: rpcProjectLinkTokenIssuer{},
 		Caller:     caller.ContextResolver{},
 		Configs:    rpcProjectConfigValidator{},
 		Events:     rpcProjectEventPublisher{},

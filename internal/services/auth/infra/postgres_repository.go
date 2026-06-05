@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
 	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
@@ -27,6 +28,10 @@ type postgresAPIKeyRepository struct {
 	store *sqlStore
 }
 
+type postgresLinkTokenRepository struct {
+	store *sqlStore
+}
+
 func newPostgresRepositories(handle *storagedb.Handle) (Repositories, error) {
 	if handle == nil {
 		return Repositories{}, fmt.Errorf("storage handle is required")
@@ -40,9 +45,10 @@ func newPostgresRepositories(handle *storagedb.Handle) (Repositories, error) {
 	}
 	repos := &PostgresRepositories{store: store}
 	return Repositories{
-		Passwords: &postgresPasswordRepository{store: repos.store},
-		Sessions:  &postgresSessionRepository{store: repos.store},
-		APIKeys:   &postgresAPIKeyRepository{store: repos.store},
+		Passwords:  &postgresPasswordRepository{store: repos.store},
+		Sessions:   &postgresSessionRepository{store: repos.store},
+		APIKeys:    &postgresAPIKeyRepository{store: repos.store},
+		LinkTokens: &postgresLinkTokenRepository{store: repos.store},
 	}, nil
 }
 
@@ -84,4 +90,20 @@ func (r *postgresAPIKeyRepository) Create(ctx context.Context, key apikey.Key) e
 
 func (r *postgresAPIKeyRepository) Update(ctx context.Context, key apikey.Key) error {
 	return r.store.UpdateAPIKey(ctx, key)
+}
+
+func (r *postgresLinkTokenRepository) GetByTokenHash(ctx context.Context, tokenHash string) (linktoken.LinkToken, error) {
+	return r.store.GetLinkTokenByTokenHash(ctx, tokenHash)
+}
+
+func (r *postgresLinkTokenRepository) Get(ctx context.Context, id linktoken.ID) (linktoken.LinkToken, error) {
+	return r.store.GetLinkToken(ctx, id)
+}
+
+func (r *postgresLinkTokenRepository) Create(ctx context.Context, token linktoken.LinkToken) error {
+	return r.store.CreateLinkToken(ctx, token)
+}
+
+func (r *postgresLinkTokenRepository) Update(ctx context.Context, token linktoken.LinkToken) error {
+	return r.store.UpdateLinkToken(ctx, token)
 }

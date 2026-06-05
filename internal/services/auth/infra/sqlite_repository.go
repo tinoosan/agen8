@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
 	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
@@ -27,6 +28,10 @@ type sqliteAPIKeyRepository struct {
 	store *sqlStore
 }
 
+type sqliteLinkTokenRepository struct {
+	store *sqlStore
+}
+
 func newSQLiteRepositories(handle *storagedb.Handle) (Repositories, error) {
 	if handle == nil {
 		return Repositories{}, fmt.Errorf("storage handle is required")
@@ -40,9 +45,10 @@ func newSQLiteRepositories(handle *storagedb.Handle) (Repositories, error) {
 	}
 	repos := &SQLiteRepositories{store: store}
 	return Repositories{
-		Passwords: &sqlitePasswordRepository{store: repos.store},
-		Sessions:  &sqliteSessionRepository{store: repos.store},
-		APIKeys:   &sqliteAPIKeyRepository{store: repos.store},
+		Passwords:  &sqlitePasswordRepository{store: repos.store},
+		Sessions:   &sqliteSessionRepository{store: repos.store},
+		APIKeys:    &sqliteAPIKeyRepository{store: repos.store},
+		LinkTokens: &sqliteLinkTokenRepository{store: repos.store},
 	}, nil
 }
 
@@ -84,4 +90,20 @@ func (r *sqliteAPIKeyRepository) Create(ctx context.Context, key apikey.Key) err
 
 func (r *sqliteAPIKeyRepository) Update(ctx context.Context, key apikey.Key) error {
 	return r.store.UpdateAPIKey(ctx, key)
+}
+
+func (r *sqliteLinkTokenRepository) GetByTokenHash(ctx context.Context, tokenHash string) (linktoken.LinkToken, error) {
+	return r.store.GetLinkTokenByTokenHash(ctx, tokenHash)
+}
+
+func (r *sqliteLinkTokenRepository) Get(ctx context.Context, id linktoken.ID) (linktoken.LinkToken, error) {
+	return r.store.GetLinkToken(ctx, id)
+}
+
+func (r *sqliteLinkTokenRepository) Create(ctx context.Context, token linktoken.LinkToken) error {
+	return r.store.CreateLinkToken(ctx, token)
+}
+
+func (r *sqliteLinkTokenRepository) Update(ctx context.Context, token linktoken.LinkToken) error {
+	return r.store.UpdateLinkToken(ctx, token)
 }

@@ -39,7 +39,10 @@ type ContextRegistrar interface {
 }
 
 type RegisterContextRequest struct {
-	Token            string
+	Token string
+	// BoundProjectID is the session's server-side project binding (from a wlt_
+	// link token). Authoritative: it overrides the caller-asserted ProjectID.
+	BoundProjectID   string
 	ProjectID        string
 	ProjectRoot      string
 	LocationID       string
@@ -103,11 +106,14 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	if err != nil {
 		return Result{}, err
 	}
+	if input.Action == "register" {
+		// Register dispatches before the gap-fill below so the caller-asserted
+		// input.ProjectID stays distinct from the session binding call.ProjectID:
+		// the binding is authoritative and must not be silently merged away.
+		return h.registerContext(ctx, call, input)
+	}
 	if input.ProjectID == "" {
 		input.ProjectID = strings.TrimSpace(call.ProjectID)
-	}
-	if input.Action == "register" {
-		return h.registerContext(ctx, call, input)
 	}
 	actor, ctx, err := h.resolveActor(ctx, call)
 	if err != nil {
@@ -197,6 +203,7 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 	}
 	result, err := call.ContextRegistrar.RegisterMCPContext(ctx, RegisterContextRequest{
 		Token:            token,
+		BoundProjectID:   strings.TrimSpace(call.ProjectID),
 		ProjectID:        input.ProjectID,
 		ProjectRoot:      input.ProjectRoot,
 		LocationID:       input.LocationID,

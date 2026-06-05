@@ -12,16 +12,18 @@ import (
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
 	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
 	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
 )
 
 const (
-	bcryptCost        = 12
-	sessionTokenSize  = 32
-	apiKeyTokenSize   = 32
-	defaultSessionTTL = 7 * 24 * time.Hour
+	bcryptCost         = 12
+	sessionTokenSize   = 32
+	apiKeyTokenSize    = 32
+	linkTokenTokenSize = 32
+	defaultSessionTTL  = 7 * 24 * time.Hour
 )
 
 type UserLoader interface {
@@ -30,18 +32,20 @@ type UserLoader interface {
 }
 
 type Service struct {
-	passwords password.Repository
-	sessions  session.Repository
-	apiKeys   apikey.Repository
-	users     UserLoader
-	clock     auth.Clock
-	logger    *slog.Logger
+	passwords  password.Repository
+	sessions   session.Repository
+	apiKeys    apikey.Repository
+	linkTokens linktoken.Repository
+	users      UserLoader
+	clock      auth.Clock
+	logger     *slog.Logger
 }
 
 func NewService(
 	passwords password.Repository,
 	sessions session.Repository,
 	apiKeys apikey.Repository,
+	linkTokens linktoken.Repository,
 	users UserLoader,
 	clock auth.Clock,
 	logger *slog.Logger,
@@ -55,6 +59,9 @@ func NewService(
 	if apiKeys == nil {
 		return nil, fmt.Errorf("api key repository is required")
 	}
+	if linkTokens == nil {
+		return nil, fmt.Errorf("link token repository is required")
+	}
 	if users == nil {
 		return nil, fmt.Errorf("user loader is required")
 	}
@@ -64,7 +71,7 @@ func NewService(
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	return &Service{passwords: passwords, sessions: sessions, apiKeys: apiKeys, users: users, clock: clock, logger: logger}, nil
+	return &Service{passwords: passwords, sessions: sessions, apiKeys: apiKeys, linkTokens: linkTokens, users: users, clock: clock, logger: logger}, nil
 }
 
 type CreatePasswordParams struct {
@@ -288,6 +295,96 @@ func (s *Service) RevokeAPIKey(ctx context.Context, id apikey.ID) error {
 	now := s.clock.Now()
 	record.RevokedAt = &now
 	return s.apiKeys.Update(ctx, record)
+}
+
+type CreateLinkTokenParams struct {
+	UserID      user.ID
+	ProjectID   string
+	WorkspaceID string
+	Label       string
+	ExpiresAt   *time.Time
+}
+
+type CreateLinkTokenResult struct {
+	LinkToken linktoken.LinkToken
+	Token     string
+}
+
+// LinkTokenBinding is what a valid wlt_ token resolves to: the user that holds
+// it and the project (and optional workspace) it is bound to. ProjectID and
+// WorkspaceID are opaque strings owned by the project service.
+type LinkTokenBinding struct {
+	User        user.User
+	ProjectID   string
+	WorkspaceID string
+}
+
+func (s *Service) CreateLinkToken(ctx context.Context, params CreateLinkTokenParams) (CreateLinkTokenResult, error) {
+	account, err := s.activeUser(ctx, params.UserID)
+	if err != nil {
+		return CreateLinkTokenResult{}, err
+	}
+	projectID := strings.TrimSpace(params.ProjectID)
+	if projectID == "" {
+		return CreateLinkTokenResult{}, fmt.Errorf("link token project id is required")
+	}
+	token, err := auth.NewRawToken("wlt", linkTokenTokenSize)
+	if err != nil {
+		return CreateLinkTokenResult{}, err
+	}
+	tokenID, err := linktoken.NewID("link_token_" + uuid.NewString())
+	if err != nil {
+		return CreateLinkTokenResult{}, err
+	}
+	prefix := token
+	if len(prefix) > 12 {
+		prefix = prefix[:12]
+	}
+	record := linktoken.LinkToken{
+		ID:          tokenID,
+		UserID:      account.ID,
+		ProjectID:   projectID,
+		WorkspaceID: strings.TrimSpace(params.WorkspaceID),
+		Label:       strings.TrimSpace(params.Label),
+		Prefix:      prefix,
+		TokenHash:   auth.HashToken(token),
+		ExpiresAt:   params.ExpiresAt,
+		CreatedAt:   s.clock.Now(),
+	}
+	if err := s.linkTokens.Create(ctx, record); err != nil {
+		return CreateLinkTokenResult{}, err
+	}
+	s.logger.Info("auth link token created", "user_id", account.ID.String(), "project_id", projectID)
+	return CreateLinkTokenResult{LinkToken: record, Token: token}, nil
+}
+
+func (s *Service) ValidateLinkToken(ctx context.Context, token string) (LinkTokenBinding, error) {
+	record, err := s.linkTokens.GetByTokenHash(ctx, auth.HashToken(token))
+	if err != nil {
+		return LinkTokenBinding{}, auth.ErrTokenNotFound
+	}
+	if !record.IsActive(s.clock.Now()) {
+		return LinkTokenBinding{}, auth.ErrTokenExpired
+	}
+	account, err := s.activeUser(ctx, record.UserID)
+	if err != nil {
+		return LinkTokenBinding{}, err
+	}
+	return LinkTokenBinding{
+		User:        account,
+		ProjectID:   strings.TrimSpace(record.ProjectID),
+		WorkspaceID: strings.TrimSpace(record.WorkspaceID),
+	}, nil
+}
+
+func (s *Service) RevokeLinkToken(ctx context.Context, id linktoken.ID) error {
+	record, err := s.linkTokens.Get(ctx, id)
+	if err != nil {
+		return auth.ErrTokenNotFound
+	}
+	now := s.clock.Now()
+	record.RevokedAt = &now
+	return s.linkTokens.Update(ctx, record)
 }
 
 func (s *Service) activeUser(ctx context.Context, id user.ID) (user.User, error) {

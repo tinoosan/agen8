@@ -131,6 +131,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		Projects:   projectRepo,
 		Members:    memberRepo,
 		Workspaces: workspaceRepo,
+		LinkTokens: linkTokenIssuerAdapter{auth: authSvc},
 		Caller:     caller.ContextResolver{},
 		Configs:    permissiveRuntimeConfigValidator{},
 		Events:     bus,
@@ -290,6 +291,47 @@ func (a projectLoaderAdapter) Get(ctx context.Context, projectID types.ProjectID
 		return projectdomain.Project{}, fmt.Errorf("project service is required")
 	}
 	return a.projects.GetProject(ctx, projectID)
+}
+
+// linkTokenIssuerAdapter lets the project service mint wlt_ link tokens without
+// importing the auth packages. The project service performs the ownership check;
+// this adapter (which the composition root is uniquely allowed to write, knowing
+// both services) translates the opaque strings of projectapp.LinkTokenRequest
+// into auth's typed ids and forwards to auth.CreateLinkToken.
+type linkTokenIssuerAdapter struct {
+	auth *authapp.Service
+}
+
+func (a linkTokenIssuerAdapter) IssueLinkToken(ctx context.Context, req projectapp.LinkTokenRequest) (projectapp.LinkTokenIssued, error) {
+	if a.auth == nil {
+		return projectapp.LinkTokenIssued{}, fmt.Errorf("auth service is required")
+	}
+	userID, err := userdomain.NewID(req.UserID)
+	if err != nil {
+		return projectapp.LinkTokenIssued{}, fmt.Errorf("link token user id: %w", err)
+	}
+	result, err := a.auth.CreateLinkToken(ctx, authapp.CreateLinkTokenParams{
+		UserID:      userID,
+		ProjectID:   req.ProjectID,
+		WorkspaceID: req.WorkspaceID,
+		Label:       req.Label,
+		ExpiresAt:   req.ExpiresAt,
+	})
+	if err != nil {
+		return projectapp.LinkTokenIssued{}, err
+	}
+	lt := result.LinkToken
+	return projectapp.LinkTokenIssued{
+		ID:          lt.ID.String(),
+		Prefix:      lt.Prefix,
+		Token:       result.Token,
+		UserID:      lt.UserID.String(),
+		ProjectID:   lt.ProjectID,
+		WorkspaceID: lt.WorkspaceID,
+		Label:       lt.Label,
+		ExpiresAt:   lt.ExpiresAt,
+		CreatedAt:   lt.CreatedAt,
+	}, nil
 }
 
 type graphServiceLinkPort struct {
