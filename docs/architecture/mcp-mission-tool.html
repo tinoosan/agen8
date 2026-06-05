@@ -128,7 +128,7 @@ type ProgressService interface {
   <tr><td><code>kr_get</code></td><td><code>GetKeyResult</code></td><td>Read one key result.</td></tr>
   <tr><td><code>kr_list</code></td><td><code>ListKeyResults</code></td><td>List key results for a mission; supports <code>limit</code> and <code>offset</code>.</td></tr>
   <tr><td><code>kr_update</code></td><td><code>UpdateKeyResult</code></td><td>Patch KR fields.</td></tr>
-  <tr><td><code>kr_assign_space</code></td><td><code>AssignKeyResultProject</code></td><td>Assign an open owning project.</td></tr>
+  <tr><td><code>kr_assign_project</code></td><td><code>AssignKeyResultProject</code></td><td>Assign an open owning project.</td></tr>
   <tr><td><code>kr_drop</code></td><td><code>DeleteKeyResult</code></td><td>Drop a key result while preserving history; accepts an optional rationale <code>note</code>.</td></tr>
   <tr><td><code>kr_reopen</code></td><td><code>ReopenKeyResult</code></td><td>Reopen completed or dropped KR scope, resetting progress to its starting value; accepts an optional rationale <code>note</code>.</td></tr>
   <tr><td><code>kr_progress</code></td><td><code>UpdateProgress</code></td><td>Record KR progress.</td></tr>

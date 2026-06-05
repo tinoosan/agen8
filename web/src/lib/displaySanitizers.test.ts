@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { looksLikeOpaqueId, safeReferenceLabel, sanitizeDecisionTitle, sanitizeSpaceTitle } from './displaySanitizers'
+import { looksLikeOpaqueId, safeReferenceLabel, sanitizeDecisionTitle, sanitizeDisplayTitle } from './displaySanitizers'
 
 describe('displaySanitizers', () => {
-  it('drops opaque runtime identifiers from space titles', () => {
-    expect(sanitizeSpaceTitle('space-07f5f6ee-06a7-4399-97b9-6ced1c165a78')).toBeNull()
+  it('drops opaque runtime identifiers from display titles', () => {
+    expect(sanitizeDisplayTitle('space-07f5f6ee-06a7-4399-97b9-6ced1c165a78')).toBeNull()
   })
 
-  it('keeps human-facing space titles, including slug titles', () => {
-    expect(sanitizeSpaceTitle('research-tnxp')).toBe('research-tnxp')
-    expect(sanitizeSpaceTitle('Market Research')).toBe('Market Research')
+  it('keeps human-facing display titles, including slug titles', () => {
+    expect(sanitizeDisplayTitle('research-tnxp')).toBe('research-tnxp')
+    expect(sanitizeDisplayTitle('Market Research')).toBe('Market Research')
   })
 
   it('strips raw refs from decision titles', () => {

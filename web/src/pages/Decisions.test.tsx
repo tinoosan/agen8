@@ -21,11 +21,6 @@ vi.mock('../hooks/useDecisions', async (importOriginal) => {
   }
 })
 
-const mockUseProjectSpaces = vi.fn()
-vi.mock('../hooks/useProjectSpaces', () => ({
-  useProjectSpaces: (...args: unknown[]) => mockUseProjectSpaces(...args),
-}))
-
 const { default: Decisions } = await import('./Decisions')
 
 function renderPage() {
@@ -51,7 +46,6 @@ describe('Decisions page', () => {
             projectId: 'proj-1',
             source: 'agent',
             sourceIdentity: 'cto',
-            spaceId: 'space-eng',
             title: 'Use PostgreSQL',
             rationale: 'Operationally simpler',
             confidence: 0.8,
@@ -71,9 +65,6 @@ describe('Decisions page', () => {
     mockUseDeleteDecision.mockReturnValue({
       mutateAsync: mockDeleteMutateAsync.mockResolvedValue(true),
       isPending: false,
-    })
-    mockUseProjectSpaces.mockReturnValue({
-      data: [{ spaceId: 'th-1', spaceName: 'Engineering' }],
     })
   })
 
@@ -105,7 +96,6 @@ describe('Decisions page', () => {
             projectId: 'proj-1',
             source: 'agent',
             sourceIdentity: 'cfo',
-            spaceId: 'space-eng',
             kind: 'log',
             title: 'Next iteration pricing packaging priority',
             rationale: 'Usage overage validates metering before a broader rollout.',

@@ -19,8 +19,8 @@ Rules to prevent common React anti-patterns from being reintroduced. Written aft
 
 ## Shared utilities
 
-- **Before writing a helper, check `lib/`**: formatting, plan parsing, space names, status labels, and similar utilities already exist.
-- **Shared plan parsing** lives in `lib/planUtils.ts` (parseChecklistItems, color constants). Do not redeclare locally.
+- **Before writing a helper, check `lib/`**: formatting, display sanitizers, status labels, file refs, graph helpers, and similar utilities already exist.
+- **Project-first language**: new UI copy, test fixtures, and helper names should use project, member, mission, key result, task, decision, graph, file, credential, or HTTP terminology. Do not reintroduce space, plan, chat, operator, escalation, or harness-management language unless the code is intentionally rejecting or documenting a removed concept.
 - **Auto-dismiss banners** use `hooks/useAutoDismiss.ts`. Do not copy-paste the `useEffect + setTimeout + setBanner(null)` pattern.
 
 ## Accessibility
@@ -39,7 +39,7 @@ Rules to prevent common React anti-patterns from being reintroduced. Written aft
 ## Dead code
 
 - **Delete unused exports promptly**: they add confusion and maintenance burden. If nothing imports a function, remove it.
-- **Don't alias store functions to misleading names**: if you need `setPlanOpen`, add it to the store rather than aliasing `setArtifactsOpen`.
+- **Don't alias store functions to misleading names**: if a surface needs new state, name it after the retained project-first concept it actually controls.
 
 ## Toast defaults
 

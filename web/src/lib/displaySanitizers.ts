@@ -10,7 +10,7 @@ export function looksLikeOpaqueId(value: string | null | undefined): boolean {
   return false
 }
 
-export function sanitizeSpaceTitle(title: string | null | undefined): string | null {
+export function sanitizeDisplayTitle(title: string | null | undefined): string | null {
   const text = normalizeWhitespace(title ?? '')
   if (!text) return null
   if (looksLikeOpaqueId(text)) return null

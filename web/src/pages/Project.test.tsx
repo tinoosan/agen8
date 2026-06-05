@@ -27,11 +27,9 @@ vi.mock('../lib/routing', () => ({
   useNavigation: () => ({
     projectId: null,
     focusedProjectRoot: null,
-    focusedSpaceId: null,
     activeView: 'project' as const,
     projectLoading: false,
     setFocusedProjectRoot: mockSetFocusedProjectRoot,
-    setFocusedSpaceId: vi.fn(),
     setActiveView: vi.fn(),
   }),
 }))
@@ -75,7 +73,6 @@ describe('Project page', () => {
       ],
     })
     mockRpcCall.mockImplementation((method: string) => {
-      if (method === 'project.space.list') return Promise.resolve({ spaces: [] })
       if (method === 'location.fs.listDir') {
         return Promise.resolve({ entries: [{ name: 'repo', path: '/Users/tino/repo', type: 'directory' }] })
       }

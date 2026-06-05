@@ -861,7 +861,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td>KR progress changes.</td><td><code>KRProgressEvent</code> with <code>kr.progress_updated</code>.</td><td>Dashboards/history consume the event.</td></tr>
       <tr><td>KR crosses milestone thresholds.</td><td>One <code>KRProgressEvent</code> per newly crossed <code>kr.milestone</code>.</td><td>History records the milestone once.</td></tr>
       <tr><td>KR completes and mission may complete.</td><td><code>kr.completed</code> and optional <code>mission.completed</code>.</td><td>The caller and dashboard observe the outcome.</td></tr>
-      <tr><td>KR is created, dropped, reopened, or assigned.</td><td>Typed KR lifecycle events when those outcomes are persisted.</td><td>Message only when action is required, such as a new owner assignment or reopened work.</td></tr>
+      <tr><td>KR is created, dropped, reopened, or assigned.</td><td>Typed KR lifecycle events when those outcomes are persisted.</td><td>History and dashboard projections consume the event.</td></tr>
     </tbody>
   </table>
 
@@ -936,8 +936,8 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
     <thead><tr><th>Projection</th><th>Idempotency key</th><th>Duplicate rule</th></tr></thead>
     <tbody>
       <tr><td><code>mission.activated</code> for an assigned project.</td><td><code>mission:&lt;missionId&gt;:project:&lt;projectId&gt;:activated</code></td><td>Project at most once for the activation episode.</td></tr>
-      <tr><td><code>kr.owner_assigned</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:owner:&lt;projectId&gt;</code></td><td>Send only when the owner project actually changes.</td></tr>
-      <tr><td><code>kr.reopened</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:reopened:&lt;version&gt;</code></td><td>Send once for the reopen transition, not for later progress edits.</td></tr>
+      <tr><td><code>kr.owner_assigned</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:owner:&lt;projectId&gt;</code></td><td>Project only when the owner project actually changes.</td></tr>
+      <tr><td><code>kr.reopened</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:reopened:&lt;version&gt;</code></td><td>Project once for the reopen transition, not for later progress edits.</td></tr>
       <tr><td>Mission paused because owner project became unavailable.</td><td><code>mission:&lt;missionId&gt;:paused:owner-unavailable:&lt;projectId&gt;</code></td><td>Send once per unavailable owner-project cause.</td></tr>
     </tbody>
   </table>
@@ -949,7 +949,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
   <div class="diagram">
     <svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
       <defs>
-        <marker id="activation-message-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <marker id="activation-event-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
         </marker>
       </defs>
@@ -972,19 +972,19 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <text x="683" y="272" text-anchor="middle" fill="var(--text-muted)">find coordinators</text>
 
       <rect x="44" y="202" width="190" height="82" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
-      <text x="139" y="232" text-anchor="middle" fill="var(--text)" font-weight="700">Message service</text>
-      <text x="139" y="254" text-anchor="middle" fill="var(--text-muted)">PublishAgentMessage</text>
-      <text x="139" y="272" text-anchor="middle" fill="var(--text-muted)">idempotent producer ids</text>
+      <text x="139" y="232" text-anchor="middle" fill="var(--text)" font-weight="700">History projection</text>
+      <text x="139" y="254" text-anchor="middle" fill="var(--text-muted)">Persist lifecycle fact</text>
+      <text x="139" y="272" text-anchor="middle" fill="var(--text-muted)">idempotent projection ids</text>
 
       <rect x="316" y="214" width="190" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
       <text x="411" y="238" text-anchor="middle" fill="var(--text)" font-weight="700">Coordinator</text>
       <text x="411" y="258" text-anchor="middle" fill="var(--text-muted)">mission is active</text>
 
-      <line x1="234" y1="93" x2="316" y2="93" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
-      <line x1="506" y1="93" x2="588" y2="93" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
-      <line x1="683" y1="130" x2="683" y2="202" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
-      <line x1="588" y1="243" x2="234" y2="243" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
-      <line x1="234" y1="243" x2="316" y2="243" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
+      <line x1="234" y1="93" x2="316" y2="93" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-event-arrow)"/>
+      <line x1="506" y1="93" x2="588" y2="93" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-event-arrow)"/>
+      <line x1="683" y1="130" x2="683" y2="202" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-event-arrow)"/>
+      <line x1="588" y1="243" x2="234" y2="243" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-event-arrow)"/>
+      <line x1="234" y1="243" x2="316" y2="243" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-event-arrow)"/>
 
       <text x="480" y="330" text-anchor="middle" fill="var(--text-muted)">Mission emits one fact. Subscribers own their own projections and duplicate suppression.</text>
     </svg>
