@@ -126,14 +126,14 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
   <table>
     <thead><tr><th>RPC method</th><th>Service call</th><th>Boundary rule</th></tr></thead>
     <tbody>
-      <tr><td><code>task.create</code></td><td><code>Service.Create</code></td><td>Creates a pending task and publishes the assignment message through the service.</td></tr>
+      <tr><td><code>task.create</code></td><td><code>Service.Create</code></td><td>Creates a pending task and publishes the assignment event through the service.</td></tr>
       <tr><td><code>task.get</code></td><td><code>Service.Get</code></td><td>Reads one task and projects it to <code>TaskView</code>.</td></tr>
-      <tr><td><code>task.list</code></td><td><code>Service.List</code> + <code>Service.Count</code></td><td>Applies service-owned filters, including project, assignee, claim, status, task kind, and plan refs.</td></tr>
+      <tr><td><code>task.list</code></td><td><code>Service.List</code> + <code>Service.Count</code></td><td>Applies service-owned filters, including project, assignee, claim, status, task kind, mission ref, and key result ref.</td></tr>
       <tr><td><code>task.update</code></td><td><code>Service.Update</code></td><td>Coordinator-only data edit. It updates title, description, acceptance criteria, refs, kind, and metadata; it does not run lifecycle transitions.</td></tr>
     </tbody>
   </table>
 
-  <p><code>TaskView</code> contains the task service read model: ids, project/member assignment, creator actor, description, acceptance criteria, status, artifacts, KR and plan refs, metadata, and lifecycle timestamps.</p>
+  <p><code>TaskView</code> contains the task service read model: ids, project/member assignment, creator actor, description, acceptance criteria, status, artifacts, mission and KR refs, metadata, and lifecycle timestamps.</p>
 
   <h2 id="lifecycle">3. The task lifecycle</h2>
 

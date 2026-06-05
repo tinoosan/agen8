@@ -18,627 +18,137 @@
 <div class="page">
   <span class="eyebrow">Architecture · Location Service</span>
   <h1>Location Service</h1>
-  <p class="lede">The location service owns execution-capable work locations. A project stores a <code>locationId</code> and root path, but the location service owns reachability, filesystem browsing, readiness probes, and remote setup state.</p>
+  <p class="lede">The location service records where project roots live and provides bounded filesystem discovery for those roots. It does not start, resume, or supervise AI harness sessions.</p>
 
   <nav class="toc" aria-label="On this page">
     <div class="toc-label">On this page</div>
     <ol>
       <li><a href="#boundary">Service boundary</a></li>
       <li><a href="#shape">Domain shape</a></li>
-      <li><a href="#capabilities">Capabilities</a></li>
-      <li><a href="#flow">Project creation flow</a></li>
-      <li><a href="#runtime-flow">Remote execution flow</a></li>
-      <li><a href="#repository">Repository</a></li>
+      <li><a href="#project-flow">Project root flow</a></li>
+      <li><a href="#filesystem">Filesystem contract</a></li>
       <li><a href="#credentials">Credential boundary</a></li>
       <li><a href="#rpc">RPC surface</a></li>
-      <li><a href="#client">Client contract</a></li>
       <li><a href="#invariants">Invariants</a></li>
     </ol>
   </nav>
 
   <h2 id="boundary">1. Service boundary</h2>
-  <p>A location is a reachable work boundary that can host harness sessions. It can be this machine, a user-owned machine reached by SSH, or an agen8-managed execution worker. Storage-only endpoints are not project locations because members cannot execute there. The service does not own projects, tasks, missions, or decisions. It answers whether a location is known, whether it is reachable, whether it can run harness sessions, and how clients can browse roots inside it.</p>
+  <p>A location is a durable reference to a place that can contain project files. The first baseline always includes the local location so a new local daemon can register a project from the current machine. Remote locations can be added later, but their purpose remains root discovery and access validation, not harness orchestration.</p>
 
   <div class="grid">
     <div class="card">
       <div class="label">Location owns</div>
-      <div class="title">Reachability</div>
-      <div class="meta">Location identity, kind, label, online status, connection metadata, and readiness probe results.</div>
+      <div class="title">Root reachability</div>
+      <div class="meta">Location id, kind, label, address metadata, readiness summary, probe timestamp, and last sanitized error.</div>
     </div>
     <div class="card">
-      <div class="label">Location filesystem owns</div>
-      <div class="title">Browsing and stat</div>
-      <div class="meta">Directory listing, path normalization, write/read checks, and location-scoped path validation.</div>
+      <div class="label">Filesystem owns</div>
+      <div class="title">Browsing</div>
+      <div class="meta">Directory listing, path normalization, stat checks, and virtual project path resolution.</div>
     </div>
     <div class="card">
       <div class="label">Project owns</div>
-      <div class="title">Project association</div>
-      <div class="meta">Project records store <code>locationId</code> and <code>root</code>. They do not browse or probe the location directly.</div>
+      <div class="title">Association</div>
+      <div class="meta">Project records store <code>locationId</code> and <code>root</code>. They do not probe locations directly.</div>
     </div>
     <div class="card">
       <div class="label">Harness owns</div>
-      <div class="title">Execution sessions</div>
-      <div class="meta">Harness startup, Codex availability, member process lifecycle, and runtime execution stay behind the harness boundary.</div>
+      <div class="title">Work surface</div>
+      <div class="meta">Codex, Claude Code, and other harnesses remain external work surfaces that connect to Agen8 through MCP.</div>
     </div>
   </div>
 
   <h2 id="shape">2. Domain shape</h2>
-  <p>The first version always exposes a default local location so a local daemon can create a project without manual configuration. The local record keeps the daemon host name in <code>address.host</code>, which lets clients show the actual execution machine while keeping the user-facing label as <code>This machine</code>. Remote locations use the same record shape, but readiness is discovered by probe rather than assumed from the kind.</p>
+  <p>The current service shape is intentionally small. A location can be local, SSH, or managed in the domain, but the release baseline treats local as the supported setup path and keeps remote work behind explicit future validation.</p>
 
 <pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Location</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ID</span>           location.ID
-    <span class="tok-field">Kind</span>         LocationKind
-    <span class="tok-field">Label</span>        <span class="tok-type">string</span>
-    <span class="tok-field">Address</span>      LocationAddress
-    <span class="tok-field">Status</span>       LocationStatus
-    <span class="tok-field">Ready</span>        <span class="tok-type">bool</span>
-    <span class="tok-field">CredentialRef</span> <span class="tok-type">string</span>
-    <span class="tok-field">Probe</span>        Probe
+    <span class="tok-field">ID</span>             location.ID
+    <span class="tok-field">Kind</span>           LocationKind
+    <span class="tok-field">Label</span>          <span class="tok-type">string</span>
+    <span class="tok-field">Address</span>        LocationAddress
+    <span class="tok-field">Status</span>         LocationStatus
+    <span class="tok-field">Ready</span>          <span class="tok-type">bool</span>
+    <span class="tok-field">CredentialRef</span>  <span class="tok-type">string</span>
     <span class="tok-field">LastProbeError</span> <span class="tok-type">string</span>
-    <span class="tok-field">LastProbedAt</span> *time.Time
-    <span class="tok-field">CreatedAt</span>    time.Time
-    <span class="tok-field">UpdatedAt</span>    time.Time
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationAddress</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Host</span>     <span class="tok-type">string</span>
-    <span class="tok-field">Port</span>     <span class="tok-type">int</span>
-    <span class="tok-field">Username</span> <span class="tok-type">string</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">Probe</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Reachable</span>    <span class="tok-type">bool</span>
-    <span class="tok-field">FileBrowsing</span> <span class="tok-type">bool</span>
-    <span class="tok-field">Exec</span>         <span class="tok-type">bool</span>
-    <span class="tok-field">Codex</span>        <span class="tok-type">bool</span>
-    <span class="tok-field">Claude</span>       <span class="tok-type">bool</span>
+    <span class="tok-field">LastProbedAt</span>   *time.Time
+    <span class="tok-field">CreatedAt</span>      time.Time
+    <span class="tok-field">UpdatedAt</span>      time.Time
 }</code></pre>
 
   <table>
     <thead><tr><th>Field</th><th>Meaning</th><th>Client impact</th></tr></thead>
     <tbody>
-      <tr><td><code>label</code></td><td>User-facing name for the location.</td><td>The local location displays as <code>This machine</code>.</td></tr>
-      <tr><td><code>address.host</code></td><td>Execution endpoint host name or remote host.</td><td>The Locations page can show the daemon host for <code>local</code> and the SSH target for <code>ssh</code>.</td></tr>
-      <tr><td><code>ready</code></td><td>Durable readiness summary derived from the last probe.</td><td>Project creation only offers ready locations.</td></tr>
-      <tr><td><code>probe</code>, <code>lastProbeError</code>, <code>lastProbedAt</code></td><td>Sanitized probe result and timestamp, including Codex and Claude CLI availability.</td><td>The UI renders repair state without exposing credentials.</td></tr>
+      <tr><td><code>label</code></td><td>User-facing location name.</td><td>The local location displays as <code>This machine</code>.</td></tr>
+      <tr><td><code>address</code></td><td>Host metadata for non-local locations.</td><td>The UI can show where a root is expected to live without exposing secrets.</td></tr>
+      <tr><td><code>ready</code></td><td>Durable readiness summary.</td><td>Project creation can filter unusable locations.</td></tr>
+      <tr><td><code>credentialRef</code></td><td>Reference to a stored credential record.</td><td>Credential material stays in the credential service.</td></tr>
     </tbody>
   </table>
 
-  <h2 id="capabilities">3. Capabilities</h2>
-  <p>Locations are intentionally narrower than generic storage. Every selectable project location must be able to browse files and execute managed harness work. A probe can report that a configured location is not ready, but that location does not become valid for project creation until <code>ready</code> is true.</p>
-
-  <table>
-    <thead><tr><th>Location kind</th><th>Filesystem</th><th>Execution</th><th>Ready gate</th><th>Notes</th></tr></thead>
-    <tbody>
-      <tr><td><code>local</code></td><td>Required</td><td>Required</td><td>Probe result</td><td>Auto-registered as <code>local</code> for first-run UX.</td></tr>
-      <tr><td><code>ssh</code></td><td>Required</td><td>Required</td><td>Probe result</td><td>Matches a VS Code Remote SSH style setup path.</td></tr>
-      <tr><td><code>managed</code></td><td>Required</td><td>Required</td><td>Probe result</td><td>Agen8-provisioned Docker container, VM, or managed worker.</td></tr>
-    </tbody>
-  </table>
-
-  <h2 id="flow">4. Project creation flow</h2>
-  <p>The browser asks the location service for known locations, browses a root through the selected location, and then calls <code>project.create</code> with <code>locationId</code> and <code>root</code>. When the only ready location is the default local location, the UI selects it automatically and starts at root selection. Project creation does not perform filesystem access itself.</p>
+  <h2 id="project-flow">3. Project root flow</h2>
+  <p>The browser or MCP caller selects a location and root. Project creation stores the association after the location service confirms the root can be addressed. Project registration from an MCP client can also create or reuse a project from the caller's working directory, which maps to the local location by default.</p>
 
   <div class="diagram">
-    <svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Location-backed project creation flow">
+    <svg viewBox="0 0 920 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Location-backed project root flow">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
         </marker>
       </defs>
-      <rect x="28" y="42" width="168" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="112" y="67" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Project page</text>
-      <text x="112" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="11">first-run UI</text>
+      <rect x="42" y="58" width="150" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--border)"/>
+      <text x="117" y="83" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Caller</text>
+      <text x="117" y="102" text-anchor="middle" fill="var(--text-muted)" font-size="11">browser or MCP</text>
 
-      <rect x="268" y="42" width="168" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="352" y="67" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">location.list</text>
-      <text x="352" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="11">ready local default + configured</text>
+      <rect x="252" y="58" width="150" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="327" y="83" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Location</text>
+      <text x="327" y="102" text-anchor="middle" fill="var(--text-muted)" font-size="11">list · browse · validate</text>
 
-      <rect x="508" y="42" width="168" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="592" y="67" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">location.fs.listDir</text>
-      <text x="592" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="11">location-scoped path</text>
+      <rect x="462" y="58" width="150" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="537" y="83" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Project</text>
+      <text x="537" y="102" text-anchor="middle" fill="var(--text-muted)" font-size="11">locationId + root</text>
 
-      <rect x="748" y="42" width="168" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="832" y="67" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">project.create</text>
-      <text x="832" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="11">locationId + root</text>
+      <rect x="672" y="58" width="190" height="58" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="767" y="83" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Agen8 context</text>
+      <text x="767" y="102" text-anchor="middle" fill="var(--text-muted)" font-size="11">missions · tasks · decisions · graph</text>
 
-      <line x1="196" y1="71" x2="268" y2="71" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
-      <line x1="436" y1="71" x2="508" y2="71" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
-      <line x1="676" y1="71" x2="748" y2="71" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="192" y1="87" x2="252" y2="87" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="402" y1="87" x2="462" y2="87" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
+      <line x1="612" y1="87" x2="672" y2="87" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#arrow)"/>
 
-      <rect x="110" y="172" width="760" height="118" rx="10" fill="var(--bg-subtle)" stroke="var(--border)"/>
-      <text x="490" y="205" text-anchor="middle" fill="var(--text)" font-size="16" font-weight="800">Project service stores the association only</text>
-      <text x="490" y="232" text-anchor="middle" fill="var(--text-muted)" font-size="13">ProjectID is derived from locationId + root. Location remains the owner of path reachability.</text>
-      <text x="490" y="258" text-anchor="middle" fill="var(--text-muted)" font-size="13">Creation is enabled only when the selected location is online and ready.</text>
+      <text x="452" y="166" text-anchor="middle" fill="var(--text-muted)" font-size="12">The harness still opens and works in its own UI. Agen8 records durable context for the selected project root.</text>
     </svg>
   </div>
 
-  <h2 id="runtime-flow">5. Remote execution flow</h2>
-  <p>A project does not run code. A location can run code. The daemon deployment mode describes where the control plane runs; the location kind describes where project work and harness execution run.</p>
-
-  <div class="diagram">
-    <svg viewBox="0 0 980 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Daemon deployment and execution location axes">
-      <defs>
-        <marker id="runtime-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
-        </marker>
-      </defs>
-
-      <text x="42" y="46" fill="var(--text)" font-size="18" font-weight="800">Two independent axes</text>
-      <text x="42" y="72" fill="var(--text-muted)" font-size="12">The daemon is the control plane. The location is where project files and harness commands execute.</text>
-
-      <rect x="70" y="118" width="360" height="106" rx="10" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="250" y="148" text-anchor="middle" fill="var(--text-faint)" font-size="11" font-weight="700" letter-spacing="1.2">CONTROL PLANE</text>
-      <text x="250" y="176" text-anchor="middle" fill="var(--text)" font-size="15" font-weight="800">Daemon deployment mode</text>
-      <text x="250" y="200" text-anchor="middle" fill="var(--text-muted)" font-size="12">local daemon or hosted daemon</text>
-
-      <rect x="550" y="118" width="360" height="106" rx="10" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="730" y="148" text-anchor="middle" fill="var(--text-faint)" font-size="11" font-weight="700" letter-spacing="1.2">EXECUTION LOCATION</text>
-      <text x="730" y="176" text-anchor="middle" fill="var(--text)" font-size="15" font-weight="800">Project work boundary</text>
-      <text x="730" y="200" text-anchor="middle" fill="var(--text-muted)" font-size="12">local, ssh, or managed</text>
-
-      <line x1="430" y1="171" x2="550" y2="171" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#runtime-arrow)"/>
-      <text x="490" y="154" text-anchor="middle" fill="var(--text-muted)" font-size="11">project uses</text>
-
-      <rect x="36" y="286" width="208" height="90" rx="9" fill="var(--bg-elevated)" stroke="var(--border)"/>
-      <text x="140" y="316" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="800">Local + local</text>
-      <text x="140" y="340" text-anchor="middle" fill="var(--text-muted)" font-size="11">Daemon and repo</text>
-      <text x="140" y="360" text-anchor="middle" fill="var(--text-muted)" font-size="11">on the same machine</text>
-
-      <rect x="274" y="286" width="208" height="90" rx="9" fill="var(--bg-elevated)" stroke="var(--border)"/>
-      <text x="378" y="316" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="800">Local + SSH</text>
-      <text x="378" y="340" text-anchor="middle" fill="var(--text-muted)" font-size="11">Daemon on this machine</text>
-      <text x="378" y="360" text-anchor="middle" fill="var(--text-muted)" font-size="11">repo on user-owned host</text>
-
-      <rect x="512" y="286" width="208" height="90" rx="9" fill="var(--bg-elevated)" stroke="var(--border)"/>
-      <text x="616" y="316" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="800">Hosted + SSH</text>
-      <text x="616" y="340" text-anchor="middle" fill="var(--text-muted)" font-size="11">Daemon on server</text>
-      <text x="616" y="360" text-anchor="middle" fill="var(--text-muted)" font-size="11">repo on user-owned host</text>
-
-      <rect x="750" y="286" width="208" height="90" rx="9" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="854" y="316" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="800">Hosted + managed</text>
-      <text x="854" y="340" text-anchor="middle" fill="var(--text-muted)" font-size="11">Daemon on server</text>
-      <text x="854" y="360" text-anchor="middle" fill="var(--text-muted)" font-size="11">repo in container / VM</text>
-
-      <line x1="140" y1="224" x2="140" y2="286" stroke="var(--teal)" stroke-width="1.5" marker-end="url(#runtime-arrow)"/>
-      <path d="M 250 224 C 250 260 378 250 378 286" fill="none" stroke="var(--teal)" stroke-width="1.5" marker-end="url(#runtime-arrow)"/>
-      <path d="M 250 224 C 250 260 616 250 616 286" fill="none" stroke="var(--teal)" stroke-width="1.5" marker-end="url(#runtime-arrow)"/>
-      <path d="M 730 224 C 730 260 854 250 854 286" fill="none" stroke="var(--teal)" stroke-width="1.5" marker-end="url(#runtime-arrow)"/>
-
-      <rect x="84" y="438" width="812" height="76" rx="10" fill="var(--bg-subtle)" stroke="var(--border)"/>
-      <text x="490" y="468" text-anchor="middle" fill="var(--text)" font-size="15" font-weight="800">SSH remains SSH even when the daemon is hosted</text>
-      <text x="490" y="494" text-anchor="middle" fill="var(--text-muted)" font-size="12">Managed means agen8 provisions the execution worker; SSH means the user brings a machine and agen8 connects to it.</text>
-    </svg>
-  </div>
-
-  <div class="diagram">
-    <svg viewBox="0 0 980 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Execution scenario diagrams">
-      <defs>
-        <marker id="scenario-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
-        </marker>
-      </defs>
-
-      <text x="42" y="42" fill="var(--text)" font-size="18" font-weight="800">Scenario shapes</text>
-
-      <rect x="36" y="78" width="424" height="126" rx="10" fill="var(--bg-elevated)" stroke="var(--border)"/>
-      <text x="248" y="106" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="800">Local daemon + local location</text>
-      <rect x="76" y="136" width="138" height="42" rx="8" fill="var(--bg-subtle)" stroke="var(--teal)"/>
-      <text x="145" y="162" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">Local daemon</text>
-      <rect x="284" y="136" width="138" height="42" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="353" y="162" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">Local project root</text>
-      <line x1="214" y1="157" x2="284" y2="157" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#scenario-arrow)"/>
-
-      <rect x="520" y="78" width="424" height="126" rx="10" fill="var(--bg-elevated)" stroke="var(--border)"/>
-      <text x="732" y="106" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="800">Local daemon + SSH location</text>
-      <rect x="560" y="136" width="138" height="42" rx="8" fill="var(--bg-subtle)" stroke="var(--teal)"/>
-      <text x="629" y="162" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">Local daemon</text>
-      <rect x="768" y="136" width="138" height="42" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="837" y="162" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">SSH target</text>
-      <line x1="698" y1="157" x2="768" y2="157" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#scenario-arrow)"/>
-      <text x="733" y="143" text-anchor="middle" fill="var(--text-muted)" font-size="10">SSH</text>
-
-      <rect x="36" y="244" width="424" height="126" rx="10" fill="var(--bg-elevated)" stroke="var(--border)"/>
-      <text x="248" y="272" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="800">Hosted daemon + SSH location</text>
-      <rect x="76" y="302" width="138" height="42" rx="8" fill="var(--bg-subtle)" stroke="var(--teal)"/>
-      <text x="145" y="328" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">Hosted daemon</text>
-      <rect x="284" y="302" width="138" height="42" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="353" y="328" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">SSH target</text>
-      <line x1="214" y1="323" x2="284" y2="323" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#scenario-arrow)"/>
-      <text x="249" y="309" text-anchor="middle" fill="var(--text-muted)" font-size="10">SSH</text>
-
-      <rect x="520" y="244" width="424" height="126" rx="10" fill="var(--bg-elevated)" stroke="var(--border)"/>
-      <text x="732" y="272" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="800">Hosted daemon + managed location</text>
-      <rect x="560" y="302" width="138" height="42" rx="8" fill="var(--bg-subtle)" stroke="var(--teal)"/>
-      <text x="629" y="328" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">Hosted daemon</text>
-      <rect x="768" y="292" width="138" height="62" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="837" y="316" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">Managed worker</text>
-      <text x="837" y="336" text-anchor="middle" fill="var(--text-muted)" font-size="10">Docker / VM</text>
-      <line x1="698" y1="323" x2="768" y2="323" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#scenario-arrow)"/>
-    </svg>
-  </div>
-
-  <p>The project record never stores SSH hosts, credentials, tunnels, probe state, or process handles. The harness service loads member and project context, stores the project's <code>locationId</code> and root on the harness session, asks the location service for the location-scoped bridge endpoint when the location is not local, and lets the selected harness adapter decide how to create or resume its protocol thread inside the project root.</p>
-
-  <p>Command execution is location-scoped. For <code>local</code>, the transport starts an OS process with the harness adapter's command, args, environment, and working directory. For <code>ssh</code>, the transport dials the configured SSH target, changes to the remote project root when a raw command is the correct protocol, exports the runtime environment, and execs the adapter command remotely. A command request requires a ready location and a non-empty command; it fails instead of running in the daemon checkout when the location or root cannot be resolved.</p>
-
-  <p>Long-lived harness protocols use a bridge rather than per-turn command launches. The SSH environment manager detects the remote OS and architecture, builds or reuses a cached local <code>agen8-bridge</code> binary for that target, uploads it to a content-addressed path under <code>~/.agen8/bin</code>, reuses a recorded bridge process only when its stored binary identity matches the uploaded binary, replaces stale bridge processes on remote loopback, verifies readiness and diagnostics, opens a daemon-side loopback tunnel to the bridge, and opens a reverse SSH tunnel from remote loopback back to the local daemon MCP endpoint. The bridge owns runtime backend processes on the SSH machine. The selected runtime adapter still owns the protocol: Codex sends the remote project root as <code>cwd</code> in app-server thread calls, while Claude Code starts in the remote project root and receives command metadata as a first WebSocket message, not as HTTP handshake headers.</p>
-  <p>Codex app-server sessions stay open across completed turns while their process-level configuration stays the same. Agen8 calls <code>initialize</code>, sends the required <code>initialized</code> notification, calls <code>thread/start</code> for a new managed member, persists the returned Codex thread id, and then sends each follow-up user message as another <code>turn/start</code> on the same live app-server connection. When member runtime config changes, Agen8 invalidates the live app-server client immediately while preserving the thread id. Agen8 calls <code>thread/resume</code> when it reconnects to an existing persisted Codex thread after the live app-server connection is gone or after model, reasoning effort, permission, command, or MCP process config changes. A successful <code>turn/start</code> response supplies the active turn id; terminal events for any other turn are ignored instead of completing the current message.</p>
-  <p>Managed Codex sessions run with the selected model, reasoning effort, and permission mode as Codex config overrides. The app-server process starts with the selected <code>model</code>, <code>model_reasoning_effort</code>, and permission config; thread start/resume also carries those values in the app-server <code>config</code> payload so a resumed native thread sees the current member runtime settings. Each turn carries the selected model, effort, and permission protocol fields. Full-access turns use the Codex native full-access sandbox preset: <code>approvalPolicy="never"</code> plus <code>sandbox="danger-full-access"</code> for thread start/resume and <code>sandboxPolicy.type="dangerFullAccess"</code> for turn start. For SSH locations, the daemon sends model, effort, and permission config in bridge headers, the bridge includes those values in the backend cache key, and the remote app-server process is replaced when they change. Codex HTTP MCP configuration is passed as a Codex config override for the location-scoped MCP URL.</p>
-
-  <p>The bridge diagnostics endpoint reports the bridge version, recorded binary identity, resolved Codex path/version, and resolved Claude Code path/version or setup error. The bridge proxies Codex app-server WebSocket frames with the same multi-megabyte read limit as the harness client so large <code>thread/resume</code> payloads are forwarded intact. When a Claude Code request names <code>claude</code>, the bridge resolves common user install paths and login-shell paths before <code>PATH</code>. If Claude Code is missing and <code>npm</code> is available, the bridge installs <code>@anthropic-ai/claude-code</code> under <code>$HOME/.local</code> and resolves the executable again. Authentication remains an explicit runtime readiness concern: the bridge can install and start harness CLIs, but account login state belongs to the user account on the selected location and is verified with each CLI's auth commands.</p>
-  <p>CLI setup is a location workflow for both local and SSH locations. <code>location.installCodex</code> and <code>location.installClaude</code> install missing CLIs with the selected location's package manager path and then reprobe. <code>location.codexAuthStatus</code> runs <code>codex login status</code>; <code>location.codexLogin</code> starts <code>codex login --device-auth</code> and returns the device-login URL and sanitized output. <code>location.claudeLogin</code> starts <code>claude auth login --claudeai</code>, keeps its stdin connected to a location-scoped input file under <code>~/.agen8/claude-login</code>, and returns the OAuth URL and sanitized log output. If Claude's browser flow shows an authorization code, <code>location.claudeLoginComplete</code> appends that one-time code to the waiting login process and returns the refreshed login log. Agen8 never persists the code or writes it into the login log.</p>
+  <h2 id="filesystem">4. Filesystem contract</h2>
+  <p>Filesystem calls are location-scoped. Clients send a location id plus a path or a project-scoped virtual path. The service normalizes paths and returns structured entries, not shell output. File previews are owned by the file service; location only answers discovery and addressability questions.</p>
 
   <table>
-    <thead><tr><th>Location capability</th><th>Owner</th><th>Failure behavior</th></tr></thead>
+    <thead><tr><th>Operation</th><th>Purpose</th><th>Boundary</th></tr></thead>
     <tbody>
-      <tr><td>Local process start</td><td>Location transport</td><td>Missing command or workdir returns an error.</td></tr>
-      <tr><td>SSH command start</td><td>Location transport</td><td>SSH, credential, workdir, or command failures return remote stderr.</td></tr>
-      <tr><td>SSH bridge</td><td>Location remote environment manager</td><td>Startup, readiness, upload, diagnostics, runtime binary setup, forward tunnel, or reverse MCP tunnel failures return remote logs and do not fall back to local execution.</td></tr>
-      <tr><td>CLI auth</td><td>Harness readiness through bridge diagnostics and Codex/Claude auth commands</td><td>Unauthenticated CLIs return explicit login-required states. Agen8 does not treat CLI installation as authenticated readiness.</td></tr>
-      <tr><td>Protocol thread creation</td><td>Harness runtime adapter</td><td>Missing session ref, changed thread id, or missing remote cwd fails the harness turn.</td></tr>
+      <tr><td><code>location.list</code></td><td>Show known locations.</td><td>No project mutation.</td></tr>
+      <tr><td><code>location.fs.listDir</code></td><td>Browse a directory inside a location.</td><td>No arbitrary command execution.</td></tr>
+      <tr><td><code>location.probe</code></td><td>Refresh reachability/readiness.</td><td>Returns sanitized errors only.</td></tr>
     </tbody>
   </table>
 
-  <h2 id="repository">6. Repository</h2>
-  <p>The repository persists location records and probe state. It does not persist secrets directly and it does not open network connections. Connection credentials live behind credential infrastructure; transports use the location record plus credential reference when the app service asks them to probe, browse, or execute.</p>
+  <h2 id="credentials">5. Credential boundary</h2>
+  <p>Locations reference credentials by id. Credential values live in the credential service and are resolved only by trusted backend callers. Location records never store raw private keys, passwords, tokens, or command output that could contain secrets.</p>
 
-<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
-    <span class="tok-fn">Get</span>(ctx context.Context, id ID) (Record, <span class="tok-type">error</span>)
-    <span class="tok-fn">List</span>(ctx context.Context, filter Filter) ([]Record, <span class="tok-type">error</span>)
-}
+  <h2 id="rpc">6. RPC surface</h2>
+  <p>The RPC adapter translates browser requests into typed location service calls. MCP project registration can use the local project root directly; it does not need to call location RPC first when the harness already knows its working directory.</p>
 
-<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
-    <span class="tok-fn">Save</span>(ctx context.Context, location Record) (Record, <span class="tok-type">error</span>)
-    <span class="tok-fn">Delete</span>(ctx context.Context, id ID) <span class="tok-type">error</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">Repository</span> <span class="tok-kw">interface</span> {
-    Reader
-    Writer
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">Record</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ID</span>              ID
-    <span class="tok-field">Kind</span>            LocationKind
-    <span class="tok-field">Label</span>           <span class="tok-type">string</span>
-    <span class="tok-field">Address</span>         LocationAddress
-    <span class="tok-field">Status</span>          LocationStatus
-    <span class="tok-field">Ready</span>           <span class="tok-type">bool</span>
-    <span class="tok-field">CredentialRef</span>   <span class="tok-type">string</span>
-    <span class="tok-field">Probe</span>           Probe
-    <span class="tok-field">LastProbeError</span>  <span class="tok-type">string</span>
-    <span class="tok-field">LastProbedAt</span>    *time.Time
-    <span class="tok-field">CreatedAt</span>       time.Time
-    <span class="tok-field">UpdatedAt</span>       time.Time
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">Filter</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Kind</span>         LocationKind
-    <span class="tok-field">Status</span>       LocationStatus
-    <span class="tok-field">Ready</span>        *<span class="tok-type">bool</span>
-}</code></pre>
-
+  <h2 id="invariants">7. Invariants</h2>
   <table>
-    <thead><tr><th>Field</th><th>Stored by repository</th><th>Owned by</th></tr></thead>
+    <thead><tr><th>Invariant</th><th>Owner</th><th>Reason</th></tr></thead>
     <tbody>
-      <tr><td><code>id</code>, <code>kind</code>, <code>label</code>, <code>address</code></td><td>Yes</td><td>Location domain</td></tr>
-      <tr><td><code>status</code>, <code>ready</code>, probe fields</td><td>Yes</td><td>Location probe workflow</td></tr>
-      <tr><td><code>credentialRef</code></td><td>Yes, as an opaque reference</td><td>Credential infrastructure</td></tr>
-      <tr><td>SSH private keys, managed worker tokens, injected runtime secrets</td><td>No</td><td>Credential infrastructure</td></tr>
-      <tr><td>Project roots</td><td>No</td><td>Project service stores <code>locationId + root</code></td></tr>
-      <tr><td>Harness session refs and process handles</td><td>No</td><td>Harness service and runtime supervisor</td></tr>
+      <tr><td>A project root always belongs to one location.</td><td>Project service and location service</td><td>Graph and file context need a stable root boundary.</td></tr>
+      <tr><td>Location browsing is not harness execution.</td><td>Location service</td><td>Agen8 remains the context layer, not a replacement harness UI.</td></tr>
+      <tr><td>Secrets are referenced, not stored on locations.</td><td>Credential service</td><td>Location records stay safe to display and export.</td></tr>
+      <tr><td>Remote support must fail loudly when not ready.</td><td>Location service</td><td>Work should never silently run against the daemon checkout or the wrong machine.</td></tr>
     </tbody>
   </table>
-
-  <p>SQLite and Postgres implementations share the same repository contract. The app service uses <code>Reader</code> for validation and view loading, <code>Writer</code> for location creation and probe updates, and the combined <code>Repository</code> where a command needs both.</p>
-
-  <h2 id="credentials">7. Credential boundary</h2>
-  <p>Location records contain enough non-secret connection metadata to identify a target, plus an opaque <code>credentialRef</code>. The credential service owns secret material and credential lifecycle. Location probes and transports ask the credential service to resolve usable authentication material at runtime, then redact that material from logs, probe errors, RPC results, and harness session records.</p>
-
-  <div class="grid">
-    <div class="card">
-      <div class="label">Location stores</div>
-      <div class="title">Reference and public metadata</div>
-      <div class="meta">Location id, kind, label, host/port/user metadata, status, probe results, and opaque credential reference.</div>
-    </div>
-    <div class="card">
-      <div class="label">Credential service stores</div>
-      <div class="title">Secret material</div>
-      <div class="meta">Private keys, passphrases, passwords, managed worker tokens, refresh material, rotation metadata, and external secret-manager references.</div>
-    </div>
-    <div class="card">
-      <div class="label">Transport consumes</div>
-      <div class="title">Resolved auth</div>
-      <div class="meta">SSH and managed adapters receive short-lived resolved credentials for probe, browse, and execution. They do not write them back to project or harness records.</div>
-    </div>
-  </div>
-
-  <table>
-    <thead><tr><th>SSH auth mode</th><th>How it works</th><th>Default stance</th></tr></thead>
-    <tbody>
-      <tr><td><code>sshAgent</code></td><td>Uses the daemon user's existing SSH agent. The credential ref points to the agent-backed identity policy, not to private key bytes.</td><td>Preferred first slice for local desktop installs.</td></tr>
-      <tr><td><code>keyRef</code></td><td>Uses a private key managed by credential infrastructure or an external secret manager. The location stores only the credential ref.</td><td>Valid for SSH and managed execution.</td></tr>
-    </tbody>
-  </table>
-
-<pre class="mocha"><code class="lang-json">{
-  "kind": "ssh",
-  "label": "Build host",
-  "host": "devbox.internal",
-  "port": 22,
-  "username": "user",
-  "auth": {
-    "mode": "sshAgent"
-  }
-}</code></pre>
-
-  <p>The create flow validates public connection fields, stores a location record with a credential reference, and then runs <code>location.probe</code>. Probe resolves credentials, dials the target, checks readiness, and persists sanitized state.</p>
-
-  <div class="diagram">
-    <svg viewBox="0 0 980 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Location credential probe flow">
-      <defs>
-        <marker id="credential-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
-        </marker>
-      </defs>
-      <rect x="30" y="62" width="150" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="105" y="87" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="800">location.create</text>
-      <text x="105" y="106" text-anchor="middle" fill="var(--text-muted)" font-size="10">public fields</text>
-
-      <rect x="230" y="62" width="150" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="305" y="87" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="800">repository</text>
-      <text x="305" y="106" text-anchor="middle" fill="var(--text-muted)" font-size="10">credentialRef only</text>
-
-      <rect x="430" y="62" width="150" height="58" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
-      <text x="505" y="87" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="800">credential svc</text>
-      <text x="505" y="106" text-anchor="middle" fill="var(--text-muted)" font-size="10">resolve auth</text>
-
-      <rect x="630" y="62" width="150" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="705" y="87" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="800">transport</text>
-      <text x="705" y="106" text-anchor="middle" fill="var(--text-muted)" font-size="10">dial target</text>
-
-      <rect x="830" y="62" width="120" height="58" rx="8" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="890" y="87" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="800">probe state</text>
-      <text x="890" y="106" text-anchor="middle" fill="var(--text-muted)" font-size="10">sanitized</text>
-
-      <line x1="180" y1="91" x2="230" y2="91" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#credential-arrow)"/>
-      <line x1="380" y1="91" x2="430" y2="91" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#credential-arrow)"/>
-      <line x1="580" y1="91" x2="630" y2="91" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#credential-arrow)"/>
-      <line x1="780" y1="91" x2="830" y2="91" stroke="var(--teal)" stroke-width="1.6" marker-end="url(#credential-arrow)"/>
-
-      <rect x="130" y="166" width="720" height="48" rx="8" fill="var(--bg-subtle)" stroke="var(--border)"/>
-      <text x="490" y="196" text-anchor="middle" fill="var(--text-muted)" font-size="12">Secrets are resolved for the transport and never copied to project records, harness records, logs, or RPC responses.</text>
-    </svg>
-  </div>
-
-  <p>Logs can include location id, kind, label, host, port, auth mode, credential id, and sanitized failure category. Logs never include private keys, passwords, passphrases, tokens, raw credential payloads, or command strings that embed secrets.</p>
-
-  <h2 id="rpc">8. RPC surface</h2>
-  <table>
-    <thead><tr><th>Method</th><th>Client need</th><th>App call</th><th>Notes</th></tr></thead>
-    <tbody>
-      <tr><td><code>location.list</code></td><td>Render the Locations page and project creation choices.</td><td><code>ListLocations</code></td><td>Returns execution-capable locations. The default local location includes the daemon host name in <code>address.host</code>.</td></tr>
-      <tr><td><code>location.get</code></td><td>Load one location and its capability state.</td><td><code>GetLocation</code></td><td>Returns location metadata and current capability view.</td></tr>
-      <tr><td><code>location.create</code></td><td>Add an SSH or managed location from the Locations page.</td><td><code>CreateLocation</code></td><td>Validates public connection fields, stores the location, and starts a probe.</td></tr>
-      <tr><td><code>location.update</code></td><td>Repair or rename a known location.</td><td><code>UpdateLocation</code></td><td>Updates label, address, or auth mode. Secret mutation remains on the credential service.</td></tr>
-      <tr><td><code>location.delete</code></td><td>Remove stale locations.</td><td><code>DeleteLocation</code></td><td>Refuses deletion when active projects reference the location.</td></tr>
-      <tr><td><code>location.probe</code></td><td>Refresh reachability and readiness checks.</td><td><code>ProbeLocation</code></td><td>Checks connection, filesystem browsing, exec, Codex availability, and Claude Code availability.</td></tr>
-      <tr><td><code>location.installCodex</code> / <code>location.installClaude</code></td><td>Install supported harness CLIs on a local or SSH location.</td><td><code>InstallCodex</code> / <code>InstallClaude</code></td><td>Uses the selected location transport and reprobes the location. Installation errors return sanitized command output.</td></tr>
-      <tr><td><code>location.codexAuthStatus</code> / <code>location.codexLogin</code></td><td>Check and start Codex account login for a local or SSH location.</td><td><code>CodexAuthStatus</code> / <code>BeginCodexLogin</code></td><td>Returns structured logged-in state or Codex device-login output. Login secrets stay in Codex storage on that location.</td></tr>
-      <tr><td><code>location.claudeAuthStatus</code> / <code>location.claudeLogin</code> / <code>location.claudeLoginComplete</code></td><td>Check, start, and complete Claude Code account login for a local or SSH location.</td><td><code>ClaudeAuthStatus</code> / <code>BeginClaudeLogin</code> / <code>CompleteClaudeLogin</code></td><td>Returns structured logged-in state, a Claude OAuth URL, or refreshed login output after code submission. Login secrets stay in Claude Code storage on that location.</td></tr>
-      <tr><td><code>location.fs.listDir</code></td><td>Browse folders before creating a project.</td><td><code>ListDirectory</code></td><td>Requires <code>locationId</code> and path. It replaces project-specific filesystem browsing.</td></tr>
-    </tbody>
-  </table>
-
-<pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">LocationListResult</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Locations</span> []LocationView <span class="tok-string">`json:"locations"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationResult</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Location</span> LocationView <span class="tok-string">`json:"location"`</span>
-}
-
-<span class="tok-kw">const</span> (
-    <span class="tok-field">LocationKindLocal</span>   = <span class="tok-string">"local"</span>
-    <span class="tok-field">LocationKindSSH</span>     = <span class="tok-string">"ssh"</span>
-    <span class="tok-field">LocationKindManaged</span> = <span class="tok-string">"managed"</span>
-)
-
-<span class="tok-kw">const</span> (
-    <span class="tok-field">LocationStatusOnline</span>   = <span class="tok-string">"online"</span>
-    <span class="tok-field">LocationStatusOffline</span>  = <span class="tok-string">"offline"</span>
-    <span class="tok-field">LocationStatusNotReady</span> = <span class="tok-string">"not_ready"</span>
-)
-
-<span class="tok-kw">const</span> (
-    <span class="tok-field">AuthModeSSHAgent</span> = <span class="tok-string">"sshAgent"</span>
-    <span class="tok-field">AuthModeKeyRef</span>   = <span class="tok-string">"keyRef"</span>
-)
-
-<span class="tok-kw">const</span> (
-    <span class="tok-field">ProbeStatusPassed</span>  = <span class="tok-string">"passed"</span>
-    <span class="tok-field">ProbeStatusFailed</span>  = <span class="tok-string">"failed"</span>
-    <span class="tok-field">ProbeStatusUnknown</span> = <span class="tok-string">"unknown"</span>
-)
-
-<span class="tok-kw">const</span> (
-    <span class="tok-field">FailureAuthFailed</span>       = <span class="tok-string">"auth_failed"</span>
-    <span class="tok-field">FailureUnreachable</span>      = <span class="tok-string">"unreachable"</span>
-    <span class="tok-field">FailurePermissionDenied</span> = <span class="tok-string">"permission_denied"</span>
-    <span class="tok-field">FailureRootMissing</span>      = <span class="tok-string">"root_missing"</span>
-    <span class="tok-field">FailureCodexMissing</span>     = <span class="tok-string">"codex_missing"</span>
-    <span class="tok-field">FailureExecutionMissing</span> = <span class="tok-string">"execution_missing"</span>
-)
-
-<span class="tok-kw">const</span> (
-    <span class="tok-field">DirEntryDirectory</span> = <span class="tok-string">"directory"</span>
-    <span class="tok-field">DirEntryFile</span>      = <span class="tok-string">"file"</span>
-    <span class="tok-field">DirEntrySymlink</span>   = <span class="tok-string">"symlink"</span>
-)
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationView</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ID</span>             <span class="tok-type">string</span>            <span class="tok-string">`json:"id"`</span>
-    <span class="tok-field">Kind</span>           <span class="tok-type">string</span>            <span class="tok-string">`json:"kind"`</span>
-    <span class="tok-field">Label</span>          <span class="tok-type">string</span>            <span class="tok-string">`json:"label"`</span>
-    <span class="tok-field">Address</span>        *LocationAddressView <span class="tok-string">`json:"address,omitempty"`</span>
-    <span class="tok-field">Status</span>         <span class="tok-type">string</span>            <span class="tok-string">`json:"status"`</span>
-    <span class="tok-field">Ready</span>          <span class="tok-type">bool</span>              <span class="tok-string">`json:"ready"`</span>
-    <span class="tok-field">Capabilities</span>   []CapabilityView  <span class="tok-string">`json:"capabilities,omitempty"`</span>
-    <span class="tok-field">Auth</span>           LocationAuthView  <span class="tok-string">`json:"auth"`</span>
-    <span class="tok-field">LastProbe</span>      *ProbeView        <span class="tok-string">`json:"lastProbe,omitempty"`</span>
-    <span class="tok-field">CreatedAt</span>      *time.Time        <span class="tok-string">`json:"createdAt,omitempty"`</span>
-    <span class="tok-field">UpdatedAt</span>      *time.Time        <span class="tok-string">`json:"updatedAt,omitempty"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationCreateParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Kind</span>    <span class="tok-type">string</span>              <span class="tok-string">`json:"kind"`</span>
-    <span class="tok-field">Label</span>   <span class="tok-type">string</span>              <span class="tok-string">`json:"label"`</span>
-    <span class="tok-field">Address</span> LocationAddressView <span class="tok-string">`json:"address,omitempty"`</span>
-    <span class="tok-field">Auth</span>    LocationAuthView    <span class="tok-string">`json:"auth,omitempty"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationUpdateParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">LocationID</span> <span class="tok-type">string</span>               <span class="tok-string">`json:"locationId"`</span>
-    <span class="tok-field">Label</span>      <span class="tok-type">string</span>               <span class="tok-string">`json:"label,omitempty"`</span>
-    <span class="tok-field">Address</span>    *LocationAddressView <span class="tok-string">`json:"address,omitempty"`</span>
-    <span class="tok-field">Auth</span>       *LocationAuthView    <span class="tok-string">`json:"auth,omitempty"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationDeleteParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">LocationID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"locationId"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationProbeParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">LocationID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"locationId"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationAddressView</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Host</span>     <span class="tok-type">string</span> <span class="tok-string">`json:"host,omitempty"`</span>
-    <span class="tok-field">Port</span>     <span class="tok-type">int</span>    <span class="tok-string">`json:"port,omitempty"`</span>
-    <span class="tok-field">Username</span> <span class="tok-type">string</span> <span class="tok-string">`json:"username,omitempty"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">CapabilityView</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Name</span>   <span class="tok-type">string</span> <span class="tok-string">`json:"name"`</span>
-    <span class="tok-field">Status</span> <span class="tok-type">string</span> <span class="tok-string">`json:"status"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationAuthView</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Mode</span>          <span class="tok-type">string</span> <span class="tok-string">`json:"mode,omitempty"`</span>
-    <span class="tok-field">HasCredential</span> <span class="tok-type">bool</span>   <span class="tok-string">`json:"hasCredential,omitempty"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">ProbeView</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Status</span>      <span class="tok-type">string</span>     <span class="tok-string">`json:"status,omitempty"`</span>
-    <span class="tok-field">FailureCode</span> <span class="tok-type">string</span>     <span class="tok-string">`json:"failureCode,omitempty"`</span>
-    <span class="tok-field">Message</span>     <span class="tok-type">string</span>     <span class="tok-string">`json:"message,omitempty"`</span>
-    <span class="tok-field">ProbedAt</span>    *time.Time <span class="tok-string">`json:"probedAt,omitempty"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationFSListDirParams</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">LocationID</span> <span class="tok-type">string</span> <span class="tok-string">`json:"locationId"`</span>
-    <span class="tok-field">Path</span>       <span class="tok-type">string</span> <span class="tok-string">`json:"path"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">LocationFSListDirResult</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Entries</span>    []DirEntry  <span class="tok-string">`json:"entries"`</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">DirEntry</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Name</span>  <span class="tok-type">string</span> <span class="tok-string">`json:"name"`</span>
-    <span class="tok-field">Path</span>  <span class="tok-type">string</span> <span class="tok-string">`json:"path"`</span>
-    <span class="tok-field">Type</span>  <span class="tok-type">string</span> <span class="tok-string">`json:"type"`</span>
-    <span class="tok-field">Size</span>  <span class="tok-type">int64</span>  <span class="tok-string">`json:"size,omitempty"`</span>
-}</code></pre>
-
-  <table>
-    <thead><tr><th>View field</th><th>Client use</th><th>Rule</th></tr></thead>
-    <tbody>
-      <tr><td><code>ready</code></td><td>Enable project creation against a location.</td><td>True only when the location is online and can execute managed work.</td></tr>
-      <tr><td><code>address.host</code></td><td>Show the concrete execution host.</td><td>The local location uses the daemon hostname; SSH locations use the remote host.</td></tr>
-      <tr><td><code>capabilities</code></td><td>Render readiness checks and blocked states.</td><td>Derived from sanitized probe results.</td></tr>
-      <tr><td><code>auth</code></td><td>Show auth mode and whether a credential is configured.</td><td>Never includes secret values or raw credential refs.</td></tr>
-      <tr><td><code>lastProbe.failureCode</code></td><td>Explain repair steps.</td><td>Uses safe categories such as <code>auth_failed</code>, <code>codex_missing</code>, or <code>permission_denied</code>.</td></tr>
-      <tr><td><code>entries</code></td><td>Render remote/local folder navigation.</td><td>Directory listing is scoped to <code>locationId</code> and normalized path.</td></tr>
-    </tbody>
-  </table>
-
-  <h2 id="client">9. Client contract</h2>
-  <p>Clients render known locations with explicit readiness states. A known location can be offline or not ready; it remains visible on the Locations page so users can repair it, but it is not selectable for project creation until its probe reports <code>ready=true</code>.</p>
-
-  <div class="grid">
-    <div class="card">
-      <div class="label">Ready</div>
-      <div class="title"><code>ready=true</code></div>
-      <div class="meta">The UI can browse roots and create projects against this location.</div>
-    </div>
-    <div class="card">
-      <div class="label">Known but blocked</div>
-      <div class="title">Offline or not ready</div>
-      <div class="meta">The UI shows a concrete state: offline, auth failed, root missing, permission denied, Codex missing, or execution missing.</div>
-    </div>
-    <div class="card">
-      <div class="label">Repair path</div>
-      <div class="title"><code>location.probe</code></div>
-      <div class="meta">Users can re-run probes after installing dependencies, fixing credentials, or reconnecting a remote worker.</div>
-    </div>
-  </div>
-
-  <p>Project creation keeps backend validation inside the service layer. The browser browses with <code>location.fs.listDir</code> and submits <code>project.create</code>; the project service loads the selected location, requires <code>online</code> and <code>ready=true</code>, and asks the location service to validate that the root is accessible before storing the project.</p>
-
-  <p>The first-run project form does not force users to choose a location when the only usable option is <code>local</code>. It uses the ready local location by default, shows a location picker when multiple ready locations exist, and links to the Locations page when no location is ready.</p>
-
-  <p>Location credentials, SSH keys, managed worker tokens, and injected runtime secrets do not live on project records. They belong to location/credential infrastructure. Project records contain only <code>projectId</code>, <code>locationId</code>, root, title, status, and timestamps.</p>
-
-  <h2 id="invariants">10. Invariants</h2>
-  <table>
-    <thead><tr><th>Rule</th><th>Enforced by</th><th>Reason</th></tr></thead>
-    <tbody>
-      <tr><td>The local daemon exposes one default <code>local</code> location when local harness execution is available.</td><td>Location app service</td><td>First-run project creation must not require manual configuration on a valid local install.</td></tr>
-      <tr><td>The local location stores the daemon host name in <code>address.host</code> and backfills missing host data when <code>EnsureLocal</code> runs.</td><td>Location app service</td><td>Users should see which machine is the actual local execution host.</td></tr>
-      <tr><td>A path is never interpreted without a location.</td><td>RPC validation and domain values</td><td>The same path string can mean different things on different machines.</td></tr>
-      <tr><td>Filesystem browsing stays on <code>location.fs.*</code>, not <code>project.*</code>.</td><td>RPC method ownership</td><td>Project owns association; location owns reachability.</td></tr>
-      <tr><td>Readiness is probe state, not implied by location kind.</td><td>Probe result</td><td>An SSH target may not have Codex, Claude Code, or the execution runtime installed.</td></tr>
-      <tr><td>Storage-only endpoints are not project locations.</td><td>Location domain validation</td><td>A project location must be able to host member harness sessions.</td></tr>
-      <tr><td>Project creation accepts only online, ready locations.</td><td>Project creation UI and app validation through location loading</td><td>Every project location must be able to host member execution.</td></tr>
-      <tr><td><code>project.create</code> validates the selected root through the location service.</td><td>Project app service</td><td>Clients should not orchestrate backend correctness with a separate validation RPC.</td></tr>
-      <tr><td>Location deletion refuses active project references.</td><td>Location app service plus project lookup</td><td>Projects must not point at missing execution locations.</td></tr>
-      <tr><td>Known locations can be offline without being deleted.</td><td>Location status model</td><td>Remote machines and managed workers can disconnect and later return.</td></tr>
-      <tr><td>Location credentials are never copied onto project records.</td><td>Credential and location boundaries</td><td>Projects identify where work lives; they do not own connection secrets.</td></tr>
-      <tr><td>The location repository stores credential references, not credentials.</td><td>Repository schema</td><td>Persistence can identify which credential to use without exposing secret material to project or harness records.</td></tr>
-      <tr><td>The location repository never performs filesystem, SSH, managed-worker, or harness operations.</td><td>Repository interface shape</td><td>Persistence remains separate from transports and probes.</td></tr>
-      <tr><td>Location probes resolve credentials at runtime and persist only sanitized results.</td><td>Credential boundary and probe workflow</td><td>Readiness state is useful durable state; authentication material is not.</td></tr>
-      <tr><td>SSH private keys, passwords, passphrases, and tokens never appear in logs or RPC responses.</td><td>Logging and DTO policy</td><td>Connection diagnostics must not leak secrets.</td></tr>
-      <tr><td>Project-level location overrides are outside the first slice.</td><td>Project schema</td><td>The first implementation keeps one project location to avoid premature agent visibility and artifact scoping complexity.</td></tr>
-      <tr><td>Harness startup commands are owned by harness adapters, not location or project.</td><td>Harness runtime boundary</td><td>Location supplies execution transport; harness adapters know their own protocol.</td></tr>
-      <tr><td>Durable task delivery reaches members through message wakes and runtime delivery.</td><td>Message service and daemon delivery worker</td><td>Agents receive work through the managed runtime instead of polling RPC manually.</td></tr>
-    </tbody>
-  </table>
-
-<pre class="mocha"><code class="lang-text">internal/services/location/
-  domain/
-    doc.go
-    errors.go
-    location.go
-    repository.go
-  app/
-    doc.go
-    ports.go
-    service.go
-  infra/
-    doc.go
-    repository_builder.go
-    sql_store.go
-    sql_helpers.go
-    postgres_repository.go
-    sqlite_repository.go
-    local_filesystem.go
-    ssh_transport.go
-  rpc/
-    doc.go
-    handler.go
-    types.go</code></pre>
 </div>
+
 </body>
 </html>

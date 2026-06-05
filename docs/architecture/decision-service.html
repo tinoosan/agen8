@@ -47,7 +47,7 @@
       <li><a href="#service">Service boundary</a></li>
       <li><a href="#domain">Domain model</a></li>
       <li><a href="#persistence">Persistence and queries</a></li>
-      <li><a href="#events">Links, events, and notifications</a></li>
+      <li><a href="#events">Links and events</a></li>
       <li><a href="#invariants">Invariants</a></li>
     </ol>
   </nav>
@@ -180,7 +180,7 @@
     logger *slog.<span class="tok-type">Logger</span>,
 ) (*<span class="tok-type">Service</span>, error)</code></pre>
 
-  <p><code>repo</code>, <code>clock</code>, <code>links</code>, <code>linkDeleter</code>, and <code>events</code> are mandatory. Task and mission readers enrich references: a decision linked to a task can also link to the task's key result and mission. Member display lookup enriches event payloads for notification text; failures there are presentation-only and do not block persistence.</p>
+  <p><code>repo</code>, <code>clock</code>, <code>links</code>, <code>linkDeleter</code>, and <code>events</code> are mandatory. Task and mission readers enrich references: a decision linked to a task can also link to the task's key result and mission. Member display lookup enriches event payloads for readable display text; failures there are presentation-only and do not block persistence.</p>
 
   <h2 id="domain">4. Domain model</h2>
 
@@ -267,7 +267,7 @@
     </g>
   </svg>
 
-  <p>Context links are emitted from the decision to each referenced key result, mission, task, and plan. <code>decision.logged</code> is published after link creation. Publish failure returns an error because a missing decision event hides a product-visible state transition from notification evaluators and wake-signal consumers.</p>
+  <p>Context links are emitted from the decision to each referenced key result, mission, and task. <code>decision.logged</code> is published after link creation. Publish failure returns an error because a missing decision event hides a product-visible state transition from downstream projections.</p>
 
   <h2 id="invariants">7. Invariants</h2>
 

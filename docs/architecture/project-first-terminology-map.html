@@ -55,7 +55,7 @@
     <div class="toc-label">On this page</div>
     <ol>
       <li><a href="#canonical">Canonical terms</a></li>
-      <li><a href="#run-ownership">Run ownership</a></li>
+      <li><a href="#run-ownership">Member ownership</a></li>
       <li><a href="#member-types">Member types</a></li>
       <li><a href="#roles">Roles</a></li>
       <li><a href="#configuration">Configuration terms</a></li>
@@ -75,21 +75,17 @@
       <tr><td><code>Role</code></td><td>Optional reusable capability/persona definition.</td><td>Not coordinator or worker status.</td></tr>
       <tr><td><code>RoleSnapshot</code></td><td>Immutable snapshot of effective member instructions and capabilities.</td><td>Preserves traceability when role definitions change.</td></tr>
       <tr><td><code>ProjectTemplate</code></td><td>Optional blueprint and provenance for setting up a project roster.</td><td>Not the live runtime owner.</td></tr>
-      <tr><td><code>HarnessSession</code></td><td>Execution backend/session metadata.</td><td>Not the primary Agen8 actor identity.</td></tr>
-      <tr><td><code>Run</code></td><td>Agen8 execution address for a managed member harness.</td><td>Owned by the member's harness session, not by the project.</td></tr>
-      <tr><td><code>DesiredExecutionSettings</code></td><td>Settings Agen8 or the user wants.</td><td>Compared against actual managed harness settings.</td></tr>
-      <tr><td><code>ActualExecutionSettings</code></td><td>Settings the harness is actually using.</td><td>Recorded with source/evidence where possible.</td></tr>
-      <tr><td><code>HarnessCapabilities</code></td><td>Operations Agen8 can perform or observe for a harness/session.</td><td>Session id alone grants no control.</td></tr>
-      <tr><td><code>Channel</code></td><td>Member-addressed push lane <code>channel:&lt;project&gt;:member:&lt;id&gt;</code>.</td><td>A delivery address, not the actor identity.</td></tr>
+      <tr><td><code>NativeSessionRef</code></td><td>Stable session/thread reference exposed by a connected harness when available.</td><td>Used for member identity, not for recreating harness thread management.</td></tr>
+      <tr><td><code>ChannelID</code></td><td>Stable member route key returned for compatibility with retained member records.</td><td>Not an active push-delivery lane in the MCP-first baseline.</td></tr>
       <tr><td><code>Group</code></td><td>Reserved future term for an additive sub-team aggregate within a project.</td><td>Not built yet; not a coordination boundary today.</td></tr>
     </tbody>
   </table>
 
-  <h2 id="run-ownership">2. Run ownership</h2>
-  <p>A project is the coordination and context boundary. A <code>Member</code> is the live actor and equals exactly one harness session. When Agen8 provisions a managed member, the member receives a run so work records have a concrete execution address. That run belongs to the member's managed harness session.</p>
+  <h2 id="run-ownership">2. Member ownership</h2>
+  <p>A project is the coordination and context boundary. A <code>Member</code> is the Agen8 actor record for one connected harness session when the harness exposes a stable reference. Agen8 records member work; it does not own the external harness session.</p>
 
   <div class="callout">
-    <strong>Do not introduce run-backed projects.</strong> Managed member behavior derives from the <code>Member</code> record, <code>MemberType</code>, harness kind, and execution settings. It does not derive from hidden containers or role-owned runs.
+    <strong>Do not introduce run-backed projects.</strong> Member behavior derives from the <code>Member</code> record, <code>MemberType</code>, harness kind, and optional native session reference. It does not derive from hidden containers or role-owned runs.
   </div>
 
   <h2 id="member-types">3. Member types</h2>
@@ -134,7 +130,7 @@
       <tr><td><code>project_default_settings</code></td><td>Defaults for new members in a project.</td></tr>
       <tr><td><code>role_default_settings</code></td><td>Persona or capability preferences from a role.</td></tr>
       <tr><td><code>member_desired_settings</code></td><td>Settings Agen8 or the user wants for this member.</td></tr>
-      <tr><td><code>harness_actual_settings</code></td><td>Settings the managed harness is actually using.</td></tr>
+      <tr><td><code>harness_actual_settings</code></td><td>Settings reported by the external harness when available.</td></tr>
       <tr><td><code>harness_capabilities</code></td><td>Controls and observations supported by the selected harness.</td></tr>
     </tbody>
   </table>
@@ -145,11 +141,10 @@
     <tbody>
       <tr><td>Project</td><td><code>draft</code>, <code>open</code>, <code>paused</code>, <code>closed</code>, <code>archived</code>, <code>deleting</code></td></tr>
       <tr><td>Member</td><td><code>pending</code>, <code>active</code>, <code>inactive</code>, <code>disconnected</code>, <code>left</code>, <code>removed</code>, <code>expired</code></td></tr>
-      <tr><td>Harness session</td><td><code>not_started</code>, <code>starting</code>, <code>running</code>, <code>suspended</code>, <code>stopped</code>, <code>failed</code>, <code>unknown</code></td></tr>
     </tbody>
   </table>
 
-  <p>Member lifecycle and harness lifecycle are related but not identical. A managed member can remain registered while its harness run is starting, stopped, failed, or disconnected.</p>
+  <p>Member lifecycle and harness lifecycle are related but not identical. A member can remain registered after the external harness session stops exposing active metadata.</p>
 
   <h2 id="rules">7. Naming rules</h2>
   <ol>

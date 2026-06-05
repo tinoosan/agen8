@@ -20,7 +20,7 @@
   <span class="eyebrow">Architecture · Daemon</span>
   <h1>Daemon process host</h1>
   <p class="lede">
-    The daemon is the process host for agen8 services. It builds the application once, wires JSON-RPC registrations, selects a listener strategy, handles first-run onboarding, and stamps secure request identity before calling the transport-agnostic RPC server.
+    The daemon is the process host for agen8 services. It builds the application once, wires JSON-RPC registrations, serves HTTP routes, handles first-run onboarding, exposes MCP, and stamps secure request identity before calling the transport-agnostic RPC server.
   </p>
 
   <nav class="toc" aria-label="On this page">
@@ -299,7 +299,7 @@ internal/
   <table>
     <thead><tr><th>Package</th><th>Coverage</th></tr></thead>
     <tbody>
-      <tr><td><code>internal/daemon</code></td><td>Local one-request dispatch, HTTP health, HTTP auth rejection, bearer-token dispatch, setup can run once only</td></tr>
+      <tr><td><code>internal/daemon</code></td><td>HTTP health, HTTP auth rejection, bearer-token dispatch, setup can run once only, MCP API keys survive restart</td></tr>
       <tr><td><code>internal/rpc</code></td><td>Registry duplicate checks, request dispatch, task method registration</td></tr>
       <tr><td><code>internal/services/auth</code></td><td>First user admin, API-key validation, invalid bearer failure</td></tr>
       <tr><td><code>cmd</code></td><td>Default local listener, explicit HTTP listener, invalid listener failure</td></tr>

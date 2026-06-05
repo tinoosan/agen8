@@ -37,14 +37,14 @@
 
   <h2 id="boundary">1. Boundary</h2>
 
-  <p>The daemon owns listeners and web serving. RPC owns JSON-RPC. Services own use cases. The same <code>rpc.Server</code> is called by local IPC and HTTP listener strategies, so transport changes never create a second RPC semantic model.</p>
+  <p>The daemon owns HTTP listening and web serving. RPC owns JSON-RPC. Services own use cases. Browser RPC calls enter through the daemon and share one service-backed semantic model.</p>
 
   <p>Development web proxying is outside the RPC layer. When <code>AGEN8_DEV_WEB_URL</code> is set, the daemon reverse-proxies SPA assets and Vite hot-reload traffic after protocol routes are claimed. <code>/rpc</code>, <code>/events</code>, <code>/healthz</code>, and setup routes still terminate in the daemon and never pass through Vite.</p>
 
   <div class="layers">
     <div class="layer handler">
       <div class="label">internal/daemon</div>
-      <div class="role">Runs local IPC and HTTP listener strategies, authenticates transport identity, and calls <code>rpc.Server</code>.</div>
+      <div class="role">Runs the HTTP listener, authenticates transport identity, and calls <code>rpc.Server</code>.</div>
     </div>
     <div class="layer service">
       <div class="label">internal/rpc</div>
@@ -87,24 +87,24 @@
     </defs>
 
     <rect x="34" y="34" width="872" height="392" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
-    <text x="470" y="68" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">JSON-RPC dispatch is shared by local IPC and HTTP</text>
-    <text x="470" y="88" text-anchor="middle" font-size="11" fill="var(--text-muted)">Listener strategies authenticate and stamp identity; RPC dispatch remains transport-agnostic.</text>
+    <text x="470" y="68" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">JSON-RPC dispatch is owned by the daemon HTTP surface</text>
+    <text x="470" y="88" text-anchor="middle" font-size="11" fill="var(--text-muted)">The daemon authenticates and stamps identity; RPC dispatch remains transport-agnostic.</text>
 
     <rect x="76" y="132" width="142" height="58" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
-    <text x="147" y="154" text-anchor="middle" font-weight="700" fill="var(--text)">Local client</text>
-    <text x="147" y="173" text-anchor="middle" fill="var(--text-muted)">socket / pipe</text>
+    <text x="147" y="154" text-anchor="middle" font-weight="700" fill="var(--text)">Browser client</text>
+    <text x="147" y="173" text-anchor="middle" fill="var(--text-muted)">POST /rpc</text>
 
     <rect x="76" y="226" width="142" height="58" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
-    <text x="147" y="248" text-anchor="middle" font-weight="700" fill="var(--text)">HTTP client</text>
-    <text x="147" y="267" text-anchor="middle" fill="var(--text-muted)">POST /rpc</text>
+    <text x="147" y="248" text-anchor="middle" font-weight="700" fill="var(--text)">Setup/auth client</text>
+    <text x="147" y="267" text-anchor="middle" fill="var(--text-muted)">session token</text>
 
     <rect x="292" y="132" width="154" height="58" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
-    <text x="369" y="154" text-anchor="middle" font-weight="700" fill="var(--text)">LocalStrategy</text>
-    <text x="369" y="173" text-anchor="middle" fill="var(--text-muted)">resolve local user</text>
+    <text x="369" y="154" text-anchor="middle" font-weight="700" fill="var(--text)">HTTP daemon</text>
+    <text x="369" y="173" text-anchor="middle" fill="var(--text-muted)">validate session</text>
 
     <rect x="292" y="226" width="154" height="58" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
-    <text x="369" y="248" text-anchor="middle" font-weight="700" fill="var(--text)">HTTPStrategy</text>
-    <text x="369" y="267" text-anchor="middle" fill="var(--text-muted)">validate bearer token</text>
+    <text x="369" y="248" text-anchor="middle" font-weight="700" fill="var(--text)">HTTP daemon</text>
+    <text x="369" y="267" text-anchor="middle" fill="var(--text-muted)">stamp identity</text>
 
     <rect x="512" y="178" width="154" height="74" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
     <text x="589" y="202" text-anchor="middle" font-weight="700" fill="var(--text)">rpc.Server</text>
@@ -134,8 +134,8 @@
   </div>
 
   <ol>
-    <li>The selected daemon listener receives a request from local IPC or HTTP.</li>
-    <li>The listener authenticates through its own transport rules and stamps <code>rpc.Identity</code> into <code>context.Context</code>.</li>
+    <li>The daemon HTTP listener receives a browser RPC request.</li>
+    <li>The daemon authenticates through HTTP session rules and stamps <code>rpc.Identity</code> into <code>context.Context</code>.</li>
     <li><code>rpc.Server</code> decodes the JSON-RPC envelope and asks the registry for the named method.</li>
     <li>The RPC method registration maps <code>rpc.Identity</code> to the shared <code>caller.Caller</code> context contract.</li>
     <li>The service-owned RPC handler validates DTOs and calls a service method.</li>

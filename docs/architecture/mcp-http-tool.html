@@ -96,7 +96,7 @@
 
 <h2>Application wiring</h2>
 
-<p>The application composition root constructs <code>CredentialSvc</code> once. When MCP session bootstrap registers a session for a managed harness, it includes that concrete service as the handler's narrow credential resolver. The HTTP clients are not supplied by the session; they are created inside the HTTP tool package.</p>
+<p>The application composition root constructs <code>CredentialSvc</code> once. The daemon includes that concrete service as the MCP handler's narrow credential resolver. The HTTP clients are not supplied by the session; they are created inside the HTTP tool package.</p>
 
 <pre><code>// MCP session bootstrap
 tokenStore.Register(token, agen8mcp.Session{

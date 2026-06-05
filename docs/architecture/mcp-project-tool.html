@@ -45,7 +45,7 @@
   </tr>
   <tr>
     <td><code>member_list</code></td>
-    <td>Resolve the active actor member, stamp caller context, and list active members of the project, exposing routable channel ids.</td>
+    <td>Resolve the active actor member, stamp caller context, and list active members of the project, including stable channel ids.</td>
     <td><code>ProjectSvc.GetMember</code>, <code>ProjectSvc.ListMembers</code>.</td>
     <td>Member list with member id, display label, member type, lifecycle state, and channel id.</td>
   </tr>
@@ -124,7 +124,7 @@
 
 <h2>Application wiring</h2>
 
-<p>The application composition root constructs <code>ProjectSvc</code> once. The same concrete service exposes project lifecycle methods and member roster methods. When the runtime supervisor spawns a managed harness, it registers an MCP session token that carries that concrete service as narrow handler-owned interfaces. The MCP server stores the session and supplies those interfaces to the native <code>project</code> handler when the agent calls <code>project(...)</code>.</p>
+<p>The application composition root constructs <code>ProjectSvc</code> once. The same concrete service exposes project lifecycle methods and member roster methods. The daemon builds an MCP session from the authenticated token and supplies narrow handler-owned interfaces to the native <code>project</code> handler when the agent calls <code>project(...)</code>.</p>
 
 <pre><code>// MCP session bootstrap
 tokenStore.Register(token, agen8mcp.Session{
@@ -150,11 +150,11 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <h2>Runtime-resolved identity</h2>
 
-<p>The agent supplies discovery intent. Agen8 supplies runtime identity. The MCP session token already binds the call to a project, member, and channel, so those values are not agent-required request fields. The handler uses them to stamp caller context, resolve the active actor member, and authorize service calls.</p>
+<p>The agent supplies discovery intent. Agen8 supplies runtime identity. The MCP session token plus registration state binds the call to a project and member, so those values are not agent-required request fields after registration. The handler uses them to stamp caller context, resolve the active actor member, and authorize service calls.</p>
 
 <h2>MCP registration and delivery</h2>
 
-<p><code>project.register</code> is the MCP-first entry point for harnesses. A harness can call it with only a working directory or project id. Agen8 resolves the project, creates or reuses the member identity, activates the durable harness session, and returns the ids the harness needs for later tool calls.</p>
+<p><code>project.register</code> is the MCP-first entry point for harnesses. A harness can call it with only a working directory or project id. Agen8 resolves the project, creates or reuses the member identity, and returns the ids the harness needs for later tool calls.</p>
 
 <p>When a harness exposes a stable native session or thread id in the MCP call metadata, the MCP server passes that value through the project tool call context. The daemon stores it as the harness session reference. For Codex, the server reads the top-level MCP metadata fields <code>threadId</code>, <code>thread_id</code>, <code>sessionId</code>, and <code>session_id</code>, plus the optional <code>x-codex-turn-metadata</code> object that Codex sends with <code>thread_id</code> and <code>session_id</code>.</p>
 
@@ -202,8 +202,8 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <table>
   <tr><th>Member type</th><th>Visible actions</th><th>Reason</th></tr>
-  <tr><td><code>coordinator</code></td><td><code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Sees routable peers and manages the roster when coordination requires another member.</td></tr>
-  <tr><td><code>worker</code></td><td><code>member_get</code>, <code>member_list</code></td><td>Discovers routable peer identities. If a worker calls roster mutation actions, the tool rejects the request before mutation.</td></tr>
+  <tr><td><code>coordinator</code></td><td><code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Sees registered peers and manages the roster when coordination requires another member.</td></tr>
+  <tr><td><code>worker</code></td><td><code>member_get</code>, <code>member_list</code></td><td>Discovers registered peer identities. If a worker calls roster mutation actions, the tool rejects the request before mutation.</td></tr>
 </table>
 
 <p>Visibility is prompt/tool-surface policy. Authorization remains enforced by the handler and the underlying services using caller identity from <code>ctx</code>. The handler rejects missing or removed actor members before it calls <code>ProjectSvc</code>.</p>
@@ -230,7 +230,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <table>
   <tr><th>Test</th><th>Assertion</th></tr>
-  <tr><td><code>member_list</code> success</td><td>Resolves the actor member, calls the roster read path, and returns routable member labels and channel ids.</td></tr>
+  <tr><td><code>member_list</code> success</td><td>Resolves the actor member, calls the roster read path, and returns member labels and stable channel ids.</td></tr>
   <tr><td><code>member_create</code> success</td><td>Executes through the MCP server session, stamps caller identity, calls the registrar, and returns the created member payload.</td></tr>
   <tr><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code> success</td><td>Call the same production session path and delegate to the project service roster methods.</td></tr>
   <tr><td>member mutation validation</td><td>Rejects missing ids or runtime fields before calling the registrar.</td></tr>

@@ -96,7 +96,7 @@
   </div>
 
   <h2 id="boundaries">3. Service boundaries</h2>
-  <p>Services depend on <code>caller.Resolver</code>, not on protocol packages. This lets the same service run behind JSON-RPC, MCP, local IPC, HTTP, tests, and future daemon strategies without changing the service constructor.</p>
+  <p>Services depend on <code>caller.Resolver</code>, not on protocol packages. This lets the same service run behind JSON-RPC, MCP, HTTP, tests, and future daemon strategies without changing the service constructor.</p>
 
   <table>
     <thead><tr><th>Layer</th><th>Responsibility</th></tr></thead>

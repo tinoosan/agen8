@@ -154,7 +154,7 @@
     <thead><tr><th>Record</th><th>What belongs there</th><th>What does not belong there</th></tr></thead>
     <tbody>
       <tr><td><code>Mission</code></td><td>Objective identity, descriptive fields, lifecycle status, lifecycle timestamps.</td><td>Tool action names, message bodies, delivery attempts, activity feed rows.</td></tr>
-      <tr><td><code>KeyResult</code></td><td>Measurement definition, progress snapshot, assigned project, milestone notification cursor.</td><td>Task lists, plan snapshots, heartbeat runtime state.</td></tr>
+      <tr><td><code>KeyResult</code></td><td>Measurement definition, progress snapshot, assigned project, milestone notification cursor.</td><td>Task lists or runtime state.</td></tr>
       <tr><td><code>ProgressEntry</code></td><td>Append-only history of progress value changes.</td><td>Mission and KR lifecycle events.</td></tr>
       <tr><td><code>LifecycleHistoryEntry</code></td><td>Append-only mission/KR lifecycle event facts, including optional notes.</td><td>Progress value deltas; those live in <code>ProgressEntry</code>.</td></tr>
     </tbody>
@@ -986,7 +986,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <line x1="588" y1="243" x2="234" y2="243" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
       <line x1="234" y1="243" x2="316" y2="243" stroke="var(--text-faint)" stroke-width="1.6" marker-end="url(#activation-message-arrow)"/>
 
-      <text x="480" y="330" text-anchor="middle" fill="var(--text-muted)">Mission emits one fact. The subscriber owns message delivery and duplicate suppression.</text>
+      <text x="480" y="330" text-anchor="middle" fill="var(--text-muted)">Mission emits one fact. Subscribers own their own projections and duplicate suppression.</text>
     </svg>
   </div>
 
