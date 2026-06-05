@@ -174,15 +174,33 @@ func (h decisionHydrator) FetchMany(ctx context.Context, projectID string, nodeI
 func (h decisionHydrator) Search(ctx context.Context, projectID, query string, limit int) ([]domain.GraphNodeSummary, error) {
 	items, err := h.decisions.List(ctx, decisiondomain.DecisionFilter{
 		ProjectID: strings.TrimSpace(projectID),
-		Query:     strings.TrimSpace(query),
 		SortDesc:  true,
-		Limit:     max(limit*5, 100),
+		Limit:     max(limit*20, 200),
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.GraphNodeSummary, 0, len(items))
 	for _, item := range items {
+		var logValues []string
+		if item.Log != nil {
+			logValues = []string{
+				item.Log.Rationale,
+				item.Log.Context,
+				item.Log.AlternativesRejected,
+				strings.Join(item.Log.InvalidationConditions, " "),
+				item.Log.Outcome,
+			}
+		}
+		if !matchesQuery(query, append([]string{
+			item.Title,
+			string(item.ID),
+			item.TaskRef,
+			item.KeyResultRef,
+			item.MissionRef,
+		}, logValues...)...) {
+			continue
+		}
 		out = append(out, domain.GraphNodeSummary{
 			ID:        strings.TrimSpace(string(item.ID)),
 			Type:      domain.NodeTypeDecision,
@@ -407,16 +425,67 @@ func decisionStatus(decision decisiondomain.Decision) string {
 }
 
 func matchesQuery(query string, values ...string) bool {
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "" {
+	normalizedQuery := strings.ToLower(strings.TrimSpace(query))
+	if normalizedQuery == "" {
 		return true
 	}
+	tokens := searchTokens(normalizedQuery)
 	for _, value := range values {
-		if strings.Contains(strings.ToLower(strings.TrimSpace(value)), query) {
+		normalizedValue := strings.ToLower(strings.TrimSpace(value))
+		if normalizedValue == "" {
+			continue
+		}
+		if strings.Contains(normalizedValue, normalizedQuery) {
+			return true
+		}
+		if queryTokenMatchCount(tokens, normalizedValue) >= requiredTokenMatches(len(tokens)) {
 			return true
 		}
 	}
 	return false
+}
+
+func searchTokens(query string) []string {
+	seen := map[string]struct{}{}
+	raw := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(query)), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	out := make([]string, 0, len(raw))
+	for _, token := range raw {
+		token = strings.TrimSpace(token)
+		if len(token) < 3 {
+			continue
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		out = append(out, token)
+	}
+	return out
+}
+
+func queryTokenMatchCount(tokens []string, normalizedValue string) int {
+	if len(tokens) == 0 || strings.TrimSpace(normalizedValue) == "" {
+		return 0
+	}
+	matches := 0
+	for _, token := range tokens {
+		if strings.Contains(normalizedValue, token) {
+			matches++
+		}
+	}
+	return matches
+}
+
+func requiredTokenMatches(tokenCount int) int {
+	if tokenCount <= 0 {
+		return 1
+	}
+	if tokenCount <= 2 {
+		return 1
+	}
+	return 2
 }
 
 func firstNonEmptyString(values ...string) string {

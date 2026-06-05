@@ -170,6 +170,11 @@ func searchScore(summary domain.GraphNodeSummary, normalizedQuery string) float6
 	if strings.Contains(title, normalizedQuery) {
 		return 0.6
 	}
+	tokens := searchTokens(normalizedQuery)
+	matches := queryTokenMatchCount(tokens, title)
+	if matches > 0 {
+		return 0.4 + (0.15 * float64(matches) / float64(max(len(tokens), 1)))
+	}
 	return 0.4
 }
 

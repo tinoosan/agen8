@@ -544,6 +544,30 @@ func TestServiceSearchAllPreservesRelevanceOrder(t *testing.T) {
 	}
 }
 
+func TestMatchesQueryAllowsMeaningfulMultiTermSubset(t *testing.T) {
+	if !matchesQuery("graph search traversal readability density ranking", "Prioritize graph readability controls over new graph semantics") {
+		t.Fatal("expected multi-term query to match meaningful token subset")
+	}
+	if matchesQuery("graph search traversal readability density ranking", "Release baseline setup and verification") {
+		t.Fatal("expected unrelated title not to match sparse multi-term query")
+	}
+	if !matchesQuery("release graph", "Release baseline setup and verification") {
+		t.Fatal("expected two-term query to match one meaningful token")
+	}
+}
+
+func TestSortSummariesBySearchScoreFavorsStrongerTokenOverlap(t *testing.T) {
+	now := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	summaries := []domain.GraphNodeSummary{
+		{ID: "dec-newer", Type: domain.NodeTypeDecision, Title: "Graph notes", CreatedAt: now.Format(time.RFC3339Nano)},
+		{ID: "dec-older", Type: domain.NodeTypeDecision, Title: "Graph readability controls and graph semantics", CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano)},
+	}
+	sortSummariesBySearchScore(summaries, "graph readability semantics")
+	if summaries[0].ID != "dec-older" {
+		t.Fatalf("first result=%+v want stronger token overlap", summaries[0])
+	}
+}
+
 func ptrFloat(v float64) *float64 { return &v }
 
 func containsNodeID(nodes []domain.GraphNodeSummary, id string) bool {
