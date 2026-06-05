@@ -232,8 +232,7 @@
     lifecycle_repository.go <span class="tok-comment">// LifecycleEventRepository persistence and queries</span>
     repository_assertions_test.go
 internal/services/mission/subscribers/
-  activation_messages.go    <span class="tok-comment">// mission.activated event to idempotent coordinator messages</span>
-  owner_messages.go         <span class="tok-comment">// owner-assigned/reopened/intervention message subscribers</span></code></pre>
+  activity_projection.go    <span class="tok-comment">// lifecycle events to durable activity/history projections</span></code></pre>
 
   <table>
     <thead><tr><th>Question</th><th>Decision</th></tr></thead>
@@ -751,7 +750,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
   <h2 id="events">8. Fired events</h2>
 
   <p>
-    Mission events are facts emitted after a successful state change. They are not agent instructions. Lifecycle event facts are also stored in mission-owned history so lifecycle notes remain readable after the action response is gone. Subscribers may translate fired facts into messages, heartbeat changes, dashboards, or operator workflows.
+    Mission events are facts emitted after a successful state change. They are not agent instructions. Lifecycle event facts are also stored in mission-owned history so lifecycle notes remain readable after the action response is gone. Subscribers may translate fired facts into dashboards, history rows, or other read projections.
   </p>
 
   <h3>Event failure semantics</h3>
@@ -842,7 +841,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
 }</code></pre>
 
   <p>
-    Event consumers own delivery workflows. Mission activation briefings, heartbeat pause/resume changes, coordinator wakeups, and operator notifications are event-subscriber behavior, not methods on the mission service.
+    Event consumers own read projections. Mission activation history, heartbeat pause/resume changes, and dashboard updates are event-subscriber behavior, not methods on the mission service.
   </p>
 
   <p>
@@ -852,16 +851,16 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
   <h2 id="event-specs">9. Event specs</h2>
 
   <p>
-    The mission service owns service-local event specs, not a member-facing message registry and not a separate factory object. This follows the task service pattern: typed outcome constants plus private helper functions in <code>service.go</code>. The helpers map successful mission and KR outcomes into event records with consistent payloads.
+    The mission service owns service-local event specs, not a member-facing notification registry and not a separate factory object. This follows the task service pattern: typed outcome constants plus private helper functions in <code>service.go</code>. The helpers map successful mission and KR outcomes into event records with consistent payloads.
   </p>
 
   <table>
-    <thead><tr><th>Outcome</th><th>Event output</th><th>Default message behavior</th></tr></thead>
+    <thead><tr><th>Outcome</th><th>Event output</th><th>Default projection behavior</th></tr></thead>
     <tbody>
-      <tr><td>Mission activates, pauses, completes, or archives.</td><td><code>MissionLifecycleEvent</code></td><td>Activation notifies coordinators of assigned projects. Other lifecycle events send messages only if they create work or require intervention.</td></tr>
-      <tr><td>KR progress changes.</td><td><code>KRProgressEvent</code> with <code>kr.progress_updated</code>.</td><td>No agent message. Dashboards/history consume the event.</td></tr>
-      <tr><td>KR crosses milestone thresholds.</td><td>One <code>KRProgressEvent</code> per newly crossed <code>kr.milestone</code>.</td><td>No agent message by default. Subscriber may create summaries later if product behavior needs them.</td></tr>
-      <tr><td>KR completes and mission may complete.</td><td><code>kr.completed</code> and optional <code>mission.completed</code>.</td><td>No agent message by default; the caller usually already knows the outcome.</td></tr>
+      <tr><td>Mission activates, pauses, completes, or archives.</td><td><code>MissionLifecycleEvent</code></td><td>History and dashboard projections consume the event.</td></tr>
+      <tr><td>KR progress changes.</td><td><code>KRProgressEvent</code> with <code>kr.progress_updated</code>.</td><td>Dashboards/history consume the event.</td></tr>
+      <tr><td>KR crosses milestone thresholds.</td><td>One <code>KRProgressEvent</code> per newly crossed <code>kr.milestone</code>.</td><td>History records the milestone once.</td></tr>
+      <tr><td>KR completes and mission may complete.</td><td><code>kr.completed</code> and optional <code>mission.completed</code>.</td><td>The caller and dashboard observe the outcome.</td></tr>
       <tr><td>KR is created, dropped, reopened, or assigned.</td><td>Typed KR lifecycle events when those outcomes are persisted.</td><td>Message only when action is required, such as a new owner assignment or reopened work.</td></tr>
     </tbody>
   </table>
@@ -915,28 +914,28 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
 }</code></pre>
 
   <p>
-    This differs from the task service message registry only in the target boundary. Task lifecycle transitions are message-driven work handoffs, so task service publishes member-facing task messages. Mission lifecycle transitions are strategic facts, so mission service publishes event records. Event subscribers translate mission events into messages only when the event creates an actionable obligation or requires human/coordinator intervention.
+    Mission lifecycle transitions are strategic facts, so mission service publishes event records. Event subscribers project those records into mission history and dashboards.
   </p>
 
   <table>
-    <thead><tr><th>Mission event</th><th>Agent message?</th><th>Reason</th></tr></thead>
+    <thead><tr><th>Mission event</th><th>Projection</th><th>Reason</th></tr></thead>
     <tbody>
-      <tr><td><code>kr.progress_updated</code>, <code>kr.milestone</code>, <code>kr.completed</code>, <code>mission.completed</code>, <code>mission.archived</code></td><td>No by default.</td><td>These are facts the caller or dashboard can observe; they do not inherently ask another agent to act.</td></tr>
-      <tr><td><code>mission.activated</code></td><td>Yes.</td><td>Notify the coordinator of each project assigned to a live KR so the project knows the mission is now active.</td></tr>
-      <tr><td><code>kr.owner_assigned</code>, <code>kr.reopened</code></td><td>Usually yes.</td><td>A project/agent may need to begin tracking or resume work.</td></tr>
-      <tr><td>Mission paused because live KR ownership became unavailable.</td><td>Yes.</td><td>Coordinator or operator intervention is required.</td></tr>
+      <tr><td><code>kr.progress_updated</code>, <code>kr.milestone</code>, <code>kr.completed</code>, <code>mission.completed</code>, <code>mission.archived</code></td><td>History and dashboard facts.</td><td>These are durable facts the caller or dashboard can observe.</td></tr>
+      <tr><td><code>mission.activated</code></td><td>Mission history fact.</td><td>Shows when strategic work becomes active.</td></tr>
+      <tr><td><code>kr.owner_assigned</code>, <code>kr.reopened</code></td><td>KR history fact.</td><td>Shows ownership and lifecycle changes.</td></tr>
+      <tr><td>Mission paused because live KR ownership became unavailable.</td><td>Mission history fact.</td><td>Shows why the mission stopped progressing.</td></tr>
     </tbody>
   </table>
 
-  <h3>Notification idempotency</h3>
+  <h3>Projection idempotency</h3>
   <p>
-    Mission activation can be retried, recomputed after KR assignment, or replayed by an event subscriber. Activation messages must therefore be idempotent per mission, assigned project, and event kind.
+    Mission activation can be retried, recomputed after KR assignment, or replayed by an event subscriber. Projected history rows must therefore be idempotent per mission, assigned project, and event kind.
   </p>
 
   <table>
-    <thead><tr><th>Notification</th><th>Idempotency key</th><th>Duplicate rule</th></tr></thead>
+    <thead><tr><th>Projection</th><th>Idempotency key</th><th>Duplicate rule</th></tr></thead>
     <tbody>
-      <tr><td><code>mission.activated</code> to an assigned coordinator.</td><td><code>mission:&lt;missionId&gt;:project:&lt;projectId&gt;:activated</code></td><td>Send at most once for the activation episode.</td></tr>
+      <tr><td><code>mission.activated</code> for an assigned project.</td><td><code>mission:&lt;missionId&gt;:project:&lt;projectId&gt;:activated</code></td><td>Project at most once for the activation episode.</td></tr>
       <tr><td><code>kr.owner_assigned</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:owner:&lt;projectId&gt;</code></td><td>Send only when the owner project actually changes.</td></tr>
       <tr><td><code>kr.reopened</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:reopened:&lt;version&gt;</code></td><td>Send once for the reopen transition, not for later progress edits.</td></tr>
       <tr><td>Mission paused because owner project became unavailable.</td><td><code>mission:&lt;missionId&gt;:paused:owner-unavailable:&lt;projectId&gt;</code></td><td>Send once per unavailable owner-project cause.</td></tr>
@@ -944,7 +943,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
   </table>
 
   <p>
-    The mission service still publishes events only. The event subscriber that creates agent messages must use deterministic producer intent/correlation ids so message persistence can reject or ignore duplicates.
+    The mission service still publishes events only. Subscribers that project activity must use deterministic ids so persistence can reject or ignore duplicates.
   </p>
 
   <div class="diagram">
@@ -1060,11 +1059,11 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
     <tbody>
       <tr><td>No <code>Deps</code> bag in mission service construction.</td><td>Constructor dependencies stay visible and reviewable.</td></tr>
       <tr><td>No tool request or generic action dispatcher in <code>internal/services/mission/app</code>.</td><td>MCP owns tool semantics.</td></tr>
-      <tr><td>No direct writes to task, project, heartbeat, message, or context-link repositories.</td><td>Services talk to services through narrow interfaces.</td></tr>
-      <tr><td>No lifecycle notification handlers in the mission app service package.</td><td>Event subscribers belong to the event/subscriber layer, not the mission service.</td></tr>
-      <tr><td>No member-facing message registry or exported event factory in mission service.</td><td>The mission service owns typed event kinds and private publishing/spec helpers; subscribers own message wording and delivery.</td></tr>
-      <tr><td>No automatic mission-event-to-agent-message rule.</td><td>Mission events become messages only when a subscriber identifies an actionable obligation or intervention need; <code>mission.activated</code> is actionable for coordinators of assigned projects.</td></tr>
-      <tr><td>No duplicate mission activation messages.</td><td>Activation notifications use deterministic idempotency keys per mission and assigned project.</td></tr>
+      <tr><td>No direct writes to task, project, heartbeat, or context-link repositories.</td><td>Services talk to services through narrow interfaces.</td></tr>
+      <tr><td>No lifecycle projection handlers in the mission app service package.</td><td>Event subscribers belong to the event/subscriber layer, not the mission service.</td></tr>
+      <tr><td>No member-facing notification registry or exported event factory in mission service.</td><td>The mission service owns typed event kinds and private publishing/spec helpers; subscribers own projections.</td></tr>
+      <tr><td>No automatic mission-event-to-agent-notification rule.</td><td>Mission events become history/dashboard facts unless a future retained product surface explicitly adds another projection.</td></tr>
+      <tr><td>No duplicate mission activation projections.</td><td>Activation projections use deterministic idempotency keys per mission and assigned project.</td></tr>
       <tr><td>No raw JSON or protocol DTOs in service methods.</td><td>Protocol adapters translate at the boundary.</td></tr>
       <tr><td>No partial progress writes.</td><td><code>UpdateProgress</code> runs completion gates before persistence and writes progress entry, KR state, mission state, and events as one use case.</td></tr>
       <tr><td>No KR progress under a draft mission.</td><td>Progress updates require the parent mission to be <code>active</code>.</td></tr>

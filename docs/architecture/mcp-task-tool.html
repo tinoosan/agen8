@@ -23,10 +23,10 @@
 
 <h2>1. Boundary</h2>
 
-<p><code>task</code> is an MCP protocol adapter. It owns the member-facing action names, request schema, payload validation, session member resolution, service context stamping, and deterministic MCP result formatting. The task service owns lifecycle authorization, state transitions, persistence, and task-originated messages.</p>
+<p><code>task</code> is an MCP protocol adapter. It owns the member-facing action names, request schema, payload validation, session member resolution, service context stamping, and deterministic MCP result formatting. The task service owns lifecycle authorization, state transitions, and persistence.</p>
 
 <div class="callout">
-  <strong>Service rule.</strong> The handler calls <code>internal/services/task/app.Service</code> methods. It never calls task repositories, storage handles, or message repositories.
+  <strong>Service rule.</strong> The handler calls <code>internal/services/task/app.Service</code> methods. It never calls task repositories or storage handles.
 </div>
 
 <h2>2. Wiring</h2>
@@ -145,7 +145,7 @@
   <tr><td>Worker member</td><td>List assigned tasks, get visible assigned/claimed tasks, claim assigned tasks, release claimed tasks, submit claimed tasks, block claimed tasks, and unblock claimed tasks.</td></tr>
 </table>
 
-<p>Coordinator unblock exists because blocked task messages route to the coordinator for resolution. After the coordinator resolves the blocker directly or through an operator action, the same task service transition returns the task to active work and notifies the assigned worker.</p>
+<p>Coordinator unblock exists because blocked tasks need an explicit recorded resolution. After the coordinator resolves the blocker, the same task service transition returns the task to active work.</p>
 
 <footer>Architecture · agen8 · This document describes the current MCP task tool shape.</footer>
 

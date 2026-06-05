@@ -54,7 +54,7 @@
 
   <h2 id="purpose">1. Purpose and ownership</h2>
 
-  <p>A decision is a product artifact, not a log line. It explains a branch in the work: an agent selected an approach, an operator resolved an escalation, or a human answered a structured question that unblocked the next step. The service makes that artifact durable, queryable, and linked into the work graph.</p>
+  <p>A decision is a product artifact, not a log line. It explains a branch in the work: an agent selected an approach, accepted a tradeoff, or chose a next direction. The service makes that artifact durable, queryable, and linked into the work graph.</p>
 
   <table>
     <thead>
@@ -62,7 +62,7 @@
     </thead>
     <tbody>
       <tr><td>Canonical <code>Decision</code> records and payload validation.</td><td>Prompt instructions or model behavior.</td></tr>
-      <tr><td>The resolved audit entry for <code>log</code> and <code>ask_user</code> decisions.</td><td>The blocking wait loop that collects human input.</td></tr>
+      <tr><td>The resolved audit entry for <code>log</code> decisions.</td><td>Blocking human waits or external approval flows.</td></tr>
       <tr><td>Context links from decisions to tasks, key results, missions, and plans.</td><td>Task lifecycle, mission lifecycle, or plan review state.</td></tr>
       <tr><td>Project-scoped decision queries, counts, exports, and graph hydration.</td><td>Transcript card rendering or activity-feed formatting.</td></tr>
       <tr><td><code>decision.logged</code> publication after persistence.</td><td>Notification storage, delivery, or inbox read state.</td></tr>
@@ -92,11 +92,11 @@
 
   <h2 id="human-input">2. Human input model</h2>
 
-  <p><code>ask_user</code> is a decision because the human answer becomes part of the reasoning trail. The question itself is not enough; the durable artifact is the resolved question, including whether the user answered or cancelled.</p>
+  <p>The retained decision surface is <code>log</code>. Agents record the rationale, rejected alternatives, confidence, invalidation conditions, and graph references directly in the decision row.</p>
 
   <svg class="flow-svg" viewBox="0 0 980 250" role="img" aria-labelledby="ask-flow-title ask-flow-desc">
     <title id="ask-flow-title">Human input flow</title>
-    <desc id="ask-flow-desc">The MCP decision tool declares human input, waits for the operator result, then records the resolved decision.</desc>
+    <desc id="ask-flow-desc">The MCP decision tool validates an agent decision and persists it as durable work memory.</desc>
     <defs>
       <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
         <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
@@ -120,9 +120,9 @@
       <text x="295" y="146" text-anchor="middle">input</text>
 
       <rect class="flow-box" x="450" y="58" width="110" height="108" rx="8"></rect>
-      <text x="505" y="94" text-anchor="middle">Human</text>
-      <text x="505" y="120" text-anchor="middle">answers or</text>
-      <text x="505" y="146" text-anchor="middle">cancels</text>
+      <text x="505" y="94" text-anchor="middle">Service</text>
+      <text x="505" y="120" text-anchor="middle">validates</text>
+      <text x="505" y="146" text-anchor="middle">payload</text>
 
       <rect class="flow-box" x="660" y="58" width="110" height="108" rx="8"></rect>
       <text x="715" y="94" text-anchor="middle">Tool calls</text>
@@ -136,32 +136,16 @@
     </g>
   </svg>
 
-  <p>The human-input primitives live outside the decision service. They define the shape of a question and answer:</p>
+  <p>The decision payload is intentionally small:</p>
 
-<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Question</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">ID</span>             <span class="tok-type">string</span>
-    <span class="tok-field">Text</span>           <span class="tok-type">string</span>
-    <span class="tok-field">Type</span>           <span class="tok-type">string</span>
-    <span class="tok-field">Options</span>        []<span class="tok-type">string</span>
-    <span class="tok-field">AllowFreeForm</span>  <span class="tok-type">bool</span>
-    <span class="tok-field">Recommendation</span> <span class="tok-type">string</span>
-    <span class="tok-field">Blocking</span>       <span class="tok-type">bool</span>
-}
-
-<span class="tok-kw">type</span> <span class="tok-type">QuestionsResult</span> <span class="tok-kw">struct</span> {
-    <span class="tok-field">Cancelled</span> <span class="tok-type">bool</span>
-    <span class="tok-field">Answers</span>   []<span class="tok-type">Answer</span>
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">LogPayload</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Rationale</span>              <span class="tok-type">string</span>
+    <span class="tok-field">Context</span>                <span class="tok-type">string</span>
+    <span class="tok-field">AlternativesRejected</span>   <span class="tok-type">string</span>
+    <span class="tok-field">InvalidationConditions</span> []<span class="tok-type">string</span>
 }</code></pre>
 
-  <p>The MCP layer delegates the active interaction to the <a href="./humaninput-service.html">human input service</a>: <code>DeclareHumanInput</code> parks the tool call and exposes the questions to the operator; <code>ResolveHumanInput</code> receives the answers or cancellation. The decision service is called after resolution through <code>CompleteAskUser</code>, and it persists the final audit record.</p>
-
-<pre><code class="lang-go"><span class="tok-kw">func</span> (s *<span class="tok-type">Service</span>) <span class="tok-fn">CompleteAskUser</span>(
-    ctx context.Context,
-    req <span class="tok-type">AskUserRequest</span>,
-    result humaninput.<span class="tok-type">QuestionsResult</span>,
-) (<span class="tok-type">Result</span>, error)</code></pre>
-
-  <p>The decision row stores the original questions, the returned answers, and <code>cancelled=true</code> when the operator cancels. Agents treat returned answers as authoritative: they do not ask the same question again unless they need a genuinely new, narrower decision.</p>
+  <p>The decision row stores the rationale and its work references. Agents treat logged decisions as durable context and create a new decision only when the direction materially changes.</p>
 
   <h3>MCP tool schema</h3>
 
@@ -228,12 +212,11 @@
       <tr><th>Kind</th><th>Meaning</th><th>Required payload</th></tr>
     </thead>
     <tbody>
-      <tr><td><code>log</code></td><td>An agent or operator records a decision already made.</td><td><code>LogPayload.Rationale</code></td></tr>
-      <tr><td><code>ask_user</code></td><td>A structured human question is resolved and recorded.</td><td>At least one <code>Question</code>; answers or cancellation come from <code>QuestionsResult</code>.</td></tr>
+      <tr><td><code>log</code></td><td>An agent records a decision already made.</td><td><code>LogPayload.Rationale</code></td></tr>
     </tbody>
   </table>
 
-  <p><code>Source</code> records who produced the decision: <code>agent</code> for agent tool calls and <code>operator</code> for operator-owned resolutions. It is separate from <code>Kind</code>; an agent can ask a human question, and an operator can resolve an escalation by creating a log decision.</p>
+  <p><code>Source</code> records who produced the decision. The retained source is <code>agent</code>.</p>
 
   <h2 id="persistence">5. Persistence and queries</h2>
 
@@ -302,7 +285,6 @@
     <tbody>
       <tr><td>A decision is a durable explanation of a work branch.</td><td>The service persists <code>Decision</code> records; transient runner text is not the source of truth.</td></tr>
       <tr><td>A decision has exactly one payload.</td><td><code>Decision.Validate</code> and repository save checks.</td></tr>
-      <tr><td><code>ask_user</code> records resolved human input, not an untracked chat exchange.</td><td>MCP human-input declaration and <code>Service.CompleteAskUser</code>.</td></tr>
       <tr><td>Project-scoped reads require a project ID.</td><td><code>Service.List</code>, <code>Service.Count</code>, <code>Service.Export</code>, and RPC validation.</td></tr>
       <tr><td>Retry storms do not create duplicate decision rows.</td><td><code>DecisionExistsByFingerprint</code> within the service deduplication window.</td></tr>
       <tr><td>Deleted decisions do not leave graph edges behind.</td><td><code>Service.Delete</code> deletes context links before deleting the row.</td></tr>

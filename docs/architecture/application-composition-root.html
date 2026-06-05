@@ -253,7 +253,7 @@ project.Handler.Handle(ctx, project.CallContext{
     ActorMemberID: session.MemberID,
 }, args)</code></pre>
 
-<p>The <a href="./mcp-task-tool.html">MCP task tool</a> follows the same native shape, with a larger dependency set. Its handler owns task tool actions and cross-service lookups. The task service owns lifecycle state transitions, persistence, and task-originated assignment messages through the message service boundary.</p>
+<p>The <a href="./mcp-task-tool.html">MCP task tool</a> follows the same native shape, with a larger dependency set. Its handler owns task tool actions and cross-service lookups. The task service owns lifecycle state transitions, persistence, and deterministic task results.</p>
 
 <h3>MCP call flow</h3>
 
@@ -319,7 +319,7 @@ project.Handler.Handle(ctx, project.CallContext{
   <tr>
     <td><code>CreateTaskCommand</code></td>
     <td><code>internal/services/task/app</code></td>
-    <td>Authorize the caller, create the task, persist it, publish events/messages, and return a domain result.</td>
+    <td>Authorize the caller, create the task, persist it, and return a domain result.</td>
   </tr>
   <tr>
     <td>MCP result</td>
@@ -356,14 +356,11 @@ project.Handler.Handle(ctx, project.CallContext{
     mission/
     plan/
     decision/
-    operator/
     heartbeat/
     http/
 </pre>
 
 <p><code>internal/mcp/tools/&lt;tool&gt;</code> is the canonical home for MCP tool behavior. Product-facing tool names live here, request/response decoding lives here, tool-action policy lives here, and cross-service orchestration lives here. Service packages remain transport-agnostic and do not define MCP tool schemas, tool actions, or raw JSON tool request envelopes. The <a href="./mcp-project-tool.html">MCP project tool</a> is the reference shape for handler-owned orchestration.</p>
-
-<p>The <a href="./mcp-message-tool.html">MCP message tool</a> owns agent-facing message sending. Member discovery remains in <code>project(action="member_list")</code>; message delivery remains in <code>message(action="send")</code>.</p>
 
 <p>The MCP adapter does not load tools through side-effect imports or a process-global module registry. The composition root builds the handler set from application services, the MCP server registers those handlers in a local registry, and the server exposes one member-authenticated MCP surface. The registry stores handlers, not domain services and not generic runtime modules.</p>
 

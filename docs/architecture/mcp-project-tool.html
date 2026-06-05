@@ -159,10 +159,10 @@ project.NewHandler().Handle(ctx, project.CallContext{
 <p>When a harness exposes a stable native session or thread id in the MCP call metadata, the MCP server passes that value through the project tool call context. The daemon stores it as the harness session reference. For Codex, the server reads the top-level MCP metadata fields <code>threadId</code>, <code>thread_id</code>, <code>sessionId</code>, and <code>session_id</code>, plus the optional <code>x-codex-turn-metadata</code> object that Codex sends with <code>thread_id</code> and <code>session_id</code>.</p>
 
 <div class="callout">
-<strong>Boundary.</strong> MCP registration does not recreate Codex or Claude thread management. Agen8 stores a native session reference only when the connected harness exposes one. Tool calls, member ids, task ids, decisions, and graph records remain the durable Agen8 coordination surface. Native-thread delivery is an optional integration path for harnesses that can receive messages into an existing session. Registration is explicit; Agen8 does not auto-promote terminal sessions.
+<strong>Boundary.</strong> MCP registration does not recreate Codex or Claude thread management. Agen8 stores a native session reference only when the connected harness exposes one. Tool calls, member ids, task ids, decisions, and graph records remain the durable Agen8 coordination surface. Registration is explicit; Agen8 does not auto-promote terminal sessions.
 </div>
 
-<p>After registration, Agen8 starts the per-member durable delivery worker. The worker drains queued member messages and wakes on new messages. If the registered harness has a routable native session reference, messages can reach that existing harness session. If no native reference exists, the same durable Agen8 records remain available through MCP tools and the inspection UI.</p>
+<p>After registration, the member can use retained MCP tools against the bound project. If no native session reference exists, the same durable Agen8 records remain available through MCP tools and the inspection UI.</p>
 
 <table>
   <tr><th>Input</th><th>Source</th><th>Behavior</th></tr>

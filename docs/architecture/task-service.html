@@ -71,7 +71,7 @@ next, err := current.<span class="tok-fn">Cancel</span>(reason, now)            
 err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    <span class="tok-comment">// persists the domain record</span></code></pre>
 
   <h3>The service struct</h3>
-  <p>The application service owns orchestration. It resolves the caller from <code>context.Context</code>, validates member and project boundaries, calls the pure domain transition, persists the next task state, and publishes agent messages through the message service. It does not accept a dependency bag; the constructor lists the service boundary explicitly.</p>
+  <p>The application service owns orchestration. It resolves the caller from <code>context.Context</code>, validates member and project boundaries, calls the pure domain transition, persists the next task state, and returns a deterministic result to the caller. It does not accept a dependency bag; the constructor lists the service boundary explicitly.</p>
 
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Service</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">tasks</span>    <span class="tok-pkg">domain</span>.<span class="tok-type">TaskRepository</span>
@@ -79,7 +79,6 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
     <span class="tok-field">caller</span>   <span class="tok-pkg">caller</span>.<span class="tok-type">Resolver</span>
     <span class="tok-field">members</span>  <span class="tok-type">MemberLoader</span>
     <span class="tok-field">projects</span>   <span class="tok-type">ProjectLoader</span>
-    <span class="tok-field">messages</span> <span class="tok-type">MessagePublisher</span>
     <span class="tok-field">logger</span>   *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>
 }
 
@@ -89,7 +88,6 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
     caller <span class="tok-pkg">caller</span>.<span class="tok-type">Resolver</span>,
     members <span class="tok-type">MemberLoader</span>,
     projects <span class="tok-type">ProjectLoader</span>,
-    messages <span class="tok-type">MessagePublisher</span>,
     logger *<span class="tok-pkg">slog</span>.<span class="tok-type">Logger</span>,
 ) (*<span class="tok-type">Service</span>, error)</code></pre>
 
@@ -216,46 +214,27 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
   </div>
 
   <h3>Service actions</h3>
-  <p>The product-facing task surface stays small. Read actions never publish messages. Mutations publish only when another agent needs to act.</p>
+  <p>The product-facing task surface stays small. Read actions return task state. Mutations return the next required action in the tool result so the caller can continue or coordinate explicitly.</p>
 
   <table>
-    <thead><tr><th>Action</th><th>Service method</th><th>Message?</th><th>Why</th></tr></thead>
+    <thead><tr><th>Action</th><th>Service method</th><th>Result guidance</th><th>Why</th></tr></thead>
     <tbody>
-      <tr><td><code>create</code></td><td><code>Create</code></td><td>yes, <code>assigned</code></td><td>The assigned worker needs to claim the task.</td></tr>
-      <tr><td><code>get</code> / <code>list</code></td><td><code>Get</code> / <code>List</code></td><td>no</td><td>Read-only actions do not wake agents.</td></tr>
-      <tr><td><code>update</code></td><td><code>Update</code></td><td>no</td><td>CRUD data edits do not represent a lifecycle transition.</td></tr>
-      <tr><td><code>claim</code></td><td><code>Claim</code></td><td>no</td><td>The caller already knows they claimed the task.</td></tr>
-      <tr><td><code>release</code></td><td><code>Release</code></td><td>yes, <code>released</code></td><td>The coordinator needs to decide what happens next.</td></tr>
-      <tr><td><code>submit</code></td><td><code>Complete</code></td><td>yes, <code>review_requested</code></td><td>The coordinator needs to review the completed work.</td></tr>
-      <tr><td><code>block</code></td><td><code>Block</code></td><td>yes, <code>blocked</code></td><td>The coordinator needs to resolve the blocker or escalate.</td></tr>
-      <tr><td><code>unblock</code></td><td><code>Unblock</code></td><td>yes, <code>unblocked</code></td><td>The assigned worker can continue after the claimant or coordinator clears the blocker.</td></tr>
-      <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td>yes, <code>retry_requested</code></td><td>The worker needs feedback and another pass.</td></tr>
-      <tr><td><code>review</code> approve</td><td><code>ApproveReview</code></td><td>no</td><td>The worker is done; no action is required.</td></tr>
-      <tr><td><code>review</code> fail</td><td><code>FailReview</code></td><td>no</td><td>No action is required unless the coordinator separately retries or cancels.</td></tr>
-      <tr><td><code>cancel</code></td><td><code>Cancel</code></td><td>yes, <code>canceled</code>, when someone may still be working</td><td>The assigned or claimed worker needs to stop work.</td></tr>
+      <tr><td><code>create</code></td><td><code>Create</code></td><td><code>claim</code> when assigned to the caller, otherwise inspect the task record.</td><td>The result tells the caller what to do without requiring async delivery.</td></tr>
+      <tr><td><code>get</code> / <code>list</code></td><td><code>Get</code> / <code>List</code></td><td>Return read models.</td><td>Read-only actions do not create lifecycle obligations.</td></tr>
+      <tr><td><code>claim</code></td><td><code>Claim</code></td><td><code>work</code></td><td>The caller now owns active work.</td></tr>
+      <tr><td><code>release</code></td><td><code>Release</code></td><td><code>reassign</code> or <code>cancel</code></td><td>The coordinator decides what happens next.</td></tr>
+      <tr><td><code>submit</code></td><td><code>Complete</code></td><td><code>review</code></td><td>The coordinator reviews the completed work.</td></tr>
+      <tr><td><code>block</code></td><td><code>Block</code></td><td><code>unblock</code> when resolved.</td><td>The blocker stays attached to the task record.</td></tr>
+      <tr><td><code>unblock</code></td><td><code>Unblock</code></td><td><code>work</code></td><td>The assigned member can continue.</td></tr>
+      <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td><code>work</code></td><td>The worker needs another pass with feedback.</td></tr>
+      <tr><td><code>review</code> approve</td><td><code>ApproveReview</code></td><td><code>done</code></td><td>The task is complete.</td></tr>
+      <tr><td><code>review</code> fail</td><td><code>FailReview</code></td><td><code>stop</code></td><td>The task is terminal.</td></tr>
+      <tr><td><code>cancel</code></td><td><code>Cancel</code></td><td><code>stop</code></td><td>No more work should continue for that task.</td></tr>
     </tbody>
   </table>
-
-  <h3>Task message kinds</h3>
-  <p>The task service owns lifecycle notification timing because it is the layer that knows whether a state change committed. Message composition is typed and event-specific. A task message is a wake-up envelope: it includes canonical ids, the lifecycle event, the intended next action, and short event-specific context. It does not duplicate the task read model because the receiver can call <code>task.get</code> with the provided <code>taskId</code>.</p>
-
-  <table>
-    <thead><tr><th>Kind</th><th>Published by</th><th>Recipient</th><th>Message guidance</th></tr></thead>
-    <tbody>
-      <tr><td><code>assigned</code></td><td><code>Create</code> and assignment correction</td><td>assigned worker/member</td><td>Claim the task before starting work. Work against the acceptance criteria and submit it for review when complete.</td></tr>
-      <tr><td><code>review_requested</code></td><td><code>Complete</code></td><td>coordinator</td><td>Review the worker summary, artifacts, and acceptance criteria. Approve only when every criterion is satisfied; otherwise request a retry with concrete feedback.</td></tr>
-      <tr><td><code>retry_requested</code></td><td><code>RetryReview</code></td><td>assigned worker/member</td><td>Continue from the active task state. Focus on coordinator feedback and unsatisfied acceptance criteria, then submit again when the remaining work is complete.</td></tr>
-      <tr><td><code>released</code></td><td><code>Release</code></td><td>coordinator</td><td>The worker returned the task without completing it. Decide whether to assign it again, change the direction, or cancel it.</td></tr>
-      <tr><td><code>blocked</code></td><td><code>Block</code></td><td>coordinator</td><td>The worker cannot continue without intervention. Resolve the blocker directly, escalate for human action when needed, then unblock the task.</td></tr>
-      <tr><td><code>unblocked</code></td><td><code>Unblock</code></td><td>assigned worker/member</td><td>Continue from the current task state and submit for review when the acceptance criteria are satisfied.</td></tr>
-      <tr><td><code>canceled</code></td><td><code>Cancel</code></td><td>assigned or claimed worker/member</td><td>Stop working on the task. Do not claim, continue, or submit it unless a coordinator creates or assigns a new task.</td></tr>
-    </tbody>
-  </table>
-
-  <p>Every task message body includes <code>event</code>, <code>taskId</code>, <code>projectId</code>, <code>actorMemberId</code>, <code>targetMemberId</code>, <code>nextAction</code>, <code>guidance</code>, and a concise human-readable <code>message</code>. Review-ready messages may include the worker <code>summary</code>. Retry, blocker, and cancel messages include a short <code>reason</code>. Unblock messages may include a short <code>note</code>. Message bodies do not include task descriptions, acceptance criteria, artifacts, metadata, plan refs, or KR refs; those live behind <code>task.get</code>.</p>
 
   <h3>Domain transition methods</h3>
-  <p>Each labelled arrow is a method on <code>domain.Task</code>. Assignment is a single product concept: if a task needs a different worker, the service assigns it again and emits the same <code>assigned</code> message shape.</p>
+  <p>Each labelled arrow is a method on <code>domain.Task</code>. Assignment is a single product concept: if a task needs a different worker, the service assigns it again and returns the updated task state.</p>
 
   <table>
     <thead><tr><th>Method</th><th>Source state</th><th>Result</th><th>Required inputs</th></tr></thead>
@@ -371,23 +350,9 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
     </tbody>
   </table>
 
-  <h2 id="publishing">7. Persistence and message publishing</h2>
+  <h2 id="publishing">7. Persistence</h2>
 
-  <p>Only state changes that require another agent to act publish messages. That keeps the message stream useful: messages wake agents for assignment, review, retry, release, blockers, unblock, and cancel. Approval and failure do not notify the worker because no worker action is required.</p>
-
-  <p>Every notification-producing state change passes through a single seam that orders task persistence before message publishing and surfaces the two outcomes distinctly:</p>
-
-  <div class="flow">
-    <div class="step"><div class="marker">1</div><div class="body">Repository writes the next state. On failure the seam returns the error — no message is published, no side effect leaks.</div></div>
-    <div class="step"><div class="marker">2</div><div class="body">Message publisher creates the corresponding <code>AgentMessage</code> through the message service boundary. The task service never receives or calls a message repository.</div></div>
-  </div>
-
-  <p>Two outcomes are meaningfully different to callers:</p>
-
-  <ul>
-    <li><strong>Caller receives an error.</strong> The task repository did not commit, or the message service rejected the notification. State is unchanged unless the service method explicitly documents a committed-before-notify result.</li>
-    <li><strong>Caller receives no error.</strong> The task state committed and the message service accepted the notification for persistence and delivery.</li>
-  </ul>
+  <p>Every mutation writes the next task state before the tool result is returned. If persistence fails, the service returns an error and no lifecycle state is advanced. If persistence succeeds, the caller receives the updated task, status, and next-action guidance in the same MCP response.</p>
 
   <h3>Repository implementation</h3>
   <p>The task repository is a concrete infra concern. The domain declares the repository contract; <code>internal/services/task/infra</code> owns the SQL-backed implementations. The repository stores the canonical <code>domain.Task</code> document and maintains query columns for task-list filters.</p>
@@ -427,7 +392,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
       <tr><td>Task with status <code>Canceled</code> or <code>Failed</code> but no reason</td><td><code>Cancel</code> and <code>FailReview</code> reject empty reason</td></tr>
       <tr><td>Status transition outside the state machine</td><td>Every transition method validates the source status</td></tr>
       <tr><td>Pending task with a stale <code>ClaimedByMemberID</code></td><td><code>Release</code> drops the claim</td></tr>
-      <tr><td>No-action lifecycle update spamming agents</td><td>Approval and failure do not publish worker messages; retry or cancel carries the next action when one exists</td></tr>
+      <tr><td>No-action lifecycle update creating phantom work</td><td>Approval and failure return terminal status; retry or cancel carries the next action when one exists</td></tr>
       <tr><td>Re-claiming a terminal task</td><td><code>Claim</code> rejects unless the source status is Pending</td></tr>
       <tr><td>User-owned action by an unauthorized caller</td><td>The service checks user ownership or coordinator membership before state changes</td></tr>
       <tr><td>Task service parsing protocol payloads</td><td>Protocol handlers decode requests and call typed service commands</td></tr>

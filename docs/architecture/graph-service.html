@@ -103,7 +103,7 @@ internal/mcp/tools/graph/
       <tr><td>Graph app</td><td><code>internal/services/graph/app</code></td><td>Authorizes callers, validates project scope, hydrates nodes, expands neighbourhoods, creates and deletes links, and shapes graph results.</td></tr>
       <tr><td>Graph domain</td><td><code>internal/services/graph/domain</code></td><td>Defines graph node types, edge types, link aggregate, requests, result models, warnings, and hydrator interfaces.</td></tr>
       <tr><td>Contextlink subdomain</td><td><code>internal/services/graph/contextlink</code></td><td>Persists typed edges and enforces edge identity, allowed edge types, confidence bounds, metadata shape, and delete semantics.</td></tr>
-      <tr><td>Hydrators</td><td><code>internal/services/graph/app/hydrators.go</code></td><td>Reads node details from task, mission, decision, and operator service ports.</td></tr>
+      <tr><td>Hydrators</td><td><code>internal/services/graph/app/hydrators.go</code></td><td>Reads node details from task, mission, and decision service ports.</td></tr>
       <tr><td>RPC adapter</td><td><code>internal/services/graph/rpc</code></td><td>Translates JSON-RPC graph requests into typed service calls and projects results to transport DTOs.</td></tr>
       <tr><td>MCP tool</td><td><code>internal/mcp/tools/graph</code></td><td>Owns agent-facing action names, JSON schema, session actor resolution, request validation, and deterministic MCP result formatting.</td></tr>
     </tbody>
@@ -192,7 +192,7 @@ internal/mcp/tools/graph/
     <div class="step"><div class="marker">1</div><div class="body">The service validates source ref, target ref, edge type, confidence, rationale, project id, and caller identity before any write.</div></div>
     <div class="step"><div class="marker">2</div><div class="body">Both endpoints are hydrated in the requested project scope. A link cannot point to a node that the graph service cannot resolve.</div></div>
     <div class="step"><div class="marker">3</div><div class="body">The contextlink aggregate validates the edge record. The repository writes exactly the validated edge or returns a persistence error.</div></div>
-    <div class="step"><div class="marker">4</div><div class="body">The service returns the persisted edge projection. Graph mutations do not publish agent messages; callers already receive the result synchronously.</div></div>
+    <div class="step"><div class="marker">4</div><div class="body">The service returns the persisted edge projection. Graph mutations do not publish notifications; callers already receive the result synchronously.</div></div>
   </div>
 
   <h2 id="model">4. Domain model</h2>
@@ -416,10 +416,6 @@ internal/mcp/tools/graph/
     <text x="125" y="198" text-anchor="middle" font-size="14" font-weight="700">Decision service</text>
     <text x="125" y="218" text-anchor="middle" font-size="12" fill="#555">decision shortcuts</text>
 
-    <rect x="40" y="274" width="170" height="64" rx="8" fill="#f2f2f2" stroke="#888"/>
-    <text x="125" y="300" text-anchor="middle" font-size="14" font-weight="700">Operator service</text>
-    <text x="125" y="320" text-anchor="middle" font-size="12" fill="#555">action/escalation edges</text>
-
     <rect x="330" y="132" width="235" height="138" rx="8" fill="#e6f5e8" stroke="#3d8c4a"/>
     <text x="448" y="162" text-anchor="middle" font-size="14" font-weight="700">Graph application port</text>
     <text x="448" y="190" text-anchor="middle" font-size="12" fill="#555">Link(ctx, GraphLinkRequest)</text>
@@ -436,7 +432,6 @@ internal/mcp/tools/graph/
 
     <line x1="210" y1="102" x2="330" y2="168" stroke="#3d8c4a" stroke-width="1.8" marker-end="url(#integration-write-arrow)"/>
     <line x1="210" y1="204" x2="330" y2="204" stroke="#3d8c4a" stroke-width="1.8" marker-end="url(#integration-write-arrow)"/>
-    <line x1="210" y1="306" x2="330" y2="238" stroke="#3d8c4a" stroke-width="1.8" marker-end="url(#integration-write-arrow)"/>
     <line x1="565" y1="170" x2="690" y2="102" stroke="#5f6368" stroke-width="1.5" marker-end="url(#integration-arrow)"/>
     <line x1="565" y1="236" x2="690" y2="306" stroke="#5f6368" stroke-width="1.5" marker-end="url(#integration-arrow)"/>
 
@@ -450,7 +445,6 @@ internal/mcp/tools/graph/
       <tr><td>Task</td><td><code>task --serves--&gt; key_result</code>, <code>task --child_of--&gt; task</code></td><td><code>task --relates_to--&gt; mission</code> when direct mission recall is useful.</td><td>Deletes edges for the task node when the task is deleted.</td></tr>
       <tr><td>Decision</td><td><code>decision --made_during--&gt; task</code>, <code>decision --produced--&gt; task</code></td><td><code>decision --informed_by--&gt; mission</code> or <code>decision --serves--&gt; key_result</code> when the decision should appear directly around those nodes.</td><td>Deletes edges for the decision node when the decision is deleted.</td></tr>
       <tr><td>Mission / key result</td><td><code>key_result --serves--&gt; mission</code></td><td>Mission-level shortcut edges created from mission workflows when the relationship is durable agent context.</td><td>Deletes edges for mission or key-result nodes when those records are deleted.</td></tr>
-      <tr><td>Operator</td><td><code>escalation --spawned--&gt; operator_action</code>, <code>operator_action --completed_by--&gt; decision</code>, <code>escalation --resolved_by--&gt; decision</code></td><td><code>operator_action --relates_to--&gt; mission</code> when the action should surface directly in mission recall.</td><td>Deletes edges for operator-action and escalation nodes when those records are deleted.</td></tr>
       <tr><td>Plan</td><td><code>plan --serves--&gt; mission</code> or <code>plan --serves--&gt; key_result</code></td><td><code>decision --produced--&gt; plan</code> when planning output is produced by a recorded decision.</td><td>Deletes edges for the plan node when the plan is deleted.</td></tr>
     </tbody>
   </table>
