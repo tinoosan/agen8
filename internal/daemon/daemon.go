@@ -382,6 +382,12 @@ func (d *Daemon) mcpUserID(ctx context.Context, token string) string {
 
 func mcpUserID(ctx context.Context, users *userapp.Service, auth *authapp.Service, token string) string {
 	if auth != nil {
+		if strings.HasPrefix(strings.TrimSpace(token), "wlt_") {
+			binding, err := auth.ValidateLinkToken(ctx, token)
+			if err == nil && strings.TrimSpace(binding.User.ID.String()) != "" {
+				return strings.TrimSpace(binding.User.ID.String())
+			}
+		}
 		record, err := auth.ValidateAPIKey(ctx, token)
 		if err == nil && strings.TrimSpace(record.ID.String()) != "" {
 			return strings.TrimSpace(record.ID.String())
