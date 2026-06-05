@@ -43,6 +43,93 @@ func TestCreateCredentialStoresMetadataAndMaterial(t *testing.T) {
 	}
 }
 
+func TestCreateCredentialCanonicalizesAlpacaHeaderAliases(t *testing.T) {
+	ctx := context.Background()
+	service := newTestService(t, newMemoryRepository())
+
+	credential, err := service.CreateCredential(ctx, CreateCredentialInput{
+		Kind:  credentialdomain.KindAPIKey,
+		Label: "Alpaca Paper API Key",
+		Secrets: map[string]string{
+			"host":       "paper-api.alpaca.markets/v2",
+			"injection":  "header",
+			"headerName": "ALPACA_PAPER_API_KEY",
+			"value":      "secret-value",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential: %v", err)
+	}
+
+	resolved, err := service.ResolveCredential(ctx, ResolveCredentialInput{
+		CredentialID: credential.ID(),
+		Purpose:      credentialdomain.PurposeHTTPTool,
+	})
+	if err != nil {
+		t.Fatalf("ResolveCredential: %v", err)
+	}
+	if got := resolved.Values["headerName"]; got != "APCA-API-KEY-ID" {
+		t.Fatalf("headerName=%q want APCA-API-KEY-ID", got)
+	}
+}
+
+func TestCreateCredentialRejectsInvalidHTTPHeaderName(t *testing.T) {
+	ctx := context.Background()
+	service := newTestService(t, newMemoryRepository())
+
+	_, err := service.CreateCredential(ctx, CreateCredentialInput{
+		Kind:  credentialdomain.KindAPIKey,
+		Label: "Bad Header",
+		Secrets: map[string]string{
+			"host":       "api.example.com",
+			"injection":  "header",
+			"headerName": "Bad Header",
+			"value":      "secret-value",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid headerName error")
+	}
+	if got := err.Error(); got != `api_key headerName "Bad Header" is not a valid HTTP header name` {
+		t.Fatalf("error=%q", got)
+	}
+}
+
+func TestUpdateCredentialCanonicalizesAlpacaSecretHeaderAlias(t *testing.T) {
+	ctx := context.Background()
+	service := newTestService(t, newMemoryRepository())
+	credential, err := service.CreateCredential(ctx, CreateCredentialInput{
+		Kind:    credentialdomain.KindAPIKey,
+		Label:   "Alpaca Secret Key",
+		Secrets: map[string]string{"value": "old-secret"},
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential: %v", err)
+	}
+
+	if _, err := service.UpdateCredential(ctx, UpdateCredentialInput{
+		ID: credential.ID(),
+		Secrets: map[string]string{
+			"host":       "paper-api.alpaca.markets/v2",
+			"injection":  "header",
+			"headerName": "APCA_PAPER_SECRET_KEY",
+			"value":      "new-secret",
+		},
+	}); err != nil {
+		t.Fatalf("UpdateCredential: %v", err)
+	}
+	resolved, err := service.ResolveCredential(ctx, ResolveCredentialInput{
+		CredentialID: credential.ID(),
+		Purpose:      credentialdomain.PurposeHTTPTool,
+	})
+	if err != nil {
+		t.Fatalf("ResolveCredential: %v", err)
+	}
+	if got := resolved.Values["headerName"]; got != "APCA-API-SECRET-KEY" {
+		t.Fatalf("headerName=%q want APCA-API-SECRET-KEY", got)
+	}
+}
+
 func TestResolveRejectsWrongPurpose(t *testing.T) {
 	ctx := context.Background()
 	service := newTestService(t, newMemoryRepository())

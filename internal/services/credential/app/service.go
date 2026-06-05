@@ -99,6 +99,7 @@ func (s *Service) CreateCredential(ctx context.Context, input CreateCredentialIn
 	kind := credentialdomain.Kind(strings.TrimSpace(string(input.Kind)))
 	storageKind := cleanStorageKind(input.StorageKind, kind)
 	secrets := cleanSecrets(input.Secrets)
+	secrets = normalizeAPIKeySecrets(secrets)
 	if err := validateCreate(kind, storageKind, secrets); err != nil {
 		return credentialdomain.Credential{}, err
 	}
@@ -160,6 +161,7 @@ func (s *Service) UpdateCredential(ctx context.Context, input UpdateCredentialIn
 	}
 	secrets := cleanSecrets(input.Secrets)
 	if len(input.Secrets) > 0 {
+		secrets = normalizeAPIKeySecrets(secrets)
 		storageKind := cleanStorageKind(input.StorageKind, current.Kind)
 		if err := validateCreate(current.Kind, storageKind, secrets); err != nil {
 			return credentialdomain.Credential{}, err
@@ -292,6 +294,9 @@ func validateCreate(kind credentialdomain.Kind, storageKind credentialdomain.Sto
 		if strings.TrimSpace(secrets["value"]) == "" {
 			return fmt.Errorf("api_key credentials require value")
 		}
+		if err := validateAPIKeyHTTPConfig(secrets); err != nil {
+			return err
+		}
 		return nil
 	default:
 		return fmt.Errorf("unsupported credential kind %q", kind)
@@ -324,6 +329,78 @@ func cleanSecrets(secrets map[string]string) map[string]string {
 		out[key] = strings.TrimSpace(value)
 	}
 	return out
+}
+
+func normalizeAPIKeySecrets(secrets map[string]string) map[string]string {
+	if len(secrets) == 0 {
+		return secrets
+	}
+	out := make(map[string]string, len(secrets))
+	for key, value := range secrets {
+		out[key] = value
+	}
+	if headerName := strings.TrimSpace(out["headerName"]); headerName != "" {
+		out["headerName"] = canonicalHTTPHeaderName(headerName)
+	}
+	return out
+}
+
+func validateAPIKeyHTTPConfig(secrets map[string]string) error {
+	injection := strings.ToLower(strings.TrimSpace(secrets["injection"]))
+	headerName := strings.TrimSpace(secrets["headerName"])
+	paramName := strings.TrimSpace(secrets["paramName"])
+	switch injection {
+	case "", string(credentialdomain.InjectionBearer):
+		return nil
+	case string(credentialdomain.InjectionHeader):
+		if headerName == "" {
+			return fmt.Errorf("api_key header credentials require headerName")
+		}
+		if !validHTTPHeaderName(headerName) {
+			return fmt.Errorf("api_key headerName %q is not a valid HTTP header name", headerName)
+		}
+		return nil
+	case string(credentialdomain.InjectionQuery):
+		if paramName == "" {
+			return fmt.Errorf("api_key query credentials require paramName")
+		}
+		if strings.ContainsAny(paramName, "=&?#") {
+			return fmt.Errorf("api_key paramName %q is not a valid query parameter name", paramName)
+		}
+		return nil
+	default:
+		return fmt.Errorf("api_key injection must be bearer, header, or query")
+	}
+}
+
+func canonicalHTTPHeaderName(name string) string {
+	name = strings.TrimSpace(name)
+	switch strings.ToUpper(strings.NewReplacer("-", "_", " ", "_").Replace(name)) {
+	case "ALPACA_PAPER_API_KEY", "ALPACA_API_KEY", "ALPACA_API_KEY_ID", "APCA_API_KEY_ID":
+		return "APCA-API-KEY-ID"
+	case "ALPACA_PAPER_SECRET_KEY", "ALPACA_SECRET_KEY", "ALPACA_API_SECRET_KEY", "APCA_API_SECRET_KEY", "APCA_PAPER_SECRET_KEY":
+		return "APCA-API-SECRET-KEY"
+	default:
+		return name
+	}
+}
+
+func validHTTPHeaderName(name string) bool {
+	if strings.TrimSpace(name) != name || name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			continue
+		}
+		switch r {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func fieldsForSecrets(secrets map[string]string, kind credentialdomain.Kind) []credentialdomain.FieldRef {
