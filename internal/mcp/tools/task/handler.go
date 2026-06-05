@@ -100,7 +100,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		if err != nil {
 			return Result{}, err
 		}
-		task, err := call.Tasks.Complete(taskCtx, taskapp.CompleteTaskParams{TaskID: id, Summary: summary, Artifacts: input.Artifacts})
+		task, err := call.Tasks.Complete(taskCtx, taskapp.CompleteTaskParams{TaskID: id, Summary: summary, Artifacts: input.Artifacts, Metadata: input.Metadata})
 		return h.taskResultForActor(ctx, call, "submit", task, err, nil, actor)
 	case "block":
 		id, err := requireTaskID(input.TaskID)

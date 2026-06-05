@@ -59,6 +59,7 @@ type CompleteTaskParams struct {
 	TaskID    domain.TaskID
 	Summary   string
 	Artifacts []string
+	Metadata  map[string]any
 }
 
 type AssignTaskParams struct {
@@ -307,6 +308,24 @@ func metadataWithMissionRef(metadata map[string]any, missionRef string) (map[str
 	return next, nil
 }
 
+func mergeTaskMetadata(existing map[string]any, updates map[string]any) map[string]any {
+	if len(updates) == 0 {
+		return cloneMap(existing)
+	}
+	next := cloneMap(existing)
+	if next == nil {
+		next = make(map[string]any, len(updates))
+	}
+	for key, value := range updates {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		next[key] = value
+	}
+	return next
+}
+
 func (s *Service) resolveCreationMissionRef(ctx context.Context, keyResultRef, missionRef string) (string, error) {
 	keyResultRef = strings.TrimSpace(keyResultRef)
 	missionRef = strings.TrimSpace(missionRef)
@@ -466,6 +485,9 @@ func (s *Service) Complete(ctx context.Context, params CompleteTaskParams) (doma
 	next, err := loaded.Complete(params.Summary, params.Artifacts, s.clock.Now())
 	if err != nil {
 		return domain.Task{}, err
+	}
+	if len(params.Metadata) > 0 {
+		next.Metadata = mergeTaskMetadata(next.Metadata, params.Metadata)
 	}
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("update task: %w", err)

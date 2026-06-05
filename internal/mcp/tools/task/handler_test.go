@@ -13,13 +13,14 @@ import (
 )
 
 type stubService struct {
-	createReq  taskapp.CreateTaskParams
-	listReq    taskdomain.TaskFilter
-	listResp   []taskdomain.Task
-	assignReq  taskapp.AssignTaskParams
-	reviewReq  taskapp.ReviewTaskParams
-	seenCaller taskapp.Caller
-	called     string
+	createReq   taskapp.CreateTaskParams
+	completeReq taskapp.CompleteTaskParams
+	listReq     taskdomain.TaskFilter
+	listResp    []taskdomain.Task
+	assignReq   taskapp.AssignTaskParams
+	reviewReq   taskapp.ReviewTaskParams
+	seenCaller  taskapp.Caller
+	called      string
 }
 
 func (s *stubService) capture(ctx context.Context, called string) {
@@ -60,7 +61,8 @@ func (s *stubService) Release(ctx context.Context, id taskdomain.TaskID) (taskdo
 
 func (s *stubService) Complete(ctx context.Context, req taskapp.CompleteTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "complete")
-	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", CreatedBy: "coord-1", AssignedTo: "worker-1", Summary: req.Summary, Status: taskdomain.TaskStatusInReview}, nil
+	s.completeReq = req
+	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", CreatedBy: "coord-1", AssignedTo: "worker-1", Summary: req.Summary, Metadata: req.Metadata, Status: taskdomain.TaskStatusInReview}, nil
 }
 
 func (s *stubService) Block(ctx context.Context, id taskdomain.TaskID, reason string) (taskdomain.Task, error) {
@@ -256,6 +258,20 @@ func TestHandleSubmitSelfReviewReturnsReviewGuidance(t *testing.T) {
 	}
 }
 
+func TestHandleSubmitAcceptsStringMetadata(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"submit","task_id":"task-1","summary":"done","metadata":{"commit":"abc123","decision":"dec-1"}}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if svc.completeReq.Metadata["commit"] != "abc123" || svc.completeReq.Metadata["decision"] != "dec-1" {
+		t.Fatalf("complete metadata=%+v", svc.completeReq.Metadata)
+	}
+	if !strings.Contains(result.Text, `"metadata":{"commit":"abc123","decision":"dec-1"}`) {
+		t.Fatalf("result missing metadata: %s", result.Text)
+	}
+}
+
 func TestHandleReassignCallsAssign(t *testing.T) {
 	svc := &stubService{}
 	_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"reassign","task_id":"task-1","assignee_member_id":"worker-1"}`))
@@ -342,6 +358,16 @@ func TestDecodeAcceptsStringMetadata(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if input.Metadata["smoke"] != "true" {
+		t.Fatalf("metadata=%+v", input.Metadata)
+	}
+}
+
+func TestDecodeAcceptsSubmitStringMetadata(t *testing.T) {
+	input, err := decode(json.RawMessage(`{"action":"submit","task_id":"task-1","summary":"done","metadata":{"commit":"abc123"}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if input.Metadata["commit"] != "abc123" {
 		t.Fatalf("metadata=%+v", input.Metadata)
 	}
 }

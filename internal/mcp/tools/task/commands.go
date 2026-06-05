@@ -108,7 +108,7 @@ var fieldsByAction = map[string]map[string]struct{}{
 	"list":     fieldSet("action", "assignee_member_id", "status", "limit", "offset"),
 	"claim":    fieldSet("action", "task_id"),
 	"release":  fieldSet("action", "task_id"),
-	"submit":   fieldSet("action", "task_id", "summary", "artifacts"),
+	"submit":   fieldSet("action", "task_id", "summary", "artifacts", "metadata"),
 	"block":    fieldSet("action", "task_id", "reason"),
 	"unblock":  fieldSet("action", "task_id", "note"),
 	"reassign": fieldSet("action", "task_id", "assignee_member_id"),
