@@ -123,6 +123,22 @@ func TestSQLiteRepositoryRejectsMetadataFilter(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryFreshSchemaExcludesPlanColumns(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	columns := sqliteTaskColumns(t, repo.db)
+
+	for _, column := range []string{"plan_phase_id", "plan_todo_id"} {
+		if columns[column] {
+			t.Fatalf("fresh tasks schema contains removed column %q", column)
+		}
+	}
+	for _, column := range []string{"task_id", "project_id", "assigned_to", "claimed_by_member_id", "task_kind", "status", "key_result_ref", "task_json"} {
+		if !columns[column] {
+			t.Fatalf("fresh tasks schema missing retained column %q", column)
+		}
+	}
+}
+
 func newSQLiteRepositoryForTest(t *testing.T) *SQLiteRepository {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{
@@ -140,6 +156,34 @@ func newSQLiteRepositoryForTest(t *testing.T) *SQLiteRepository {
 		t.Fatalf("NewSQLiteRepository: %v", err)
 	}
 	return repo
+}
+
+func sqliteTaskColumns(t *testing.T, db *sql.DB) map[string]bool {
+	t.Helper()
+	rows, err := db.Query(`PRAGMA table_info(tasks)`)
+	if err != nil {
+		t.Fatalf("pragma tasks: %v", err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notNull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan pragma tasks: %v", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("pragma tasks rows: %v", err)
+	}
+	return columns
 }
 
 func infraTask(id string, projectID string, status domain.TaskStatus) domain.Task {

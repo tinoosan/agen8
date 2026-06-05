@@ -337,6 +337,7 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 		{name: "decisions", columns: []string{"id", "project_id", "source_identity", "member_name", "invalidation_conditions_json"}, forbid: nil},
 		{name: "agent_space_entries", columns: []string{"entry_id", "event_id", "run_id", "kind", "surface", "created_at"}, forbid: nil},
 		{name: "members", columns: []string{"member_id", "project_id", "member_type", "lifecycle_state", "harness_kind", "member_json"}, forbid: []string{"space_id", "role_id", "session_token_hash", "session_token_prefix", "provisioning_mode", "external_session_id"}},
+		{name: "tasks", columns: []string{"task_id", "project_id", "assigned_to", "claimed_by_member_id", "task_kind", "status", "key_result_ref", "task_json"}, forbid: []string{"plan_phase_id", "plan_todo_id"}},
 	}
 
 	for _, tbl := range required {
@@ -345,6 +346,9 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 			return fmt.Errorf("sqlite: validate schema: check table %s: %w", tbl.name, err)
 		}
 		if exists == 0 {
+			if tbl.name == "tasks" {
+				continue
+			}
 			return fmt.Errorf("sqlite: incompatible schema: missing table %q (hard cutover). Delete agen8.db and retry", tbl.name)
 		}
 		rows, err := tx.Query(`PRAGMA table_info(` + tbl.name + `)`)

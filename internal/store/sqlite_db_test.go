@@ -107,6 +107,44 @@ func TestRemovedTablesAreNotCreated(t *testing.T) {
 	}
 }
 
+func TestHardCutoverRejectsLegacyTaskPlanColumns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+
+	db, err := GetDB(cfg)
+	if err != nil {
+		t.Fatalf("getSQLiteDB: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE tasks (
+		task_id TEXT PRIMARY KEY,
+		project_id TEXT NOT NULL DEFAULT '',
+		assigned_to TEXT NOT NULL DEFAULT '',
+		claimed_by_member_id TEXT NOT NULL DEFAULT '',
+		task_kind TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT '',
+		key_result_ref TEXT NOT NULL DEFAULT '',
+		plan_phase_id TEXT,
+		plan_todo_id TEXT,
+		task_json TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("create legacy tasks table: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	err = validateHardCutoverSchema(tx)
+	if rollbackErr := tx.Rollback(); rollbackErr != nil {
+		t.Fatalf("rollback: %v", rollbackErr)
+	}
+	if err == nil {
+		t.Fatal("expected legacy task plan column error")
+	}
+	if !strings.Contains(err.Error(), `table "tasks" has legacy column "plan_phase_id"`) {
+		t.Fatalf("error=%q", err)
+	}
+}
+
 func TestDecisionMemberNameRepairBackfillsFromMemberRecord(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
