@@ -30,7 +30,7 @@ func (s *stubService) capture(ctx context.Context, called string) {
 func (s *stubService) Create(ctx context.Context, req taskapp.CreateTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "create")
 	s.createReq = req
-	return taskdomain.Task{ID: "task-1", ProjectID: req.ProjectID, AssignedTo: req.AssignedTo, Description: req.Description, Status: taskdomain.TaskStatusPending}, nil
+	return taskdomain.Task{ID: "task-1", ProjectID: req.ProjectID, AssignedTo: req.AssignedTo, AssignedToLabel: "Worker engineer", Description: req.Description, Status: taskdomain.TaskStatusPending}, nil
 }
 
 func (s *stubService) Get(ctx context.Context, id taskdomain.TaskID) (taskdomain.Task, error) {
@@ -153,6 +153,17 @@ func TestHandleCreateAssignedToWorkerDoesNotReturnClaimGuidance(t *testing.T) {
 	structured := result.Structured.(map[string]any)
 	if got := structured["nextAction"]; got != nil {
 		t.Fatalf("nextAction=%v want omitted for worker assignment", got)
+	}
+}
+
+func TestHandleCreateReturnsReadableTaskMemberLabel(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if !strings.Contains(result.Text, `"assignedToLabel":"Worker engineer"`) {
+		t.Fatalf("result missing assignedToLabel: %s", result.Text)
 	}
 }
 

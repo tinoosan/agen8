@@ -18,7 +18,7 @@ const (
 	MethodTaskCancel = "task.cancel"
 )
 
-func RegisterTask(reg *Registry, taskSvc *taskapp.Service, members taskrpc.MemberLookup) error {
+func RegisterTask(reg *Registry, taskSvc *taskapp.Service, members taskrpc.MemberDisplayLookup) error {
 	if taskSvc == nil {
 		return fmt.Errorf("task service is required")
 	}

@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -10,6 +11,14 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
+
+type stubMemberDisplay struct {
+	names map[member.ID]string
+}
+
+func (s stubMemberDisplay) DisplayName(_ context.Context, id member.ID) (string, error) {
+	return s.names[id], nil
+}
 
 func TestNewTaskViewMapsRebuiltTaskFields(t *testing.T) {
 	createdAt := time.Date(2026, time.May, 15, 10, 0, 0, 0, time.FixedZone("BST", 3600))
@@ -213,5 +222,17 @@ func TestTaskViewJSONShape(t *testing.T) {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("json contains removed key %q in %s", key, raw)
 		}
+	}
+}
+
+func TestHandlerMemberLabelUsesDisplayNameLookup(t *testing.T) {
+	handler := &Handler{members: stubMemberDisplay{
+		names: map[member.ID]string{
+			"member-worker": "Codex backend engineer",
+		},
+	}}
+
+	if got := handler.memberLabel(context.Background(), member.ID("member-worker")); got != "Codex backend engineer" {
+		t.Fatalf("memberLabel=%q want Codex backend engineer", got)
 	}
 }

@@ -11,16 +11,16 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
-type MemberLookup interface {
-	GetMember(ctx context.Context, id member.ID) (member.Record, error)
+type MemberDisplayLookup interface {
+	DisplayName(ctx context.Context, id member.ID) (string, error)
 }
 
 type Handler struct {
 	svc     *taskapp.Service
-	members MemberLookup
+	members MemberDisplayLookup
 }
 
-func NewHandler(svc *taskapp.Service, members MemberLookup) *Handler {
+func NewHandler(svc *taskapp.Service, members MemberDisplayLookup) *Handler {
 	if svc == nil {
 		panic("task RPC handler requires task service")
 	}
@@ -170,20 +170,11 @@ func (h *Handler) memberLabel(ctx context.Context, id member.ID) string {
 	if id == "" {
 		return ""
 	}
-	rosterMember, err := h.members.GetMember(ctx, id)
+	name, err := h.members.DisplayName(ctx, id)
 	if err != nil {
 		return ""
 	}
-	if label := strings.TrimSpace(rosterMember.DisplayName); label != "" {
-		return label
-	}
-	if label := strings.TrimSpace(rosterMember.HarnessKind); label != "" {
-		return label
-	}
-	if label := strings.TrimSpace(rosterMember.MemberType); label != "" {
-		return strings.ReplaceAll(label, "_", " ")
-	}
-	return ""
+	return strings.TrimSpace(name)
 }
 
 func cloneRequestMetadata(metadata map[string]any) map[string]any {

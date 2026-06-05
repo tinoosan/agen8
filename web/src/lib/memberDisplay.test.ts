@@ -6,8 +6,8 @@ describe('memberDisplayName', () => {
     expect(memberDisplayName('Codex backend engineer', 'member-95fed2e1ebce6ce6')).toBe('Codex backend engineer')
   })
 
-  it('does not present raw member ids as names', () => {
-    expect(memberDisplayName(undefined, 'member-95fed2e1ebce6ce6')).toBeUndefined()
+  it('uses raw member ids only as a last-resort ownership label', () => {
+    expect(memberDisplayName(undefined, 'member-95fed2e1ebce6ce6')).toBe('member-95fed2e1ebce6ce6')
     expect(memberDisplayName('member-95fed2e1ebce6ce6', undefined)).toBeUndefined()
   })
 

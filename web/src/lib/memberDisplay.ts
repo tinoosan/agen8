@@ -5,8 +5,6 @@ export function memberDisplayName(label?: string, id?: string): string | undefin
   const cleanId = id?.trim()
   if (!cleanId) return undefined
 
-  if (isRawIdentity(cleanId)) return undefined
-
   return cleanId.replaceAll('_', ' ')
 }
 

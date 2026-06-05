@@ -16,8 +16,11 @@ type taskEntry struct {
 	Title              string                           `json:"title,omitempty"`
 	Description        string                           `json:"description,omitempty"`
 	AssignedToMemberID string                           `json:"assignedToMemberId,omitempty"`
+	AssignedToLabel    string                           `json:"assignedToLabel,omitempty"`
 	ClaimedByMemberID  string                           `json:"claimedByMemberId,omitempty"`
+	ClaimedByLabel     string                           `json:"claimedByMemberLabel,omitempty"`
 	CreatedBy          string                           `json:"createdBy,omitempty"`
+	CreatedByLabel     string                           `json:"createdByLabel,omitempty"`
 	KeyResultRef       string                           `json:"keyResultRef,omitempty"`
 	MissionRef         string                           `json:"missionRef,omitempty"`
 	TaskKind           string                           `json:"taskKind,omitempty"`
@@ -117,8 +120,11 @@ func toTaskEntry(task taskdomain.Task) taskEntry {
 		Title:              strings.TrimSpace(task.Title),
 		Description:        strings.TrimSpace(task.Description),
 		AssignedToMemberID: strings.TrimSpace(string(task.AssignedTo)),
+		AssignedToLabel:    strings.TrimSpace(task.AssignedToLabel),
 		ClaimedByMemberID:  strings.TrimSpace(string(task.ClaimedByMemberID)),
+		ClaimedByLabel:     strings.TrimSpace(task.ClaimedByMemberLabel),
 		CreatedBy:          strings.TrimSpace(task.CreatedBy),
+		CreatedByLabel:     strings.TrimSpace(task.CreatedByLabel),
 		KeyResultRef:       strings.TrimSpace(task.KeyResultRef),
 		MissionRef:         missionRefFromTaskMetadata(task.Metadata),
 		TaskKind:           strings.TrimSpace(task.TaskKind),
@@ -150,7 +156,13 @@ func memberLabel(member member.Record) string {
 	if strings.TrimSpace(member.DisplayName) != "" {
 		return strings.TrimSpace(member.DisplayName)
 	}
-	return strings.TrimSpace(string(member.ID))
+	if strings.TrimSpace(member.HarnessKind) != "" {
+		return strings.TrimSpace(member.HarnessKind)
+	}
+	if strings.TrimSpace(member.MemberType) != "" {
+		return strings.ReplaceAll(strings.TrimSpace(member.MemberType), "_", " ")
+	}
+	return ""
 }
 
 func encodeText(value any) (string, error) {
