@@ -52,6 +52,7 @@ type LogRequest struct {
 	MemberID               string
 	Title                  string
 	Rationale              string
+	Context                string
 	AlternativesRejected   string
 	InvalidationConditions []string
 	Confidence             float64
@@ -311,7 +312,7 @@ func (s *Service) Log(ctx context.Context, req LogRequest) (Result, error) {
 		MemberName:             s.resolveMemberDisplay(ctx, req.MemberID),
 		Title:                  req.Title,
 		Rationale:              req.Rationale,
-		Context:                "",
+		Context:                req.Context,
 		AlternativesRejected:   req.AlternativesRejected,
 		InvalidationConditions: req.InvalidationConditions,
 		Confidence:             req.Confidence,

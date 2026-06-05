@@ -153,6 +153,7 @@ func (h decisionHydrator) Fetch(ctx context.Context, projectID string, nodeID st
 	}
 	if p := decision.Log; p != nil {
 		fields["rationale"] = strings.TrimSpace(p.Rationale)
+		fields["context"] = strings.TrimSpace(p.Context)
 		fields["alternativesRejected"] = strings.TrimSpace(p.AlternativesRejected)
 		fields["invalidationConditions"] = append([]string(nil), p.InvalidationConditions...)
 	}

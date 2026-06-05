@@ -154,6 +154,7 @@ func TestDecisionHydrator_FetchIncludesInvalidationConditions(t *testing.T) {
 			CreatedAt:  time.Now().UTC(),
 			Log: &decisiondomain.LogPayload{
 				Rationale:              "It tests willingness to pay.",
+				Context:                "Customers asked for usage-based billing during onboarding.",
 				InvalidationConditions: []string{"Conversion drops below baseline", "Metering error rate exceeds 1%"},
 			},
 		},
@@ -174,5 +175,8 @@ func TestDecisionHydrator_FetchIncludesInvalidationConditions(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "Conversion drops below baseline" {
 		t.Fatalf("invalidationConditions=%v", got)
+	}
+	if node.Fields["context"] != "Customers asked for usage-based billing during onboarding." {
+		t.Fatalf("context=%q", node.Fields["context"])
 	}
 }

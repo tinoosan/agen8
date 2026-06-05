@@ -12,6 +12,7 @@ import (
 
 type recordingDecisionService struct {
 	caller caller.Caller
+	req    decisionapp.LogRequest
 }
 
 func (s *recordingDecisionService) Log(ctx context.Context, req decisionapp.LogRequest) (decisionapp.Result, error) {
@@ -20,6 +21,7 @@ func (s *recordingDecisionService) Log(ctx context.Context, req decisionapp.LogR
 		return decisionapp.Result{}, err
 	}
 	s.caller = actor
+	s.req = req
 	return decisionapp.Result{
 		ID:         "dec-1",
 		Kind:       "log",
@@ -54,5 +56,27 @@ func TestHandleLogAddsSessionCallerContext(t *testing.T) {
 	}
 	if string(service.caller.ProjectID) != "project-1" {
 		t.Fatalf("caller project=%q want project-1", service.caller.ProjectID)
+	}
+}
+
+func TestHandleLogAcceptsContextField(t *testing.T) {
+	service := &recordingDecisionService{}
+	_, err := NewHandler().Handle(context.Background(), CallContext{
+		Decisions:     service,
+		ProjectID:     "project-1",
+		ActorMemberID: "member-1",
+		UserID:        "user-1",
+	}, json.RawMessage(`{
+		"action":"log",
+		"title":"Choose API labels",
+		"rationale":"Users need readable labels.",
+		"context":"Graph audit found raw member ids in task nodes.",
+		"task_ref":"task-1"
+	}`))
+	if err != nil {
+		t.Fatalf("Handle log: %v", err)
+	}
+	if service.req.Context != "Graph audit found raw member ids in task nodes." {
+		t.Fatalf("context=%q want graph audit context", service.req.Context)
 	}
 }
