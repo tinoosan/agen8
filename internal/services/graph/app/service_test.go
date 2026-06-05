@@ -544,6 +544,26 @@ func TestServiceSearchAllPreservesRelevanceOrder(t *testing.T) {
 	}
 }
 
+func TestSortNodeSummariesPrioritizesLiveWorkThenRecency(t *testing.T) {
+	now := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	items := []domain.GraphNodeSummary{
+		{ID: "task-new-done", Type: domain.NodeTypeTask, Title: "New done task", Status: "succeeded", CreatedAt: now.Format(time.RFC3339Nano)},
+		{ID: "kr-old-active", Type: domain.NodeTypeKeyResult, Title: "Older active KR", Status: "in_progress", CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339Nano)},
+		{ID: "task-newer-active", Type: domain.NodeTypeTask, Title: "Newer active task", Status: "active", CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano)},
+		{ID: "dec-log", Type: domain.NodeTypeDecision, Title: "Decision log", Status: "log", CreatedAt: now.Add(-30 * time.Minute).Format(time.RFC3339Nano)},
+	}
+
+	sortNodeSummaries(items)
+
+	got := []string{items[0].ID, items[1].ID, items[2].ID, items[3].ID}
+	want := []string{"task-newer-active", "kr-old-active", "dec-log", "task-new-done"}
+	for idx := range want {
+		if got[idx] != want[idx] {
+			t.Fatalf("order=%v want %v", got, want)
+		}
+	}
+}
+
 func TestMatchesQueryAllowsMeaningfulMultiTermSubset(t *testing.T) {
 	if !matchesQuery("graph search traversal readability density ranking", "Prioritize graph readability controls over new graph semantics") {
 		t.Fatal("expected multi-term query to match meaningful token subset")

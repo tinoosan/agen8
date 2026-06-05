@@ -975,6 +975,11 @@ func dedupeNonEmpty(values []string) []string {
 
 func sortNodeSummaries(items []domain.GraphNodeSummary) {
 	sort.Slice(items, func(i, j int) bool {
+		leftStatusRank := graphNodeStatusRank(items[i].Status)
+		rightStatusRank := graphNodeStatusRank(items[j].Status)
+		if leftStatusRank != rightStatusRank {
+			return leftStatusRank < rightStatusRank
+		}
 		leftTime, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(items[i].CreatedAt))
 		rightTime, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(items[j].CreatedAt))
 		if !leftTime.Equal(rightTime) {
@@ -987,6 +992,23 @@ func sortNodeSummaries(items []domain.GraphNodeSummary) {
 		}
 		return strings.TrimSpace(items[i].ID) < strings.TrimSpace(items[j].ID)
 	})
+}
+
+func graphNodeStatusRank(status string) int {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active", "in_progress", "pending", "in_review":
+		return 0
+	case "blocked", "failed":
+		return 1
+	case "log", "recorded":
+		return 2
+	case "succeeded", "completed", "done":
+		return 3
+	case "canceled", "cancelled", "archived", "dropped":
+		return 4
+	default:
+		return 2
+	}
 }
 
 func sortGraphEdgesForFocal(edges []domain.GraphEdge, focalType, focalID string) {
