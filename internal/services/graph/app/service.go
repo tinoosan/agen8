@@ -130,10 +130,12 @@ func (s *Service) nodeOneHop(ctx context.Context, projectID, nodeType, nodeID st
 		return domain.GraphNodeDetail{}, []domain.GraphWarning{}, fmt.Errorf("graph_query: linked entities for %s/%s: %w", core.Type, core.ID, err)
 	}
 	edges := make([]domain.GraphEdge, 0, len(links))
-	neighbourIDs := map[string]map[string]struct{}{}
 	for _, link := range links {
-		edge := graphEdgeFromLink(link, "")
-		edges = append(edges, edge)
+		edges = append(edges, graphEdgeFromLink(link, ""))
+	}
+
+	neighbourIDs := map[string]map[string]struct{}{}
+	for _, edge := range edges {
 		otherType, otherID, ok := otherEndpoint(edge, core.Type, core.ID)
 		if !ok {
 			continue
@@ -220,6 +222,10 @@ func (s *Service) nodeOneHop(ctx context.Context, projectID, nodeType, nodeID st
 		))
 		neighbours = neighbours[:defaultNeighbourLimit]
 	}
+	edges, err = s.pruneRedundantMissionEdges(ctx, projectID, core.Type, core.ID, edges)
+	if err != nil {
+		return domain.GraphNodeDetail{}, []domain.GraphWarning{}, err
+	}
 	sortGraphEdgesForFocal(edges, core.Type, core.ID)
 	detail := domain.GraphNodeDetail{
 		ID:                     core.ID,
@@ -238,6 +244,66 @@ func (s *Service) nodeOneHop(ctx context.Context, projectID, nodeType, nodeID st
 		detail.Neighbours = []domain.GraphNodeSummary{}
 	}
 	return detail, warnings, nil
+}
+
+func (s *Service) pruneRedundantMissionEdges(ctx context.Context, projectID, focalType, focalID string, edges []domain.GraphEdge) ([]domain.GraphEdge, error) {
+	if focalType != domain.NodeTypeMission || len(edges) == 0 {
+		return edges, nil
+	}
+	out := make([]domain.GraphEdge, 0, len(edges))
+	for _, edge := range edges {
+		if s.isRedundantDirectMissionEdge(ctx, projectID, focalID, edge) {
+			continue
+		}
+		out = append(out, edge)
+	}
+	return out, nil
+}
+
+func (s *Service) isRedundantDirectMissionEdge(ctx context.Context, projectID, missionID string, edge domain.GraphEdge) bool {
+	if edge.EdgeType != domain.EdgeTypeServes || edge.TargetType != domain.NodeTypeMission || edge.TargetID != missionID {
+		return false
+	}
+	switch edge.SourceType {
+	case domain.NodeTypeTask, domain.NodeTypeDecision:
+	default:
+		return false
+	}
+	sourceLinks, err := s.contextLinks.FindBySource(ctx, contextlink.NodeRef{
+		Type: contextlink.NodeType(edge.SourceType),
+		ID:   edge.SourceID,
+	})
+	if err != nil {
+		return false
+	}
+	for _, sourceLink := range sourceLinks {
+		if strings.TrimSpace(string(sourceLink.EdgeType)) != domain.EdgeTypeServes {
+			continue
+		}
+		if strings.TrimSpace(string(sourceLink.Target.Type)) != domain.NodeTypeKeyResult {
+			continue
+		}
+		if s.keyResultBelongsToMission(ctx, projectID, sourceLink.Target.ID, missionID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) keyResultBelongsToMission(ctx context.Context, projectID, keyResultID, missionID string) bool {
+	hydrator, ok := s.hydrators[domain.NodeTypeKeyResult]
+	if !ok {
+		return false
+	}
+	core, err := hydrator.Fetch(ctx, projectID, strings.TrimSpace(keyResultID))
+	if err != nil {
+		return false
+	}
+	raw, ok := core.Fields["missionId"].(string)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(raw) == strings.TrimSpace(missionID)
 }
 
 func (s *Service) Search(ctx context.Context, req domain.GraphSearchRequest) ([]domain.GraphNodeSummary, []domain.GraphWarning, error) {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
 	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
 	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
@@ -167,10 +168,11 @@ func TestCredentialLifecycleLogsOmitCredentialIdentifiersAndTokens(t *testing.T)
 }
 
 type authTestDeps struct {
-	passwords *memoryPasswordRepo
-	sessions  *memorySessionRepo
-	apiKeys   *memoryAPIKeyRepo
-	users     *memoryUserLoader
+	passwords  *memoryPasswordRepo
+	sessions   *memorySessionRepo
+	apiKeys    *memoryAPIKeyRepo
+	linkTokens *memoryLinkTokenRepo
+	users      *memoryUserLoader
 }
 
 func newAuthServiceForTest(t *testing.T, users ...user.User) (*Service, authTestDeps) {
@@ -184,12 +186,16 @@ func newAuthServiceForTestWithLogger(t *testing.T, logger *slog.Logger, users ..
 		passwords: &memoryPasswordRepo{records: map[string]password.Credential{}},
 		sessions:  &memorySessionRepo{records: map[string]session.Session{}},
 		apiKeys:   &memoryAPIKeyRepo{records: map[string]apikey.Key{}},
-		users:     newMemoryUserLoader(users...),
+		linkTokens: &memoryLinkTokenRepo{
+			records: map[string]linktoken.LinkToken{},
+		},
+		users: newMemoryUserLoader(users...),
 	}
 	svc, err := NewService(
 		deps.passwords,
 		deps.sessions,
 		deps.apiKeys,
+		deps.linkTokens,
 		deps.users,
 		auth.FixedClock{T: authTestNow},
 		logger,
@@ -301,6 +307,37 @@ func (r *memoryAPIKeyRepo) Create(_ context.Context, record apikey.Key) error {
 }
 
 func (r *memoryAPIKeyRepo) Update(_ context.Context, record apikey.Key) error {
+	r.records[record.TokenHash] = record
+	return nil
+}
+
+type memoryLinkTokenRepo struct {
+	records map[string]linktoken.LinkToken
+}
+
+func (r *memoryLinkTokenRepo) GetByTokenHash(_ context.Context, tokenHash string) (linktoken.LinkToken, error) {
+	record, ok := r.records[tokenHash]
+	if !ok {
+		return linktoken.LinkToken{}, auth.ErrTokenNotFound
+	}
+	return record, nil
+}
+
+func (r *memoryLinkTokenRepo) Get(_ context.Context, id linktoken.ID) (linktoken.LinkToken, error) {
+	for _, record := range r.records {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+	return linktoken.LinkToken{}, auth.ErrTokenNotFound
+}
+
+func (r *memoryLinkTokenRepo) Create(_ context.Context, record linktoken.LinkToken) error {
+	r.records[record.TokenHash] = record
+	return nil
+}
+
+func (r *memoryLinkTokenRepo) Update(_ context.Context, record linktoken.LinkToken) error {
 	r.records[record.TokenHash] = record
 	return nil
 }

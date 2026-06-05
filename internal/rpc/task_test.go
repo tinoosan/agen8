@@ -120,12 +120,17 @@ func newRPCTaskStack(t *testing.T) (*projectapp.Service, *taskinfra.SQLiteReposi
 	if err != nil {
 		t.Fatalf("new member repo: %v", err)
 	}
+	workspaces, err := projectinfra.NewWorkspaceRepository(handle)
+	if err != nil {
+		t.Fatalf("new workspace repo: %v", err)
+	}
 	projectSvc, err := projectapp.NewService(projectapp.Config{
-		Projects: projects,
-		Members:  members,
-		Caller:   caller.ContextResolver{},
-		Configs:  rpcProjectConfigValidator{},
-		Events:   rpcProjectEventPublisher{},
+		Projects:   projects,
+		Members:    members,
+		Workspaces: workspaces,
+		Caller:     caller.ContextResolver{},
+		Configs:    rpcProjectConfigValidator{},
+		Events:     rpcProjectEventPublisher{},
 	})
 	if err != nil {
 		t.Fatalf("new project service: %v", err)

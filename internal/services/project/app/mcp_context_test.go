@@ -165,13 +165,18 @@ func newProjectServiceForMCPContextTest(t *testing.T) *Service {
 	if err != nil {
 		t.Fatalf("new member repo: %v", err)
 	}
+	workspaces, err := projectinfra.NewWorkspaceRepository(handle)
+	if err != nil {
+		t.Fatalf("new workspace repo: %v", err)
+	}
 	service, err := NewService(Config{
-		Projects: projects,
-		Members:  members,
-		Clock:    fixedClock{now: time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)},
-		Caller:   caller.ContextResolver{},
-		Configs:  acceptingConfigValidator{},
-		Events:   noopPublisher{},
+		Projects:   projects,
+		Members:    members,
+		Workspaces: workspaces,
+		Clock:      fixedClock{now: time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)},
+		Caller:     caller.ContextResolver{},
+		Configs:    acceptingConfigValidator{},
+		Events:     noopPublisher{},
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)

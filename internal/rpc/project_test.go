@@ -279,12 +279,17 @@ func newRPCProjectService(t *testing.T) *projectapp.Service {
 	if err != nil {
 		t.Fatalf("NewMemberSQLiteRepository: %v", err)
 	}
+	workspaces, err := projectinfra.NewWorkspaceSQLiteRepository(handle.DB())
+	if err != nil {
+		t.Fatalf("NewWorkspaceSQLiteRepository: %v", err)
+	}
 	svc, err := projectapp.NewService(projectapp.Config{
-		Projects: projects,
-		Members:  members,
-		Caller:   caller.ContextResolver{},
-		Configs:  rpcProjectConfigValidator{},
-		Events:   rpcProjectEventPublisher{},
+		Projects:   projects,
+		Members:    members,
+		Workspaces: workspaces,
+		Caller:     caller.ContextResolver{},
+		Configs:    rpcProjectConfigValidator{},
+		Events:     rpcProjectEventPublisher{},
 	})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)

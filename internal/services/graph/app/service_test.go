@@ -160,6 +160,94 @@ func TestServiceNodeInfersTypeAndExpandsDepth(t *testing.T) {
 	}
 }
 
+func TestServiceNodePrunesRedundantDirectMissionEdges(t *testing.T) {
+	ctx := context.Background()
+	handle, err := storagedb.Open(ctx, storagedb.Config{
+		Driver:       storagedb.DriverSQLite,
+		DataDir:      t.TempDir(),
+		MigrationKey: "graphquery-prune-mission-edges-test",
+		Migrate: func(ctx context.Context, db *sql.DB, driver storagedb.Driver) error {
+			_, err := db.ExecContext(ctx, contextLinkSchema)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("open db handle: %v", err)
+	}
+	links, err := contextlink.NewSQLiteRepository(handle)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	now := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	svc, err := NewService(links, []domain.NodeHydrator{
+		graphTestHydrator{nodeType: domain.NodeTypeMission, nodes: map[string]domain.GraphNodeCore{
+			"mission-1": {ID: "mission-1", Type: domain.NodeTypeMission, Title: "Mission", Status: "active", CreatedAt: now},
+		}},
+		graphTestHydrator{nodeType: domain.NodeTypeKeyResult, nodes: map[string]domain.GraphNodeCore{
+			"kr-1": {ID: "kr-1", Type: domain.NodeTypeKeyResult, Title: "KR", Status: "in_progress", CreatedAt: now, Fields: map[string]any{"missionId": "mission-1"}},
+		}},
+		graphTestHydrator{nodeType: domain.NodeTypeTask, nodes: map[string]domain.GraphNodeCore{
+			"task-1": {ID: "task-1", Type: domain.NodeTypeTask, Title: "Task", Status: "active", CreatedAt: now},
+		}},
+		graphTestHydrator{nodeType: domain.NodeTypeDecision, nodes: map[string]domain.GraphNodeCore{
+			"dec-1": {ID: "dec-1", Type: domain.NodeTypeDecision, Title: "Decision", Status: "log", CreatedAt: now},
+		}},
+	}, time.Second)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	for _, link := range []contextlink.Link{
+		{
+			ID:         "cl-task-mission",
+			Source:     contextlink.NodeRef{Type: contextlink.NodeType(domain.NodeTypeTask), ID: "task-1"},
+			Target:     contextlink.NodeRef{Type: contextlink.NodeType(domain.NodeTypeMission), ID: "mission-1"},
+			EdgeType:   contextlink.EdgeTypeServes,
+			Confidence: 1,
+			CreatedAt:  time.Now().UTC(),
+		},
+		{
+			ID:         "cl-task-kr",
+			Source:     contextlink.NodeRef{Type: contextlink.NodeType(domain.NodeTypeTask), ID: "task-1"},
+			Target:     contextlink.NodeRef{Type: contextlink.NodeType(domain.NodeTypeKeyResult), ID: "kr-1"},
+			EdgeType:   contextlink.EdgeTypeServes,
+			Confidence: 1,
+			CreatedAt:  time.Now().UTC(),
+		},
+		{
+			ID:         "cl-decision-mission",
+			Source:     contextlink.NodeRef{Type: contextlink.NodeType(domain.NodeTypeDecision), ID: "dec-1"},
+			Target:     contextlink.NodeRef{Type: contextlink.NodeType(domain.NodeTypeMission), ID: "mission-1"},
+			EdgeType:   contextlink.EdgeTypeServes,
+			Confidence: 1,
+			CreatedAt:  time.Now().UTC(),
+		},
+	} {
+		if err := links.Save(ctx, link); err != nil {
+			t.Fatalf("save %s: %v", link.ID, err)
+		}
+	}
+
+	detail, _, err := svc.Node(ctx, "proj", domain.NodeTypeMission, "mission-1", 2)
+	if err != nil {
+		t.Fatalf("node: %v", err)
+	}
+	if containsEdgeID(detail.Edges, "cl-task-mission") {
+		t.Fatalf("redundant direct task mission edge was returned: %+v", detail.Edges)
+	}
+	if !containsEdgeID(detail.Edges, "cl-decision-mission") {
+		t.Fatalf("non-redundant mission edges missing: %+v", detail.Edges)
+	}
+	if !containsNodeID(detail.Neighbours, "task-1") {
+		t.Fatalf("task should remain reachable even when direct mission edge is hidden: %+v", detail.Neighbours)
+	}
+	if !containsNodeID(detail.Subgraph, "kr-1") {
+		t.Fatalf("KR was not reachable through depth-2 task path: %+v", detail.Subgraph)
+	}
+	if _, err := links.FindByID(ctx, contextlink.ID("cl-task-mission")); err != nil {
+		t.Fatalf("stored direct edge was mutated or deleted: %v", err)
+	}
+}
+
 func TestServiceLinkStoresRationaleAndUnlinkRemovesEdge(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := newGraphQueryTestService(t)
@@ -593,6 +681,15 @@ func ptrFloat(v float64) *float64 { return &v }
 func containsNodeID(nodes []domain.GraphNodeSummary, id string) bool {
 	for _, node := range nodes {
 		if node.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEdgeID(edges []domain.GraphEdge, id string) bool {
+	for _, edge := range edges {
+		if edge.ID == id {
 			return true
 		}
 	}

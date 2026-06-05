@@ -12,6 +12,7 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
 	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
 	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
 	authrpc "github.com/tinoosan/agen8-mcp-server/internal/services/auth/rpc"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
@@ -129,6 +130,7 @@ func newAuthRPCServer(t *testing.T, users ...user.User) (*Server, *authapp.Servi
 		&rpcAuthPasswordRepo{records: map[string]password.Credential{}},
 		&rpcAuthSessionRepo{records: map[string]session.Session{}},
 		&rpcAuthAPIKeyRepo{records: map[string]apikey.Key{}},
+		&rpcAuthLinkTokenRepo{records: map[string]linktoken.LinkToken{}},
 		newRPCAuthUserLoader(users...),
 		auth.FixedClock{T: rpcAuthTestNow},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -261,6 +263,37 @@ func (r *rpcAuthAPIKeyRepo) Update(_ context.Context, record apikey.Key) error {
 	return nil
 }
 
+type rpcAuthLinkTokenRepo struct {
+	records map[string]linktoken.LinkToken
+}
+
+func (r *rpcAuthLinkTokenRepo) GetByTokenHash(_ context.Context, tokenHash string) (linktoken.LinkToken, error) {
+	record, ok := r.records[tokenHash]
+	if !ok {
+		return linktoken.LinkToken{}, auth.ErrTokenNotFound
+	}
+	return record, nil
+}
+
+func (r *rpcAuthLinkTokenRepo) Get(_ context.Context, id linktoken.ID) (linktoken.LinkToken, error) {
+	for _, record := range r.records {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+	return linktoken.LinkToken{}, auth.ErrTokenNotFound
+}
+
+func (r *rpcAuthLinkTokenRepo) Create(_ context.Context, record linktoken.LinkToken) error {
+	r.records[record.TokenHash] = record
+	return nil
+}
+
+func (r *rpcAuthLinkTokenRepo) Update(_ context.Context, record linktoken.LinkToken) error {
+	r.records[record.TokenHash] = record
+	return nil
+}
+
 func rpcAuthUserRecord(t *testing.T, rawID string, lifecycle user.Lifecycle) user.User {
 	t.Helper()
 	id, err := user.NewID(rawID)
@@ -268,11 +301,11 @@ func rpcAuthUserRecord(t *testing.T, rawID string, lifecycle user.Lifecycle) use
 		t.Fatalf("NewID: %v", err)
 	}
 	record, err := user.New(user.NewInput{
-		ID:           id,
-		Email:        rawID + "@example.com",
-		Name:         "Test User",
-		Role:         user.RoleAdmin,
-		Now:          rpcAuthTestNow,
+		ID:    id,
+		Email: rawID + "@example.com",
+		Name:  "Test User",
+		Role:  user.RoleAdmin,
+		Now:   rpcAuthTestNow,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

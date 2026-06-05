@@ -91,6 +91,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		authRepos.Passwords,
 		authRepos.Sessions,
 		authRepos.APIKeys,
+		authRepos.LinkTokens,
 		userSvc,
 		authdomain.SystemClock{},
 		logger.With("service", "auth"),
@@ -122,13 +123,18 @@ func NewApplication(cfg Config) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build project member repository: %w", err)
 	}
+	workspaceRepo, err := projectinfra.NewWorkspaceRepository(handle)
+	if err != nil {
+		return nil, fmt.Errorf("build project workspace repository: %w", err)
+	}
 	projectSvc, err := projectapp.NewService(projectapp.Config{
-		Projects: projectRepo,
-		Members:  memberRepo,
-		Caller:   caller.ContextResolver{},
-		Configs:  permissiveRuntimeConfigValidator{},
-		Events:   bus,
-		Logger:   logger.With("service", "project"),
+		Projects:   projectRepo,
+		Members:    memberRepo,
+		Workspaces: workspaceRepo,
+		Caller:     caller.ContextResolver{},
+		Configs:    permissiveRuntimeConfigValidator{},
+		Events:     bus,
+		Logger:     logger.With("service", "project"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build project service: %w", err)
