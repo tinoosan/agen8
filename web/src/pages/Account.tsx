@@ -6,7 +6,7 @@ export default function Account() {
       <div className="mx-auto flex w-full max-w-[980px] flex-col gap-8">
         <div className="flex flex-col gap-1">
           <h1 className="m-0 text-2xl font-bold text-[var(--text-1)]">Settings</h1>
-          <p className="m-0 text-[13px] text-[var(--text-3)]">Account, preferences, and runtime controls.</p>
+          <p className="m-0 text-[0.8125rem] text-[var(--text-3)]">Account, preferences, and runtime controls.</p>
         </div>
         <AccountSettingsSections />
       </div>

@@ -25,11 +25,11 @@ export function NumberField({ label, value, onChange, min, max, step, descriptio
         max={max}
         step={step}
         className={cn(
-          'h-auto px-2.5 py-[7px] text-[13px] bg-[var(--bg-elevated)] border-[var(--border)] rounded-[var(--r-md)] w-[120px]',
+          'h-auto px-2.5 py-[7px] text-[0.8125rem] bg-[var(--bg-elevated)] border-[var(--border)] rounded-[var(--r-md)] w-[120px]',
         )}
       />
       {description && (
-        <span className="text-[11px] text-[var(--text-3)] mt-0.5 block">{description}</span>
+        <span className="text-[0.6875rem] text-[var(--text-3)] mt-0.5 block">{description}</span>
       )}
     </label>
   )

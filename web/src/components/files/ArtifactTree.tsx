@@ -63,7 +63,7 @@ function FileTypeBadge({ path }: { path: string }) {
     <span
       aria-hidden="true"
       className={clsx(
-        'flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[4px] text-[8px] font-extrabold leading-none tracking-normal',
+        'flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[4px] text-[0.5rem] font-extrabold leading-none tracking-normal',
         fileBadgeClass(ext),
       )}
     >
@@ -290,7 +290,7 @@ export default function ArtifactTree({
             {basename(path)}
           </div>
           {a.member && (
-            <div className="text-[10px] text-[var(--text-3)] mt-0.5 truncate">{a.member}</div>
+            <div className="text-[0.625rem] text-[var(--text-3)] mt-0.5 truncate">{a.member}</div>
           )}
         </div>
       </button>
@@ -326,8 +326,8 @@ export default function ArtifactTree({
             ? <FolderOpen size={13} className="shrink-0 text-[var(--text-3)]" />
             : <Folder size={13} className="shrink-0 text-[var(--text-3)]" />
           }
-          <span className="truncate text-[11px] font-medium text-[var(--text-2)]">{node.name}</span>
-          <span className="text-[10px] text-[var(--text-3)] tabular-nums shrink-0">{isLoadingDir ? '...' : countAllFiles(node)}</span>
+          <span className="truncate text-[0.6875rem] font-medium text-[var(--text-2)]">{node.name}</span>
+          <span className="text-[0.625rem] text-[var(--text-3)] tabular-nums shrink-0">{isLoadingDir ? '...' : countAllFiles(node)}</span>
         </button>
         {isExpanded && (
           <>
@@ -352,7 +352,7 @@ export default function ArtifactTree({
               aria-label="Filter files"
               value={fileSearch}
               onChange={e => setFileSearch(e.target.value)}
-              className="border-none outline-none bg-transparent flex-1 text-[11px] text-[var(--text-1)] font-[inherit] min-w-0"
+              className="border-none outline-none bg-transparent flex-1 text-[0.6875rem] text-[var(--text-1)] font-[inherit] min-w-0"
             />
           </div>
         </div>
@@ -369,11 +369,11 @@ export default function ArtifactTree({
             <div className="w-12 h-12 rounded-xl bg-[var(--bg-surface)] border border-[var(--border)] flex items-center justify-center">
               <File size={20} className="text-[var(--text-3)]" />
             </div>
-            <div className="text-[var(--text-3)] text-[13px]">
+            <div className="text-[var(--text-3)] text-[0.8125rem]">
               {fileSearch ? 'No files match' : 'No files yet'}
             </div>
             {!fileSearch && (
-              <div className="text-[var(--text-3)] text-[11px] leading-normal">
+              <div className="text-[var(--text-3)] text-[0.6875rem] leading-normal">
                 Files will appear here as agents generate them
               </div>
             )}

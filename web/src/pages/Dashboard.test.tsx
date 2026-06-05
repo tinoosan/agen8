@@ -80,13 +80,13 @@ describe('Dashboard page', () => {
     expect(lastCall).toMatchObject({ projectId: 'proj-1', mode: 'active' })
   })
 
-  it('opens the dashboard context panel on the overview route', () => {
+  it('opens the dashboard context panel with the missions panel by default', () => {
     renderPage()
 
     expect(mockDashboardContextPanel).toHaveBeenCalled()
     const lastCall = mockDashboardContextPanel.mock.calls.at(-1)?.[0] as { open: boolean; panel: string }
     expect(lastCall?.open).toBe(true)
-    expect(lastCall?.panel).toBe('overview')
+    expect(lastCall?.panel).toBe('missions')
   })
 
   it('prompts for a project when none is focused', () => {

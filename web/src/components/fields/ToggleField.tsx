@@ -20,7 +20,7 @@ export function ToggleField({ label, description, checked, onChange }: {
       >
         <Label className={`block text-xs font-medium text-[var(--text-2)] cursor-pointer ${description ? 'mb-0.5' : 'mb-0'}`}>{label}</Label>
         {description && (
-          <div className="text-[11px] text-[var(--text-3)] leading-[1.4]">{description}</div>
+          <div className="text-[0.6875rem] text-[var(--text-3)] leading-[1.4]">{description}</div>
         )}
       </div>
     </div>

@@ -1,6 +1,6 @@
 /**
  * Sidebar — the main navigation shell. Composes extracted sub-components
- * (ProjectSwitcher, SpaceList, MissionSection, AccountChip) into the
+ * (MissionSection, GlobalContent, AccountChip) into the
  * shadcn sidebar layout with header, scrollable content, and footer.
  *
  * This file owns only:
@@ -11,7 +11,7 @@
  *
  * All heavy sub-components live in `./sidebar/`.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
 import {
   BarChart3, Network, Plus, PanelLeft,
@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 import { useNavigation, dashboardLink } from '../lib/routing'
 import { useStore } from '../lib/store'
 import CreateMissionDialog from './mission/CreateMissionDialog'
-import { ProjectSwitcher, AccountChip, MissionsSidebarSection, GlobalSidebarContent } from './sidebar-parts'
+import { AccountChip, MissionsSidebarSection, GlobalSidebarContent } from './sidebar-parts'
 import {
   Sidebar as ShadcnSidebar,
   SidebarContent,
@@ -32,14 +32,21 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '@/components/ui/sidebar'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 
 import agen8IconDark from '../assets/agen8-app-icon-dark.svg'
 import agen8IconLight from '../assets/agen8-app-icon-light.svg'
 
 /* ── Style constants ─────────────────────────────────── */
 
-const ROW_BASE = 'mx-1 rounded-[6px] px-2.5 py-[5px] text-[13px] font-normal'
+const ROW_BASE = 'mx-1 rounded-[6px] px-2.5 py-[5px] text-[0.8125rem] font-normal'
 const ROW_STYLE = { letterSpacing: '-0.08px' } as const
+const BRAND_STYLE = { fontSize: '0.875rem', fontWeight: 600, letterSpacing: '-0.02em' } as const
 const ROW_ACTIVE = 'bg-[var(--bg-active)] text-[var(--text-1)]'
 const ROW_IDLE = 'text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-2)]'
 
@@ -62,7 +69,7 @@ function SectionAddButton({ onClick, label, tourAnchor }: { onClick: () => void;
 function SidebarSectionLabel({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="mx-3.5 mb-1 mt-2.5 flex items-center gap-2">
-      <span className="flex-1 text-[10px] font-semibold uppercase text-[var(--text-3)]" style={{ letterSpacing: '0.06em' }}>
+      <span className="flex-1 text-[0.625rem] font-semibold uppercase text-[var(--text-3)]" style={{ letterSpacing: '0.06em' }}>
         {children}
       </span>
       {action}
@@ -89,14 +96,21 @@ function SidebarCollapseToggle() {
 /* ── Sidebar ─────────────────────────────────────────── */
 
 export default function Sidebar() {
-  const [, navigate] = useLocation()
+  const [location, navigate] = useLocation()
   const theme = useStore((s) => s.theme)
-  const { state } = useSidebar()
+  const { state, isMobile, openMobile, setOpenMobile } = useSidebar()
   const collapsed = state === 'collapsed'
   const { activeView, setActiveView, focusedProjectRoot, projectId } = useNavigation()
   const hasProject = !!focusedProjectRoot
 
   const [createMissionOpen, setCreateMissionOpen] = useState(false)
+
+  // Close the mobile drawer whenever the route changes (e.g. tapping a nav link).
+  // Depend only on `location` so opening the drawer doesn't immediately re-close it.
+  useEffect(() => {
+    setOpenMobile(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location])
 
   const SIDEBAR_CARD_CHROME = [
     'agen8-sidebar-shell',
@@ -106,35 +120,40 @@ export default function Sidebar() {
     'backdrop-blur-xl',
   ].join(' ')
 
-  // Collapsed: thin icon column
-  if (collapsed) {
-    return (
-      <nav
-        className="agen8-sidebar-collapsed-overlay absolute left-2 top-3 z-30 flex flex-col items-center"
-        aria-label="Sidebar (collapsed)"
-      >
-        <SidebarCollapseToggle />
-      </nav>
-    )
-  }
-
-  return (
-    <ShadcnSidebar
-      collapsible="none"
-      className={cn('!w-[272px] overflow-hidden', SIDEBAR_CARD_CHROME)}
-    >
+  const body = (
+    <>
       <SidebarHeader className="p-0 gap-0 shrink-0">
         <div className="flex items-center gap-1.5 px-3.5 h-[46px] shrink-0">
-          <img
-            src={theme === 'light' ? agen8IconLight : agen8IconDark}
-            alt=""
-            className="w-5 h-5 shrink-0 rounded-[5px] select-none"
-            draggable={false}
-            aria-hidden="true"
-          />
-          <div className="flex-1 min-w-0">
-            <ProjectSwitcher />
-          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="group flex flex-1 min-w-0 items-center gap-1.5 border-none bg-transparent p-0 text-left cursor-pointer"
+            aria-label="All projects"
+            title="All projects"
+          >
+            <img
+              src={theme === 'light' ? agen8IconLight : agen8IconDark}
+              alt=""
+              className="w-5 h-5 shrink-0 rounded-[5px] select-none"
+              draggable={false}
+              aria-hidden="true"
+            />
+            <span
+              className="flex-1 min-w-0 truncate text-[var(--text-1)] group-hover:text-[var(--accent)] transition-colors"
+              style={BRAND_STYLE}
+            >
+              agen8
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/?new=true')}
+            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-[6px] border-none bg-transparent cursor-pointer text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors"
+            title="New project"
+            aria-label="New project"
+          >
+            <Plus size={15} />
+          </button>
           <SidebarCollapseToggle />
         </div>
       </SidebarHeader>
@@ -185,8 +204,8 @@ export default function Sidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className={cn('p-0 gap-0 shrink-0', collapsed && 'hidden')}>
-        <div className="px-3.5 py-2.5">
+      <SidebarFooter className={cn('p-0 gap-0 shrink-0', !isMobile && collapsed && 'hidden')}>
+        <div className="px-2.5 pt-1 pb-2">
           <AccountChip />
         </div>
       </SidebarFooter>
@@ -198,6 +217,44 @@ export default function Sidebar() {
           onOpenChange={setCreateMissionOpen}
         />
       )}
+    </>
+  )
+
+  // Mobile: off-canvas drawer (the desktop collapsed-overlay never applies here)
+  if (isMobile) {
+    return (
+      <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+        <SheetContent
+          side="left"
+          className={cn('w-[288px] max-w-[85vw] p-0 gap-0 [&>button]:hidden', SIDEBAR_CARD_CHROME)}
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>Navigation</SheetTitle>
+          </SheetHeader>
+          <div className="flex h-full w-full flex-col">{body}</div>
+        </SheetContent>
+      </Sheet>
+    )
+  }
+
+  // Collapsed: thin icon column (desktop only)
+  if (collapsed) {
+    return (
+      <nav
+        className="agen8-sidebar-collapsed-overlay absolute left-2 top-3 z-30 flex flex-col items-center"
+        aria-label="Sidebar (collapsed)"
+      >
+        <SidebarCollapseToggle />
+      </nav>
+    )
+  }
+
+  return (
+    <ShadcnSidebar
+      collapsible="none"
+      className={cn('!w-[272px] overflow-hidden', SIDEBAR_CARD_CHROME)}
+    >
+      {body}
     </ShadcnSidebar>
   )
 }

@@ -182,10 +182,10 @@ export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps
         </div>
         <div className="flex flex-col items-center gap-[2px]">
           <span className="text-foreground truncate text-center font-medium transition-opacity duration-200"
-            style={{ fontSize: '11px', lineHeight: '14px', maxWidth: 170 }}>
+            style={{ fontSize: '0.6875rem', lineHeight: '14px', maxWidth: 170 }}>
             {task.title ?? task.description}
           </span>
-          <span className="flex items-center gap-1 text-[9.5px] font-medium leading-none text-muted-foreground">
+          <span className="flex items-center gap-1 text-[0.59375rem] font-medium leading-none text-muted-foreground">
             <span className="shrink-0" style={{ color: statusMeta.tone }}>{statusMeta.label}</span>
             {ownerLabel && (
               <>

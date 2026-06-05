@@ -35,7 +35,7 @@ const agen8EditorTheme = EditorView.theme({
     color: 'var(--text-1)',
     backgroundColor: 'transparent',
     fontFamily: 'var(--font-mono, "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, monospace)',
-    fontSize: '12px',
+    fontSize: '0.75rem',
   },
   '.cm-scroller': {
     fontFamily: 'inherit',
@@ -58,7 +58,7 @@ const agen8EditorTheme = EditorView.theme({
   '.cm-lineNumbers .cm-gutterElement': {
     minWidth: '3.2em',
     padding: '0 12px 0 8px',
-    fontSize: '10px',
+    fontSize: '0.625rem',
     opacity: '0.68',
   },
   '.cm-activeLine': {

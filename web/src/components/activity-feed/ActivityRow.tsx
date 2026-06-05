@@ -152,12 +152,12 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
         const mode = event.data?.writeMode
         const lang = guessLang(event.path ?? '')
         d[mode === 'created' ? 'New file' : 'Written content'] = (
-          <Suspense fallback={<pre className="mono m-0 px-2.5 py-2 text-[11px] rounded-[var(--r-md)] bg-[var(--bg-app)] overflow-x-auto">{event.textPreview}</pre>}>
+          <Suspense fallback={<pre className="mono m-0 px-2.5 py-2 text-[0.6875rem] rounded-[var(--r-md)] bg-[var(--bg-app)] overflow-x-auto">{event.textPreview}</pre>}>
             <ActivityCodeBlock code={event.textPreview} language={lang} compact showLineNumbers />
           </Suspense>
         )
         if (event.textTruncated) {
-          d[''] = <span className="text-[10px] text-[var(--text-3)] italic">preview truncated</span>
+          d[''] = <span className="text-[0.625rem] text-[var(--text-3)] italic">preview truncated</span>
         }
       }
     }
@@ -170,11 +170,11 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
         d['Spaces'] = (
           <div className="flex flex-col gap-1">
             {rows.map((row, idx) => (
-              <div key={`${row.displayName}-${idx}`} className="text-[11px]">
+              <div key={`${row.displayName}-${idx}`} className="text-[0.6875rem]">
                 <span className="font-medium">{row.displayName}</span>
                 {row.status && <span className="text-[var(--text-3)]"> · {row.status}</span>}
-                {row.coordinatorRole && <div className="text-[10px] text-[var(--text-3)]">coordinator: {row.coordinatorRole}</div>}
-                {row.roles.length > 0 && <div className="text-[10px] text-[var(--text-3)]">roles: {row.roles.join(', ')}</div>}
+                {row.coordinatorRole && <div className="text-[0.625rem] text-[var(--text-3)]">coordinator: {row.coordinatorRole}</div>}
+                {row.roles.length > 0 && <div className="text-[0.625rem] text-[var(--text-3)]">roles: {row.roles.join(', ')}</div>}
               </div>
             ))}
           </div>
@@ -257,7 +257,7 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
 
           {/* Role text label */}
           {role && (
-            <span className="text-[10px] font-semibold text-[var(--text-3)] tracking-[0.04em] uppercase shrink-0">
+            <span className="text-[0.625rem] font-semibold text-[var(--text-3)] tracking-[0.04em] uppercase shrink-0">
               {role}
             </span>
           )}
@@ -279,14 +279,14 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
 
           {/* Inline file path */}
           {inlinePath && (
-            <span className="mono text-[10px] text-[var(--text-3)] shrink-0">
+            <span className="mono text-[0.625rem] text-[var(--text-3)] shrink-0">
               {inlinePath}
             </span>
           )}
 
           {/* Inline command for exec events */}
           {inlineCommand && (
-            <span className="mono truncate text-[10px] text-[var(--text-2)] max-w-[160px]">
+            <span className="mono truncate text-[0.625rem] text-[var(--text-2)] max-w-[160px]">
               {inlineCommand}
             </span>
           )}
@@ -294,7 +294,7 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
           {/* Inline exit code */}
           {inlineExitCode != null && (
             <span className={clsx(
-              'mono text-[9px] shrink-0 font-semibold',
+              'mono text-[0.5625rem] shrink-0 font-semibold',
               String(inlineExitCode) === '0' ? 'text-[var(--green)]' : 'text-[var(--red)]',
             )}>
               {String(inlineExitCode) === '0' ? 'ok' : `exit ${inlineExitCode}`}
@@ -303,7 +303,7 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
 
           {/* Inline spawned role */}
           {inlineSpawnRole && (
-            <span className="text-[11px] text-[var(--accent)] font-medium">
+            <span className="text-[0.6875rem] text-[var(--accent)] font-medium">
               {inlineSpawnRole}
             </span>
           )}
@@ -315,21 +315,21 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
 
           {/* Inline error (red, visible without expanding) */}
           {inlineError && !expanded && (
-            <span className="truncate text-[11px] text-[var(--red)] max-w-[200px] shrink">
+            <span className="truncate text-[0.6875rem] text-[var(--red)] max-w-[200px] shrink">
               {inlineError}
             </span>
           )}
 
           {/* Duration */}
           {duration != null && duration > 0 && (
-            <span className="text-[10px] text-[var(--text-3)] tabular-nums shrink-0">
+            <span className="text-[0.625rem] text-[var(--text-3)] tabular-nums shrink-0">
               {formatDuration(duration)}
             </span>
           )}
 
           {/* Relative timestamp */}
           {event.startedAt && (
-            <span className="text-[10px] text-[var(--text-3)] tabular-nums shrink-0 ml-1">
+            <span className="text-[0.625rem] text-[var(--text-3)] tabular-nums shrink-0 ml-1">
               {relativeTime(event.startedAt)}
             </span>
           )}
@@ -346,13 +346,13 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
               return (
                 <div key={key} className="px-2.5 py-1.5" style={{ borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
                   {key && (
-                    <div className="text-[9px] font-semibold text-[var(--text-3)] uppercase tracking-[0.04em] mb-1">
+                    <div className="text-[0.5625rem] font-semibold text-[var(--text-3)] uppercase tracking-[0.04em] mb-1">
                       {key}
                     </div>
                   )}
                   <div
                     className={clsx(
-                      'text-[11px]',
+                      'text-[0.6875rem]',
                       !isRich && 'text-[var(--text-2)] whitespace-pre-wrap break-words max-h-[250px] overflow-y-auto',
                     )}
                   >

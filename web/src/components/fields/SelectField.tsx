@@ -18,7 +18,7 @@ export function SelectField({ label, value, onChange, options, description }: {
         className="w-full max-w-[280px] border-[var(--border)] bg-transparent"
       />
       {description && (
-        <span className="text-[11px] text-[var(--text-3)] mt-1 block">{description}</span>
+        <span className="text-[0.6875rem] text-[var(--text-3)] mt-1 block">{description}</span>
       )}
     </div>
   )

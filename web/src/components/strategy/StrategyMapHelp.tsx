@@ -92,9 +92,9 @@ export function StrategyMapHelp({ open, onOpenChange }: StrategyMapHelpProps) {
             // Override shadcn's default text-lg + tracking-tight classes so we
             // can hit Apple's spec precisely. The `!` prefixes beat shadcn's
             // base utilities on specificity.
-            className="!text-[20px] !font-semibold !tracking-normal !leading-none"
+            className="!text-[1.25rem] !font-semibold !tracking-normal !leading-none"
             style={{
-              fontSize: '20px',
+              fontSize: '1.25rem',
               fontWeight: 600,
               lineHeight: 1.14,
               letterSpacing: '-0.2px',
@@ -151,7 +151,7 @@ export function StrategyMapHelp({ open, onOpenChange }: StrategyMapHelpProps) {
                   className="uppercase"
                   style={{
                     // Apple-style eyebrow — 11px semibold with wide tracking.
-                    fontSize: '11px',
+                    fontSize: '0.6875rem',
                     fontWeight: 600,
                     lineHeight: 1,
                     letterSpacing: '0.08em',
@@ -171,7 +171,7 @@ export function StrategyMapHelp({ open, onOpenChange }: StrategyMapHelpProps) {
                       <span
                         style={{
                           // Apple Caption — 14px, weight 400, tracking -0.224px.
-                          fontSize: '14px',
+                          fontSize: '0.875rem',
                           fontWeight: 400,
                           lineHeight: 1.43,
                           letterSpacing: '-0.224px',
@@ -199,7 +199,7 @@ export function StrategyMapHelp({ open, onOpenChange }: StrategyMapHelpProps) {
                               background: 'var(--bg-surface)',
                               color: 'var(--text-2)',
                               fontFamily: 'SF Mono, Menlo, monospace',
-                              fontSize: '11px',
+                              fontSize: '0.6875rem',
                               fontWeight: 500,
                               lineHeight: 1,
                               letterSpacing: '-0.12px',

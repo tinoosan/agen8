@@ -102,12 +102,12 @@ export default function ArtifactPreviewPane({
         <div className={isCompact ? 'flex min-w-0 items-start justify-between gap-3' : 'flex-1 min-w-0'}>
           <div className="min-w-0">
             {showHeaderTitle && (
-              <div className="mono truncate text-[13px] text-[var(--text-1)] font-semibold">
+              <div className="mono truncate text-[0.8125rem] text-[var(--text-1)] font-semibold">
                 {selectedPath}
               </div>
             )}
             {(content || contentKind !== 'text') && (
-              <div className={cn('flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-[var(--text-3)] tabular-nums', showHeaderTitle && 'mt-1')}>
+              <div className={cn('flex flex-wrap gap-x-2 gap-y-1 text-[0.625rem] text-[var(--text-3)] tabular-nums', showHeaderTitle && 'mt-1')}>
                 {isText && <span>{lineCount} lines</span>}
                 <span>{formatBytes(byteCount)}</span>
                 {contentType && <span className="max-w-[220px] truncate">{contentType}</span>}
@@ -127,7 +127,7 @@ export default function ArtifactPreviewPane({
                 aria-label="Search file content"
                 value={contentSearch}
                 onChange={e => setContentSearch(e.target.value)}
-                className="min-w-0 flex-1 border-none bg-transparent text-[11px] text-[var(--text-1)] outline-none font-[inherit] sm:w-[120px]"
+                className="min-w-0 flex-1 border-none bg-transparent text-[0.6875rem] text-[var(--text-1)] outline-none font-[inherit] sm:w-[120px]"
               />
             </div>
           )}
@@ -136,14 +136,14 @@ export default function ArtifactPreviewPane({
             <div className="flex items-center rounded-[var(--r-sm)] border border-[var(--border)] overflow-hidden">
               <button
                 onClick={() => setSvgMode('preview')}
-                className="px-2.5 py-1 text-[11px]"
+                className="px-2.5 py-1 text-[0.6875rem]"
                 style={{ background: svgMode === 'preview' ? 'var(--bg-active)' : 'transparent', color: 'var(--text-1)' }}
               >
                 Preview
               </button>
               <button
                 onClick={() => setSvgMode('source')}
-                className="px-2.5 py-1 text-[11px] border-l border-[var(--border)]"
+                className="px-2.5 py-1 text-[0.6875rem] border-l border-[var(--border)]"
                 style={{ background: svgMode === 'source' ? 'var(--bg-active)' : 'transparent', color: 'var(--text-1)' }}
               >
                 Source
@@ -225,7 +225,7 @@ export default function ArtifactPreviewPane({
             <div className="text-xs text-[var(--text-2)] leading-[1.6]">
               {truncated ? 'Preview/download unavailable in viewer due to size.' : 'This file type is detected correctly, but inline preview is not supported in v1.'}
             </div>
-            <div className="mono text-[11px] text-[var(--text-2)] leading-[1.8]">
+            <div className="mono text-[0.6875rem] text-[var(--text-2)] leading-[1.8]">
               <div>Name: {basename(selectedPath)}</div>
               <div>Type: {contentType || 'application/octet-stream'}</div>
               <div>Size: {formatBytes(byteCount)}</div>
@@ -233,14 +233,14 @@ export default function ArtifactPreviewPane({
             </div>
           </div>
         ) : isMd ? (
-          <div className="md-prose text-[13.5px] text-[var(--text-1)] leading-[1.7] max-w-[680px]">
+          <div className="md-prose text-[0.84375rem] text-[var(--text-1)] leading-[1.7] max-w-[680px]">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
         ) : isText ? (
           <CodeView content={content} filePath={selectedPath} search={contentSearch} />
         ) : null}
         {truncated && (
-          <div className="mt-3 text-[11px] text-[var(--text-3)] px-2.5 py-1.5 bg-[var(--bg-surface)] rounded-[var(--r-sm)] border border-[var(--border)] inline-flex items-center gap-1">
+          <div className="mt-3 text-[0.6875rem] text-[var(--text-3)] px-2.5 py-1.5 bg-[var(--bg-surface)] rounded-[var(--r-sm)] border border-[var(--border)] inline-flex items-center gap-1">
             Preview truncated at {bytesRead.toLocaleString()} bytes
           </div>
         )}

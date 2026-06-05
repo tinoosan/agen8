@@ -33,8 +33,8 @@ function Placeholder({ icon: Icon, title, detail }: { icon: typeof FileText; tit
   return (
     <div className="flex flex-col items-center justify-center h-full gap-1.5 px-6">
       <Icon className="h-5 w-5 mb-1" style={{ color: 'var(--text-3)' }} />
-      <p className="text-[13px] font-medium" style={{ color: 'var(--text-1)' }}>{title}</p>
-      <p className="text-[12px] text-center max-w-xs" style={{ color: 'var(--text-3)' }}>{detail}</p>
+      <p className="text-[0.8125rem] font-medium" style={{ color: 'var(--text-1)' }}>{title}</p>
+      <p className="text-[0.75rem] text-center max-w-xs" style={{ color: 'var(--text-3)' }}>{detail}</p>
     </div>
   )
 }
@@ -240,9 +240,9 @@ td,th{border:1px solid #ddd;padding:8px}th{background:#f5f5f5}blockquote{border-
         ) : (
           <>
             <FileText className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--text-3)' }} />
-            <span className="text-[12px] font-medium truncate" style={{ color: 'var(--text-2)' }}>{fileName}</span>
+            <span className="text-[0.75rem] font-medium truncate" style={{ color: 'var(--text-2)' }}>{fileName}</span>
             {preview?.fileSize != null && (
-              <span className="text-[11px] shrink-0" style={{ color: 'var(--text-4)' }}>{formatBytes(preview.fileSize)}</span>
+              <span className="text-[0.6875rem] shrink-0" style={{ color: 'var(--text-4)' }}>{formatBytes(preview.fileSize)}</span>
             )}
           </>
         )}
@@ -253,7 +253,7 @@ td,th{border:1px solid #ddd;padding:8px}th{background:#f5f5f5}blockquote{border-
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 px-2 text-[11px] gap-1 shrink-0"
+              className="h-6 px-2 text-[0.6875rem] gap-1 shrink-0"
               onClick={handleCancelEdit}
               disabled={saving}
             >
@@ -261,7 +261,7 @@ td,th{border:1px solid #ddd;padding:8px}th{background:#f5f5f5}blockquote{border-
             </Button>
             <Button
               size="sm"
-              className="h-6 px-2.5 text-[11px] gap-1 shrink-0"
+              className="h-6 px-2.5 text-[0.6875rem] gap-1 shrink-0"
               onClick={handleSave}
               disabled={saving}
             >
@@ -306,19 +306,19 @@ td,th{border:1px solid #ddd;padding:8px}th{background:#f5f5f5}blockquote{border-
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 px-2 text-[11px] gap-1 shrink-0"
+                  className="h-6 px-2 text-[0.6875rem] gap-1 shrink-0"
                   onClick={handleStartEdit}
                 >
                   <Pencil className="h-2.5 w-2.5" /> Edit
                 </Button>
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1 shrink-0" onClick={() => { void handleCopyContent() }}>
+                <Button variant="ghost" size="sm" className="h-6 px-2 text-[0.6875rem] gap-1 shrink-0" onClick={() => { void handleCopyContent() }}>
                   <Copy className="h-2.5 w-2.5" /> Copy content
                 </Button>
                 <div className="w-px h-3.5 shrink-0" style={{ background: 'var(--border)' }} />
-                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px] gap-1 shrink-0" onClick={handleExportMD}>
+                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[0.6875rem] gap-1 shrink-0" onClick={handleExportMD}>
                   <Download className="h-2.5 w-2.5" /> MD
                 </Button>
-                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px] gap-1 shrink-0" onClick={handleExportHTML}>
+                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[0.6875rem] gap-1 shrink-0" onClick={handleExportHTML}>
                   <Download className="h-2.5 w-2.5" /> HTML
                 </Button>
               </>
@@ -335,7 +335,7 @@ td,th{border:1px solid #ddd;padding:8px}th{background:#f5f5f5}blockquote{border-
               ref={textareaRef}
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
-              className="w-full h-full resize-none border-0 outline-none p-6 text-[13px] leading-[1.7]"
+              className="w-full h-full resize-none border-0 outline-none p-6 text-[0.8125rem] leading-[1.7]"
               style={{
                 background: 'transparent',
                 color: 'var(--text-1)',
@@ -348,8 +348,8 @@ td,th{border:1px solid #ddd;padding:8px}th{background:#f5f5f5}blockquote{border-
         ) : (
           <div
             className={isSlideover
-              ? 'md-prose text-[13.5px] leading-[1.7] max-w-[760px] mx-auto py-5 px-6'
-              : 'md-prose text-[13.5px] leading-[1.7] max-w-[680px] mx-auto py-6 px-6'}
+              ? 'md-prose text-[0.84375rem] leading-[1.7] max-w-[760px] mx-auto py-5 px-6'
+              : 'md-prose text-[0.84375rem] leading-[1.7] max-w-[680px] mx-auto py-6 px-6'}
             style={{ color: 'var(--text-1)' }}
           >
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{content}</ReactMarkdown>
@@ -360,14 +360,14 @@ td,th{border:1px solid #ddd;padding:8px}th{background:#f5f5f5}blockquote{border-
       {/* Edit mode footer */}
       {isEditing && (
         <div
-          className="flex items-center justify-between h-7 px-3 text-[11px] shrink-0 border-t"
+          className="flex items-center justify-between h-7 px-3 text-[0.6875rem] shrink-0 border-t"
           style={{ color: 'var(--text-3)', borderColor: 'var(--border)' }}
         >
           <span>Editing markdown source</span>
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 px-1.5 text-[10px] gap-1"
+            className="h-5 px-1.5 text-[0.625rem] gap-1"
             onClick={() => {
               // Preview: toggle back to read with current edit content
               // (not saved yet — just a preview)

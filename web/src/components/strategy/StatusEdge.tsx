@@ -116,7 +116,7 @@ export const StatusEdge = memo(function StatusEdge({
               background: 'var(--bg-panel)',
               padding: '2px 8px',
               borderRadius: 4,
-              fontSize: 9,
+              fontSize: '0.5625rem',
               fontWeight: 600,
               color: strokeColor,
               letterSpacing: '0.02em',

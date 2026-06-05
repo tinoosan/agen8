@@ -36,7 +36,7 @@ export function CollapsibleSection({
         {open
           ? <ChevronDown size={10} style={{ color: accent ?? 'var(--text-3)', flexShrink: 0 }} />
           : <ChevronRight size={10} style={{ color: accent ?? 'var(--text-3)', flexShrink: 0 }} />}
-        <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: accent ?? 'var(--text-3)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: accent ?? 'var(--text-3)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
           {icon}
           {label}
         </span>

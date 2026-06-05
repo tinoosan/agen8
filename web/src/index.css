@@ -1,5 +1,13 @@
 @import "tailwindcss";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource/atkinson-hyperlegible";
+@import "@fontsource-variable/source-serif-4";
+@import "@fontsource-variable/lora";
+@import "@fontsource-variable/fraunces";
+@import "@fontsource-variable/jetbrains-mono";
 
 /*
  * shadcn/ui color bridge — maps Tailwind utility classes (bg-primary, text-muted-foreground, etc.)
@@ -108,9 +116,23 @@
   --r-xl: 16px;
   --r-2xl: 20px;
 
-  /* Typography */
-  --font-sans: 'Aptos', 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+  /* Typography — each typeface option resolves to a bundled variable font
+     first (guaranteed identical rendering across machines) then a graceful
+     native fallback. The selected family flows through --app-font, which is
+     swapped per [data-font-family]; --font-sans stays the canonical default. */
+  --font-inter: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-geist: 'Geist Variable', 'Inter Variable', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-figtree: 'Figtree Variable', 'Inter Variable', -apple-system, system-ui, sans-serif;
+  --font-space-grotesk: 'Space Grotesk Variable', 'Inter Variable', system-ui, sans-serif;
+  --font-atkinson: 'Atkinson Hyperlegible', 'Inter Variable', system-ui, sans-serif;
+  --font-system: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Helvetica Neue', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  --font-serif: 'Source Serif 4 Variable', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --font-lora: 'Lora Variable', 'Iowan Old Style', Georgia, serif;
+  --font-fraunces: 'Fraunces Variable', 'Iowan Old Style', Georgia, serif;
+  --font-sans: var(--font-inter);
+  --app-font: var(--font-inter);
+  --app-font-scale: 16px;
 
   /* Line heights */
   --lh-tight: 1.3;
@@ -375,11 +397,521 @@
   --space-color-pink: hsl(320, 65%, 55%);
 }
 
+/* ── Midnight theme (OLED true-black) ──────────────
+ * Dark-family variant that drops the canvas to pure #000 for OLED
+ * panels (genuine pixel-off black, deeper contrast). Borders are lifted
+ * a touch since hairlines disappear against pure black, and shadows are
+ * darkened so elevation still reads when the base can't go any lower.
+ * Status/accent hues inherit from :root (the dark default). */
+[data-theme="midnight"] {
+  --bg-app: #000000;
+  --bg-panel: #0a0a0d;
+  --bg-surface: #131317;
+  --bg-elevated: #1c1c22;
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.10);
+
+  --border: rgba(255, 255, 255, 0.11);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-focus: rgba(255, 255, 255, 0.22);
+
+  --map-bg: hsl(222, 12%, 4%);
+  --map-vignette: rgba(0, 0, 0, 0.30);
+
+  --text-1: #f5f5f8;
+  --text-2: #a0a0b0;
+  --text-3: #6a6a7e;
+
+  --accent: #3b82f6;
+  --accent-dim: rgba(59, 130, 246, 0.16);
+  --accent-glow: rgba(59, 130, 246, 0.10);
+  --accent-solid: rgba(59, 130, 246, 0.95);
+
+  --bubble-user-bg: #16161a;
+
+  --dashboard-rail-bg: color-mix(in srgb, var(--bg-panel) 70%, #000 30%);
+  --dashboard-subsurface-bg: color-mix(in srgb, var(--bg-surface) 74%, #000 26%);
+  --dashboard-hover-fill: color-mix(in srgb, var(--bg-hover) 56%, var(--bg-surface) 44%);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.7);
+  --shadow-xl: 0 18px 48px rgba(0, 0, 0, 0.7);
+  --shadow-overlay: 0 24px 80px rgba(0, 0, 0, 0.85);
+  --overlay-bg: rgba(0, 0, 0, 0.66);
+
+  --bg-code: rgba(255, 255, 255, 0.04);
+  --text-4: rgba(255, 255, 255, 0.16);
+  --chart-cursor: rgba(255, 255, 255, 0.05);
+
+  --sidebar-shell-bg: rgba(0, 0, 0, 0.85);
+  --sidebar-shell-border: rgba(255, 255, 255, 0.07);
+  --sidebar-shell-shadow: none;
+}
+
+/* ── Nebula theme (dark + violet accent) ───────────
+ * Dark-family variant with a faint violet tint in the surfaces and a
+ * violet primary. Status hues are warmed/brightened so they read as part
+ * of the same palette rather than the default blue-leaning set. */
+[data-theme="nebula"] {
+  --bg-app: #16151d;
+  --bg-panel: #1c1b26;
+  --bg-surface: #242230;
+  --bg-elevated: #2d2b3c;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: rgba(255, 255, 255, 0.09);
+
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.17);
+  --border-focus: rgba(168, 130, 255, 0.30);
+
+  --map-bg: hsl(258, 18%, 11%);
+  --map-vignette: rgba(0, 0, 0, 0.18);
+
+  --text-1: #f1f0f7;
+  --text-2: #a39fb8;
+  --text-3: #6f6a85;
+
+  --accent: #8b5cf6;
+  --accent-dim: rgba(139, 92, 246, 0.16);
+  --accent-glow: rgba(139, 92, 246, 0.10);
+  --accent-solid: rgba(139, 92, 246, 0.92);
+
+  --green: #34d399;
+  --green-dim: rgba(52, 211, 153, 0.13);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251, 191, 36, 0.13);
+  --red: #fb7185;
+  --red-dim: rgba(251, 113, 133, 0.13);
+  --blue: #818cf8;
+  --blue-dim: rgba(129, 140, 248, 0.13);
+
+  --bubble-user-bg: #3a2e5c;
+  --bubble-user-fg: #ffffff;
+
+  --accent-border: rgba(139, 92, 246, 0.26);
+  --accent-border-dim: rgba(139, 92, 246, 0.14);
+
+  --dashboard-rail-bg: color-mix(in srgb, var(--bg-panel) 80%, var(--accent-dim) 20%);
+  --dashboard-subsurface-bg: color-mix(in srgb, var(--bg-surface) 78%, var(--accent-dim) 22%);
+  --dashboard-hover-fill: color-mix(in srgb, var(--bg-hover) 58%, var(--accent-dim) 42%);
+
+  --apple-link: #a78bfa;
+  --bg-code: rgba(0, 0, 0, 0.22);
+
+  --diff-add-bg: rgba(52, 211, 153, 0.15);
+  --diff-add-border: rgba(52, 211, 153, 0.6);
+  --diff-del-bg: rgba(251, 113, 133, 0.15);
+  --diff-del-border: rgba(251, 113, 133, 0.6);
+  --diff-hunk-bg: rgba(139, 92, 246, 0.10);
+  --diff-hunk-border: rgba(139, 92, 246, 0.4);
+
+  --text-4: rgba(255, 255, 255, 0.18);
+  --chart-cursor: rgba(255, 255, 255, 0.04);
+
+  --sidebar-shell-bg: rgba(12, 10, 20, 0.74);
+  --sidebar-shell-border: rgba(255, 255, 255, 0.06);
+  --sidebar-shell-shadow: none;
+}
+
+/* ── Sepia theme (warm paper light) ────────────────
+ * Light-family variant tuned for long-form reading: warm paper canvas,
+ * ink-brown text, and an amber primary. Status hues shift to earthy
+ * tones (olive/sienna/clay) so nothing reads as a cold UI accent against
+ * the warm base. Needs color-scheme: light (see rule below). */
+[data-theme="sepia"] {
+  --bg-app: #f4ecd8;
+  --bg-panel: #fbf4e3;
+  --bg-surface: #efe6cf;
+  --bg-elevated: #e7dcc0;
+  --bg-hover: rgba(60, 42, 20, 0.05);
+  --bg-active: rgba(60, 42, 20, 0.09);
+
+  --border: rgba(80, 60, 30, 0.16);
+  --border-strong: rgba(80, 60, 30, 0.26);
+  --border-focus: rgba(150, 90, 40, 0.34);
+
+  --map-bg: hsl(40, 30%, 86%);
+  --map-vignette: rgba(80, 50, 20, 0.06);
+
+  --text-1: #3a2f1d;
+  --text-2: #6b5a3e;
+  --text-3: #9a876a;
+
+  --accent: #b45309;
+  --accent-dim: rgba(180, 83, 9, 0.12);
+  --accent-glow: rgba(180, 83, 9, 0.07);
+  --accent-solid: rgba(180, 83, 9, 0.92);
+
+  --green: #4d7c0f;
+  --green-dim: rgba(77, 124, 15, 0.12);
+  --amber: #b45309;
+  --amber-dim: rgba(180, 83, 9, 0.12);
+  --red: #b91c1c;
+  --red-dim: rgba(185, 28, 28, 0.12);
+  --blue: #0e7490;
+  --blue-dim: rgba(14, 116, 144, 0.12);
+
+  --bubble-user-bg: #3a2f1d;
+  --bubble-user-fg: #fbf4e3;
+
+  --accent-border: rgba(180, 83, 9, 0.26);
+  --accent-border-dim: rgba(180, 83, 9, 0.14);
+
+  --dashboard-rail-bg: color-mix(in srgb, var(--bg-panel) 88%, var(--bg-app) 12%);
+  --dashboard-subsurface-bg: color-mix(in srgb, var(--bg-surface) 80%, var(--bg-panel) 20%);
+  --dashboard-hover-fill: color-mix(in srgb, var(--bg-hover) 50%, var(--bg-surface) 50%);
+
+  --shadow-sm: 0 1px 2px rgba(80, 55, 20, 0.08);
+  --shadow-md: 0 4px 12px rgba(80, 55, 20, 0.10);
+  --shadow-lg: 0 8px 32px rgba(80, 55, 20, 0.12);
+  --shadow-xl: 0 18px 48px rgba(80, 55, 20, 0.14);
+  --shadow-overlay: 0 24px 80px rgba(80, 55, 20, 0.20);
+  --overlay-bg: rgba(50, 35, 15, 0.32);
+
+  --apple-link: #b45309;
+  --bg-code: rgba(80, 55, 20, 0.06);
+
+  --diff-add-bg: rgba(77, 124, 15, 0.12);
+  --diff-add-border: rgba(77, 124, 15, 0.5);
+  --diff-del-bg: rgba(185, 28, 28, 0.12);
+  --diff-del-border: rgba(185, 28, 28, 0.5);
+  --diff-hunk-bg: rgba(180, 83, 9, 0.08);
+  --diff-hunk-border: rgba(180, 83, 9, 0.3);
+
+  --text-4: rgba(60, 42, 20, 0.16);
+  --chart-cursor: rgba(60, 42, 20, 0.04);
+
+  --sidebar-shell-bg: rgba(251, 244, 227, 0.90);
+  --sidebar-shell-border: rgba(80, 60, 30, 0.10);
+  --sidebar-shell-shadow: 0 1px 4px rgba(80, 55, 20, 0.08);
+}
+
+/* ── Nord theme (arctic blue-grey) ─────────────────
+ * Dark-family variant built on the Nord palette: cool polar-night
+ * surfaces, snow-storm text, and a frost-blue primary. Status hues use
+ * Nord's aurora set so the whole UI stays inside one curated palette. */
+[data-theme="nord"] {
+  --bg-app: #2e3440;
+  --bg-panel: #333b4a;
+  --bg-surface: #3b4252;
+  --bg-elevated: #434c5e;
+  --bg-hover: rgba(236, 239, 244, 0.05);
+  --bg-active: rgba(236, 239, 244, 0.09);
+
+  --border: rgba(236, 239, 244, 0.10);
+  --border-strong: rgba(236, 239, 244, 0.18);
+  --border-focus: rgba(136, 192, 208, 0.34);
+
+  --map-bg: hsl(220, 16%, 18%);
+  --map-vignette: rgba(0, 0, 0, 0.18);
+
+  --text-1: #eceff4;
+  --text-2: #abb2c0;
+  --text-3: #7b8394;
+
+  --accent: #5e81ac;
+  --accent-dim: rgba(94, 129, 172, 0.18);
+  --accent-glow: rgba(94, 129, 172, 0.10);
+  --accent-solid: rgba(94, 129, 172, 0.95);
+
+  --green: #a3be8c;
+  --green-dim: rgba(163, 190, 140, 0.14);
+  --amber: #ebcb8b;
+  --amber-dim: rgba(235, 203, 139, 0.14);
+  --red: #bf616a;
+  --red-dim: rgba(191, 97, 106, 0.14);
+  --blue: #81a1c1;
+  --blue-dim: rgba(129, 161, 193, 0.14);
+
+  --bubble-user-bg: #3b4252;
+  --bubble-user-fg: #eceff4;
+
+  --accent-border: rgba(94, 129, 172, 0.28);
+  --accent-border-dim: rgba(94, 129, 172, 0.16);
+
+  --dashboard-rail-bg: color-mix(in srgb, var(--bg-panel) 82%, var(--accent-dim) 18%);
+  --dashboard-subsurface-bg: color-mix(in srgb, var(--bg-surface) 80%, var(--accent-dim) 20%);
+  --dashboard-hover-fill: color-mix(in srgb, var(--bg-hover) 60%, var(--accent-dim) 40%);
+
+  --apple-link: #88c0d0;
+  --bg-code: rgba(0, 0, 0, 0.18);
+  --diff-add-bg: rgba(163, 190, 140, 0.16);
+  --diff-add-border: rgba(163, 190, 140, 0.6);
+  --diff-del-bg: rgba(191, 97, 106, 0.16);
+  --diff-del-border: rgba(191, 97, 106, 0.6);
+  --diff-hunk-bg: rgba(94, 129, 172, 0.12);
+  --diff-hunk-border: rgba(94, 129, 172, 0.4);
+  --text-4: rgba(236, 239, 244, 0.18);
+  --chart-cursor: rgba(236, 239, 244, 0.05);
+  --sidebar-shell-bg: rgba(27, 32, 41, 0.74);
+  --sidebar-shell-border: rgba(236, 239, 244, 0.06);
+  --sidebar-shell-shadow: none;
+}
+
+/* ── Rosé theme (muted mauve dark) ─────────────────
+ * Rose-pine inspired: low-saturation plum surfaces with a soft rose
+ * primary and the rose-pine aurora (foam/gold/love/iris) for status. */
+[data-theme="rose"] {
+  --bg-app: #191724;
+  --bg-panel: #1f1d2e;
+  --bg-surface: #26233a;
+  --bg-elevated: #2f2b43;
+  --bg-hover: rgba(224, 222, 244, 0.05);
+  --bg-active: rgba(224, 222, 244, 0.09);
+
+  --border: rgba(224, 222, 244, 0.10);
+  --border-strong: rgba(224, 222, 244, 0.17);
+  --border-focus: rgba(196, 167, 231, 0.34);
+
+  --map-bg: hsl(249, 22%, 12%);
+  --map-vignette: rgba(0, 0, 0, 0.20);
+
+  --text-1: #e0def4;
+  --text-2: #908caa;
+  --text-3: #6e6a86;
+
+  --accent: #c4567a;
+  --accent-dim: rgba(196, 86, 122, 0.16);
+  --accent-glow: rgba(196, 86, 122, 0.10);
+  --accent-solid: rgba(196, 86, 122, 0.92);
+
+  --green: #9ccfd8;
+  --green-dim: rgba(156, 207, 216, 0.14);
+  --amber: #f6c177;
+  --amber-dim: rgba(246, 193, 119, 0.14);
+  --red: #eb6f92;
+  --red-dim: rgba(235, 111, 146, 0.14);
+  --blue: #c4a7e7;
+  --blue-dim: rgba(196, 167, 231, 0.14);
+
+  --bubble-user-bg: #403a5a;
+  --bubble-user-fg: #e0def4;
+
+  --accent-border: rgba(196, 86, 122, 0.28);
+  --accent-border-dim: rgba(196, 86, 122, 0.16);
+
+  --dashboard-rail-bg: color-mix(in srgb, var(--bg-panel) 82%, var(--accent-dim) 18%);
+  --dashboard-subsurface-bg: color-mix(in srgb, var(--bg-surface) 80%, var(--accent-dim) 20%);
+  --dashboard-hover-fill: color-mix(in srgb, var(--bg-hover) 60%, var(--accent-dim) 40%);
+
+  --apple-link: #c4a7e7;
+  --bg-code: rgba(0, 0, 0, 0.22);
+  --diff-add-bg: rgba(156, 207, 216, 0.14);
+  --diff-add-border: rgba(156, 207, 216, 0.6);
+  --diff-del-bg: rgba(235, 111, 146, 0.16);
+  --diff-del-border: rgba(235, 111, 146, 0.6);
+  --diff-hunk-bg: rgba(196, 86, 122, 0.12);
+  --diff-hunk-border: rgba(196, 86, 122, 0.4);
+  --text-4: rgba(224, 222, 244, 0.18);
+  --chart-cursor: rgba(224, 222, 244, 0.05);
+  --sidebar-shell-bg: rgba(15, 13, 24, 0.74);
+  --sidebar-shell-border: rgba(224, 222, 244, 0.06);
+  --sidebar-shell-shadow: none;
+}
+
+/* ── Forest theme (deep evergreen) ─────────────────
+ * Dark-family variant on a near-black green canvas with an emerald
+ * primary; status hues stay in the green/teal family for cohesion. */
+[data-theme="forest"] {
+  --bg-app: #0e1613;
+  --bg-panel: #13201b;
+  --bg-surface: #1a2c24;
+  --bg-elevated: #24382e;
+  --bg-hover: rgba(220, 245, 232, 0.05);
+  --bg-active: rgba(220, 245, 232, 0.09);
+
+  --border: rgba(220, 245, 232, 0.10);
+  --border-strong: rgba(220, 245, 232, 0.17);
+  --border-focus: rgba(16, 185, 129, 0.34);
+
+  --map-bg: hsl(160, 22%, 8%);
+  --map-vignette: rgba(0, 0, 0, 0.20);
+
+  --text-1: #e7f3ec;
+  --text-2: #94b0a3;
+  --text-3: #5f7a6e;
+
+  --accent: #059669;
+  --accent-dim: rgba(5, 150, 105, 0.16);
+  --accent-glow: rgba(5, 150, 105, 0.10);
+  --accent-solid: rgba(5, 150, 105, 0.92);
+
+  --green: #34d399;
+  --green-dim: rgba(52, 211, 153, 0.14);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251, 191, 36, 0.14);
+  --red: #f87171;
+  --red-dim: rgba(248, 113, 113, 0.14);
+  --blue: #2dd4bf;
+  --blue-dim: rgba(45, 212, 191, 0.14);
+
+  --bubble-user-bg: #1f3a30;
+  --bubble-user-fg: #e7f3ec;
+
+  --accent-border: rgba(5, 150, 105, 0.28);
+  --accent-border-dim: rgba(5, 150, 105, 0.16);
+
+  --dashboard-rail-bg: color-mix(in srgb, var(--bg-panel) 82%, var(--accent-dim) 18%);
+  --dashboard-subsurface-bg: color-mix(in srgb, var(--bg-surface) 80%, var(--accent-dim) 20%);
+  --dashboard-hover-fill: color-mix(in srgb, var(--bg-hover) 60%, var(--accent-dim) 40%);
+
+  --apple-link: #34d399;
+  --bg-code: rgba(0, 0, 0, 0.24);
+  --diff-add-bg: rgba(52, 211, 153, 0.15);
+  --diff-add-border: rgba(52, 211, 153, 0.6);
+  --diff-del-bg: rgba(248, 113, 113, 0.15);
+  --diff-del-border: rgba(248, 113, 113, 0.6);
+  --diff-hunk-bg: rgba(5, 150, 105, 0.12);
+  --diff-hunk-border: rgba(5, 150, 105, 0.4);
+  --text-4: rgba(231, 243, 236, 0.18);
+  --chart-cursor: rgba(231, 243, 236, 0.05);
+  --sidebar-shell-bg: rgba(7, 13, 11, 0.74);
+  --sidebar-shell-border: rgba(231, 243, 236, 0.06);
+  --sidebar-shell-shadow: none;
+}
+
+/* ── Ember theme (warm retro dark) ─────────────────
+ * Gruvbox-inspired: warm graphite surfaces, cream text, and a burnt-
+ * orange primary, with the gruvbox earthy status set. */
+[data-theme="ember"] {
+  --bg-app: #1d2021;
+  --bg-panel: #282828;
+  --bg-surface: #32302f;
+  --bg-elevated: #3c3836;
+  --bg-hover: rgba(235, 219, 178, 0.05);
+  --bg-active: rgba(235, 219, 178, 0.09);
+
+  --border: rgba(235, 219, 178, 0.10);
+  --border-strong: rgba(235, 219, 178, 0.18);
+  --border-focus: rgba(214, 93, 14, 0.40);
+
+  --map-bg: hsl(20, 6%, 12%);
+  --map-vignette: rgba(0, 0, 0, 0.20);
+
+  --text-1: #ebdbb2;
+  --text-2: #bdae93;
+  --text-3: #928374;
+
+  --accent: #d65d0e;
+  --accent-dim: rgba(214, 93, 14, 0.16);
+  --accent-glow: rgba(214, 93, 14, 0.10);
+  --accent-solid: rgba(214, 93, 14, 0.92);
+
+  --green: #98971a;
+  --green-dim: rgba(152, 151, 26, 0.16);
+  --amber: #d79921;
+  --amber-dim: rgba(215, 153, 33, 0.16);
+  --red: #cc241d;
+  --red-dim: rgba(204, 36, 29, 0.16);
+  --blue: #458588;
+  --blue-dim: rgba(69, 133, 136, 0.16);
+
+  --bubble-user-bg: #3c3836;
+  --bubble-user-fg: #ebdbb2;
+
+  --accent-border: rgba(214, 93, 14, 0.28);
+  --accent-border-dim: rgba(214, 93, 14, 0.16);
+
+  --dashboard-rail-bg: color-mix(in srgb, var(--bg-panel) 82%, var(--accent-dim) 18%);
+  --dashboard-subsurface-bg: color-mix(in srgb, var(--bg-surface) 80%, var(--accent-dim) 20%);
+  --dashboard-hover-fill: color-mix(in srgb, var(--bg-hover) 60%, var(--accent-dim) 40%);
+
+  --apple-link: #fe8019;
+  --bg-code: rgba(0, 0, 0, 0.22);
+  --diff-add-bg: rgba(152, 151, 26, 0.16);
+  --diff-add-border: rgba(152, 151, 26, 0.6);
+  --diff-del-bg: rgba(204, 36, 29, 0.16);
+  --diff-del-border: rgba(204, 36, 29, 0.6);
+  --diff-hunk-bg: rgba(214, 93, 14, 0.12);
+  --diff-hunk-border: rgba(214, 93, 14, 0.4);
+  --text-4: rgba(235, 219, 178, 0.18);
+  --chart-cursor: rgba(235, 219, 178, 0.05);
+  --sidebar-shell-bg: rgba(13, 14, 14, 0.76);
+  --sidebar-shell-border: rgba(235, 219, 178, 0.06);
+  --sidebar-shell-shadow: none;
+}
+
+/* ── Solarized theme (light) ───────────────────────
+ * Ethan Schoonover's Solarized Light: a low-contrast warm-paper canvas
+ * with the signature blue primary and solarized accent set. Needs
+ * color-scheme: light (see rule below). */
+[data-theme="solarized"] {
+  --bg-app: #fdf6e3;
+  --bg-panel: #fbf3df;
+  --bg-surface: #f3ecd4;
+  --bg-elevated: #eee5c9;
+  --bg-hover: rgba(101, 123, 131, 0.07);
+  --bg-active: rgba(101, 123, 131, 0.12);
+
+  --border: rgba(88, 110, 117, 0.18);
+  --border-strong: rgba(88, 110, 117, 0.30);
+  --border-focus: rgba(38, 139, 210, 0.40);
+
+  --map-bg: hsl(44, 60%, 90%);
+  --map-vignette: rgba(101, 123, 131, 0.05);
+
+  --text-1: #586e75;
+  --text-2: #657b83;
+  --text-3: #93a1a1;
+
+  --accent: #268bd2;
+  --accent-dim: rgba(38, 139, 210, 0.12);
+  --accent-glow: rgba(38, 139, 210, 0.07);
+  --accent-solid: rgba(38, 139, 210, 0.92);
+
+  --green: #859900;
+  --green-dim: rgba(133, 153, 0, 0.14);
+  --amber: #b58900;
+  --amber-dim: rgba(181, 137, 0, 0.14);
+  --red: #dc322f;
+  --red-dim: rgba(220, 50, 47, 0.12);
+  --blue: #268bd2;
+  --blue-dim: rgba(38, 139, 210, 0.12);
+
+  --bubble-user-bg: #073642;
+  --bubble-user-fg: #fdf6e3;
+
+  --accent-border: rgba(38, 139, 210, 0.26);
+  --accent-border-dim: rgba(38, 139, 210, 0.14);
+
+  --dashboard-rail-bg: color-mix(in srgb, var(--bg-panel) 88%, var(--bg-app) 12%);
+  --dashboard-subsurface-bg: color-mix(in srgb, var(--bg-surface) 80%, var(--bg-panel) 20%);
+  --dashboard-hover-fill: color-mix(in srgb, var(--bg-hover) 50%, var(--bg-surface) 50%);
+
+  --shadow-sm: 0 1px 2px rgba(101, 123, 131, 0.10);
+  --shadow-md: 0 4px 12px rgba(101, 123, 131, 0.12);
+  --shadow-lg: 0 8px 32px rgba(101, 123, 131, 0.14);
+  --shadow-xl: 0 18px 48px rgba(101, 123, 131, 0.16);
+  --shadow-overlay: 0 24px 80px rgba(101, 123, 131, 0.24);
+  --overlay-bg: rgba(7, 54, 66, 0.28);
+
+  --apple-link: #268bd2;
+  --bg-code: rgba(101, 123, 131, 0.08);
+  --diff-add-bg: rgba(133, 153, 0, 0.14);
+  --diff-add-border: rgba(133, 153, 0, 0.5);
+  --diff-del-bg: rgba(220, 50, 47, 0.12);
+  --diff-del-border: rgba(220, 50, 47, 0.5);
+  --diff-hunk-bg: rgba(38, 139, 210, 0.08);
+  --diff-hunk-border: rgba(38, 139, 210, 0.3);
+  --text-4: rgba(88, 110, 117, 0.18);
+  --chart-cursor: rgba(101, 123, 131, 0.05);
+  --sidebar-shell-bg: rgba(253, 246, 227, 0.90);
+  --sidebar-shell-border: rgba(88, 110, 117, 0.12);
+  --sidebar-shell-shadow: 0 1px 4px rgba(101, 123, 131, 0.10);
+}
+
+:root {
+  /* Root font size drives every rem-based dimension. The stepper writes
+     --app-font-scale on <html>; the fallback keeps SSR/first-paint sane. */
+  font-size: var(--app-font-scale, 16px);
+}
+
 body {
   margin: 0;
   color-scheme: dark;
-  font-family: var(--font-sans);
-  font-size: 16px;
+  font-family: var(--app-font);
+  font-size: 1rem;
   line-height: 1.5;
   font-feature-settings: 'cv01', 'cv03', 'cv04', 'ss01';
   font-variation-settings: 'slnt' 0;
@@ -392,8 +924,55 @@ body {
   line-height: var(--lh-normal);
 }
 
+/* Font preferences — the selected typeface flows through --app-font so the
+   whole body cascade follows it. Explicit var(--font-mono) code blocks stay
+   monospaced regardless. Font size is driven by --app-font-scale on :root. */
+[data-font-family="inter"] {
+  --app-font: var(--font-inter);
+}
+
+[data-font-family="geist"] {
+  --app-font: var(--font-geist);
+}
+
+[data-font-family="figtree"] {
+  --app-font: var(--font-figtree);
+}
+
+[data-font-family="space-grotesk"] {
+  --app-font: var(--font-space-grotesk);
+}
+
+[data-font-family="atkinson"] {
+  --app-font: var(--font-atkinson);
+}
+
+[data-font-family="system"] {
+  --app-font: var(--font-system);
+}
+
+[data-font-family="serif"] {
+  --app-font: var(--font-serif);
+}
+
+[data-font-family="lora"] {
+  --app-font: var(--font-lora);
+}
+
+[data-font-family="fraunces"] {
+  --app-font: var(--font-fraunces);
+}
+
+[data-font-family="mono"] {
+  --app-font: var(--font-mono);
+}
+
 [data-theme="light"] body,
-[data-theme="light"] {
+[data-theme="light"],
+[data-theme="sepia"] body,
+[data-theme="sepia"],
+[data-theme="solarized"] body,
+[data-theme="solarized"] {
   color-scheme: light;
 }
 
@@ -412,7 +991,7 @@ body {
   background: var(--accent);
   color: #fff;
   border-radius: var(--r-md);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   text-decoration: none;
   transition: top 0.15s;
@@ -496,6 +1075,34 @@ body {
 
 [data-theme="light"] ::selection {
   background: rgba(37, 99, 235, 0.22);
+}
+
+[data-theme="nebula"] ::selection {
+  background: rgba(139, 92, 246, 0.32);
+}
+
+[data-theme="sepia"] ::selection {
+  background: rgba(180, 83, 9, 0.22);
+}
+
+[data-theme="nord"] ::selection {
+  background: rgba(94, 129, 172, 0.34);
+}
+
+[data-theme="rose"] ::selection {
+  background: rgba(196, 86, 122, 0.30);
+}
+
+[data-theme="forest"] ::selection {
+  background: rgba(5, 150, 105, 0.30);
+}
+
+[data-theme="ember"] ::selection {
+  background: rgba(214, 93, 14, 0.30);
+}
+
+[data-theme="solarized"] ::selection {
+  background: rgba(38, 139, 210, 0.22);
 }
 
 /* ── Placeholder contrast ─────────────────────────── */
@@ -825,7 +1432,7 @@ body {
   gap: 6px;
   padding: 4px 8px;
   margin-left: 2px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--text-3);
   cursor: pointer;
   border: none;
@@ -981,14 +1588,6 @@ body {
   min-width: 0;
 }
 
-.dashboard-column-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--text-3) 88%, var(--text-2));
-}
-
 .dashboard-main-column {
   padding-right: 4px;
 }
@@ -1013,7 +1612,7 @@ body {
 
 .dashboard-human-loop-empty-title {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 650;
   letter-spacing: -0.12px;
 }
@@ -1021,7 +1620,7 @@ body {
 .dashboard-human-loop-empty p {
   margin: 0;
   max-width: 360px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.45;
 }
 
@@ -1069,18 +1668,6 @@ body {
   flex-wrap: wrap;
   justify-content: flex-end;
   margin-left: auto;
-}
-
-.dashboard-hero-tabs {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 72%, transparent);
-}
-
-.dashboard-hero-tab {
-  color: var(--text-3);
-}
-
-.dashboard-hero-tab[data-state="active"] {
-  color: var(--text-1);
 }
 
 .dashboard-hero-utility {
@@ -1159,112 +1746,6 @@ body {
   background: var(--accent);
 }
 
-.dashboard-context-overview {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  padding: 20px var(--dashboard-context-gutter);
-}
-
-.dashboard-context-overview-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.dashboard-context-overview-kicker {
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-
-.dashboard-context-overview-list {
-  display: flex;
-  flex-direction: column;
-  background: transparent;
-  box-shadow: none;
-  overflow: hidden;
-  border-top: 1px solid color-mix(in srgb, var(--border) 32%, transparent);
-}
-
-.dashboard-context-overview-row {
-  padding: 14px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
-}
-
-.dashboard-context-overview-row:last-child {
-  border-bottom: 0;
-}
-
-.dashboard-context-overview-label {
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-  color: var(--text-3);
-}
-
-.dashboard-context-overview-value {
-  margin-top: 4px;
-  font-size: 13px;
-  line-height: 1.45;
-  letter-spacing: -0.02em;
-  color: var(--text-1);
-}
-
-.dashboard-context-overview-action {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 15px 0;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    color 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.dashboard-context-overview-action:last-child {
-  border-bottom: 0;
-}
-
-.dashboard-context-overview-action:hover {
-  background: transparent;
-  color: var(--text-1);
-}
-
-.dashboard-context-overview-action-copy {
-  min-width: 0;
-}
-
-.dashboard-context-overview-action-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-  color: var(--text-1);
-}
-
-.dashboard-context-overview-action-copy p {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
-  letter-spacing: -0.01em;
-  color: var(--text-2);
-}
-
 .dashboard-system-pulse {
   position: relative;
   isolation: isolate;
@@ -1331,7 +1812,7 @@ body {
 .dashboard-section-title {
   display: inline-block;
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.02em;
@@ -1340,7 +1821,7 @@ body {
 
 .dashboard-section-caption {
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.35;
   color: color-mix(in srgb, var(--text-2) 72%, var(--text-3));
 }
@@ -1355,7 +1836,7 @@ body {
 }
 
 .dashboard-section-counter {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.01em;
@@ -1475,7 +1956,7 @@ body {
   border: 1px solid color-mix(in srgb, var(--border) 42%, transparent);
   background: color-mix(in srgb, var(--bg-panel) 42%, var(--bg-app) 58%);
   color: var(--text-2);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 550;
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -1532,7 +2013,7 @@ body {
   align-items: center;
   gap: 5px;
   min-width: 0;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 550;
   color: var(--text-3);
   letter-spacing: 0;
@@ -1648,13 +2129,13 @@ body {
 }
 
 .dashboard-mission-dialog-title {
-  font-size: 21px;
+  font-size: 1.3125rem;
   letter-spacing: -0.03em;
 }
 
 .dashboard-mission-dialog-copy {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
 }
 
@@ -1718,7 +2199,7 @@ body {
 
 .dashboard-date-value,
 .dashboard-date-placeholder {
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1;
   letter-spacing: -0.02em;
 }
@@ -1781,7 +2262,7 @@ body {
 }
 
 .dashboard-calendar-title {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 650;
   line-height: 1.2;
   letter-spacing: -0.03em;
@@ -1827,7 +2308,7 @@ body {
 
 .dashboard-calendar-weekdays span {
   text-align: center;
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1846,7 +2327,7 @@ body {
   border-radius: 11px;
   background: transparent;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 550;
   letter-spacing: -0.01em;
   display: inline-flex;
@@ -1893,7 +2374,7 @@ body {
   border: 0;
   background: transparent;
   padding: 4px 0;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: color-mix(in srgb, var(--accent) 44%, var(--text-2) 56%);
@@ -2027,7 +2508,7 @@ body {
   gap: 8px 12px;
   flex-wrap: wrap;
   min-width: 0;
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.25;
 }
 
@@ -2036,7 +2517,7 @@ body {
   align-items: center;
   padding: 2px 7px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -2065,7 +2546,7 @@ body {
   align-items: center;
   padding: 2px 7px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -2081,7 +2562,7 @@ body {
   align-items: center;
   gap: 5px;
   max-width: 170px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.2;
@@ -2164,7 +2645,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: color-mix(in srgb, var(--text-2) 72%, var(--accent) 28%);
 }
 
@@ -2173,7 +2654,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 9.5px;
+  font-size: 0.59375rem;
   line-height: 1.2;
   color: color-mix(in srgb, var(--text-3) 76%, var(--accent) 24%);
 }
@@ -2187,7 +2668,7 @@ body {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.25;
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
@@ -2272,7 +2753,7 @@ body {
 
 .decision-space-summary-more {
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 0.625rem;
   flex-shrink: 0;
 }
 
@@ -2282,21 +2763,10 @@ body {
 }
 
 .decision-heading-count {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-3);
-}
-
-.decision-filter-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-}
-
-.decision-filter-button {
-  min-width: 0;
 }
 
 /* Temporal grouping: generous breathing between time buckets */
@@ -2305,7 +2775,7 @@ body {
   align-items: center;
   gap: 10px;
   padding: 4px 4px 8px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2627,7 +3097,7 @@ textarea:focus {
 }
 
 [cmdk-group-heading] {
-  font-size: 10px !important;
+  font-size: 0.625rem !important;
   font-weight: 600 !important;
   letter-spacing: 0.08em !important;
   text-transform: uppercase !important;
@@ -2680,7 +3150,7 @@ textarea:focus {
 
 .panel-title {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--text-1);
   letter-spacing: -0.02em;
 }
@@ -2694,7 +3164,7 @@ textarea:focus {
 
 /* ── Labels ────────────────────────────────────────── */
 .label-micro {
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2702,7 +3172,7 @@ textarea:focus {
 }
 
 .label-sm {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2725,7 +3195,7 @@ textarea:focus {
   outline: none;
   background: transparent;
   flex: 1;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-1);
   font-family: inherit;
 }
@@ -2744,7 +3214,7 @@ textarea:focus {
 
 /* ── Section label (uppercase dim) ──────────────────── */
 .section-label {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2903,7 +3373,7 @@ textarea:focus {
   padding: 14px 16px;
   margin: 12px 0;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.55;
 }
 
@@ -2942,30 +3412,30 @@ textarea:focus {
 }
 
 .md-prose h1 {
-  font-size: 17px;
+  font-size: 1.0625rem;
   margin: 20px 0 8px;
 }
 
 .md-prose h2 {
-  font-size: 15px;
+  font-size: 0.9375rem;
   margin: 18px 0 6px;
 }
 
 .md-prose h3 {
-  font-size: 14px;
+  font-size: 0.875rem;
   margin: 14px 0 4px;
   letter-spacing: -0.22px;
 }
 
 .md-prose h4 {
-  font-size: 13px;
+  font-size: 0.8125rem;
   margin: 12px 0 4px;
   letter-spacing: -0.18px;
 }
 
 .md-prose h5,
 .md-prose h6 {
-  font-size: 12px;
+  font-size: 0.75rem;
   margin: 10px 0 4px;
   letter-spacing: -0.12px;
 }
@@ -2976,7 +3446,7 @@ textarea:focus {
   margin: 12px 0;
   max-width: 100%;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   width: 100%;
 }
 
@@ -2994,7 +3464,7 @@ textarea:focus {
 .md-prose th {
   background: var(--bg-surface);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-2);
 }
 
@@ -3087,7 +3557,7 @@ textarea:focus {
 }
 
 .kind-pill {
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3102,7 +3572,7 @@ textarea:focus {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   color: var(--text-2);
   flex-shrink: 0;
@@ -3117,7 +3587,7 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 700;
   color: var(--accent);
   text-transform: uppercase;
@@ -3140,7 +3610,7 @@ textarea:focus {
 }
 
 .time-divider span {
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 500;
   color: var(--text-3);
   letter-spacing: 0.04em;
@@ -3170,14 +3640,14 @@ textarea:focus {
 }
 
 .activity-empty .empty-text {
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--text-3);
   line-height: var(--lh-normal);
 }
 
 /* ── Context Panel sections ────────────────────────── */
 .section-count {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 500;
   color: var(--text-3);
   opacity: 0.7;
@@ -3204,7 +3674,7 @@ textarea:focus {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
   font-family: inherit;
   flex: 1;
@@ -3260,7 +3730,7 @@ textarea:focus {
   gap: 8px;
   padding: 8px 20px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-2);
   overflow: hidden;
   flex-shrink: 0;
@@ -3677,7 +4147,7 @@ button[disabled] {
 
 .space-registry-title {
   color: var(--text-1);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -3686,7 +4156,7 @@ button[disabled] {
 .space-registry-empty,
 .space-registry-meta {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.35;
 }
 
@@ -3739,7 +4209,7 @@ button[disabled] {
 
 .space-registry-name {
   color: var(--text-1);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: -0.015em;
   overflow: hidden;
@@ -3753,7 +4223,7 @@ button[disabled] {
   padding: 2px 7px;
   color: var(--green);
   background: var(--green-dim);
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 750;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3773,7 +4243,7 @@ button[disabled] {
   padding: 2px 7px;
   color: var(--text-2);
   background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
-  font-size: 10px;
+  font-size: 0.625rem;
   line-height: 1.2;
 }
 
@@ -3813,7 +4283,7 @@ button[disabled] {
   min-width: 0;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.25;
   letter-spacing: 0;
@@ -3845,7 +4315,7 @@ button[disabled] {
 .graph-node-title {
   overflow: hidden;
   color: var(--text-1);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   line-height: 1.25;
   letter-spacing: 0;
@@ -3856,7 +4326,7 @@ button[disabled] {
 .graph-node-meta {
   overflow: hidden;
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 0.625rem;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3870,7 +4340,7 @@ button[disabled] {
   padding: 2px 7px;
   color: var(--text-2);
   background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 750;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -3887,7 +4357,7 @@ button[disabled] {
   border-radius: 999px;
   padding: 2px 0;
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 0.625rem;
   line-height: 1.2;
 }
 
@@ -3908,7 +4378,7 @@ button[disabled] {
 .graph-node-overview-label,
 .graph-node-timeline-label {
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3916,13 +4386,13 @@ button[disabled] {
 
 .graph-node-overview-text {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
 .graph-node-section-title {
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3952,7 +4422,7 @@ button[disabled] {
 
 .graph-node-timeline-value {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.35;
 }
 
@@ -3972,7 +4442,7 @@ button[disabled] {
 
 .graph-node-field-label {
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 650;
   text-transform: uppercase;
 }
@@ -3984,7 +4454,7 @@ button[disabled] {
 .graph-node-empty,
 .graph-node-note {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 0.6875rem;
   line-height: 1.4;
 }
 
@@ -4007,7 +4477,7 @@ button[disabled] {
   padding: 2px 7px;
   color: var(--accent);
   background: var(--accent-dim);
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 750;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -4042,7 +4512,7 @@ button[disabled] {
 
 .graph-node-edge-endpoint-type {
   color: var(--text-1);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1.2;
 }
@@ -4051,7 +4521,7 @@ button[disabled] {
   max-width: 100%;
   overflow: hidden;
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 0.625rem;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4077,7 +4547,7 @@ button[disabled] {
 
 .space-registry-error {
   color: var(--red);
-  font-size: 10px;
+  font-size: 0.625rem;
 }
 
 .md-prose :not(pre) > code,
@@ -4207,11 +4677,11 @@ button[disabled] {
 
 /* ── Metrics table base styles ─────────────────── */
 .metrics-table {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .metrics-th {
   padding: 8px 12px;
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -4221,7 +4691,7 @@ button[disabled] {
 }
 .metrics-td {
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 
@@ -4257,10 +4727,6 @@ button[disabled] {
     padding-left: 0;
     padding-right: 0;
     border-left: 0;
-  }
-
-  .dashboard-column-label {
-    display: none;
   }
 
   .dashboard-hero {
@@ -4346,7 +4812,25 @@ button[disabled] {
 
   .metrics-time-range button {
     padding: 4px 8px !important;
-    font-size: 10px !important;
+    font-size: 0.625rem !important;
+  }
+}
+
+/* ── Mobile (<768px): collapse the dashboard context rail (a desktop split-view).
+   The main column already surfaces decisions + active missions, so the fixed-width
+   side rail is redundant and would otherwise starve the main column to zero. ── */
+@media (max-width: 767px) {
+  .dashboard-context-rail {
+    display: none !important;
+  }
+
+  .dashboard-main-shell-context-open .dashboard-main-scroll {
+    padding-right: 0;
+  }
+
+  .dashboard-main-shell-context-open .dashboard-side-column {
+    padding-left: 0;
+    padding-right: 0;
   }
 }
 
@@ -4480,7 +4964,7 @@ button[disabled] {
   }
 
   .dashboard-pulse-sentence {
-    font-size: 24px !important;
+    font-size: 1.5rem !important;
     line-height: 1.14;
   }
 
@@ -4505,11 +4989,11 @@ button[disabled] {
   }
 
   .dashboard-space-link {
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .space-header-stats {
-    font-size: 10px !important;
+    font-size: 0.625rem !important;
     gap: 8px !important;
   }
 
@@ -4522,11 +5006,11 @@ button[disabled] {
   .metrics-th,
   .metrics-td {
     padding: 6px 8px;
-    font-size: 11px;
+    font-size: 0.6875rem;
   }
 
   .metrics-th {
-    font-size: 8px;
+    font-size: 0.5rem;
   }
 }
 
@@ -4584,7 +5068,7 @@ button[disabled] {
 /* ── Keyboard shortcut hint ──────────────────────── */
 .kbd-hint {
   display: inline-block;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-family: inherit;
   background: var(--bg-elevated);
   color: var(--text-3);
@@ -4615,7 +5099,7 @@ button[disabled] {
 /* ── Board filter select ─────────────────────────── */
 .board-filter-select {
   font-family: inherit;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 500;
   padding: 4px 24px 4px 10px;
   border: 1px solid var(--border);
@@ -4652,7 +5136,7 @@ button[disabled] {
 .board-col-empty-state {
   padding: 24px 12px;
   text-align: center;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--text-3);
   border-radius: var(--r-md);
   border: 1px dashed var(--border);
@@ -4661,7 +5145,7 @@ button[disabled] {
 
 /* ── Board badge base ────────────────────────────── */
 .board-badge {
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -4733,14 +5217,14 @@ button[disabled] {
   gap: 2px;
 }
 .board-drawer-meta-label {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-3);
 }
 .board-drawer-section-label {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -4872,7 +5356,7 @@ button[disabled] {
   background: transparent;
   color: var(--text-1);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 0.78125rem;
 }
 
 .kb-search input::placeholder {
@@ -4889,7 +5373,7 @@ button[disabled] {
   background: var(--bg-panel);
   color: var(--text-2);
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   font-weight: 550;
   white-space: nowrap;
 }
@@ -4913,7 +5397,7 @@ button[disabled] {
   align-items: center;
   gap: 14px;
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   white-space: nowrap;
 }
 
@@ -4974,7 +5458,7 @@ button[disabled] {
 }
 
 .kb-col-label {
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -4987,7 +5471,7 @@ button[disabled] {
   border-radius: 999px;
   background: var(--bg-elevated);
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -4996,7 +5480,7 @@ button[disabled] {
   padding: 14px 0;
   text-align: center;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 /* ── Task card ──── */
@@ -5052,7 +5536,7 @@ button[disabled] {
   border-radius: 5px;
   background: var(--bg-elevated);
   color: var(--text-2);
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 650;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -5061,20 +5545,20 @@ button[disabled] {
 .kb-card-id {
   color: var(--text-4);
   font-family: var(--font-mono, 'SF Mono', Monaco, 'Fira Code', monospace);
-  font-size: 9.5px;
+  font-size: 0.59375rem;
 }
 
 .kb-card-time {
   margin-left: auto;
   color: var(--text-4);
-  font-size: 9.5px;
+  font-size: 0.59375rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .kb-card-title {
   color: var(--text-1);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.35;
   display: -webkit-box;
@@ -5095,7 +5579,7 @@ button[disabled] {
   gap: 5px;
   min-width: 0;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: 0.65625rem;
 }
 
 .kb-assignee-name {
@@ -5129,7 +5613,7 @@ button[disabled] {
   gap: 3px;
   padding: 1px 6px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 0.5625rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -5153,7 +5637,7 @@ button[disabled] {
   background: transparent;
   color: var(--text-3);
   font-family: inherit;
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   text-align: center;
   cursor: pointer;
   transition: color 150ms, border-color 150ms;
@@ -5174,7 +5658,7 @@ button[disabled] {
   justify-content: center;
   gap: 10px;
   color: var(--text-3);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .kb-clear {
@@ -5182,7 +5666,7 @@ button[disabled] {
   background: transparent;
   color: var(--accent);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   text-decoration: underline;
   cursor: pointer;
 }
@@ -5195,7 +5679,7 @@ button[disabled] {
   justify-content: center;
   gap: 12px;
   color: var(--text-3);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* ── Create / edit / delete affordances ──────────────── */
@@ -5210,7 +5694,7 @@ button[disabled] {
   background: color-mix(in oklab, var(--accent) 16%, var(--bg-panel));
   color: var(--text-1);
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 0.71875rem;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -5314,7 +5798,7 @@ button[disabled] {
 .sched-wh {
   padding: 10px 6px;
   text-align: center;
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -5331,7 +5815,7 @@ button[disabled] {
 }
 
 .sched-wh-num {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 700;
   color: var(--text-2);
   line-height: 1;
@@ -5350,7 +5834,7 @@ button[disabled] {
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   line-height: 1;
 }
@@ -5367,7 +5851,7 @@ button[disabled] {
   grid-column: 1;
   text-align: right;
   padding: 3px 10px 0 0;
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   border-top: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
@@ -5405,13 +5889,13 @@ button[disabled] {
 }
 
 .sched-empty-title {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-2);
 }
 
 .sched-empty-sub {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-3);
   max-width: 280px;
   text-align: center;
@@ -5437,7 +5921,7 @@ button[disabled] {
 .context-task-head h2 {
   margin: 6px 0 0;
   color: var(--text-1);
-  font-size: 24px;
+  font-size: 1.5rem;
   font-weight: 650;
   line-height: 1.08;
   letter-spacing: -0.04em;
@@ -5448,7 +5932,7 @@ button[disabled] {
   border-radius: 999px;
   background: color-mix(in oklab, var(--task-status-color, var(--accent)) 11%, var(--bg-panel));
   color: color-mix(in oklab, var(--task-status-color, var(--accent)) 72%, var(--text-1));
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 650;
   line-height: 1;
   padding: 7px 10px;
@@ -5464,7 +5948,7 @@ button[disabled] {
 .context-task-facts dt,
 .context-task-section .eyebrow {
   color: var(--text-4);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -5476,7 +5960,7 @@ button[disabled] {
   align-items: center;
   gap: 6px;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .context-task-section {
@@ -5486,7 +5970,7 @@ button[disabled] {
 .context-task-section p {
   margin: 8px 0 0;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
 
@@ -5502,7 +5986,7 @@ button[disabled] {
   grid-template-columns: 72px minmax(0, 1fr);
   gap: 12px;
   color: var(--text-4);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .context-task-link-row strong {

@@ -15,8 +15,8 @@ function Placeholder({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-1.5 px-6">
       <AlertTriangle className="h-5 w-5 mb-1" style={{ color: 'var(--text-3)' }} />
-      <p className="text-[13px] font-medium" style={{ color: 'var(--text-1)' }}>{title}</p>
-      <p className="text-[12px] text-center max-w-xs" style={{ color: 'var(--text-3)' }}>{detail}</p>
+      <p className="text-[0.8125rem] font-medium" style={{ color: 'var(--text-1)' }}>{title}</p>
+      <p className="text-[0.75rem] text-center max-w-xs" style={{ color: 'var(--text-3)' }}>{detail}</p>
     </div>
   )
 }
@@ -25,8 +25,8 @@ function EmptyPlaceholder() {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-1.5 px-6">
       <TableIcon className="h-5 w-5 mb-1" style={{ color: 'var(--text-3)' }} />
-      <p className="text-[13px] font-medium" style={{ color: 'var(--text-1)' }}>No data found</p>
-      <p className="text-[12px] text-center max-w-xs" style={{ color: 'var(--text-3)' }}>This spreadsheet appears to be empty.</p>
+      <p className="text-[0.8125rem] font-medium" style={{ color: 'var(--text-1)' }}>No data found</p>
+      <p className="text-[0.75rem] text-center max-w-xs" style={{ color: 'var(--text-3)' }}>This spreadsheet appears to be empty.</p>
     </div>
   )
 }
@@ -98,13 +98,13 @@ export default function SpreadsheetViewer({ file, preview, isLoading, error }: S
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ borderRadius: 'var(--r-lg)', border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
       <div className="flex items-center gap-2 h-9 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border)' }}>
-        <span className="text-[12px] font-medium truncate" style={{ color: 'var(--text-2)' }}>{fileName}</span>
-        <span className="text-[11px] shrink-0" style={{ color: 'var(--text-4)' }}>
+        <span className="text-[0.75rem] font-medium truncate" style={{ color: 'var(--text-2)' }}>{fileName}</span>
+        <span className="text-[0.6875rem] shrink-0" style={{ color: 'var(--text-4)' }}>
           {currentSheet.rows.length} &times; {currentSheet.headers.length}
           {preview?.fileSize != null ? ` \u00b7 ${formatBytes(preview.fileSize)}` : ''}
         </span>
         {preview?.truncated && (
-          <Badge variant="warning" className="text-[10px] h-[18px] px-1.5 shrink-0">Truncated</Badge>
+          <Badge variant="warning" className="text-[0.625rem] h-[18px] px-1.5 shrink-0">Truncated</Badge>
         )}
         <div className="flex-1 min-w-4" />
         <div className="relative shrink-0">
@@ -113,11 +113,11 @@ export default function SpreadsheetViewer({ file, preview, isLoading, error }: S
             placeholder="Filter..."
             value={globalFilter}
             onChange={(event) => setGlobalFilter(event.target.value)}
-            className="h-6 w-36 pl-7 text-[11px] rounded-md"
+            className="h-6 w-36 pl-7 text-[0.6875rem] rounded-md"
           />
         </div>
         <div className="w-px h-3.5 shrink-0" style={{ background: 'var(--border)' }} />
-        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px] gap-1 shrink-0" onClick={handleExportCSV}>
+        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[0.6875rem] gap-1 shrink-0" onClick={handleExportCSV}>
           <Download className="h-2.5 w-2.5" /> CSV
         </Button>
       </div>
@@ -127,7 +127,7 @@ export default function SpreadsheetViewer({ file, preview, isLoading, error }: S
           <Tabs value={String(activeSheet)} onValueChange={(value) => { setActiveSheet(Number(value)); setGlobalFilter('') }}>
             <TabsList className="h-6">
               {parsed.sheets.map((sheet, index) => (
-                <TabsTrigger key={sheet.name} value={String(index)} className="text-[11px] h-5 px-2">
+                <TabsTrigger key={sheet.name} value={String(index)} className="text-[0.6875rem] h-5 px-2">
                   {sheet.name}
                 </TabsTrigger>
               ))}

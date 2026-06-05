@@ -55,11 +55,11 @@ export default memo(function ActivityCodeBlock({
       language={normalizeActivityCodeLanguage(language)}
       style={vscDarkPlus}
       customStyle={compact
-        ? { margin: 0, padding: '8px 10px', fontSize: '11px', borderRadius: 'var(--r-md)', background: forceDark ? 'transparent' : 'var(--bg-app)' }
-        : { margin: 0, padding: '12px', fontSize: '11px', borderRadius: '4px', background: forceDark ? 'transparent' : 'var(--bg-code)' }}
+        ? { margin: 0, padding: '8px 10px', fontSize: '0.6875rem', borderRadius: 'var(--r-md)', background: forceDark ? 'transparent' : 'var(--bg-app)' }
+        : { margin: 0, padding: '12px', fontSize: '0.6875rem', borderRadius: '4px', background: forceDark ? 'transparent' : 'var(--bg-code)' }}
       showLineNumbers={showLineNumbers}
       lineNumberStyle={showLineNumbers
-        ? { color: 'var(--text-3)', fontSize: 9, minWidth: '2em', paddingRight: '8px' }
+        ? { color: 'var(--text-3)', fontSize: '0.5625rem', minWidth: '2em', paddingRight: '8px' }
         : undefined}
     >
       {code}

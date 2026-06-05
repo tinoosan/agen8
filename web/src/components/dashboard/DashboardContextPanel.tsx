@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { ArrowRight, ScrollText, Target } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import type { DashboardPanel } from '../../lib/routing'
@@ -39,68 +38,6 @@ interface DashboardContextPanelProps {
   projectId: string | null
   focusedProjectRoot: string | null
   onPanelChange: (panel: DashboardPanel) => void
-}
-
-function DashboardOverviewPanel({
-  onOpenDecisions,
-  onOpenMissions,
-}: {
-  onOpenDecisions: () => void
-  onOpenMissions: () => void
-}) {
-  return (
-    <div className="dashboard-context-overview">
-      <section className="dashboard-context-overview-section">
-        <div className="dashboard-context-overview-kicker">Keep Close</div>
-        <div className="dashboard-context-overview-list">
-          <div className="dashboard-context-overview-row">
-            <div className="dashboard-context-overview-value">
-              Keep the bigger picture close. Open actions when something needs you, or step into missions when you want to shape where the work goes next.
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="dashboard-context-overview-section">
-        <div className="dashboard-context-overview-kicker">Work surfaces</div>
-        <div className="dashboard-context-overview-list">
-          <button
-            type="button"
-            onClick={onOpenMissions}
-            className="dashboard-context-overview-action"
-          >
-            <div className="dashboard-context-overview-action-copy">
-              <div className="dashboard-context-overview-action-title">
-                <Target size={14} />
-                <span>Missions</span>
-              </div>
-              <p>
-                Outcomes, key results, and ownership now live here instead of a separate page.
-              </p>
-            </div>
-            <ArrowRight size={14} />
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenDecisions}
-            className="dashboard-context-overview-action"
-          >
-            <div className="dashboard-context-overview-action-copy">
-              <div className="dashboard-context-overview-action-title">
-                <ScrollText size={14} />
-                <span>Decisions</span>
-              </div>
-              <p>
-                Review the choices agents have logged while work moves forward.
-              </p>
-            </div>
-            <ArrowRight size={14} />
-          </button>
-        </div>
-      </section>
-    </div>
-  )
 }
 
 export default function DashboardContextPanel({
@@ -210,18 +147,11 @@ export default function DashboardContextPanel({
         <Tabs value={panel} onValueChange={(value) => onPanelChange(value as DashboardPanel)} className="flex h-full flex-col">
           <div className="dashboard-context-header shrink-0 h-12 flex items-center px-[var(--dashboard-context-gutter)] border-b border-[color-mix(in_srgb,var(--border)_48%,transparent)]">
             <TabsList className="dashboard-context-tabs h-auto bg-transparent gap-0 p-0 rounded-none shrink-0">
-              <TabsTrigger value="overview" className="dashboard-context-tab">Overview</TabsTrigger>
               <TabsTrigger value="missions" className="dashboard-context-tab">Missions</TabsTrigger>
               <TabsTrigger value="decisions" className="dashboard-context-tab">Decisions</TabsTrigger>
             </TabsList>
           </div>
 
-          <TabsContent value="overview" className="flex-1 min-h-0 mt-0 overflow-y-auto">
-            <DashboardOverviewPanel
-              onOpenDecisions={() => onPanelChange('decisions')}
-              onOpenMissions={() => onPanelChange('missions')}
-            />
-          </TabsContent>
           <TabsContent value="missions" className="flex-1 min-h-0 mt-0 overflow-hidden">
             <DashboardMissionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
           </TabsContent>

@@ -20,12 +20,12 @@ export function TextField({ label, value, onChange, placeholder, mono, descripti
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
         className={cn(
-          'h-auto px-2.5 py-[7px] text-[13px] bg-[var(--bg-elevated)] border-[var(--border)] rounded-[var(--r-md)]',
+          'h-auto px-2.5 py-[7px] text-[0.8125rem] bg-[var(--bg-elevated)] border-[var(--border)] rounded-[var(--r-md)]',
           mono ? 'font-[var(--font-mono,monospace)]' : 'font-[inherit]',
         )}
       />
       {description && (
-        <span className="text-[11px] text-[var(--text-3)] mt-0.5 block">{description}</span>
+        <span className="text-[0.6875rem] text-[var(--text-3)] mt-0.5 block">{description}</span>
       )}
     </label>
   )

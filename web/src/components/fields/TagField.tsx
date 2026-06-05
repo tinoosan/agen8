@@ -32,7 +32,7 @@ export function TagField({ label, tags, onChange, placeholder }: {
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-1.5">
           {tags.map((tag, i) => (
-            <span key={i} className="inline-flex items-center gap-1 px-2 py-[2px] text-[11px] font-medium text-[var(--text-1)] bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--r-sm)] font-[var(--font-mono,monospace)]">
+            <span key={i} className="inline-flex items-center gap-1 px-2 py-[2px] text-[0.6875rem] font-medium text-[var(--text-1)] bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--r-sm)] font-[var(--font-mono,monospace)]">
               {tag}
               <button
                 type="button"
@@ -52,7 +52,7 @@ export function TagField({ label, tags, onChange, placeholder }: {
         onKeyDown={handleKeyDown}
         onBlur={commit}
         placeholder={placeholder ?? 'Type and press Enter to add'}
-        className="h-auto px-2.5 py-[7px] text-[13px] bg-[var(--bg-elevated)] border-[var(--border)] rounded-[var(--r-md)]"
+        className="h-auto px-2.5 py-[7px] text-[0.8125rem] bg-[var(--bg-elevated)] border-[var(--border)] rounded-[var(--r-md)]"
       />
     </div>
   )

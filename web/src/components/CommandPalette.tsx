@@ -36,16 +36,16 @@ export default function CommandPalette() {
           />
           <kbd
             onClick={close}
-            className="text-[11px] cursor-pointer bg-[var(--bg-elevated)] text-[var(--text-3)] px-[7px] py-[2px] rounded-[5px] border border-[var(--border)] font-[inherit] transition-colors duration-150"
+            className="text-[0.6875rem] cursor-pointer bg-[var(--bg-elevated)] text-[var(--text-3)] px-[7px] py-[2px] rounded-[5px] border border-[var(--border)] font-[inherit] transition-colors duration-150"
           >
             ESC
           </kbd>
         </div>
 
         <Command.List className="max-h-[360px] overflow-y-auto py-1.5">
-          <Command.Empty className="px-4 py-8 text-center text-[var(--text-3)] text-[13px] leading-[1.6]">
+          <Command.Empty className="px-4 py-8 text-center text-[var(--text-3)] text-[0.8125rem] leading-[1.6]">
             No results found<br />
-            <span className="text-[11px]">Try searching for missions, decisions, or graph context</span>
+            <span className="text-[0.6875rem]">Try searching for missions, decisions, or graph context</span>
           </Command.Empty>
 
           {missions && missions.filter(m => m.status !== 'archived').length > 0 && (
@@ -59,11 +59,11 @@ export default function CommandPalette() {
                     if (projectId) navigate(strategyMapLink(projectId, m.id))
                     close()
                   }}
-                  className="py-2.5 px-3.5 cursor-pointer flex items-center gap-2.5 text-[13px] text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
+                  className="py-2.5 px-3.5 cursor-pointer flex items-center gap-2.5 text-[0.8125rem] text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
                 >
                   <Target size={13} className="text-[var(--text-3)] shrink-0" />
                   <span className="flex-1 truncate">{m.title}</span>
-                  <span className="text-[11px] text-[var(--text-3)] capitalize">{m.status}</span>
+                  <span className="text-[0.6875rem] text-[var(--text-3)] capitalize">{m.status}</span>
                 </Command.Item>
               ))}
             </Command.Group>
@@ -76,7 +76,7 @@ export default function CommandPalette() {
                 if (projectId) navigate(dashboardLink(projectId))
                 close()
               }}
-              className="py-2.5 px-3.5 cursor-pointer text-[13px] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
+              className="py-2.5 px-3.5 cursor-pointer text-[0.8125rem] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
             >
               <Home size={13} className="text-[var(--text-3)]" />
               Dashboard
@@ -87,7 +87,7 @@ export default function CommandPalette() {
                 if (projectId) navigate(strategyMapLink(projectId))
                 close()
               }}
-              className="py-2.5 px-3.5 cursor-pointer text-[13px] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
+              className="py-2.5 px-3.5 cursor-pointer text-[0.8125rem] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
             >
               <Network size={13} className="text-[var(--text-3)]" />
               Context map
@@ -98,7 +98,7 @@ export default function CommandPalette() {
                 if (projectId) navigate(decisionsLink(projectId))
                 close()
               }}
-              className="py-2.5 px-3.5 cursor-pointer text-[13px] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
+              className="py-2.5 px-3.5 cursor-pointer text-[0.8125rem] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
             >
               <ScrollText size={13} className="text-[var(--text-3)]" />
               Decisions
@@ -109,7 +109,7 @@ export default function CommandPalette() {
                 navigate('/account')
                 close()
               }}
-              className="py-2.5 px-3.5 cursor-pointer text-[13px] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
+              className="py-2.5 px-3.5 cursor-pointer text-[0.8125rem] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
             >
               <UserRound size={13} className="text-[var(--text-3)]" />
               Account setup

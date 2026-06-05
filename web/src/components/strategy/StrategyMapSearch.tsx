@@ -341,7 +341,7 @@ export function StrategyMapSearch({
             style={{
               outline: 'none',
               boxShadow: 'none',
-              fontSize: '15px',
+              fontSize: '0.9375rem',
               fontWeight: 400,
               lineHeight: 1.47,
               letterSpacing: '-0.2px',
@@ -355,7 +355,7 @@ export function StrategyMapSearch({
               borderRadius: '5px', border: '1px solid var(--border)',
               background: 'var(--bg-surface)', color: 'var(--text-3)',
               fontFamily: 'SF Mono, Menlo, monospace',
-              fontSize: '11px', fontWeight: 500, lineHeight: 1, letterSpacing: '-0.12px',
+              fontSize: '0.6875rem', fontWeight: 500, lineHeight: 1, letterSpacing: '-0.12px',
             }}
           >
             Esc
@@ -380,7 +380,7 @@ export function StrategyMapSearch({
                 style={{
                   padding: '3px 8px',
                   borderRadius: 12,
-                  fontSize: '11px',
+                  fontSize: '0.6875rem',
                   fontWeight: 600,
                   letterSpacing: '0.02em',
                   border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border)'}`,
@@ -403,7 +403,7 @@ export function StrategyMapSearch({
         >
           {flatResults.length === 0 ? (
             <div className="text-center" style={{
-              padding: '40px 20px', fontSize: '14px', fontWeight: 400,
+              padding: '40px 20px', fontSize: '0.875rem', fontWeight: 400,
               lineHeight: 1.43, letterSpacing: '-0.224px', color: 'var(--text-3)',
             }}>
               No matching nodes
@@ -414,7 +414,7 @@ export function StrategyMapSearch({
                 {/* Group header */}
                 <div className="flex items-center gap-2" style={{
                   padding: '8px 12px 4px',
-                  fontSize: '10px', fontWeight: 600, letterSpacing: '0.08em',
+                  fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.08em',
                   color: 'var(--text-3)', textTransform: 'uppercase',
                 }}>
                   {group.label}
@@ -451,7 +451,7 @@ export function StrategyMapSearch({
                       {/* Title + metadata */}
                       <div className="flex-1 min-w-0 flex flex-col gap-[1px]">
                         <span className="truncate" style={{
-                          fontSize: '13px', fontWeight: 500, lineHeight: 1.3,
+                          fontSize: '0.8125rem', fontWeight: 500, lineHeight: 1.3,
                           letterSpacing: '-0.1px', color: 'var(--text-1)',
                         }}>
                           {result.title}
@@ -468,7 +468,7 @@ export function StrategyMapSearch({
                               background: result.meta.progress >= 100 ? 'var(--green)' : 'var(--accent)',
                             }} />
                           </div>
-                          <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-3)' }}>
+                          <span style={{ fontSize: '0.625rem', fontWeight: 600, color: 'var(--text-3)' }}>
                             {Math.round(result.meta.progress)}%
                           </span>
                         </div>
@@ -539,7 +539,7 @@ function ResultMetaRow({ meta, type }: { meta: ResultMeta; type: string }) {
   if (items.length === 0) return null
 
   return (
-    <span className="flex items-center gap-1 text-[10px] font-medium leading-none text-muted-foreground">
+    <span className="flex items-center gap-1 text-[0.625rem] font-medium leading-none text-muted-foreground">
       {items.map((item, i) => (
         <span key={i} className="flex items-center gap-1">
           {i > 0 && <span className="text-muted-foreground/40">·</span>}

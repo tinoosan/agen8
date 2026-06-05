@@ -32,11 +32,11 @@ function MissionStatusIcon({ status }: { status: MissionView['status'] }) {
 function SectionLabel({ children, count }: { children: React.ReactNode; count?: number }) {
   return (
     <div className="mx-3.5 mb-1 mt-2.5 flex items-center gap-2">
-      <span className="flex-1 text-[10px] font-semibold uppercase text-[var(--text-3)]" style={{ letterSpacing: '0.06em' }}>
+      <span className="flex-1 text-[0.625rem] font-semibold uppercase text-[var(--text-3)]" style={{ letterSpacing: '0.06em' }}>
         {children}
       </span>
       {count != null && count > 0 && (
-        <span className="text-[10px] tabular-nums text-[var(--text-4)]">{count}</span>
+        <span className="text-[0.625rem] tabular-nums text-[var(--text-4)]">{count}</span>
       )}
     </div>
   )
@@ -115,7 +115,7 @@ export function GlobalSidebarContent() {
       {projectsQuery.isLoading ? (
         <SectionSkeleton rows={3} />
       ) : projects.length === 0 ? (
-        <div className="px-4 py-2 text-[11px] text-[var(--text-4)]">
+        <div className="px-4 py-2 text-[0.6875rem] text-[var(--text-4)]">
           No projects yet
         </div>
       ) : (
@@ -124,7 +124,7 @@ export function GlobalSidebarContent() {
             <button
               key={project.id}
               type="button"
-              className="flex items-center gap-2 w-full mx-1 rounded-[6px] px-2.5 py-[5px] text-[13px] text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-2)] cursor-pointer border-0 bg-transparent transition-colors text-left"
+              className="flex items-center gap-2 w-full mx-1 rounded-[6px] px-2.5 py-[5px] text-[0.8125rem] text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-2)] cursor-pointer border-0 bg-transparent transition-colors text-left"
               style={{ letterSpacing: '-0.08px' }}
               onClick={() => navigate(dashboardLink(project.id))}
             >
@@ -142,7 +142,7 @@ export function GlobalSidebarContent() {
       {allMissionsQuery.isLoading ? (
         <SectionSkeleton rows={2} />
       ) : missions.length === 0 ? (
-        <div className="px-4 py-2 text-[11px] text-[var(--text-4)]">
+        <div className="px-4 py-2 text-[0.6875rem] text-[var(--text-4)]">
           No active missions
         </div>
       ) : (
@@ -158,11 +158,11 @@ export function GlobalSidebarContent() {
                 onClick={() => navigate(missionDetailLink(mission._projectId, mission.id))}
               >
                 <MissionStatusIcon status={mission.status} />
-                <span className="flex-1 min-w-0 truncate text-[12px] text-[var(--text-2)] leading-tight">
+                <span className="flex-1 min-w-0 truncate text-[0.75rem] text-[var(--text-2)] leading-tight">
                   {mission.title}
                 </span>
                 {showMultipleProjects && (
-                  <span className="shrink-0 text-[10px] text-[var(--text-4)] tabular-nums ml-auto">
+                  <span className="shrink-0 text-[0.625rem] text-[var(--text-4)] tabular-nums ml-auto">
                     {projName}
                   </span>
                 )}

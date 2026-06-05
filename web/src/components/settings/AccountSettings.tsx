@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
-import { Moon, Sun, UserRound } from 'lucide-react'
+import { Check, Minus, Plus, RotateCcw, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '../../hooks/useAuth'
-import { useStore, type DefaultProjectView, type Theme } from '../../lib/store'
+import {
+  useStore,
+  FONT_SCALE_DEFAULT,
+  FONT_SCALE_MAX,
+  FONT_SCALE_MIN,
+  FONT_SCALE_STEP,
+  type DefaultProjectView,
+  type FontFamily,
+  type Theme,
+} from '../../lib/store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,14 +25,46 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
-const themeOptions: Array<{ value: Theme; label: string; icon: typeof Moon }> = [
-  { value: 'light', label: 'Light', icon: Sun },
-  { value: 'dark', label: 'Dark', icon: Moon },
+/* Each theme tile renders a real miniature of the palette so the choice is
+   visible before it's applied. Colors are pinned literals (not live tokens)
+   so the preview is accurate regardless of the currently-active theme. */
+type ThemeSwatch = { bg: string; surface: string; accent: string; text: string; muted: string }
+
+const themeOptions: Array<{ value: Theme; label: string; group: 'Dark' | 'Light'; swatch: ThemeSwatch }> = [
+  { value: 'dark', label: 'Charcoal', group: 'Dark', swatch: { bg: '#1a1a1c', surface: '#26262a', accent: '#3b82f6', text: '#f0f0f4', muted: '#636378' } },
+  { value: 'midnight', label: 'Midnight', group: 'Dark', swatch: { bg: '#000000', surface: '#131317', accent: '#3b82f6', text: '#f5f5f8', muted: '#6a6a7e' } },
+  { value: 'dim', label: 'Navy', group: 'Dark', swatch: { bg: '#151d2d', surface: '#213046', accent: '#1d9bf0', text: '#e7e9ea', muted: '#536471' } },
+  { value: 'nebula', label: 'Nebula', group: 'Dark', swatch: { bg: '#16151d', surface: '#242230', accent: '#8b5cf6', text: '#f1f0f7', muted: '#6f6a85' } },
+  { value: 'nord', label: 'Nord', group: 'Dark', swatch: { bg: '#2e3440', surface: '#3b4252', accent: '#5e81ac', text: '#eceff4', muted: '#7b8394' } },
+  { value: 'rose', label: 'Rosé', group: 'Dark', swatch: { bg: '#191724', surface: '#26233a', accent: '#c4567a', text: '#e0def4', muted: '#6e6a86' } },
+  { value: 'forest', label: 'Forest', group: 'Dark', swatch: { bg: '#0e1613', surface: '#1a2c24', accent: '#059669', text: '#e7f3ec', muted: '#5f7a6e' } },
+  { value: 'ember', label: 'Ember', group: 'Dark', swatch: { bg: '#1d2021', surface: '#32302f', accent: '#d65d0e', text: '#ebdbb2', muted: '#928374' } },
+  { value: 'light', label: 'Light', group: 'Light', swatch: { bg: '#ffffff', surface: '#f5f5f7', accent: '#2563eb', text: '#1d1d1f', muted: '#98989d' } },
+  { value: 'sepia', label: 'Paper', group: 'Light', swatch: { bg: '#f4ecd8', surface: '#efe6cf', accent: '#b45309', text: '#3a2f1d', muted: '#9a876a' } },
+  { value: 'solarized', label: 'Solarized', group: 'Light', swatch: { bg: '#fdf6e3', surface: '#f3ecd4', accent: '#268bd2', text: '#586e75', muted: '#93a1a1' } },
 ]
+
+/* Preserve declaration order within each group so the picker reads top-to-
+   bottom the same way the arrays are authored. */
+const themeGroupOrder: Array<'Dark' | 'Light'> = ['Dark', 'Light']
+const fontGroupOrder: Array<'Sans' | 'Serif' | 'Mono'> = ['Sans', 'Serif', 'Mono']
 
 const defaultViewOptions: Array<{ value: DefaultProjectView; label: string; description: string }> = [
   { value: 'dashboard', label: 'Dashboard', description: 'Start from project health, missions, and actions.' },
   { value: 'strategy', label: 'Strategy map', description: 'Open directly into the mission and context graph.' },
+]
+
+const fontFamilyOptions: Array<{ value: FontFamily; label: string; note: string; category: 'Sans' | 'Serif' | 'Mono'; stack: string }> = [
+  { value: 'inter', label: 'Inter', note: 'Modern UI sans', category: 'Sans', stack: "'Inter Variable', system-ui, sans-serif" },
+  { value: 'geist', label: 'Geist', note: 'Geometric sans', category: 'Sans', stack: "'Geist Variable', system-ui, sans-serif" },
+  { value: 'figtree', label: 'Figtree', note: 'Friendly rounded', category: 'Sans', stack: "'Figtree Variable', system-ui, sans-serif" },
+  { value: 'space-grotesk', label: 'Space Grotesk', note: 'Techy display', category: 'Sans', stack: "'Space Grotesk Variable', system-ui, sans-serif" },
+  { value: 'atkinson', label: 'Atkinson', note: 'High legibility', category: 'Sans', stack: "'Atkinson Hyperlegible', system-ui, sans-serif" },
+  { value: 'system', label: 'System', note: 'Native OS font', category: 'Sans', stack: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" },
+  { value: 'serif', label: 'Source Serif', note: 'Reading serif', category: 'Serif', stack: "'Source Serif 4 Variable', Georgia, serif" },
+  { value: 'lora', label: 'Lora', note: 'Warm book serif', category: 'Serif', stack: "'Lora Variable', Georgia, serif" },
+  { value: 'fraunces', label: 'Fraunces', note: 'Expressive display', category: 'Serif', stack: "'Fraunces Variable', Georgia, serif" },
+  { value: 'mono', label: 'JetBrains Mono', note: 'Monospace', category: 'Mono', stack: "'JetBrains Mono Variable', ui-monospace, monospace" },
 ]
 
 function formatDate(value?: string): string {
@@ -69,8 +110,8 @@ function SettingsRow({
   return (
     <div className={cn('grid gap-4 border-b border-[var(--border)] py-5 last:border-b-0 xl:grid-cols-[220px_minmax(0,1fr)]', className)}>
       <div>
-        <h3 className="m-0 text-[14px] font-semibold text-[var(--text-1)]">{title}</h3>
-        {description && <p className="mt-1 mb-0 text-[12px] leading-relaxed text-[var(--text-3)]">{description}</p>}
+        <h3 className="m-0 text-[0.875rem] font-semibold text-[var(--text-1)]">{title}</h3>
+        {description && <p className="mt-1 mb-0 text-[0.75rem] leading-relaxed text-[var(--text-3)]">{description}</p>}
       </div>
       <div className="min-w-0">{children}</div>
     </div>
@@ -128,8 +169,8 @@ export function AccountProfileSection() {
   return (
     <section id="settings-account" className="grid gap-4">
       <div>
-        <h2 className="m-0 text-[17px] font-semibold text-[var(--text-1)]">Account</h2>
-        <p className="mt-1 mb-0 text-[13px] text-[var(--text-3)]">Your profile and sign-in details for this Agen8 instance.</p>
+        <h2 className="m-0 text-[1.0625rem] font-semibold text-[var(--text-1)]">Account</h2>
+        <p className="mt-1 mb-0 text-[0.8125rem] text-[var(--text-3)]">Your profile and sign-in details for this Agen8 instance.</p>
       </div>
 
       <SettingsPanel>
@@ -148,7 +189,7 @@ export function AccountProfileSection() {
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
-            <span className="text-[12px] text-[var(--text-3)]">Shown as {displayName(auth.user)}</span>
+            <span className="text-[0.75rem] text-[var(--text-3)]">Shown as {displayName(auth.user)}</span>
             <Button type="button" size="sm" disabled={!profileDirty || savingProfile} onClick={() => void handleSaveProfile()}>
               {savingProfile ? 'Saving...' : 'Save profile'}
             </Button>
@@ -157,7 +198,7 @@ export function AccountProfileSection() {
 
         <SettingsRow title="Access" description="Account metadata and session control.">
           <div className="grid gap-3 xl:grid-cols-[1fr_auto] xl:items-center">
-            <div className="grid gap-2 text-[12px] text-[var(--text-2)] sm:grid-cols-2">
+            <div className="grid gap-2 text-[0.75rem] text-[var(--text-2)] sm:grid-cols-2">
               <div>
                 <span className="block text-[var(--text-3)]">Type</span>
                 <span>{accountType(auth.user)}</span>
@@ -194,8 +235,8 @@ export function AccountSecuritySection() {
   return (
     <section id="settings-security" className="grid gap-4">
       <div>
-        <h2 className="m-0 text-[17px] font-semibold text-[var(--text-1)]">Security</h2>
-        <p className="mt-1 mb-0 text-[13px] text-[var(--text-3)]">Manage active sessions and account access.</p>
+        <h2 className="m-0 text-[1.0625rem] font-semibold text-[var(--text-1)]">Security</h2>
+        <p className="mt-1 mb-0 text-[0.8125rem] text-[var(--text-3)]">Manage active sessions and account access.</p>
       </div>
       <SettingsPanel>
         <SettingsRow title="Sessions" description="Browsers currently signed in to this account.">
@@ -204,12 +245,12 @@ export function AccountSecuritySection() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-[var(--green)]" aria-hidden="true" />
-                  <span className="text-[13px] font-semibold text-[var(--text-1)]">Current browser</span>
-                  <span className="rounded-full bg-[var(--green-dim)] px-1.5 py-[1px] text-[10px] font-medium uppercase leading-4 text-[var(--green)]">
+                  <span className="text-[0.8125rem] font-semibold text-[var(--text-1)]">Current browser</span>
+                  <span className="rounded-full bg-[var(--green-dim)] px-1.5 py-[1px] text-[0.625rem] font-medium uppercase leading-4 text-[var(--green)]">
                     Active
                   </span>
                 </div>
-                <div className="mt-1 truncate text-[12px] text-[var(--text-3)]">
+                <div className="mt-1 truncate text-[0.75rem] text-[var(--text-3)]">
                   Signed in as {displayName(auth.user)}
                 </div>
               </div>
@@ -224,39 +265,236 @@ export function AccountSecuritySection() {
   )
 }
 
+function ThemeTile({
+  label,
+  swatch,
+  selected,
+  onSelect,
+}: {
+  label: string
+  swatch: ThemeSwatch
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={cn(
+        'group flex flex-col gap-2 rounded-[var(--r-lg)] border p-2 text-left transition-all',
+        selected
+          ? 'border-[var(--accent)] ring-1 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--bg-app)]'
+          : 'border-[var(--border)] hover:border-[var(--border-strong)]',
+      )}
+    >
+      <div
+        className="relative flex h-[68px] flex-col justify-between overflow-hidden rounded-[var(--r-md)] p-2.5"
+        style={{ background: swatch.bg, boxShadow: 'inset 0 0 0 1px rgba(128,128,128,0.12)' }}
+      >
+        <div className="flex flex-col gap-1.5">
+          <span className="block h-1.5 w-3/4 rounded-full" style={{ background: swatch.text }} />
+          <span className="block h-1.5 w-1/2 rounded-full" style={{ background: swatch.muted }} />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="h-3.5 w-9 rounded-full" style={{ background: swatch.accent }} />
+          <span className="h-3.5 w-3.5 rounded-full" style={{ background: swatch.surface, boxShadow: 'inset 0 0 0 1px rgba(128,128,128,0.18)' }} />
+        </div>
+      </div>
+      <div className="flex items-center justify-between px-0.5">
+        <span className={cn('text-[0.75rem] font-medium', selected ? 'text-[var(--text-1)]' : 'text-[var(--text-2)]')}>
+          {label}
+        </span>
+        {selected && <Check size={13} className="text-[var(--accent)]" aria-hidden />}
+      </div>
+    </button>
+  )
+}
+
+function FontTile({
+  label,
+  note,
+  stack,
+  selected,
+  onSelect,
+}: {
+  label: string
+  note: string
+  stack: string
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={cn(
+        'flex items-center gap-3 rounded-[var(--r-md)] border px-3 py-2.5 text-left transition-all',
+        selected
+          ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]'
+          : 'border-[var(--border)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)]',
+      )}
+    >
+      <span
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--r-sm)] bg-[var(--bg-surface)] text-[1.125rem] leading-none text-[var(--text-1)]"
+        style={{ fontFamily: stack }}
+        aria-hidden
+      >
+        Ag
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[0.8125rem] font-medium text-[var(--text-1)]" style={{ fontFamily: stack }}>
+          {label}
+        </span>
+        <span className="block truncate text-[0.6875rem] text-[var(--text-3)]">{note}</span>
+      </span>
+      {selected && <Check size={14} className="shrink-0 text-[var(--accent)]" aria-hidden />}
+    </button>
+  )
+}
+
+/* A tiny group heading that lets the grids below breathe as the option
+   count grows — the picker stays scannable instead of one long wall. */
+function PickerGroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-2 mt-1 flex items-center gap-2 first:mt-0">
+      <span className="text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-[var(--text-3)]">
+        {children}
+      </span>
+      <span className="h-px flex-1 bg-[var(--border)]" aria-hidden />
+    </div>
+  )
+}
+
 export function AccountPreferencesSection() {
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
+  const fontFamily = useStore((s) => s.fontFamily)
+  const setFontFamily = useStore((s) => s.setFontFamily)
+  const fontScale = useStore((s) => s.fontScale)
+  const stepFontScale = useStore((s) => s.stepFontScale)
+  const resetFontScale = useStore((s) => s.resetFontScale)
   const defaultProjectView = useStore((s) => s.defaultProjectView)
   const setDefaultProjectView = useStore((s) => s.setDefaultProjectView)
+
+  const atMin = fontScale <= FONT_SCALE_MIN
+  const atMax = fontScale >= FONT_SCALE_MAX
+  const isDefaultScale = fontScale === FONT_SCALE_DEFAULT
 
   return (
     <section id="settings-preferences" className="grid gap-4">
       <div>
-        <h2 className="m-0 text-[17px] font-semibold text-[var(--text-1)]">Preferences</h2>
-        <p className="mt-1 mb-0 text-[13px] text-[var(--text-3)]">Personal defaults saved in this browser.</p>
+        <h2 className="m-0 text-[1.0625rem] font-semibold text-[var(--text-1)]">Preferences</h2>
+        <p className="mt-1 mb-0 text-[0.8125rem] text-[var(--text-3)]">Personal defaults saved in this browser.</p>
       </div>
       <SettingsPanel>
-        <SettingsRow title="Appearance" description="Choose how Agen8 looks in this browser.">
-          <div className="grid gap-2">
-            <Label htmlFor="theme-select">Theme</Label>
-            <Select value={theme} onValueChange={(value) => setTheme(value as Theme)}>
-              <SelectTrigger id="theme-select" className="w-full max-w-[280px] border-[var(--border)] bg-transparent">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {themeOptions.map(({ value, label, icon: Icon }) => (
-                  <SelectItem key={value} value={value}>
-                    <span className="inline-flex items-center gap-2">
-                      <Icon size={13} />
-                      {label}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <SettingsRow title="Theme" description="Pick a palette. Changes apply instantly across the app.">
+          <div className="flex flex-col gap-4">
+            {themeGroupOrder.map((group) => {
+              const items = themeOptions.filter((option) => option.group === group)
+              if (items.length === 0) return null
+              return (
+                <div key={group}>
+                  <PickerGroupLabel>{group}</PickerGroupLabel>
+                  <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(7rem,1fr))]">
+                    {items.map(({ value, label, swatch }) => (
+                      <ThemeTile
+                        key={value}
+                        label={label}
+                        swatch={swatch}
+                        selected={theme === value}
+                        onSelect={() => setTheme(value)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </SettingsRow>
+
+        <SettingsRow title="Typeface" description="The font used across the interface.">
+          <div className="flex flex-col gap-4">
+            {fontGroupOrder.map((category) => {
+              const items = fontFamilyOptions.filter((option) => option.category === category)
+              if (items.length === 0) return null
+              return (
+                <div key={category}>
+                  <PickerGroupLabel>{category}</PickerGroupLabel>
+                  <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(13rem,1fr))]">
+                    {items.map(({ value, label, note, stack }) => (
+                      <FontTile
+                        key={value}
+                        label={label}
+                        note={note}
+                        stack={stack}
+                        selected={fontFamily === value}
+                        onSelect={() => setFontFamily(value)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </SettingsRow>
+
+        <SettingsRow title="Text size" description="Scales every label, button, and panel together.">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex items-center gap-1 rounded-[var(--r-md)] border border-[var(--border)] p-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Decrease text size"
+                  disabled={atMin}
+                  onClick={() => stepFontScale(-FONT_SCALE_STEP)}
+                >
+                  <Minus size={15} />
+                </Button>
+                <div className="min-w-[58px] text-center text-[0.8125rem] font-semibold tabular-nums text-[var(--text-1)]">
+                  {fontScale}<span className="ml-0.5 text-[0.6875rem] font-normal text-[var(--text-3)]">px</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Increase text size"
+                  disabled={atMax}
+                  onClick={() => stepFontScale(FONT_SCALE_STEP)}
+                >
+                  <Plus size={15} />
+                </Button>
+              </div>
+              <span className="text-[0.6875rem] text-[var(--text-3)]">
+                {FONT_SCALE_MIN}–{FONT_SCALE_MAX}px
+              </span>
+              {!isDefaultScale && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-[var(--text-3)] hover:text-[var(--text-1)]"
+                  onClick={resetFontScale}
+                >
+                  <RotateCcw size={12} />
+                  Reset
+                </Button>
+              )}
+            </div>
+            <p
+              className="m-0 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 leading-snug text-[var(--text-2)]"
+              style={{ fontSize: `${fontScale}px` }}
+            >
+              The quick brown fox jumps over the lazy dog.
+            </p>
+          </div>
+        </SettingsRow>
+
         <SettingsRow title="Project start view" description="Pick where projects open by default.">
           <div className="grid gap-2">
             <Label htmlFor="default-view-select">Default project view</Label>
@@ -270,7 +508,7 @@ export function AccountPreferencesSection() {
                 ))}
               </SelectContent>
             </Select>
-            <p className="m-0 text-[12px] leading-relaxed text-[var(--text-3)]">
+            <p className="m-0 text-[0.75rem] leading-relaxed text-[var(--text-3)]">
               {defaultViewOptions.find((option) => option.value === defaultProjectView)?.description}
             </p>
           </div>

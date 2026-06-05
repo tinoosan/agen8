@@ -21,12 +21,12 @@ export default function TopBar() {
       {/* Logo section — matches sidebar width */}
       <div className="w-[var(--sidebar-width)] shrink-0 flex items-center gap-2 px-4 h-full">
         <img src={theme === 'light' ? agen8IconLight : agen8IconDark} alt="" className="w-6 h-6 shrink-0 rounded-[7px]" aria-hidden="true" />
-        <span className="font-semibold text-[15px] tracking-[-0.03em] text-[var(--text-1)]">agen8</span>
+        <span className="font-semibold text-[0.9375rem] tracking-[-0.03em] text-[var(--text-1)]">agen8</span>
       </div>
 
       {/* Page context section */}
       <div className="flex-1 flex items-center gap-2.5 px-6 min-w-0 h-full">
-        <span className="text-[14px] font-semibold text-[var(--text-1)]">{title}</span>
+        <span className="text-[0.875rem] font-semibold text-[var(--text-1)]">{title}</span>
       </div>
 
       {/* Right section */}

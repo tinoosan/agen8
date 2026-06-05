@@ -844,7 +844,7 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
 
         {effectiveFocusNodeId && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-            <span className="text-[10px] text-muted-foreground/60 px-2.5 py-1">
+            <span className="text-[0.625rem] text-muted-foreground/60 px-2.5 py-1">
               Esc to clear focus
             </span>
           </div>
@@ -859,25 +859,25 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
             opacity: 0.92,
           }}
         >
-          <h4 className="text-[9px] font-bold text-foreground/50 uppercase tracking-[0.6px] mb-1">Map Legend</h4>
+          <h4 className="text-[0.5625rem] font-bold text-foreground/50 uppercase tracking-[0.6px] mb-1">Map Legend</h4>
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center gap-3">
               <Target size={13} className="text-[var(--accent)]" strokeWidth={2.2} />
-              <span className="text-[11.5px] font-medium text-foreground tracking-tight">Mission</span>
+              <span className="text-[0.71875rem] font-medium text-foreground tracking-tight">Mission</span>
             </div>
             <div className="flex items-center gap-3 w-full">
               <div className="w-[14px] h-[9px] flex items-center justify-start rounded-[2.5px] border border-[#0071e3]/60 bg-[#0071e3]/10 overflow-hidden relative left-[1px]">
                  <div className="h-full w-[8px] bg-[#0071e3]/80" />
               </div>
-              <span className="text-[11.5px] font-medium text-foreground tracking-tight pl-[3px]">Key Result</span>
+              <span className="text-[0.71875rem] font-medium text-foreground tracking-tight pl-[3px]">Key Result</span>
             </div>
             <div className="flex items-center gap-3">
               <CircleCheck size={13} className="text-[var(--text-3)]" strokeWidth={2.2} />
-              <span className="text-[11.5px] font-medium text-foreground tracking-tight">Task</span>
+              <span className="text-[0.71875rem] font-medium text-foreground tracking-tight">Task</span>
             </div>
             <div className="flex items-center gap-3">
               <Diamond size={13} className="text-[#0071e3]" strokeWidth={2.2} />
-              <span className="text-[11.5px] font-medium text-foreground tracking-tight">Decision</span>
+              <span className="text-[0.71875rem] font-medium text-foreground tracking-tight">Decision</span>
             </div>
           </div>
         </div>

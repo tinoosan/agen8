@@ -17,7 +17,7 @@ const SOURCE_DOT: Record<DecisionSource, string> = {
 }
 
 const LABEL_STYLE: CSSProperties = {
-  fontSize: '10px',
+  fontSize: '0.625rem',
   fontWeight: 500,
   letterSpacing: '0.08em',
   lineHeight: 1.33,
@@ -27,7 +27,7 @@ const LABEL_STYLE: CSSProperties = {
 
 const PROSE_STYLE: CSSProperties = {
   fontFamily: SF_TEXT,
-  fontSize: '13px',
+  fontSize: '0.8125rem',
   fontWeight: 400,
   letterSpacing: '-0.224px',
   lineHeight: 1.43,
@@ -78,7 +78,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           <p
             className="uppercase mb-1"
             style={{
-              fontSize: '10px',
+              fontSize: '0.625rem',
               fontWeight: 500,
               letterSpacing: '0.08em',
               lineHeight: 1.33,
@@ -91,7 +91,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
             className="text-foreground line-clamp-3"
             style={{
               fontFamily: SF_TEXT,
-              fontSize: '17px',
+              fontSize: '1.0625rem',
               fontWeight: 600,
               lineHeight: 1.24,
               letterSpacing: '-0.374px',
@@ -126,7 +126,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
             className="flex items-center min-w-0"
             style={{
               fontFamily: SF_TEXT,
-              fontSize: '12px',
+              fontSize: '0.75rem',
               fontWeight: 600,
               letterSpacing: '-0.12px',
               lineHeight: 1.33,
@@ -158,7 +158,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
             <span
               style={{
                 fontFamily: SF_TEXT,
-                fontSize: '11px',
+                fontSize: '0.6875rem',
                 fontWeight: 400,
                 letterSpacing: '-0.12px',
                 lineHeight: 1.33,
@@ -233,7 +233,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
                     borderRadius: '4px',
                     background: 'var(--bg-elevated)',
                     fontFamily: SF_TEXT,
-                    fontSize: '10px',
+                    fontSize: '0.625rem',
                     fontWeight: 500,
                     letterSpacing: '-0.08px',
                     lineHeight: 1.47,
@@ -275,7 +275,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
         <p
           style={{
             fontFamily: SF_TEXT,
-            fontSize: '12px',
+            fontSize: '0.75rem',
             fontWeight: 400,
             letterSpacing: '-0.12px',
             lineHeight: 1.33,

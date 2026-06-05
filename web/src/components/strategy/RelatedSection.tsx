@@ -32,7 +32,7 @@ function RelatedRow({ item, showType }: { item: RelatedItem; showType: boolean }
             <div
               className="uppercase"
               style={{
-                fontSize: '9px',
+                fontSize: '0.5625rem',
                 fontWeight: 600,
                 letterSpacing: '0.06em',
                 color: 'var(--text-3)',
@@ -45,7 +45,7 @@ function RelatedRow({ item, showType }: { item: RelatedItem; showType: boolean }
           <div
             className="truncate"
             style={{
-              fontSize: '12px',
+              fontSize: '0.75rem',
               fontWeight: 400,
               letterSpacing: '-0.12px',
               lineHeight: 1.33,
@@ -57,7 +57,7 @@ function RelatedRow({ item, showType }: { item: RelatedItem; showType: boolean }
         </div>
         {item.badge && (
           <span
-            className="shrink-0 text-[10px] font-semibold tabular-nums"
+            className="shrink-0 text-[0.625rem] font-semibold tabular-nums"
             style={{ color: item.badgeColor ?? 'var(--text-3)' }}
           >
             {item.badge}
@@ -95,7 +95,7 @@ export function RelatedSection({ items, grouped = false }: Props) {
       <p
         className="uppercase"
         style={{
-          fontSize: '10px',
+          fontSize: '0.625rem',
           fontWeight: 500,
           letterSpacing: '0.08em',
           lineHeight: 1.33,
@@ -112,7 +112,7 @@ export function RelatedSection({ items, grouped = false }: Props) {
             <div
               className="uppercase flex items-center gap-1.5"
               style={{
-                fontSize: '9px',
+                fontSize: '0.5625rem',
                 fontWeight: 600,
                 letterSpacing: '0.06em',
                 color: 'var(--text-3)',

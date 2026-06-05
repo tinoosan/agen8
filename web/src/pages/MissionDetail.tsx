@@ -250,7 +250,7 @@ function KRRow({
         {editing ? (
           <input
             className={cn(ghostInput, 'flex-1 min-w-0 text-[var(--text-1)]')}
-            style={{ fontSize: '13px', fontWeight: 500, letterSpacing: '-0.08px' }}
+            style={{ fontSize: '0.8125rem', fontWeight: 500, letterSpacing: '-0.08px' }}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => {
@@ -260,7 +260,7 @@ function KRRow({
             autoFocus
           />
         ) : (
-          <span className="flex-1 min-w-0 truncate text-[var(--text-1)]" style={{ fontSize: '13px', fontWeight: 500, letterSpacing: '-0.08px' }}>
+          <span className="flex-1 min-w-0 truncate text-[var(--text-1)]" style={{ fontSize: '0.8125rem', fontWeight: 500, letterSpacing: '-0.08px' }}>
             {kr.title}
           </span>
         )}
@@ -268,11 +268,11 @@ function KRRow({
         {!editing && (
           <>
             {kr.progressPercent > 0 && (
-              <span className="tabular-nums text-[var(--text-3)] shrink-0" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '-0.06px' }}>
+              <span className="tabular-nums text-[var(--text-3)] shrink-0" style={{ fontSize: '0.6875rem', fontWeight: 500, letterSpacing: '-0.06px' }}>
                 {Math.round(kr.progressPercent)}%
               </span>
             )}
-            <Badge variant={badge.variant} className="text-[10px] px-1.5 py-0 shrink-0">
+            <Badge variant={badge.variant} className="text-[0.625rem] px-1.5 py-0 shrink-0">
               {badge.label}
             </Badge>
           </>
@@ -282,14 +282,14 @@ function KRRow({
         {editing ? (
           <div className="flex items-center gap-2 shrink-0">
             <button
-              className="text-[12px] text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors bg-transparent border-none cursor-pointer p-0"
+              className="text-[0.75rem] text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors bg-transparent border-none cursor-pointer p-0"
               style={{ letterSpacing: '-0.12px' }}
               onClick={cancelEdit}
             >
               Cancel
             </button>
             <button
-              className="text-[12px] text-[var(--accent)] font-medium hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer p-0 disabled:opacity-40"
+              className="text-[0.75rem] text-[var(--accent)] font-medium hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer p-0 disabled:opacity-40"
               style={{ letterSpacing: '-0.12px' }}
               onClick={handleSave}
               disabled={updateKR.isPending}
@@ -298,7 +298,7 @@ function KRRow({
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
             <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-[var(--accent)]" onClick={() => { setExpanded(true); setReporting(true) }} title="Report progress">
               <BarChart2 size={11} />
             </Button>
@@ -345,10 +345,10 @@ function KRRow({
                   { label: 'Baseline', value: baseline,    set: setBaseline,    type: 'number', width: 'w-16', placeholder: '—' },
                 ] as Array<{ label: string; value: string; set: (v: string) => void; type: string; width: string; placeholder?: string }>).map(({ label, value, set, type, width, placeholder }) => (
                   <div key={label} className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-[var(--text-3)]" style={{ letterSpacing: '-0.06px' }}>{label}</span>
+                    <span className="text-[0.6875rem] text-[var(--text-3)]" style={{ letterSpacing: '-0.06px' }}>{label}</span>
                     <input
                       className={cn(ghostInput, width, 'text-[var(--text-1)] border-b border-[var(--border)]')}
-                      style={{ fontSize: '12px', letterSpacing: '-0.12px' }}
+                      style={{ fontSize: '0.75rem', letterSpacing: '-0.12px' }}
                       type={type}
                       value={value}
                       onChange={(e) => set(e.target.value)}
@@ -363,10 +363,10 @@ function KRRow({
                 {editSelects.map(({ label, value, set, options }) => {
                   return (
                     <div key={label} className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-[var(--text-3)]" style={{ letterSpacing: '-0.06px' }}>{label}</span>
+                      <span className="text-[0.6875rem] text-[var(--text-3)]" style={{ letterSpacing: '-0.06px' }}>{label}</span>
                       <select
                         className="bg-transparent border-none text-[var(--text-1)] outline-none"
-                        style={{ fontSize: '12px', letterSpacing: '-0.12px' }}
+                        style={{ fontSize: '0.75rem', letterSpacing: '-0.12px' }}
                         value={value}
                         onChange={(event) => set(event.target.value)}
                         aria-label={label}
@@ -382,10 +382,10 @@ function KRRow({
 
               {/* Row 3: description */}
               <div className="flex items-start gap-1.5">
-                <span className="text-[11px] text-[var(--text-3)] pt-0.5" style={{ letterSpacing: '-0.06px' }}>Note</span>
+                <span className="text-[0.6875rem] text-[var(--text-3)] pt-0.5" style={{ letterSpacing: '-0.06px' }}>Note</span>
                 <textarea
                   className={cn(ghostInput, 'flex-1 text-[var(--text-1)] border-b border-[var(--border)] resize-none leading-snug')}
-                  style={{ fontSize: '12px', letterSpacing: '-0.12px', minHeight: '48px' }}
+                  style={{ fontSize: '0.75rem', letterSpacing: '-0.12px', minHeight: '48px' }}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Description…"
@@ -406,7 +406,7 @@ function KRRow({
               <div className="flex items-center gap-3">
                 <input
                   className={cn(ghostInput, 'w-24 tabular-nums text-[var(--text-1)] border-b border-[var(--border)]')}
-                  style={{ fontSize: '13px', letterSpacing: '-0.08px' }}
+                  style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}
                   type="number"
                   placeholder={`${kr.currentValue ?? 0}`}
                   value={progressValue}
@@ -414,11 +414,11 @@ function KRRow({
                   onKeyDown={(e) => { if (e.key === 'Escape') cancelProgress() }}
                   autoFocus
                 />
-                <span className="text-[11px] text-[var(--text-3)]">→ target {kr.targetValue}{kr.unit ? ` ${kr.unit}` : ''}</span>
+                <span className="text-[0.6875rem] text-[var(--text-3)]">→ target {kr.targetValue}{kr.unit ? ` ${kr.unit}` : ''}</span>
               </div>
               <input
                 className={cn(ghostInput, 'text-[var(--text-3)] border-b border-[var(--border)]')}
-                style={{ fontSize: '12px', letterSpacing: '-0.12px' }}
+                style={{ fontSize: '0.75rem', letterSpacing: '-0.12px' }}
                 placeholder="What did you measure?"
                 value={progressNote}
                 onChange={(e) => setProgressNote(e.target.value)}
@@ -426,14 +426,14 @@ function KRRow({
               />
               <div className="flex items-center gap-3 pt-0.5">
                 <button
-                  className="text-[12px] text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors bg-transparent border-none cursor-pointer p-0"
+                  className="text-[0.75rem] text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors bg-transparent border-none cursor-pointer p-0"
                   style={{ letterSpacing: '-0.12px' }}
                   onClick={cancelProgress}
                 >
                   Cancel
                 </button>
                 <button
-                  className="text-[12px] text-[var(--accent)] font-medium hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer p-0 disabled:opacity-40"
+                  className="text-[0.75rem] text-[var(--accent)] font-medium hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer p-0 disabled:opacity-40"
                   style={{ letterSpacing: '-0.12px' }}
                   onClick={handleReportProgress}
                   disabled={updateProgress.isPending || !progressValue.trim() || !progressNote.trim()}
@@ -448,7 +448,7 @@ function KRRow({
           {!editing && !reportingProgress && (
             <div className="flex flex-col gap-2.5">
               {kr.description && (
-                <p className="text-[var(--text-2)] m-0" style={{ fontSize: '13px', letterSpacing: '-0.08px', lineHeight: 1.5 }}>
+                <p className="text-[var(--text-2)] m-0" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px', lineHeight: 1.5 }}>
                   {kr.description}
                 </p>
               )}
@@ -456,28 +456,28 @@ function KRRow({
               {/* Metadata chips */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 {formatKRProgress(kr) && (
-                  <span className="text-[11px] text-[var(--text-3)]">
+                  <span className="text-[0.6875rem] text-[var(--text-3)]">
                     <span className="opacity-60">Progress</span>{' '}{formatKRProgress(kr)}
                   </span>
                 )}
-                <span className="text-[11px] text-[var(--text-3)]">
+                <span className="text-[0.6875rem] text-[var(--text-3)]">
                   <span className="opacity-60">Type</span>{' '}{measurementLabel(kr.measurementType)}
                 </span>
-                <span className="text-[11px] text-[var(--text-3)]">
+                <span className="text-[0.6875rem] text-[var(--text-3)]">
                   <span className="opacity-60">Direction</span>{' '}{directionLabel(kr.direction)}
                 </span>
                 {kr.unit && (
-                  <span className="text-[11px] text-[var(--text-3)]">
+                  <span className="text-[0.6875rem] text-[var(--text-3)]">
                     <span className="opacity-60">Unit</span>{' '}{kr.unit}
                   </span>
                 )}
                 {kr.baseline != null && (
-                  <span className="text-[11px] text-[var(--text-3)]">
+                  <span className="text-[0.6875rem] text-[var(--text-3)]">
                     <span className="opacity-60">Baseline</span>{' '}{kr.baseline}
                   </span>
                 )}
                 {kr.lastUpdatedBy && (
-                  <span className="text-[11px] text-[var(--text-3)]">
+                  <span className="text-[0.6875rem] text-[var(--text-3)]">
                     <span className="opacity-60">Updated by</span>{' '}{shortAgent(kr.lastUpdatedBy)}
                   </span>
                 )}
@@ -574,7 +574,7 @@ export default function MissionDetail() {
           <Link
             to={missionsPanelLink(projectId)}
             className="inline-flex items-center gap-1.5 text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors no-underline mb-5"
-            style={{ fontSize: '13px', letterSpacing: '-0.08px' }}
+            style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}
           >
             <ArrowLeft size={13} />
             Missions
@@ -584,7 +584,7 @@ export default function MissionDetail() {
           <div className="flex items-center gap-2.5 mb-1">
             <h1
               className="m-0 text-[var(--text-1)] flex-1 min-w-0"
-              style={{ fontSize: '28px', fontWeight: 700, letterSpacing: '-0.56px', lineHeight: 1.14 }}
+              style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.56px', lineHeight: 1.14 }}
             >
               {mission.title}
             </h1>
@@ -592,7 +592,7 @@ export default function MissionDetail() {
               {statusBadge.label}
             </Badge>
             {keyResults && keyResults.length > 0 && overallProgress > 0 && (
-              <span className="tabular-nums text-[var(--text-3)] shrink-0" style={{ fontSize: '13px', fontWeight: 500, letterSpacing: '-0.06px' }}>
+              <span className="tabular-nums text-[var(--text-3)] shrink-0" style={{ fontSize: '0.8125rem', fontWeight: 500, letterSpacing: '-0.06px' }}>
                 {Math.round(overallProgress)}%
               </span>
             )}
@@ -600,7 +600,7 @@ export default function MissionDetail() {
 
           {/* Description */}
           {mission.description && (
-            <p className="mt-2 mb-0 text-[var(--text-3)] ml-[18px]" style={{ fontSize: '14px', letterSpacing: '-0.14px', lineHeight: 1.5 }}>
+            <p className="mt-2 mb-0 text-[var(--text-3)] ml-[18px]" style={{ fontSize: '0.875rem', letterSpacing: '-0.14px', lineHeight: 1.5 }}>
               {mission.description}
             </p>
           )}
@@ -608,7 +608,7 @@ export default function MissionDetail() {
           {/* Metadata */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2.5 ml-[18px]">
             {(mission.startDate || mission.endDate) && (
-              <span className="inline-flex items-center gap-1 text-[var(--text-3)]" style={{ fontSize: '12px', letterSpacing: '-0.08px' }}>
+              <span className="inline-flex items-center gap-1 text-[var(--text-3)]" style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}>
                 <Calendar size={11} />
                 {mission.startDate && mission.endDate
                   ? `${new Date(mission.startDate).toLocaleDateString()} – ${new Date(mission.endDate).toLocaleDateString()}`
@@ -618,7 +618,7 @@ export default function MissionDetail() {
               </span>
             )}
             {keyResults && keyResults.length > 0 && (
-              <span className="text-[var(--text-3)]" style={{ fontSize: '12px', letterSpacing: '-0.08px' }}>
+              <span className="text-[var(--text-3)]" style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}>
                 {keyResults.length} KR{keyResults.length !== 1 ? 's' : ''}
               </span>
             )}
@@ -630,16 +630,16 @@ export default function MissionDetail() {
       {/* Scrollable KR list */}
       <div className="px-6 py-5 max-w-4xl mx-auto w-full">
         <div className="flex items-center gap-1.5 mb-2">
-          <span className="text-[var(--text-3)]" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '-0.04px' }}>
+          <span className="text-[var(--text-3)]" style={{ fontSize: '0.6875rem', fontWeight: 500, letterSpacing: '-0.04px' }}>
             Key Results
           </span>
           {keyResults && keyResults.length > 0 && (
-            <span className="text-[11px] text-[var(--text-3)] tabular-nums">{keyResults.length}</span>
+            <span className="text-[0.6875rem] text-[var(--text-3)] tabular-nums">{keyResults.length}</span>
           )}
           {keyResults && keyResults.length > 0 && (
             <button
               className="ml-auto inline-flex items-center gap-1 text-[var(--text-3)] hover:text-[var(--text-2)] transition-colors bg-transparent border-none cursor-pointer p-0"
-              style={{ fontSize: '11px', letterSpacing: '-0.06px' }}
+              style={{ fontSize: '0.6875rem', letterSpacing: '-0.06px' }}
               onClick={() => {
                 const allExpanded = keyResults.every(kr => !!expandedKrIds[kr.id])
                 const newState = !allExpanded
@@ -658,7 +658,7 @@ export default function MissionDetail() {
 
         {(!keyResults || keyResults.length === 0) ? (
           <div className="rounded-[8px] bg-[var(--bg-surface)] px-4 py-8 text-center">
-            <p className="text-[var(--text-3)] m-0" style={{ fontSize: '13px', letterSpacing: '-0.08px' }}>
+            <p className="text-[var(--text-3)] m-0" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
               No key results defined yet.{' '}
               <Link
                 to={missionsPanelLink(projectId)}

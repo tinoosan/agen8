@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useRecentDecisions, type DecisionListFilter } from '../../hooks/useDecisions'
+import { useRecentDecisions } from '../../hooks/useDecisions'
 import { useMissions, useProjectKRs } from '../../hooks/useMissions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import { Button } from '@/components/ui/button'
@@ -58,7 +58,7 @@ function ConfidenceDots({ confidence }: { confidence: number }) {
             ))}
           </div>
         </TooltipTrigger>
-        <TooltipContent side="top" className="text-[11px]">
+        <TooltipContent side="top" className="text-[0.6875rem]">
           {Math.round(confidence * 100)}% confidence
         </TooltipContent>
       </Tooltip>
@@ -212,7 +212,7 @@ function DecisionRow({ decision, catalogs }: { decision: DecisionView; catalogs:
           <button className="flex items-center gap-3 w-full text-left bg-transparent border-none cursor-pointer p-0 font-[inherit] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none rounded-[var(--r-sm)]">
             {/* Role avatar — cluster-coloured, acts as visual anchor */}
             <span
-              className="decision-identity-badge w-6 h-6 rounded-[10px] flex items-center justify-center text-[9px] font-semibold uppercase shrink-0 tracking-[0.02em]"
+              className="decision-identity-badge w-6 h-6 rounded-[10px] flex items-center justify-center text-[0.5625rem] font-semibold uppercase shrink-0 tracking-[0.02em]"
               style={avatarStyle}
             >
               {identity.slice(0, 2)}
@@ -221,15 +221,15 @@ function DecisionRow({ decision, catalogs }: { decision: DecisionView; catalogs:
             {/* Content column */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold tracking-[-0.01em]" style={{ color: clusterColor }}>
+                <span className="text-[0.6875rem] font-semibold tracking-[-0.01em]" style={{ color: clusterColor }}>
                   {identity}
                 </span>
-                <span className="text-[10px] text-[var(--text-3)] tabular-nums">
+                <span className="text-[0.625rem] text-[var(--text-3)] tabular-nums">
                   {timeAgo(decision.createdAt)}
                 </span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-[12px] font-medium text-[var(--text-1)] truncate flex-1 min-w-0 leading-snug">
+                <span className="text-[0.75rem] font-medium text-[var(--text-1)] truncate flex-1 min-w-0 leading-snug">
                   {sanitizeDecisionTitle(decision.title)}
                 </span>
                 <ConfidenceDots confidence={decision.confidence} />
@@ -253,7 +253,7 @@ function DecisionRow({ decision, catalogs }: { decision: DecisionView; catalogs:
         {/* Expanded rationale */}
         <CollapsibleContent>
             <div className="mt-2 ml-10">
-              <div className="bg-[var(--bg-surface)] rounded-[var(--r-md)] p-2.5 text-[11px] text-[var(--text-2)] leading-[1.55]">
+              <div className="bg-[var(--bg-surface)] rounded-[var(--r-md)] p-2.5 text-[0.6875rem] text-[var(--text-2)] leading-[1.55]">
                 <div className="mb-2">
                   <RefLinks decision={decision} catalogs={catalogs} />
                 </div>
@@ -300,24 +300,12 @@ function DecisionFeedSkeleton() {
 
 /* -- Main exported component ---------------------------------------------- */
 
-type SourceFilter = '' | 'agent'
-
-const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
-  { value: '', label: 'All' },
-  { value: 'agent', label: 'Agent' },
-]
-
 export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = false }: {
   projectId: string | null
   hideHeader?: boolean
   defaultExpanded?: boolean
 }) {
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('')
-  const filter: DecisionListFilter | undefined = sourceFilter ? { source: sourceFilter as DecisionListFilter['source'] } : undefined
-  const { data: decisions, isLoading, isError, error } = useRecentDecisions(
-    projectId,
-    filter,
-  )
+  const { data: decisions, isLoading, isError, error } = useRecentDecisions(projectId)
   const missionsQuery = useMissions(projectId)
   const projectKRsQuery = useProjectKRs(projectId)
   const projectTasksQuery = useProjectTasks(projectId)
@@ -375,27 +363,12 @@ export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = 
   }
 
   if (safeDecisions.length === 0) {
-    if (!hideHeader && !sourceFilter) return null
+    if (!hideHeader) return null
     return (
       <div className="dashboard-section">
-        {hideHeader && (
-          <div className="flex justify-end mb-3">
-            <FilterButtons value={sourceFilter} onChange={setSourceFilter} />
-          </div>
-        )}
-        {!hideHeader && sourceFilter && (
-          <div className="flex items-center gap-2 mb-3">
-            <ScrollText size={14} className="text-[var(--accent)]" />
-            <span className="text-sm font-semibold text-[var(--text-1)] tracking-[-0.02em]">
-              Decision Log
-            </span>
-            <div className="flex-1" />
-            <FilterButtons value={sourceFilter} onChange={setSourceFilter} />
-          </div>
-        )}
-        <div className="flex items-center gap-2.5 px-1 py-3 text-[13px] text-[var(--text-3)]">
+        <div className="flex items-center gap-2.5 px-1 py-3 text-[0.8125rem] text-[var(--text-3)]">
           <ScrollText size={16} className="opacity-40" />
-          <span>No {sourceFilter ? `${sourceFilter} ` : ''}decisions recorded yet</span>
+          <span>No decisions recorded yet</span>
         </div>
       </div>
     )
@@ -418,9 +391,6 @@ export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = 
             </div>
             <p className="dashboard-section-caption">What changed, and who shaped it.</p>
           </div>
-          <div className="dashboard-section-meta">
-            <FilterButtons value={sourceFilter} onChange={setSourceFilter} />
-          </div>
         </div>
       )}
       {hideHeader && (
@@ -430,7 +400,6 @@ export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = 
               {safeDecisions.length} latest
             </span>
           </div>
-          <FilterButtons value={sourceFilter} onChange={setSourceFilter} />
           <Button asChild variant="outline" size="xs" className="shrink-0">
             <Link to={decisionsLink(projectId)}>Open full log</Link>
           </Button>
@@ -463,34 +432,11 @@ export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = 
       {hasMore && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className="mt-3 text-[11px] font-medium text-[var(--accent)] hover:underline bg-transparent border-none cursor-pointer p-0 font-[inherit]"
+          className="mt-3 text-[0.6875rem] font-medium text-[var(--accent)] hover:underline bg-transparent border-none cursor-pointer p-0 font-[inherit]"
         >
           {expanded ? 'Show less' : `Open full log (${safeDecisions.length})`}
         </button>
       )}
     </section>
-  )
-}
-
-function FilterButtons({ value, onChange }: { value: SourceFilter; onChange: (v: SourceFilter) => void }) {
-  return (
-    <div className="decision-filter-group">
-      {SOURCE_FILTERS.map(f => (
-        <Button
-          key={f.value}
-          variant="ghost"
-          size="xs"
-          onClick={() => onChange(f.value)}
-          className={cn(
-            'decision-filter-button text-[10px] px-2 py-0.5 rounded-[var(--r-sm)] transition-colors',
-            value === f.value
-              ? 'bg-[var(--bg-hover)] text-[var(--text-1)]'
-              : 'text-[var(--text-3)] hover:text-[var(--text-2)]',
-          )}
-        >
-          {f.label}
-        </Button>
-      ))}
-    </div>
   )
 }

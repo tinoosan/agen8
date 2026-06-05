@@ -64,11 +64,11 @@ function KeyResultRow({ kr, missionId }: { kr: KeyResultView; missionId: string 
   return (
     <div className="py-1.5 border-b border-[var(--border)]/40 last:border-0">
       <div className="flex items-center gap-2">
-        <span className="flex-1 min-w-0 truncate text-[12px] text-[var(--text-1)]" style={{ letterSpacing: '-0.08px' }}>
+        <span className="flex-1 min-w-0 truncate text-[0.75rem] text-[var(--text-1)]" style={{ letterSpacing: '-0.08px' }}>
           {kr.title}
         </span>
         {kr.progressPercent > 0 && (
-          <span className="tabular-nums text-[11px] font-medium text-[var(--text-2)] shrink-0">
+          <span className="tabular-nums text-[0.6875rem] font-medium text-[var(--text-2)] shrink-0">
             {Math.round(kr.progressPercent)}%
           </span>
         )}
@@ -92,7 +92,7 @@ function KeyResultRow({ kr, missionId }: { kr: KeyResultView; missionId: string 
       </div>
 
       {kr.progressPercent > 0 && (
-        <p className="text-[10px] text-[var(--text-3)] tabular-nums mt-0.5 m-0">
+        <p className="text-[0.625rem] text-[var(--text-3)] tabular-nums mt-0.5 m-0">
           {formatKRProgress(kr)}
         </p>
       )}
@@ -106,14 +106,14 @@ function KeyResultRow({ kr, missionId }: { kr: KeyResultView; missionId: string 
               placeholder={String(kr.targetValue)}
               value={progressValue}
               onChange={(e) => setProgressValue(e.target.value)}
-              className="w-20 px-2 py-1 text-[11px] bg-[var(--bg-elevated)] border border-[var(--border)] rounded-[var(--r-sm)] outline-none text-[var(--text-1)] tabular-nums"
+              className="w-20 px-2 py-1 text-[0.6875rem] bg-[var(--bg-elevated)] border border-[var(--border)] rounded-[var(--r-sm)] outline-none text-[var(--text-1)] tabular-nums"
               autoFocus
             />
             <input
               placeholder="What did you measure?"
               value={progressNote}
               onChange={(e) => setProgressNote(e.target.value)}
-              className="flex-1 px-2 py-1 text-[11px] bg-[var(--bg-elevated)] border border-[var(--border)] rounded-[var(--r-sm)] outline-none text-[var(--text-1)]"
+              className="flex-1 px-2 py-1 text-[0.6875rem] bg-[var(--bg-elevated)] border border-[var(--border)] rounded-[var(--r-sm)] outline-none text-[var(--text-1)]"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') { e.preventDefault(); handleReportProgress() }
                 if (e.key === 'Escape') resetProgress()
@@ -122,13 +122,13 @@ function KeyResultRow({ kr, missionId }: { kr: KeyResultView; missionId: string 
           </div>
           <div className="flex items-center gap-2 justify-end">
             <button
-              className="text-[11px] text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors bg-transparent border-none cursor-pointer p-0"
+              className="text-[0.6875rem] text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors bg-transparent border-none cursor-pointer p-0"
               onClick={resetProgress}
             >
               Cancel
             </button>
             <button
-              className="text-[11px] text-[var(--accent)] font-medium hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer p-0 disabled:opacity-40"
+              className="text-[0.6875rem] text-[var(--accent)] font-medium hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer p-0 disabled:opacity-40"
               onClick={handleReportProgress}
               disabled={updateProgress.isPending || !progressValue.trim() || !progressNote.trim()}
             >
@@ -157,7 +157,7 @@ function MissionKeyResults({ missionId }: { missionId: string }) {
 
   if (isError) {
     return (
-      <div className="flex items-center gap-1.5 py-1.5 text-[11px] text-[var(--red)]">
+      <div className="flex items-center gap-1.5 py-1.5 text-[0.6875rem] text-[var(--red)]">
         <AlertCircle size={11} />
         <span>{error instanceof Error ? error.message : 'Failed to load'}</span>
       </div>
@@ -165,7 +165,7 @@ function MissionKeyResults({ missionId }: { missionId: string }) {
   }
 
   if (!keyResults || keyResults.length === 0) {
-    return <p className="text-[11px] text-[var(--text-3)] py-1">No key results defined</p>
+    return <p className="text-[0.6875rem] text-[var(--text-3)] py-1">No key results defined</p>
   }
 
   return (
@@ -199,11 +199,11 @@ function MissionRow({ mission, projectId }: { mission: MissionView; projectId: s
           ? <ChevronDown size={11} className="shrink-0 text-[var(--text-3)]" />
           : <ChevronRight size={11} className="shrink-0 text-[var(--text-3)]" />
         }
-        <span className="text-[13px] font-semibold text-[var(--text-1)] tracking-[-0.02em] truncate flex-1">
+        <span className="text-[0.8125rem] font-semibold text-[var(--text-1)] tracking-[-0.02em] truncate flex-1">
           {mission.title}
         </span>
         {hasKeyResults && overallProgress > 0 && (
-          <span className="text-[11px] font-semibold tabular-nums text-[var(--text-2)] shrink-0">
+          <span className="text-[0.6875rem] font-semibold tabular-nums text-[var(--text-2)] shrink-0">
             {Math.round(overallProgress)}%
           </span>
         )}
@@ -221,7 +221,7 @@ function MissionRow({ mission, projectId }: { mission: MissionView; projectId: s
       {open && (
         <div className="dashboard-queue-detail px-4 pb-3 pt-1">
           {mission.description && (
-            <p className="text-[11px] text-[var(--text-3)] leading-relaxed mb-1.5 m-0">
+            <p className="text-[0.6875rem] text-[var(--text-3)] leading-relaxed mb-1.5 m-0">
               {mission.description}
             </p>
           )}
@@ -263,7 +263,7 @@ export default function MissionSummary({ projectId, mode = 'inMotion' }: { proje
 
   if (isError) {
     return (
-      <div className="dashboard-section flex items-center gap-2 px-1 py-3 text-[11px] text-[var(--red)]">
+      <div className="dashboard-section flex items-center gap-2 px-1 py-3 text-[0.6875rem] text-[var(--red)]">
         <AlertCircle size={13} />
         <span>Failed to load missions: {error instanceof Error ? error.message : 'Unknown error'}</span>
       </div>

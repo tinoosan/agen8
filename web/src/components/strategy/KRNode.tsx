@@ -116,19 +116,19 @@ export const KRNode = memo(function KRNode({ data, selected, id }: NodeProps) {
 
           <div className="flex flex-col items-center gap-[3px] mt-[2px]">
             <span className="text-foreground truncate text-center font-medium transition-opacity duration-200"
-              style={{ fontSize: '11.5px', lineHeight: '14px', maxWidth: 180 }}>
+              style={{ fontSize: '0.71875rem', lineHeight: '14px', maxWidth: 180 }}>
               {kr.title}
             </span>
             <div className="flex items-center gap-2 w-full" style={{ maxWidth: 160 }}>
               <div className="flex-1 h-[3px] bg-muted/60 rounded-full overflow-hidden">
                 <div className="h-full rounded-full transition-all duration-1000 ease-out" style={{ width: `${progress}%`, background: color }} />
               </div>
-              <span className="shrink-0 tabular-nums text-[9.5px] font-semibold text-muted-foreground">
+              <span className="shrink-0 tabular-nums text-[0.59375rem] font-semibold text-muted-foreground">
                 {progress}%
               </span>
             </div>
             {d.linkedDecisionCount != null && d.linkedDecisionCount > 0 && (
-              <span className="text-[9.5px] font-medium text-muted-foreground">
+              <span className="text-[0.59375rem] font-medium text-muted-foreground">
                 {d.linkedDecisionCount} decision{d.linkedDecisionCount === 1 ? '' : 's'}
               </span>
             )}

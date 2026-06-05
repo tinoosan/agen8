@@ -34,7 +34,7 @@ export function TextAreaField({ label, value, onChange, placeholder, mono, rows,
       <div className="flex justify-between items-baseline">
         <Label className="block text-xs font-medium text-[var(--text-2)] mb-1">{label}</Label>
         {charCount && (
-          <span className="text-[10px] text-[var(--text-3)] font-[var(--font-mono,monospace)]">
+          <span className="text-[0.625rem] text-[var(--text-3)] font-[var(--font-mono,monospace)]">
             {value.length}
           </span>
         )}
@@ -46,14 +46,14 @@ export function TextAreaField({ label, value, onChange, placeholder, mono, rows,
         placeholder={placeholder}
         rows={baseRows}
         className={cn(
-          'h-auto px-2.5 py-[7px] text-[13px] bg-[var(--bg-elevated)] border-[var(--border)] rounded-[var(--r-md)]',
+          'h-auto px-2.5 py-[7px] text-[0.8125rem] bg-[var(--bg-elevated)] border-[var(--border)] rounded-[var(--r-md)]',
           mono ? 'font-[var(--font-mono,monospace)]' : 'font-[inherit]',
           autoGrow ? 'resize-none overflow-hidden' : 'resize-y',
         )}
         style={autoGrow || rows ? undefined : { minHeight: 80 }}
       />
       {description && (
-        <span className="text-[11px] text-[var(--text-3)] mt-0.5 block">{description}</span>
+        <span className="text-[0.6875rem] text-[var(--text-3)] mt-0.5 block">{description}</span>
       )}
     </label>
   )

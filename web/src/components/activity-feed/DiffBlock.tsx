@@ -20,14 +20,14 @@ export function DiffBlock({ unified, truncated }: DiffBlockProps) {
       paddingRight: 14,
       whiteSpace: 'pre',
       fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-      fontSize: 11,
+      fontSize: '0.6875rem',
       lineHeight: '1.65',
       borderLeft: '2px solid transparent',
     }
     if (type === 'add') return { ...base, background: 'var(--diff-add-bg)', borderLeft: '2px solid var(--diff-add-border)' }
     if (type === 'del') return { ...base, background: 'var(--diff-del-bg)', borderLeft: '2px solid var(--diff-del-border)' }
     if (type === 'hunk') return { ...base, background: 'var(--diff-hunk-bg)', borderLeft: '2px solid var(--diff-hunk-border)', color: 'var(--accent)' }
-    if (type === 'meta') return { ...base, opacity: 0.45, fontSize: 10 }
+    if (type === 'meta') return { ...base, opacity: 0.45, fontSize: '0.625rem'}
     return base
   }
 
@@ -52,7 +52,7 @@ export function DiffBlock({ unified, truncated }: DiffBlockProps) {
 
   if (lines.length === 0) return null
 
-  const numColClass = 'inline-block w-9 min-w-[36px] text-right pr-2.5 text-[var(--text-3)] tabular-nums select-none opacity-60 text-[10px]'
+  const numColClass = 'inline-block w-9 min-w-[36px] text-right pr-2.5 text-[var(--text-3)] tabular-nums select-none opacity-60 text-[0.625rem]'
 
   function renderLines(maxHeight?: number) {
     return (
@@ -78,7 +78,7 @@ export function DiffBlock({ unified, truncated }: DiffBlockProps) {
         })}
         </div>
         {truncated && (
-          <div className="px-2.5 py-[3px] text-[var(--text-3)] italic text-[10px] border-t border-[var(--border)]">
+          <div className="px-2.5 py-[3px] text-[var(--text-3)] italic text-[0.625rem] border-t border-[var(--border)]">
             ... preview truncated
           </div>
         )}

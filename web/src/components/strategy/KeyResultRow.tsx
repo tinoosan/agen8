@@ -67,7 +67,7 @@ export default function KeyResultRow({ kr, expanded, onToggle, isLast }: KeyResu
           <p
             className="line-clamp-1 flex-1"
             style={{
-              fontSize: '14px',
+              fontSize: '0.875rem',
               fontWeight: 400,
               lineHeight: 1.29,
               letterSpacing: '-0.224px',
@@ -103,7 +103,7 @@ export default function KeyResultRow({ kr, expanded, onToggle, isLast }: KeyResu
           <span
             className="flex items-center"
             style={{
-              fontSize: '10px',
+              fontSize: '0.625rem',
               fontWeight: 400,
               letterSpacing: '-0.08px',
               lineHeight: 1.47,
@@ -124,7 +124,7 @@ export default function KeyResultRow({ kr, expanded, onToggle, isLast }: KeyResu
           </span>
           <span
             style={{
-              fontSize: '10px',
+              fontSize: '0.625rem',
               fontWeight: 600,
               letterSpacing: '-0.08px',
               lineHeight: 1.47,
@@ -153,7 +153,7 @@ export default function KeyResultRow({ kr, expanded, onToggle, isLast }: KeyResu
           <KRDetailBody kr={kr} />
           <NodeLink nodeId={kr.id} className="inline-flex items-center gap-1.5 self-start hover:opacity-80 transition-opacity">
             <ExternalLink size={10} style={{ color: 'var(--accent)' }} />
-            <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--accent)' }}>
+            <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--accent)' }}>
               Go to node
             </span>
           </NodeLink>

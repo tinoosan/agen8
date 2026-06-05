@@ -68,7 +68,7 @@ export default function SpreadsheetTable({
       id: '_n',
       header: () => null,
       cell: ({ row }) => (
-        <span className="text-[11px] select-none tabular-nums" style={{ color: 'var(--text-4)' }}>
+        <span className="text-[0.6875rem] select-none tabular-nums" style={{ color: 'var(--text-4)' }}>
           {row.index + 1}
         </span>
       ),
@@ -86,7 +86,7 @@ export default function SpreadsheetTable({
           style={{ color: 'var(--text-2)', justifyContent: numericCols.has(colIdx) ? 'flex-end' : 'flex-start' }}
           onClick={() => column.toggleSorting()}
         >
-          <span className="text-[12px] font-medium">{header}</span>
+          <span className="text-[0.75rem] font-medium">{header}</span>
           <SortIndicator sorted={column.getIsSorted()} />
         </button>
       ),
@@ -163,7 +163,7 @@ export default function SpreadsheetTable({
                     return (
                       <TableCell
                         key={cell.id}
-                        className="whitespace-nowrap px-3 py-[6px] text-[13px]"
+                        className="whitespace-nowrap px-3 py-[6px] text-[0.8125rem]"
                         style={{
                           color: cell.column.id === '_n' ? undefined : 'var(--text-1)',
                           textAlign: isNum ? 'right' : 'left',
@@ -181,11 +181,11 @@ export default function SpreadsheetTable({
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center">
                   <div className="flex flex-col items-center gap-1" style={{ color: 'var(--text-3)' }}>
-                    <span className="text-[13px]">No matching rows</span>
+                    <span className="text-[0.8125rem]">No matching rows</span>
                     {globalFilter && (
                       <button
                         type="button"
-                        className="text-[12px] hover:underline"
+                        className="text-[0.75rem] hover:underline"
                         style={{ color: 'var(--accent)' }}
                         onClick={() => setGlobalFilter('')}
                       >
@@ -200,7 +200,7 @@ export default function SpreadsheetTable({
         </Table>
       </div>
 
-      <div className="flex items-center justify-between h-8 px-3 text-[11px] shrink-0 border-t" style={{ color: 'var(--text-3)', borderColor: 'var(--border)' }}>
+      <div className="flex items-center justify-between h-8 px-3 text-[0.6875rem] shrink-0 border-t" style={{ color: 'var(--text-3)', borderColor: 'var(--border)' }}>
         <span className="tabular-nums">
           {globalFilter ? `${filteredCount} of ${totalCount}` : totalCount} row{totalCount !== 1 && !globalFilter ? 's' : ''} &middot; {sheet.headers.length} col{sheet.headers.length !== 1 ? 's' : ''}
         </span>

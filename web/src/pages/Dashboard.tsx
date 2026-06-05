@@ -3,9 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useNavigation, type DashboardPanel } from '../lib/routing'
 import { useLocation, useSearch } from 'wouter'
 import { useMissions } from '../hooks/useMissions'
-import { RefreshCw, Maximize2, Minimize2, PanelRight } from 'lucide-react'
+import { RefreshCw, PanelRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import DecisionFeed from '../components/dashboard/DecisionFeed'
 import MissionSummary from '../components/dashboard/MissionSummary'
@@ -23,10 +22,7 @@ export default function Dashboard() {
   const queryClient = useQueryClient()
   const searchParams = useMemo(() => new URLSearchParams(rawSearch), [rawSearch])
   const rawPanel = searchParams.get('panel')
-  const dashboardPanel: DashboardPanel =
-    rawPanel === 'missions' || rawPanel === 'decisions' || rawPanel === 'overview'
-      ? rawPanel
-      : 'overview'
+  const dashboardPanel: DashboardPanel = rawPanel === 'decisions' ? 'decisions' : 'missions'
 
   const activeMissionsQuery = useMissions(projectId, 'active')
   const activeMissionCount = useMemo(
@@ -55,10 +51,10 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (dashboardPanel === 'overview') return
+    if (rawPanel !== 'missions' && rawPanel !== 'decisions') return
     setContextCollapsed(false)
     writeStoredDashboardContextCollapsed(false)
-  }, [dashboardPanel])
+  }, [rawPanel])
 
   const auth = useAuth()
   const userFirstName = useMemo(() => {
@@ -90,8 +86,7 @@ export default function Dashboard() {
   const setDashboardPanel = useCallback((panel: DashboardPanel) => {
     if (!projectId) return
     const params = new URLSearchParams(rawSearch)
-    if (panel === 'overview') params.delete('panel')
-    else params.set('panel', panel)
+    params.set('panel', panel)
     const qs = params.toString()
     navigate(`/project/${encodeURIComponent(projectId)}/dashboard${qs ? `?${qs}` : ''}`)
   }, [navigate, projectId, rawSearch])
@@ -135,25 +130,9 @@ export default function Dashboard() {
   return (
     <div className="dashboard-page" data-state={systemState}>
     <div className="dashboard-shell">
-      <Tabs defaultValue="overview" className="dashboard-shell-tabs w-full">
-      <div className="dashboard-shell-toolbar mb-5 flex items-center justify-between gap-4">
-        <TabsList className="dashboard-hero-tabs h-8 bg-[var(--bg-surface)]">
-          <TabsTrigger value="overview" className="dashboard-hero-tab text-[11px] px-3 py-1 data-[state=active]:bg-[var(--bg-elevated)]">Today</TabsTrigger>
-        </TabsList>
+      <div className="dashboard-shell-tabs w-full">
+      <div className="dashboard-shell-toolbar mb-5 flex items-center justify-end gap-4">
         <div className="dashboard-hero-actions flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggleFocusMode}
-            className={cn(
-              'dashboard-hero-utility text-[var(--text-3)] hover:text-[var(--text-1)]',
-              focusMode && 'text-[var(--accent)] bg-[var(--accent)]/10',
-            )}
-            title={focusMode ? 'Exit focus mode (F)' : 'Focus mode (F)'}
-          >
-            {focusMode ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            <span>{focusMode ? 'Exit Focus' : 'Focus'}</span>
-          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -173,7 +152,7 @@ export default function Dashboard() {
             data-testid="dashboard-context-panel-toggle"
             onClick={toggleDashboardContext}
             className={cn(
-              'w-8 h-8 rounded-[10px] transition-colors',
+              'hidden md:inline-flex w-8 h-8 rounded-[10px] transition-colors',
               contextCollapsed
                 ? 'text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)]'
                 : 'text-[var(--text-1)] bg-[var(--bg-hover)]',
@@ -192,23 +171,20 @@ export default function Dashboard() {
         {/* Header */}
         <div className={cn('dashboard-hero mb-8 flex items-start justify-between gap-6', !contextCollapsed && 'dashboard-hero-context-open')}>
           <div className="min-w-0">
-            <h1 className="m-0 mt-1 text-[31px] font-semibold tracking-[-0.05em] leading-[1.05] text-[var(--text-1)]">
+            <h1 className="m-0 mt-1 text-[1.9375rem] font-semibold tracking-[-0.05em] leading-[1.05] text-[var(--text-1)]">
               Hello {userFirstName}
             </h1>
           </div>
           {focusMode && (
-            <div className="text-[12px] text-[var(--text-3)]">
+            <div className="text-[0.75rem] text-[var(--text-3)]">
               Only the work waiting on a person.
             </div>
           )}
         </div>
 
-        <TabsContent value="overview" className="mt-0">
+        <div className="mt-0">
           <div className="dashboard-flow">
             <div className="dashboard-main-column">
-              <div className="dashboard-column-label">
-                Work in Motion
-              </div>
               <div className="dash-stagger dash-stagger-4">
                 <DecisionFeed projectId={projectId} />
               </div>
@@ -217,7 +193,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        </TabsContent>
+        </div>
 
         </div>
       </div>
@@ -229,7 +205,7 @@ export default function Dashboard() {
         onPanelChange={setDashboardPanel}
       />
       </div>
-      </Tabs>
+      </div>
     </div>
     </div>
   )

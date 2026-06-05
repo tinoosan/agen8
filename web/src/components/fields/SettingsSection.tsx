@@ -13,7 +13,7 @@ export function SettingsSection({ title, description, restartRequired, children 
           {title}
         </h3>
         {restartRequired && (
-          <span className="text-[10px] font-semibold px-[7px] py-px rounded-full bg-[var(--amber-dim)] text-[var(--amber)] tracking-[0.01em] whitespace-nowrap">
+          <span className="text-[0.625rem] font-semibold px-[7px] py-px rounded-full bg-[var(--amber-dim)] text-[var(--amber)] tracking-[0.01em] whitespace-nowrap">
             restart required
           </span>
         )}

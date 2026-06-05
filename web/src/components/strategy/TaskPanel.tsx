@@ -57,26 +57,26 @@ function ActivityEntry({ activity }: { activity: TaskActivity }) {
   return (
     <div className="flex gap-3">
       <div className="w-10 shrink-0 pt-0.5">
-        <div style={{ fontSize: '10px', color: 'var(--text-3)' }}>{relativeTime(activity.timestamp)}</div>
+        <div style={{ fontSize: '0.625rem', color: 'var(--text-3)' }}>{relativeTime(activity.timestamp)}</div>
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap mb-1">
-          <span style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: activityKindColor(activity.kind) }}>
+          <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: activityKindColor(activity.kind) }}>
             {activityKindLabel(activity.kind)}
           </span>
-          <span style={{ fontSize: '10px', color: 'var(--text-3)' }}>·</span>
-          <span style={{ fontSize: '10px', color: 'var(--text-2)' }}>{activity.actor}</span>
+          <span style={{ fontSize: '0.625rem', color: 'var(--text-3)' }}>·</span>
+          <span style={{ fontSize: '0.625rem', color: 'var(--text-2)' }}>{activity.actor}</span>
         </div>
-        <div style={{ fontSize: '12px', lineHeight: 1.47, color: 'var(--text-2)' }}>{activity.summary}</div>
+        <div style={{ fontSize: '0.75rem', lineHeight: 1.47, color: 'var(--text-2)' }}>{activity.summary}</div>
         {details.length > 0 && (
           <details className="mt-1.5">
-            <summary style={{ fontSize: '10px', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer' }}>Details</summary>
+            <summary style={{ fontSize: '0.625rem', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer' }}>Details</summary>
             <div
               className="flex flex-col"
               style={{ marginTop: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '6px 10px', gap: 4 }}
             >
               {details.map(([key, value]) => (
-                <div key={key} style={{ fontSize: '11px', color: 'var(--text-2)', wordBreak: 'break-word' }}>
+                <div key={key} style={{ fontSize: '0.6875rem', color: 'var(--text-2)', wordBreak: 'break-word' }}>
                   <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{key}:</span> {String(value)}
                 </div>
               ))}
@@ -135,7 +135,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
 
 
   const goalContent: ReactNode = !retry.isRetry && task.description
-    ? <p style={{ fontFamily: SF_TEXT, fontSize: '14px', letterSpacing: '-0.224px', lineHeight: 1.47, color: 'var(--text-2)', margin: 0 }}>{task.description}</p>
+    ? <p style={{ fontFamily: SF_TEXT, fontSize: '0.875rem', letterSpacing: '-0.224px', lineHeight: 1.47, color: 'var(--text-2)', margin: 0 }}>{task.description}</p>
     : null
 
   const reviewTone: Record<string, { fg: string; bg: string; label: string }> = {
@@ -156,20 +156,20 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           <div className="flex items-center gap-2 mb-1">
             <p
               className="uppercase"
-              style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)' }}
+              style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)' }}
             >
               Task
             </p>
             <span className="flex items-center gap-0.5" style={{ color: 'var(--text-3)' }}>
               <Hash size={9} />
-              <span style={{ fontSize: '10px', fontFamily: 'monospace', letterSpacing: 0, lineHeight: 1.33 }}>
+              <span style={{ fontSize: '0.625rem', fontFamily: 'monospace', letterSpacing: 0, lineHeight: 1.33 }}>
                 {taskIdShort(task.id)}
               </span>
             </span>
           </div>
           <h2
             className="text-foreground line-clamp-2"
-            style={{ fontFamily: SF_TEXT, fontSize: '17px', fontWeight: 600, lineHeight: 1.24, letterSpacing: '-0.374px' }}
+            style={{ fontFamily: SF_TEXT, fontSize: '1.0625rem', fontWeight: 600, lineHeight: 1.24, letterSpacing: '-0.374px' }}
           >
             {displayTitle}
           </h2>
@@ -194,7 +194,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           <Badge
             variant="outline"
             className="gap-1.5"
-            style={{ borderRadius: '4px', fontSize: '12px', fontWeight: 600, letterSpacing: '-0.12px', lineHeight: 1.33 }}
+            style={{ borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '-0.12px', lineHeight: 1.33 }}
           >
             <span
               style={{ width: 6, height: 6, borderRadius: '50%', background: color || 'var(--text-3)', flexShrink: 0, display: 'inline-block' }}
@@ -211,7 +211,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
               border: '1px solid color-mix(in srgb, var(--amber) 30%, transparent)',
               borderRadius: '4px',
               padding: '8px 10px',
-              fontSize: '11px',
+              fontSize: '0.6875rem',
               lineHeight: 1.47,
               color: 'var(--amber)',
               fontFamily: SF_TEXT,
@@ -231,12 +231,12 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           <div className="flex flex-col" style={{ gap: '4px' }}>
             <p
               className="uppercase"
-              style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', margin: 0 }}
+              style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', margin: 0 }}
             >
               Summary
             </p>
             <p
-              style={{ fontFamily: SF_TEXT, fontSize: '13px', letterSpacing: '-0.08px', lineHeight: 1.47, color: 'var(--text-3)', margin: 0 }}
+              style={{ fontFamily: SF_TEXT, fontSize: '0.8125rem', letterSpacing: '-0.08px', lineHeight: 1.47, color: 'var(--text-3)', margin: 0 }}
             >
               {task.summary}
             </p>
@@ -253,10 +253,10 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
               padding: '8px 10px',
             }}
           >
-            <p style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--red)', marginBottom: '4px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <p style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--red)', marginBottom: '4px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
               <AlertTriangle size={10} /> Error
             </p>
-            <p style={{ fontFamily: 'monospace', fontSize: '11px', letterSpacing: 0, lineHeight: 1.47, color: 'var(--text-2)', wordBreak: 'break-all', margin: 0 }}>
+            <p style={{ fontFamily: 'monospace', fontSize: '0.6875rem', letterSpacing: 0, lineHeight: 1.47, color: 'var(--text-2)', wordBreak: 'break-all', margin: 0 }}>
               {task.error}
             </p>
           </div>
@@ -272,10 +272,10 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
               padding: '8px 10px',
             }}
           >
-            <p style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--amber)', marginBottom: '4px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <p style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--amber)', marginBottom: '4px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
               <AlertTriangle size={10} /> Blocked
             </p>
-            <p style={{ fontSize: '11px', lineHeight: 1.47, color: 'var(--amber)', margin: 0 }}>
+            <p style={{ fontSize: '0.6875rem', lineHeight: 1.47, color: 'var(--amber)', margin: 0 }}>
               {String(task.metadata.blockReason)}
             </p>
           </div>
@@ -289,41 +289,41 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
       >
         {assigneeLabel && (
           <div className="flex justify-between items-baseline">
-            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Assignee</span>
-            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
+            <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Assignee</span>
+            <span style={{ fontSize: '0.6875rem', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
               {assigneeLabel}
             </span>
           </div>
         )}
         {claimedByLabel && claimedByLabel !== assigneeLabel && (
           <div className="flex justify-between items-baseline">
-            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Claimed</span>
-            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
+            <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Claimed</span>
+            <span style={{ fontSize: '0.6875rem', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
               {claimedByLabel}
             </span>
           </div>
         )}
         {createdByLabel && createdByLabel !== assigneeLabel && createdByLabel !== claimedByLabel && (
           <div className="flex justify-between items-baseline">
-            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Created By</span>
-            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
+            <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Created By</span>
+            <span style={{ fontSize: '0.6875rem', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
               {createdByLabel}
             </span>
           </div>
         )}
         <div className="flex justify-between items-baseline">
-          <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Created</span>
-          <span className="flex items-center gap-1" style={{ fontSize: '11px', lineHeight: 1.33, color: 'var(--text-2)' }}>
+          <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Created</span>
+          <span className="flex items-center gap-1" style={{ fontSize: '0.6875rem', lineHeight: 1.33, color: 'var(--text-2)' }}>
             <Clock size={10} style={{ color: 'var(--text-3)' }} />
             {relativeTime(task.createdAt)}
           </span>
         </div>
         {task.completedAt && (
           <div className="flex justify-between items-baseline">
-            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>
               {duration ? 'Duration' : 'Completed'}
             </span>
-            <span className="flex items-center gap-1" style={{ fontSize: '11px', lineHeight: 1.33, color: 'var(--text-2)' }}>
+            <span className="flex items-center gap-1" style={{ fontSize: '0.6875rem', lineHeight: 1.33, color: 'var(--text-2)' }}>
               <Clock size={10} style={{ color: 'var(--text-3)' }} />
               {duration ?? relativeTime(task.completedAt)}
             </span>
@@ -331,8 +331,8 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
         )}
         {task.taskKind && (
           <div className="flex justify-between items-baseline">
-            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Kind</span>
-            <span style={{ fontSize: '11px', lineHeight: 1.33, color: 'var(--text-2)' }}>{task.taskKind}</span>
+            <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Kind</span>
+            <span style={{ fontSize: '0.6875rem', lineHeight: 1.33, color: 'var(--text-2)' }}>{task.taskKind}</span>
           </div>
         )}
       </div>
@@ -384,12 +384,12 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
                         flexShrink: 0,
                       }}
                     >
-                      {checked && <span style={{ color: 'white', fontSize: '8px', fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                      {checked && <span style={{ color: 'white', fontSize: '0.5rem', fontWeight: 700, lineHeight: 1 }}>✓</span>}
                     </span>
                     <span
                       style={{
                         fontFamily: SF_TEXT,
-                        fontSize: '13px',
+                        fontSize: '0.8125rem',
                         lineHeight: 1.47,
                         letterSpacing: '-0.08px',
                         color: checked ? 'var(--text-3)' : 'var(--text-1)',
@@ -414,7 +414,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span
                     style={{
-                      fontSize: '10px',
+                      fontSize: '0.625rem',
                       fontWeight: 700,
                       letterSpacing: '0.06em',
                       textTransform: 'uppercase',
@@ -427,18 +427,18 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
                     {tone.label}
                   </span>
                   {(latestReview.reviewerRole || latestReview.reviewedBy) && (
-                    <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>
+                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>
                       by {latestReview.reviewerRole || latestReview.reviewedBy}
                     </span>
                   )}
                   {latestReview.reviewedAt && (
-                    <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>{relativeTime(latestReview.reviewedAt)}</span>
+                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>{relativeTime(latestReview.reviewedAt)}</span>
                   )}
                 </div>
                 {latestReview.feedback && (
                   <div
                     className="md-prose"
-                    style={{ fontFamily: SF_TEXT, fontSize: '12px', lineHeight: 1.47, color: 'var(--text-2)', marginTop: 8 }}
+                    style={{ fontFamily: SF_TEXT, fontSize: '0.75rem', lineHeight: 1.47, color: 'var(--text-2)', marginTop: 8 }}
                   >
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{latestReview.feedback}</ReactMarkdown>
                   </div>
@@ -480,7 +480,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
                     borderBottom: i < task.artifacts!.length - 1 ? '1px solid var(--border)' : 'none',
                   }}
                 >
-                  <span style={{ fontSize: '11px', color: 'var(--accent)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{a}</span>
+                  <span style={{ fontSize: '0.6875rem', color: 'var(--accent)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{a}</span>
                 </div>
               ))}
             </div>
@@ -495,7 +495,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
                 {hiddenActivityCount > 0 && (
                   <button
                     onClick={() => setShowOlderActivity(v => !v)}
-                    style={{ fontSize: '10px', fontWeight: 600, color: 'var(--accent)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+                    style={{ fontSize: '0.625rem', fontWeight: 600, color: 'var(--accent)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
                   >
                     {showOlderActivity ? 'Hide earlier activity' : `Show ${hiddenActivityCount} earlier event${hiddenActivityCount > 1 ? 's' : ''}`}
                   </button>

@@ -1,5 +1,6 @@
 import React, { Suspense, useEffect, useRef } from 'react'
 import { Redirect, Route, Switch, useLocation } from 'wouter'
+import { Menu } from 'lucide-react'
 import { useStore } from './lib/store'
 import { missionsPanelLink, useNavigation } from './lib/routing'
 import { useAuth } from './hooks/useAuth'
@@ -7,12 +8,13 @@ import { lazyWithRetry } from './lib/lazyWithRetry'
 import Sidebar from './components/Sidebar'
 import { Toaster } from './components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { SidebarProvider } from '@/components/ui/sidebar'
+import { SidebarProvider, useSidebar } from '@/components/ui/sidebar'
 import { PageErrorBoundary } from './components/ErrorBoundary'
 
 const Project = lazyWithRetry(() => import('./pages/Project'), 'pages/Project')
 const Login = lazyWithRetry(() => import('./pages/Login'), 'pages/Login')
 const Account = lazyWithRetry(() => import('./pages/Account'), 'pages/Account')
+const Credentials = lazyWithRetry(() => import('./pages/Credentials'), 'pages/Credentials')
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'), 'pages/Dashboard')
 const MissionDetail = lazyWithRetry(() => import('./pages/MissionDetail'), 'pages/MissionDetail')
 const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/StrategyMap')
@@ -29,6 +31,25 @@ const Spinner = () => (
     <span className="spinner spinner-md" />
   </div>
 )
+
+/** Mobile-only top bar with a hamburger that opens the sidebar drawer.
+ *  Must live inside SidebarProvider so useSidebar() resolves. */
+function MobileTopBar() {
+  const { toggleSidebar } = useSidebar()
+  return (
+    <div className="md:hidden shrink-0 flex items-center gap-2 h-12 px-2 border-b border-[var(--border)] bg-[var(--bg-surface)]">
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        aria-label="Open navigation menu"
+        className="h-9 w-9 flex items-center justify-center rounded-[8px] border-none bg-transparent cursor-pointer text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors"
+      >
+        <Menu size={18} />
+      </button>
+      <span className="text-[0.875rem] font-semibold tracking-[-0.02em] text-[var(--text-1)]">agen8</span>
+    </div>
+  )
+}
 
 /** Full-page loading shell — shows a skeleton sidebar + content area so the
  *  transition into the real app feels seamless rather than a blank void. */
@@ -56,7 +77,7 @@ const AppShell = () => (
 )
 
 export default function App() {
-  const { paletteOpen, theme, resetEphemeral } = useStore()
+  const { paletteOpen, theme, fontFamily, fontScale, resetEphemeral } = useStore()
   const { projectId } = useNavigation()
   const auth = useAuth()
   const [location, navigate] = useLocation()
@@ -65,6 +86,12 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    const root = document.documentElement
+    root.setAttribute('data-font-family', fontFamily)
+    root.style.setProperty('--app-font-scale', `${fontScale}px`)
+  }, [fontFamily, fontScale])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -135,13 +162,14 @@ export default function App() {
         className="h-dvh flex-col"
         style={{ '--sidebar-width': '260px', '--sidebar-width-icon': '56px' } as React.CSSProperties}
       >
-        <div className="flex flex-1 min-h-0 w-full">
+        <div className="flex flex-1 min-h-0 w-full flex-col md:flex-row">
           <a
             href="#main-content"
             className="skip-to-content"
           >
             Skip to content
           </a>
+          <MobileTopBar />
           <Sidebar />
           <main id="main-content" className="app-main">
             <Suspense fallback={<Spinner />}>
@@ -157,6 +185,7 @@ export default function App() {
                   <Route path="/project/:projectId/metrics">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId" component={Dashboard} />
                   <Route path="/account" component={Account} />
+                  <Route path="/credentials" component={Credentials} />
                   <Route path="/login" component={Login} />
                   <Route path="/" component={Project} />
                 </Switch>

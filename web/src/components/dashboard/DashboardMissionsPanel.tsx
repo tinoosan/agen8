@@ -102,11 +102,11 @@ export default function DashboardMissionsPanel({
           <div className="min-w-0">
             <h1
               className="m-0 text-[var(--text-1)]"
-              style={{ fontSize: embedded ? '19px' : '28px', fontWeight: 700, letterSpacing: embedded ? '-0.36px' : '-0.56px', lineHeight: embedded ? 1.18 : 1.14 }}
+              style={{ fontSize: embedded ? '1.1875rem' : '1.75rem', fontWeight: 700, letterSpacing: embedded ? '-0.36px' : '-0.56px', lineHeight: embedded ? 1.18 : 1.14 }}
             >
               Missions
             </h1>
-            <p className="m-0 mt-1 text-[var(--text-3)]" style={{ fontSize: embedded ? '12px' : '13px', letterSpacing: embedded ? '-0.12px' : '-0.08px', lineHeight: 1.45 }}>
+            <p className="m-0 mt-1 text-[var(--text-3)]" style={{ fontSize: embedded ? '0.75rem' : '0.8125rem', letterSpacing: embedded ? '-0.12px' : '-0.08px', lineHeight: 1.45 }}>
               Shape the outcomes, key results, and ownership the rest of the work builds on.
             </p>
           </div>
@@ -138,7 +138,7 @@ export default function DashboardMissionsPanel({
                   style={{
                     padding: embedded ? '4px 10px' : '4px 12px',
                     borderRadius: '980px',
-                    fontSize: embedded ? '12px' : '13px',
+                    fontSize: embedded ? '0.75rem' : '0.8125rem',
                     fontWeight: isActive ? 600 : 400,
                     letterSpacing: '-0.08px',
                     background: isActive ? 'color-mix(in srgb, var(--accent-dim) 18%, var(--bg-panel) 82%)' : 'transparent',
@@ -150,7 +150,7 @@ export default function DashboardMissionsPanel({
                     <span
                       className="tabular-nums"
                       style={{
-                        fontSize: '11px',
+                        fontSize: '0.6875rem',
                         letterSpacing: '-0.06px',
                         color: isActive ? 'var(--text-3)' : 'var(--text-3)',
                       }}
@@ -178,7 +178,7 @@ export default function DashboardMissionsPanel({
                   'text-[var(--text-1)] placeholder:text-[var(--text-3)]',
                   'focus:border-[var(--accent)]/40 transition-colors',
                 )}
-                style={{ fontSize: '12px', letterSpacing: '-0.08px' }}
+                style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}
               />
             </div>
           </div>
@@ -189,7 +189,7 @@ export default function DashboardMissionsPanel({
         {isLoading && <MissionsSkeleton embedded={embedded} />}
 
         {isError && (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-[8px] bg-[var(--dashboard-subsurface-bg)] text-[13px] text-[var(--red)]" style={{ letterSpacing: '-0.08px' }}>
+          <div className="flex items-center gap-2 px-4 py-3 rounded-[8px] bg-[var(--dashboard-subsurface-bg)] text-[0.8125rem] text-[var(--red)]" style={{ letterSpacing: '-0.08px' }}>
             <AlertCircle size={16} />
             <span>Failed to load missions: {error instanceof Error ? error.message : 'Unknown error'}</span>
           </div>
@@ -200,10 +200,10 @@ export default function DashboardMissionsPanel({
             <Target size={36} className="text-[var(--text-3)] opacity-25 mb-4" />
             {allMissions && allMissions.length === 0 ? (
               <>
-                <h3 className="text-[var(--text-1)] mb-1.5" style={{ fontSize: '17px', fontWeight: 600, letterSpacing: '-0.24px', lineHeight: 1.24 }}>
+                <h3 className="text-[var(--text-1)] mb-1.5" style={{ fontSize: '1.0625rem', fontWeight: 600, letterSpacing: '-0.24px', lineHeight: 1.24 }}>
                   No missions yet
                 </h3>
-                <p className="text-[var(--text-3)] mb-5 max-w-sm" style={{ fontSize: '14px', letterSpacing: '-0.224px', lineHeight: 1.47 }}>
+                <p className="text-[var(--text-3)] mb-5 max-w-sm" style={{ fontSize: '0.875rem', letterSpacing: '-0.224px', lineHeight: 1.47 }}>
                   Missions define high-level objectives for your project. Create one to start tracking progress with key results.
                 </p>
                 <Button
@@ -217,10 +217,10 @@ export default function DashboardMissionsPanel({
               </>
             ) : (
               <>
-                <h3 className="text-[var(--text-1)] mb-1.5" style={{ fontSize: '17px', fontWeight: 600, letterSpacing: '-0.24px', lineHeight: 1.24 }}>
+                <h3 className="text-[var(--text-1)] mb-1.5" style={{ fontSize: '1.0625rem', fontWeight: 600, letterSpacing: '-0.24px', lineHeight: 1.24 }}>
                   No results
                 </h3>
-                <p className="text-[var(--text-3)] mb-5" style={{ fontSize: '14px', letterSpacing: '-0.224px', lineHeight: 1.47 }}>
+                <p className="text-[var(--text-3)] mb-5" style={{ fontSize: '0.875rem', letterSpacing: '-0.224px', lineHeight: 1.47 }}>
                   Try a different filter or search term.
                 </p>
                 <Button variant="secondary" onClick={() => { setStatusFilter('all'); setSearchQuery('') }} style={{ letterSpacing: '-0.12px' }}>
@@ -255,7 +255,7 @@ export default function DashboardMissionsPanel({
                     to={missionDetailLink(projectId, mission.id)}
                     className="flex items-center gap-2 flex-1 min-w-0 no-underline"
                   >
-                    <span className="text-[13px] font-semibold text-[var(--text-1)] tracking-[-0.02em] truncate flex-1">
+                    <span className="text-[0.8125rem] font-semibold text-[var(--text-1)] tracking-[-0.02em] truncate flex-1">
                       {mission.title}
                     </span>
                     <ExternalLink size={11} className="shrink-0 text-[var(--text-3)]" />

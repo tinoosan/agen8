@@ -90,7 +90,7 @@ export function SectionErrorBoundary({ children }: { children: ReactNode }) {
           <span className="text-[var(--text-2)]">This section failed to load.</span>
           <button
             onClick={() => window.location.reload()}
-            className="ml-auto px-2 py-1 text-[11px] font-medium rounded-[var(--r-sm)] bg-[var(--bg-elevated)] border border-[var(--border)] text-[var(--text-2)] cursor-pointer hover:bg-[var(--bg-active)] transition-colors font-[inherit]"
+            className="ml-auto px-2 py-1 text-[0.6875rem] font-medium rounded-[var(--r-sm)] bg-[var(--bg-elevated)] border border-[var(--border)] text-[var(--text-2)] cursor-pointer hover:bg-[var(--bg-active)] transition-colors font-[inherit]"
           >
             Try again
           </button>

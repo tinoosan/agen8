@@ -36,13 +36,13 @@ export default function ConfirmationDialog({
         className="w-[min(92vw,420px)] bg-[var(--bg-panel)] border-[var(--border)] rounded-[var(--r-lg)] shadow-[var(--shadow-lg)] p-0 gap-0"
       >
         <AlertDialogHeader className="px-4 py-3 border-b border-[var(--border)] flex-row items-center justify-between space-y-0">
-          <AlertDialogTitle className="font-semibold text-[13px] text-[var(--text-1)]">
+          <AlertDialogTitle className="font-semibold text-[0.8125rem] text-[var(--text-1)]">
             {title}
           </AlertDialogTitle>
         </AlertDialogHeader>
 
         <AlertDialogDescription
-          className="px-4 py-4 text-[13px] text-[var(--text-2)] leading-[1.6]"
+          className="px-4 py-4 text-[0.8125rem] text-[var(--text-2)] leading-[1.6]"
         >
           {message}
         </AlertDialogDescription>

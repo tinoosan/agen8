@@ -96,11 +96,11 @@ function DecisionRow({ decision }: { decision: DecisionView }) {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-medium text-[var(--text-1)]">{decision.title}</span>
-                <Badge variant="info" className="text-[10px] px-1.5 py-0">
+                <Badge variant="info" className="text-[0.625rem] px-1.5 py-0">
                   {decision.source}
                 </Badge>
               </div>
-              <div className="flex items-center gap-3 text-[11px] text-[var(--text-3)] mt-1 flex-wrap">
+              <div className="flex items-center gap-3 text-[0.6875rem] text-[var(--text-3)] mt-1 flex-wrap">
                 <span>{Math.round((decision.confidence ?? 0) * 100)}% confidence</span>
                 <span className="inline-flex items-center gap-1"><Clock size={10} />{timeAgo(decision.createdAt)}</span>
                 <span>{new Date(decision.createdAt).toLocaleDateString()}</span>
@@ -146,7 +146,7 @@ function DecisionRow({ decision }: { decision: DecisionView }) {
           <DecisionDetails decision={decision} />
           {refs.length > 0 && (
             <>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-3)] mt-3 mb-1">Linked entities</div>
+              <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-[var(--text-3)] mt-3 mb-1">Linked entities</div>
               <div className="flex flex-wrap gap-2">
                 {refs.map(ref => (
                   <span key={ref} className="inline-flex items-center gap-1 text-xs text-[var(--accent)]">
@@ -213,34 +213,35 @@ export default function Decisions() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-[var(--border)] shrink-0">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-[var(--border)] shrink-0 flex-wrap">
         <Button asChild variant="ghost" size="sm" className="gap-1.5">
           <Link to={decisionsPanelLink(projectId)}>
             <ArrowLeft size={14} />
             Dashboard
           </Link>
         </Button>
-        <ScrollText size={20} className="text-[var(--accent)]" />
+        <ScrollText size={20} className="text-[var(--accent)] shrink-0" />
         <h1 className="text-lg font-semibold text-[var(--text-1)] tracking-[-0.02em] m-0">Decision Log</h1>
         {total > 0 && (
           <Badge variant="secondary" className="text-xs">{total}</Badge>
         )}
-        <div className="flex-1" />
-        <Button variant="ghost" size="sm" onClick={() => {
-          setSort(prev => prev === 'newest' ? 'oldest' : 'newest')
-          setPage(1)
-        }}>
-          {sort === 'newest' ? 'Newest first' : 'Oldest first'}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onExportCsv} disabled={exportDecisions.isPending}>
-          <Download size={12} /> CSV
-        </Button>
+        <div className="flex items-center gap-3 ml-auto">
+          <Button variant="ghost" size="sm" onClick={() => {
+            setSort(prev => prev === 'newest' ? 'oldest' : 'newest')
+            setPage(1)
+          }}>
+            {sort === 'newest' ? 'Newest first' : 'Oldest first'}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onExportCsv} disabled={exportDecisions.isPending}>
+            <Download size={12} /> CSV
+          </Button>
+        </div>
       </div>
 
       {/* Filter bar */}
       <div className="flex items-end gap-3 px-6 py-3 border-b border-[var(--border)] shrink-0 flex-wrap">
         <div className="min-w-[180px] flex-1 max-w-[280px]">
-          <Label htmlFor="decision-search" className="text-[11px] text-[var(--text-3)]">Search</Label>
+          <Label htmlFor="decision-search" className="text-[0.6875rem] text-[var(--text-3)]">Search</Label>
           <Input
             id="decision-search"
             placeholder="Search decisions..."
@@ -252,7 +253,7 @@ export default function Decisions() {
           />
         </div>
         <div className="w-[140px]">
-          <Label htmlFor="decision-from-date" className="text-[11px] text-[var(--text-3)]">From</Label>
+          <Label htmlFor="decision-from-date" className="text-[0.6875rem] text-[var(--text-3)]">From</Label>
           <Input
             id="decision-from-date"
             type="date"
@@ -264,7 +265,7 @@ export default function Decisions() {
           />
         </div>
         <div className="w-[140px]">
-          <Label htmlFor="decision-to-date" className="text-[11px] text-[var(--text-3)]">To</Label>
+          <Label htmlFor="decision-to-date" className="text-[0.6875rem] text-[var(--text-3)]">To</Label>
           <Input
             id="decision-to-date"
             type="date"

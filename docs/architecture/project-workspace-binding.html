@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects, Workspaces &amp; Link Tokens — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .axis-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  @media (max-width: 760px) { .axis-grid { grid-template-columns: 1fr; } }
+  .pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .pill.new { color: var(--good); background: var(--good-soft); }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / project-workspace-binding</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture &middot; Workspace binding</span>
+  <h1>Projects, Workspaces &amp; Link Tokens</h1>
+  <p class="lede">How a local folder proves which logical Agen8 project it belongs to, and how an agent session registers into that project — without using the absolute folder path as identity.</p>
+
+  <div class="callout">
+    <strong>Marker over path.</strong> Project identity comes from the <code>.agen8</code> marker inside a folder, validated server-side through its <code>wlt_</code> link token. The legacy path hash (<code>ProjectIDForLocationRoot</code>) survives only as a fallback for unmarked and legacy folders — it never overrides a marker.
+  </div>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#problem">The problem</a></li>
+      <li><a href="#model">Project, Workspace, Member</a></li>
+      <li><a href="#marker">The .agen8 marker</a></li>
+      <li><a href="#identity">Identity resolution</a></li>
+      <li><a href="#linktoken">The wlt_ link token</a></li>
+      <li><a href="#shim">The local shim</a></li>
+      <li><a href="#axes">Two identity axes</a></li>
+      <li><a href="#integration">Integration points</a></li>
+      <li><a href="#onboarding">Onboarding (UI-first)</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+      <li><a href="#files">File layout</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="problem">1. The problem</h2>
+  <p>An agent harness — Codex or Claude Code — runs inside a folder on a developer machine. Today, when that harness connects to Agen8 over MCP, the project it lands in is derived from a hash of the folder's absolute path (<code>ProjectIDForLocationRoot</code>). That makes the <em>filesystem path</em> the identity of the work. It breaks the moment the same logical project lives at a different path on a different machine, and it offers no way for the server to trust a claimed <code>project_id</code> — any caller could assert any id.</p>
+
+  <p>Two things must be true instead:</p>
+  <ul>
+    <li>A local folder resolves to the correct <strong>logical</strong> Agen8 project, decided by a marker inside the folder, not by where the folder happens to sit on disk.</li>
+    <li>The agent session registers as a <strong>member</strong> of that project, with the project binding established server-side from a credential the caller holds — not from an unauthenticated, spoofable field.</li>
+  </ul>
+
+  <p>The design splits cleanly into two orthogonal identity axes (section&nbsp;7), introduces one new credential type and one new domain entity, and reuses the local shim that already exists. It deliberately keeps the path-hash behaviour alive as a <em>fallback</em>, so unmarked folders and existing data keep working.</p>
+
+  <h2 id="model">2. Project, Workspace, Member</h2>
+  <p>The core reframe is a one-to-many relationship that does not exist in the schema today. A <strong>Project</strong> owns many <strong>Workspaces</strong>. A Workspace is one place the project is checked out. A <strong>Member</strong> is one harness session working in it.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">Logical &middot; system of record</div>
+      <div class="title">Project</div>
+      <div class="meta">The shared body of work. Lives on the server (local daemon or hosted). Owns missions, tasks, decisions, the work graph, and the member roster. Identity is a durable <code>project_id</code>, never a path. <span class="pill">exists today</span></div>
+    </div>
+    <div class="card primary">
+      <div class="label">Physical &middot; new entity</div>
+      <div class="title">Workspace</div>
+      <div class="meta">One <code>(location, root, machine)</code> linked to a project. A project has many: the laptop checkout, the CI box, a second machine. Carries display + last-seen metadata. Created when a marked folder first registers. <span class="pill new">new</span></div>
+    </div>
+    <div class="card">
+      <div class="label">Session &middot; actor identity</div>
+      <div class="title">Member</div>
+      <div class="meta">One harness session registered into a project, keyed by <code>(project_id, harness_kind, native_session_ref)</code>. Unchanged by this design. The first member is the coordinator; later sessions are workers. <span class="pill">exists today</span></div>
+    </div>
+  </div>
+
+  <p>Git is the closest mental model and the one the design borrows from deliberately:</p>
+
+  <table>
+    <thead><tr><th>Git</th><th>Agen8</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td>Remote repository</td><td><strong>Project</strong></td><td>The canonical work, owned centrally. Identity does not depend on where it is cloned.</td></tr>
+      <tr><td>A clone on a machine</td><td><strong>Workspace</strong></td><td>A folder on a host. Many clones of one repo; many workspaces of one project.</td></tr>
+      <tr><td><code>.git/</code> directory</td><td><strong>.agen8/</strong> marker</td><td>What makes a folder belong to the project. Authoritative when present.</td></tr>
+      <tr><td>A working session / checkout</td><td><strong>Member</strong></td><td>The agent thread doing work in that clone right now.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="diagram">
+    <svg viewBox="0 0 980 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A marked folder resolves through the shim and daemon to one logical project">
+      <defs>
+        <marker id="bind-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/>
+        </marker>
+      </defs>
+
+      <text x="24" y="34" fill="var(--text)" font-size="17" font-weight="800">A folder proves which project it belongs to</text>
+
+      <rect x="24" y="70" width="200" height="78" rx="9" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="124" y="100" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Workspace folder</text>
+      <text x="124" y="121" text-anchor="middle" fill="var(--text-muted)" font-size="11">~/work/app · /srv/app · D:\app</text>
+      <text x="124" y="138" text-anchor="middle" fill="var(--text)" font-size="11" font-weight="700">.agen8/ marker</text>
+
+      <rect x="270" y="70" width="200" height="78" rx="9" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="370" y="100" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">agen8 mcp serve</text>
+      <text x="370" y="121" text-anchor="middle" fill="var(--text-muted)" font-size="11">stdio &#8596; http shim</text>
+      <text x="370" y="138" text-anchor="middle" fill="var(--text-muted)" font-size="11">reads marker · sends token</text>
+
+      <rect x="516" y="70" width="200" height="78" rx="9" fill="var(--bg-elevated)" stroke="var(--teal)"/>
+      <text x="616" y="100" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">daemon /mcp</text>
+      <text x="616" y="121" text-anchor="middle" fill="var(--text-muted)" font-size="11">resolveMCPSession</text>
+      <text x="616" y="138" text-anchor="middle" fill="var(--text-muted)" font-size="11">local or hosted</text>
+
+      <rect x="762" y="70" width="194" height="78" rx="9" fill="var(--good-soft)" stroke="var(--good)"/>
+      <text x="859" y="100" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Project + Member</text>
+      <text x="859" y="121" text-anchor="middle" fill="var(--text-muted)" font-size="11">1 project &#8592; N workspaces</text>
+      <text x="859" y="138" text-anchor="middle" fill="var(--text-muted)" font-size="11">system of record</text>
+
+      <line x1="224" y1="109" x2="270" y2="109" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#bind-arrow)"/>
+      <line x1="470" y1="109" x2="516" y2="109" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#bind-arrow)"/>
+      <line x1="716" y1="109" x2="762" y2="109" stroke="var(--teal)" stroke-width="1.8" marker-end="url(#bind-arrow)"/>
+
+      <line x1="24" y1="196" x2="956" y2="196" stroke="var(--border)" stroke-width="1"/>
+      <text x="24" y="226" fill="var(--text-muted)" font-size="12.5">Many workspaces (folders, machines) resolve to one Project. The marker decides which — never the path.</text>
+      <text x="24" y="248" fill="var(--text-faint)" font-size="12">When the marker is absent, the daemon falls back to the path hash so unmarked and legacy folders still work.</text>
+    </svg>
+  </div>
+
+  <h2 id="marker">3. The .agen8 marker</h2>
+  <p>A marked folder carries a small <code>.agen8/</code> directory, the analogue of <code>.git/</code>. It is split into a committed pointer and a gitignored secret, mirroring how a repo commits <code>.gitmodules</code> but never commits credentials.</p>
+
+  <div class="grid">
+    <div class="card primary">
+      <div class="label">Committed &middot; shared</div>
+      <div class="title"><code>./.agen8/workspace.json</code></div>
+      <div class="meta">Says which project this folder is, and where its server lives. Safe to commit; identical for every teammate cloning the repo. Carries no secret.</div>
+    </div>
+    <div class="card primary">
+      <div class="label">Gitignored &middot; personal</div>
+      <div class="title"><code>./.agen8/token</code></div>
+      <div class="meta">The <code>wlt_</code> link token. Personal to one user, like git credentials. Minted per user, never committed. A generated <code>./.agen8/.gitignore</code> excludes it by default.</div>
+    </div>
+  </div>
+
+<pre class="mocha"><code class="lang-text">./.agen8/
+  workspace.json     <span class="tok-comment"># committed — the pointer</span>
+  token              <span class="tok-comment"># gitignored — the secret</span>
+  .gitignore         <span class="tok-comment"># generated — contains: token</span></code></pre>
+
+<pre class="mocha"><code class="lang-text"><span class="tok-comment">// ./.agen8/workspace.json  (committed)</span>
+{
+  <span class="tok-field">"server_url"</span>: <span class="tok-string">"https://agen8.example.com"</span>,
+  <span class="tok-field">"project_id"</span>: <span class="tok-string">"agen8-app-1a2b3c4d"</span>,
+  <span class="tok-field">"workspace_id"</span>: <span class="tok-string">"ws-9f8e..."</span>      <span class="tok-comment">// optional, server-assigned, cached for display</span>
+}
+
+<span class="tok-comment">// ./.agen8/token  (gitignored, one line)</span>
+wlt_8c1f2a...9b
+</code></pre>
+
+  <p>The pointer is authoritative about <em>which project</em>. The token is the credential that proves <em>which user</em> may bind a session to that project. <code>workspace_id</code> is optional: the server derives the workspace from the token plus the reported <code>(location, root, machine)</code>, and may return an id the marker caches for stable display. It is never required for identity.</p>
+
+  <div class="callout">
+    <strong>No silent fallback inside the marker.</strong> If <code>workspace.json</code> exists but is malformed, or names a project the token is not bound to, the shim fails loudly. A broken marker is an error to surface, not a reason to silently drop back to path-hash identity.
+  </div>
+
+  <h2 id="identity">4. Identity resolution</h2>
+  <p>Project identity is resolved in a strict priority order. The marker wins when present; the path hash is the last resort, kept only so unmarked folders, legacy rows, and first-time discovery keep working.</p>
+
+  <div class="flow">
+    <div class="step"><span class="marker">1</span><span class="body"><strong>Link-token binding.</strong> The session carries a <code>project_id</code> bound server-side from its <code>wlt_</code> token. This is authoritative and cannot be overridden by request input.</span></div>
+    <div class="step"><span class="marker">2</span><span class="body"><strong>Explicit <code>project_id</code>.</strong> A caller with no token binding (e.g. the bootstrap <code>agen8-local</code> token) may still pass an explicit id, as today.</span></div>
+    <div class="step"><span class="marker">3</span><span class="body"><strong>Path-hash fallback.</strong> With neither binding nor explicit id, and only a <code>root</code>, <code>ProjectIDForLocationRoot(location, root)</code> derives an id from the path — the legacy behaviour, now demoted to last resort.</span></div>
+    <div class="step"><span class="marker">&times;</span><span class="body"><strong>Otherwise: fail.</strong> No binding, no id, no root &rarr; an explicit error. The function never invents a project.</span></div>
+  </div>
+
+  <p>In every case, the folder's <code>(location, root, machine)</code> is recorded as <strong>Workspace metadata</strong>, never as the project's identity. cwd is context; it tells you where a workspace is, not which project it is.</p>
+
+  <h2 id="linktoken">5. The wlt_ link token</h2>
+  <p>A new credential type, <code>wlt_</code> (workspace link token), carries the project binding. It is modeled directly on the existing API key (<code>ak_</code>) path — same minting, same hash-only storage, same validation shape — with one addition: it binds a <strong>project</strong> (and optionally a workspace), not just a user.</p>
+
+  <table>
+    <thead><tr><th>Token</th><th>Prefix</th><th>Binds</th><th>Used by</th></tr></thead>
+    <tbody>
+      <tr><td>Session token</td><td><code>ses_</code></td><td>user</td><td>Web UI bearer.</td></tr>
+      <tr><td>API key</td><td><code>ak_</code></td><td>user</td><td>Programmatic MCP callers. No project binding.</td></tr>
+      <tr><td>Bootstrap</td><td><code>agen8-local</code></td><td>user <code>local</code></td><td>Single in-memory local MCP token.</td></tr>
+      <tr><td><strong>Link token</strong></td><td><code>wlt_</code></td><td><strong>user + project</strong> (+ workspace)</td><td>The shim, from a marked folder. <span class="pill new">new</span></td></tr>
+    </tbody>
+  </table>
+
+  <p>Why a token rather than letting the shim send a bare <code>project_id</code>: a token makes the project binding <em>server-side and unspoofable</em>. The server validates the token and reads the bound project from its own store. An MCP caller cannot assert membership of a project it was never granted. The raw token is shown once at mint time and stored only as a SHA-256 hash, exactly like an API key.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-comment">// internal/services/auth/linktoken/key.go  (new — mirrors apikey)</span>
+<span class="tok-kw">type</span> <span class="tok-type">LinkToken</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>          ID
+    <span class="tok-field">UserID</span>      user.ID
+    <span class="tok-field">ProjectID</span>   <span class="tok-type">string</span>             <span class="tok-comment">// opaque; auth never imports the project domain</span>
+    <span class="tok-field">WorkspaceID</span> <span class="tok-type">string</span>             <span class="tok-comment">// opaque; optional, bound once the workspace exists</span>
+    <span class="tok-field">Label</span>       <span class="tok-type">string</span>
+    <span class="tok-field">Prefix</span>      <span class="tok-type">string</span>             <span class="tok-comment">// "wlt_" + first chars, for display only</span>
+    <span class="tok-field">TokenHash</span>   <span class="tok-type">string</span>             <span class="tok-comment">// SHA-256; raw shown once at mint</span>
+    <span class="tok-field">ExpiresAt</span>   *time.Time
+    <span class="tok-field">RevokedAt</span>   *time.Time
+    <span class="tok-field">CreatedAt</span>   time.Time
+}
+
+<span class="tok-kw">func</span> (t <span class="tok-type">LinkToken</span>) <span class="tok-fn">IsActive</span>(now time.Time) <span class="tok-type">bool</span> { <span class="tok-comment">/* not revoked, not expired */</span> }
+
+<span class="tok-comment">// internal/services/auth/app/service.go  (new methods)</span>
+<span class="tok-comment">//   CreateLinkToken(ctx, params)  -> raw "wlt_..." returned once</span>
+<span class="tok-comment">//   ValidateLinkToken(ctx, raw)   -> { User, ProjectID, WorkspaceID }</span>
+<span class="tok-comment">//   RevokeLinkToken(ctx, id)</span>
+</code></pre>
+
+  <p>Minting reuses the existing primitives: <code>auth.NewRawToken("wlt", n)</code> for the <code>prefix_hex</code> string and <code>auth.HashToken</code> for storage. Persistence reuses the auth SQL store: an <code>auth_link_tokens</code> table self-creates in <code>ensureSchema</code>, with thin SQLite and Postgres wrappers — no migration files, consistent with every other table in the system.</p>
+
+  <h2 id="shim">6. The local shim</h2>
+  <p>The shim already exists. <code>RunHTTPBridge</code> (<code>internal/mcp/http_bridge.go</code>) is a stdio-to-HTTP forwarder: it speaks stdio MCP to the harness and Streamable HTTP to the daemon, local or hosted, and already injects a per-session header. <code>agen8 mcp serve</code> is a thin CLI subcommand over that existing logic plus marker reading.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">Harness side</div>
+      <div class="role">The harness (Codex / Claude Code desktop or terminal) launches <code>agen8 mcp serve</code> as a stdio MCP server. No <code>claude -p</code>, no terminal-only assumption.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Marker read</div>
+      <div class="role">The shim finds <code>./.agen8/</code> from cwd, reads <code>workspace.json</code> (server_url, project_id) and <code>token</code> (the wlt_). A missing marker is the unmarked-folder case; a malformed one is an error.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Connect</div>
+      <div class="role">Opens HTTP to <code>server_url/mcp</code>, sends the <code>wlt_</code> token, and reports <code>(location, root, machine)</code> as workspace metadata plus the per-conversation native session ref.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Proxy</div>
+      <div class="role">Forwards every MCP tool call between harness and daemon. The session is now bound to the right project and registered as a member.</div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>What changes inside the shim.</strong> Today <code>bridgeSessionID()</code> caches a per-folder UUID at <code>~/.agen8/bridge-sessions/&lt;sha256(projectRoot)&gt;.uuid</code> — that is path-as-identity again, one layer down. The target shim drops that cache in favour of the marker's token for the project axis, keeping the per-conversation ref for the member axis.
+  </div>
+
+  <h2 id="axes">7. Two identity axes</h2>
+  <p>The design keeps two concerns apart that were previously tangled. They compose; neither blocks the other.</p>
+
+  <div class="axis-grid">
+    <div class="caller-card ag">
+      <span class="who">Axis A &middot; project</span>
+      <dl>
+        <dt>carried by</dt><dd>the <code>.agen8</code> marker, via its <code>wlt_</code> token</dd>
+        <dt>binds</dt><dd>user + project (server-side, unspoofable)</dd>
+        <dt>answers</dt><dd>&ldquo;which body of work is this folder?&rdquo;</dd>
+        <dt>status</dt><dd>introduced by this design</dd>
+      </dl>
+    </div>
+    <div class="caller-card op">
+      <span class="who">Axis B &middot; session</span>
+      <dl>
+        <dt>carried by</dt><dd>the per-conversation native session ref</dd>
+        <dt>binds</dt><dd>member / session within the project</dd>
+        <dt>answers</dt><dd>&ldquo;which agent thread is acting right now?&rdquo;</dd>
+        <dt>status</dt><dd>Codex works today via <code>_meta</code>; Claude per-conversation granularity is a separate, deferred residual</dd>
+      </dl>
+    </div>
+  </div>
+
+  <p>Because the axes are independent, the Project &harr; Workspace model ships and delivers value <strong>without</strong> first solving Claude's per-conversation session identity. A marked folder lands every session in the right project immediately; sharpening which <em>member</em> a Claude conversation is can follow later without reopening this design.</p>
+
+  <h2 id="integration">8. Integration points</h2>
+  <p>This design touches exactly two existing decision points. Everything else is additive (a new token type, a new entity).</p>
+
+  <h3>Point 1 &middot; token resolution &mdash; <code>daemon.resolveMCPSession</code></h3>
+  <p>An unknown MCP token falls through to <code>ValidateAPIKey</code>. A <code>wlt_</code>-prefixed token is recognised first and validated as a link token, producing a session pre-bound to a user <em>and a project</em>. The <code>mcp.Session</code> type carries a <code>ProjectID</code> field for that binding.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-comment">// internal/daemon/daemon.go — illustrative</span>
+<span class="tok-kw">func</span> (d *<span class="tok-type">Daemon</span>) <span class="tok-fn">resolveMCPSession</span>(ctx context.Context, token <span class="tok-type">string</span>) (mcp.Session, <span class="tok-type">bool</span>) {
+    <span class="tok-kw">if</span> sess, ok := d.tokens.<span class="tok-fn">Resolve</span>(token); ok {
+        <span class="tok-kw">return</span> sess, <span class="tok-kw">true</span>                       <span class="tok-comment">// bootstrap + web-registered tokens</span>
+    }
+    <span class="tok-kw">if</span> strings.<span class="tok-fn">HasPrefix</span>(token, <span class="tok-string">"wlt_"</span>) {
+        bind, err := d.AuthSvc.<span class="tok-fn">ValidateLinkToken</span>(ctx, token)
+        <span class="tok-kw">if</span> err != <span class="tok-kw">nil</span> {
+            <span class="tok-kw">return</span> mcp.Session{}, <span class="tok-kw">false</span>             <span class="tok-comment">// invalid / expired / revoked — fail, no fallback</span>
+        }
+        <span class="tok-kw">return</span> mcp.Session{
+            UserID:    bind.User.ID,
+            ProjectID: bind.ProjectID,            <span class="tok-comment">// authoritative project binding</span>
+        }, <span class="tok-kw">true</span>
+    }
+    <span class="tok-kw">if</span> user, err := d.AuthSvc.<span class="tok-fn">ValidateAPIKey</span>(ctx, token); err == <span class="tok-kw">nil</span> {
+        <span class="tok-kw">return</span> mcp.Session{UserID: user.ID}, <span class="tok-kw">true</span>  <span class="tok-comment">// existing ak_ path, no project binding</span>
+    }
+    <span class="tok-kw">return</span> mcp.Session{}, <span class="tok-kw">false</span>
+}
+</code></pre>
+
+  <h3>Point 2 &middot; project resolution &mdash; <code>RegisterMCPContext</code></h3>
+  <p>At <code>internal/services/project/app/mcp_context.go</code>, project resolution consults the session's token binding first, demotes the path hash to a true fallback, and records the folder as a Workspace.</p>
+
+<pre class="mocha"><code class="lang-go"><span class="tok-comment">// internal/services/project/app/mcp_context.go — illustrative</span>
+projectID := session.ProjectID                          <span class="tok-comment">// 1. authoritative: link-token binding</span>
+<span class="tok-kw">if</span> projectID == <span class="tok-string">""</span> {
+    projectID = types.<span class="tok-fn">ProjectID</span>(strings.<span class="tok-fn">TrimSpace</span>(input.ProjectID))  <span class="tok-comment">// 2. explicit caller id</span>
+}
+root := strings.<span class="tok-fn">TrimSpace</span>(input.ProjectRoot)
+<span class="tok-kw">if</span> projectID == <span class="tok-string">""</span> {                                  <span class="tok-comment">// 3. fallback only</span>
+    <span class="tok-kw">if</span> root == <span class="tok-string">""</span> {
+        <span class="tok-kw">return</span> RegisterMCPContextResult{},
+            fmt.<span class="tok-fn">Errorf</span>(<span class="tok-string">"no project binding: marker, project_id, or project_root required"</span>)
+    }
+    projectID = <span class="tok-fn">ProjectIDForLocationRoot</span>(locationID, root)  <span class="tok-comment">// legacy path hash</span>
+}
+
+<span class="tok-comment">// record (location, root, machine) as a Workspace — metadata, never identity</span>
+_, err = s.workspaces.<span class="tok-fn">Upsert</span>(ctx, workspace.Record{
+    ProjectID: projectID, LocationID: locationID, Root: root, Machine: machine,
+})
+</code></pre>
+
+  <h2 id="onboarding">9. Onboarding (UI-first)</h2>
+  <p>The primary flow is the web UI, not the terminal. There is no <code>agen8 init</code> that builds everything from the shell. A CLI helper may exist, but only to support the UI-led flow.</p>
+
+  <div class="flow">
+    <div class="step"><span class="marker">1</span><span class="body">In the Agen8 web UI, the user <strong>creates or selects a Project</strong>.</span></div>
+    <div class="step"><span class="marker">2</span><span class="body">They click <strong>&ldquo;link this folder&rdquo;</strong> for a local path. The UI mints a <code>wlt_</code> link token for that user + project.</span></div>
+    <div class="step"><span class="marker">3</span><span class="body">The marker is written: <code>./.agen8/workspace.json</code> (committed), <code>./.agen8/token</code> (gitignored), and <code>./.agen8/.gitignore</code>.</span></div>
+    <div class="step"><span class="marker">4</span><span class="body"><code>agen8 mcp serve</code> reads the marker and connects. The harness session registers into the bound project.</span></div>
+  </div>
+
+  <h2 id="invariants">10. Invariants</h2>
+  <table>
+    <thead><tr><th>Rule</th><th>Enforced by</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>Project identity comes from the <code>.agen8</code> marker when present.</td><td>Marker reader &rarr; <code>RegisterMCPContext</code></td><td>A logical project must not change identity when its folder moves or is cloned elsewhere.</td></tr>
+      <tr><td><code>ProjectIDForLocationRoot</code> is fallback only.</td><td><code>RegisterMCPContext</code></td><td>Path-hash identity is for unmarked folders, legacy data, and first discovery; it never overrides a marker.</td></tr>
+      <tr><td>A link token binds exactly one <code>(user, project)</code>.</td><td><code>auth.ValidateLinkToken</code></td><td>Project binding is server-side and unspoofable; an MCP caller cannot assert an arbitrary <code>project_id</code>.</td></tr>
+      <tr><td>The raw <code>wlt_</code> token is shown once, stored only as a hash.</td><td>Link-token service</td><td>Matches the API-key model; a leaked store yields no usable tokens.</td></tr>
+      <tr><td>A Project owns many Workspaces; a Workspace belongs to one Project.</td><td>Workspace aggregate</td><td>Multi-device: one logical project is linked from several folders and machines.</td></tr>
+      <tr><td><code>(location, root, machine)</code> is Workspace metadata, never identity.</td><td><code>RegisterMCPContext</code></td><td>Filesystem location is context, not the routing key.</td></tr>
+      <tr><td>The secret <code>token</code> file is gitignored by default.</td><td>Marker writer (UI / CLI helper)</td><td>A link token is a personal credential, like git credentials, not a committed pointer.</td></tr>
+      <tr><td>Member identity stays <code>(project_id, harness_kind, native_session_ref)</code>.</td><td>Member aggregate (unchanged)</td><td>The project axis composes with — does not replace — the per-session member axis.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="files">11. File layout</h2>
+  <p>What this design adds and edits. New files mirror existing templates: the link token mirrors <code>apikey</code>; the workspace mirrors <code>member</code>.</p>
+
+  <div class="tree"><pre><span class="dir">internal/services/auth/</span>
+  <span class="dir">linktoken/</span>
+    <span class="file">key.go</span><span class="note">new — wlt_ LinkToken aggregate + IsActive + NewID</span>
+    <span class="file">repository.go</span><span class="note">new — Reader/Writer/Repository + Filter + ErrNotFound</span>
+  <span class="dir">infra/</span>
+    <span class="file">sql_store.go</span><span class="note">edit — ensureSchema: auth_link_tokens table</span>
+    <span class="file">sqlite_repository.go</span><span class="note">edit — thin wrappers</span>
+    <span class="file">postgres_repository.go</span><span class="note">edit — thin wrappers</span>
+    <span class="file">repository_builder.go</span><span class="note">edit — LinkTokens in Repositories</span>
+  <span class="dir">app/</span>
+    <span class="file">service.go</span><span class="note">edit — CreateLinkToken / ValidateLinkToken / RevokeLinkToken</span>
+
+<span class="dir">internal/services/project/</span>
+  <span class="dir">domain/workspace/</span>
+    <span class="file">workspace.go</span><span class="note">new — Workspace aggregate + Record</span>
+    <span class="file">repository.go</span><span class="note">new — Reader/Writer/Repository + Filter + ErrNotFound</span>
+  <span class="dir">infra/</span>
+    <span class="file">workspace_sqlite_repository.go</span><span class="note">new — self-creating workspaces table</span>
+    <span class="file">workspace_postgres_repository.go</span><span class="note">new</span>
+    <span class="file">repository_builder.go</span><span class="note">edit — NewWorkspaceRepository</span>
+  <span class="dir">app/</span>
+    <span class="file">workspace_service.go</span><span class="note">new — Upsert / List / Touch</span>
+    <span class="file">service.go</span><span class="note">edit — Workspaces in Config + Service</span>
+    <span class="file">mcp_context.go</span><span class="note">edit — integration point #2</span>
+
+<span class="dir">internal/daemon/</span>
+  <span class="file">daemon.go</span><span class="note">edit — integration point #1 (resolveMCPSession)</span>
+<span class="dir">internal/mcp/</span>
+  <span class="file">server.go</span><span class="note">edit — Session gains ProjectID</span>
+  <span class="file">http_bridge.go</span><span class="note">edit — read .agen8 marker; drop path-as-identity cache</span>
+<span class="dir">cmd/agen8-mcp/</span>
+  <span class="file">main.go</span><span class="note">edit — `mcp serve` subcommand</span>
+
+<span class="dir">internal/app/</span>
+  <span class="file">application.go</span><span class="note">edit — wire LinkTokens + Workspaces</span>
+
+<span class="dir">web/</span><span class="note">create/select project &rarr; &ldquo;link this folder&rdquo;</span></pre></div>
+
+  <p class="footnote">No migration files: the <code>auth_link_tokens</code> and <code>workspaces</code> tables self-create in <code>ensureSchema</code>, consistent with every other table in the system.</p>
+</div>
+</body>
+</html>

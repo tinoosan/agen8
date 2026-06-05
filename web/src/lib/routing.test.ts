@@ -40,10 +40,10 @@ describe('useNavigation', () => {
   })
 
   it('builds dashboard board task links', () => {
-    expect(boardTaskLink('proj-1', 'task-123')).toBe('/project/proj-1/dashboard?panel=overview&task=task-123')
+    expect(boardTaskLink('proj-1', 'task-123')).toBe('/project/proj-1/dashboard?task=task-123')
   })
 
   it('omits the task query parameter when the task id is empty', () => {
-    expect(boardTaskLink('proj-1', '')).toBe('/project/proj-1/dashboard?panel=overview')
+    expect(boardTaskLink('proj-1', '')).toBe('/project/proj-1/dashboard')
   })
 })

@@ -4,7 +4,7 @@ import { useStore, type DefaultProjectView } from './store'
 import type { Project } from './types'
 
 export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy'
-export type DashboardPanel = 'overview' | 'missions' | 'decisions'
+export type DashboardPanel = 'missions' | 'decisions'
 
 /* ── Route constants ──────────────────────────────── */
 
@@ -21,9 +21,10 @@ export const ROUTES = {
 
 export function boardTaskLink(projectId: string, taskId: string): string {
   const base = dashboardLink(projectId)
-  const params = new URLSearchParams({ panel: 'overview' })
+  const params = new URLSearchParams()
   if (taskId.trim()) params.set('task', taskId)
-  return `${base}?${params.toString()}`
+  const qs = params.toString()
+  return qs ? `${base}?${qs}` : base
 }
 
 export function calendarLink(projectId: string, taskId?: string): string {
@@ -41,7 +42,7 @@ export function missionDetailLink(projectId: string, missionId: string): string 
 export function dashboardLink(projectId: string, params?: { panel?: DashboardPanel }): string {
   const base = `/project/${encodeURIComponent(projectId)}/dashboard`
   const search = new URLSearchParams()
-  if (params?.panel && params.panel !== 'overview') search.set('panel', params.panel)
+  if (params?.panel) search.set('panel', params.panel)
   const qs = search.toString()
   return qs ? `${base}?${qs}` : base
 }

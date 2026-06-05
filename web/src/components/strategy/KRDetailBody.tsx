@@ -9,7 +9,7 @@ import type { KeyResultView } from '../../lib/types'
 const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
 
 const LABEL_STYLE: CSSProperties = {
-  fontSize: '10px',
+  fontSize: '0.625rem',
   fontWeight: 500,
   letterSpacing: '0.08em',
   lineHeight: 1.33,
@@ -19,7 +19,7 @@ const LABEL_STYLE: CSSProperties = {
 
 const VALUE_STYLE: CSSProperties = {
   fontFamily: SF_TEXT,
-  fontSize: '15px',
+  fontSize: '0.9375rem',
   fontWeight: 500,
   letterSpacing: '-0.224px',
   lineHeight: 1.24,
@@ -30,7 +30,7 @@ const VALUE_STYLE: CSSProperties = {
 
 const SECONDARY_STYLE: CSSProperties = {
   fontFamily: SF_TEXT,
-  fontSize: '13px',
+  fontSize: '0.8125rem',
   fontWeight: 400,
   letterSpacing: '-0.224px',
   lineHeight: 1.43,
@@ -75,7 +75,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
           className="md-prose"
           style={{
             fontFamily: SF_TEXT,
-            fontSize: '13px',
+            fontSize: '0.8125rem',
             fontWeight: 400,
             lineHeight: 1.43,
             letterSpacing: '-0.224px',
@@ -146,7 +146,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
             <p
               style={{
                 fontFamily: SF_TEXT,
-                fontSize: '11px',
+                fontSize: '0.6875rem',
                 fontWeight: 400,
                 letterSpacing: '-0.12px',
                 lineHeight: 1.33,
@@ -196,7 +196,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
               <p
                 style={{
                   fontFamily: SF_TEXT,
-                  fontSize: '11px',
+                  fontSize: '0.6875rem',
                   letterSpacing: '-0.12px',
                   color: 'var(--text-3)',
                   margin: 0,
@@ -209,7 +209,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
               <p
                 style={{
                   fontFamily: SF_TEXT,
-                  fontSize: '11px',
+                  fontSize: '0.6875rem',
                   letterSpacing: '-0.12px',
                   color: 'var(--text-3)',
                   fontStyle: 'italic',
@@ -227,7 +227,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
                   <span
                     style={{
                       fontFamily: SF_TEXT,
-                      fontSize: '12px',
+                      fontSize: '0.75rem',
                       fontWeight: 500,
                       letterSpacing: '-0.12px',
                       lineHeight: 1.33,
@@ -240,7 +240,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
                   <span
                     style={{
                       fontFamily: SF_TEXT,
-                      fontSize: '10px',
+                      fontSize: '0.625rem',
                       fontWeight: 600,
                       letterSpacing: '-0.08px',
                       color: 'var(--text-2)',
@@ -254,7 +254,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
                   <p
                     style={{
                       fontFamily: SF_TEXT,
-                      fontSize: '11px',
+                      fontSize: '0.6875rem',
                       fontWeight: 400,
                       lineHeight: 1.43,
                       letterSpacing: '-0.12px',
@@ -268,7 +268,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
                 <p
                   style={{
                     fontFamily: SF_TEXT,
-                    fontSize: '10px',
+                    fontSize: '0.625rem',
                     fontWeight: 400,
                     letterSpacing: '-0.08px',
                     lineHeight: 1.33,

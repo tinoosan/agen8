@@ -105,7 +105,7 @@ export const MissionNode = memo(function MissionNode({ data, selected, id }: Nod
                 opacity: isActive ? 1 : 0.6,
                 filter: isActive ? `drop-shadow(0 0 4px ${color})` : undefined,
               }} />
-            <span className="uppercase font-semibold text-foreground tracking-[0.4px] opacity-[0.65]" style={{ fontSize: '9px' }}>
+            <span className="uppercase font-semibold text-foreground tracking-[0.4px] opacity-[0.65]" style={{ fontSize: '0.5625rem' }}>
               MISSION
             </span>
           </div>
@@ -114,7 +114,7 @@ export const MissionNode = memo(function MissionNode({ data, selected, id }: Nod
             <h3 className="text-foreground w-full break-words"
               style={{
                 fontWeight: 600,
-                fontSize: '17px',
+                fontSize: '1.0625rem',
                 letterSpacing: '-0.374px',
                 lineHeight: 1.24
               }}>
@@ -123,7 +123,7 @@ export const MissionNode = memo(function MissionNode({ data, selected, id }: Nod
           </div>
 
           <div className="flex items-center text-left"
-            style={{ fontWeight: 400, fontSize: '14px', letterSpacing: '-0.224px', color: 'var(--text-3)' }}>
+            style={{ fontWeight: 400, fontSize: '0.875rem', letterSpacing: '-0.224px', color: 'var(--text-3)' }}>
             <span>{krCount} KR{krCount !== 1 ? 's' : ''}</span>
             <span className="mx-2 opacity-60">·</span>
             <span>{avgProgress}% average</span>

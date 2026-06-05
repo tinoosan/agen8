@@ -12,9 +12,3 @@ export function accountDisplayName(user: AuthUser | null | undefined): string {
   if (email) return email
   return 'Account'
 }
-
-export function accountSubtitle(user: AuthUser | null | undefined): string {
-  const email = user?.email?.trim() ?? ''
-  if (!email) return ''
-  return email
-}

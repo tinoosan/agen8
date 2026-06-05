@@ -77,7 +77,7 @@ export function DetailPanel({ node, projectId, projectRoot, onClose }: Props) {
 
   return (
     <motion.div
-      className="absolute top-0 right-0 bottom-0 z-20 border-l border-border bg-card overflow-hidden flex flex-col"
+      className="absolute top-0 right-0 bottom-0 z-20 max-w-full border-l border-border bg-card overflow-hidden flex flex-col"
       style={{ width }}
       initial={{ x: width, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}

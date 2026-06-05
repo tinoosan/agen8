@@ -12,12 +12,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
         classNames: {
           toast:
             "rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-panel)] text-[var(--text-1)] shadow-[var(--shadow-lg)]",
-          title: "text-[13px] font-medium text-[var(--text-1)]",
-          description: "text-[12px] text-[var(--text-2)]",
+          title: "text-[0.8125rem] font-medium text-[var(--text-1)]",
+          description: "text-[0.75rem] text-[var(--text-2)]",
           actionButton:
-            "rounded-[var(--r-md)] bg-[var(--accent)] px-2.5 py-1 text-[11px] font-medium text-white",
+            "rounded-[var(--r-md)] bg-[var(--accent)] px-2.5 py-1 text-[0.6875rem] font-medium text-white",
           cancelButton:
-            "rounded-[var(--r-md)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-2)]",
+            "rounded-[var(--r-md)] bg-[var(--bg-elevated)] px-2.5 py-1 text-[0.6875rem] font-medium text-[var(--text-2)]",
           closeButton:
             "border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-2)]",
         },

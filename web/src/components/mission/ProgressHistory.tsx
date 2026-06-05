@@ -34,19 +34,19 @@ function EntryRow({ entry }: { entry: ProgressEntryView }) {
       {/* Header line: value → % · agent · time */}
       <div className="flex items-center gap-1.5">
         <span className="shrink-0 w-1 h-1 rounded-full bg-[var(--accent)]" />
-        <span className="tabular-nums text-[var(--text-1)] shrink-0" style={{ fontSize: '11px', fontWeight: 500 }}>
+        <span className="tabular-nums text-[var(--text-1)] shrink-0" style={{ fontSize: '0.6875rem', fontWeight: 500 }}>
           {entry.value} <span className="text-[var(--text-3)] font-normal">→ {entry.progress}%</span>
         </span>
-        <span className="text-[var(--text-3)] shrink-0 ml-auto" style={{ fontSize: '10px' }}>
+        <span className="text-[var(--text-3)] shrink-0 ml-auto" style={{ fontSize: '0.625rem' }}>
           {shortAgent(entry.updatedBy)}
         </span>
-        <span className="text-[var(--text-3)] shrink-0 tabular-nums" style={{ fontSize: '10px' }}>
+        <span className="text-[var(--text-3)] shrink-0 tabular-nums" style={{ fontSize: '0.625rem' }}>
           {timeAgo(entry.createdAt)}
         </span>
       </div>
       {/* Note — wraps freely below */}
       {entry.note && (
-        <p className="text-[var(--text-2)] m-0 mt-0.5 pl-2.5" style={{ fontSize: '11px', lineHeight: 1.5 }}>
+        <p className="text-[var(--text-2)] m-0 mt-0.5 pl-2.5" style={{ fontSize: '0.6875rem', lineHeight: 1.5 }}>
           {entry.note}
         </p>
       )}
@@ -65,7 +65,7 @@ export default function ProgressHistory({ keyResultId }: { keyResultId: string }
       <button
         onClick={() => setExpanded(e => !e)}
         className="inline-flex items-center gap-1 text-[var(--text-3)] hover:text-[var(--text-2)] transition-colors bg-transparent border-none cursor-pointer p-0"
-        style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '-0.06px' }}
+        style={{ fontSize: '0.6875rem', fontWeight: 500, letterSpacing: '-0.06px' }}
       >
         {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
         Progress History
@@ -79,7 +79,7 @@ export default function ProgressHistory({ keyResultId }: { keyResultId: string }
             </div>
           )}
           {!isLoading && entries && entries.length === 0 && (
-            <p className="text-[10px] text-[var(--text-3)] py-1">No progress updates yet</p>
+            <p className="text-[0.625rem] text-[var(--text-3)] py-1">No progress updates yet</p>
           )}
           {!isLoading && entries && entries.length > 0 && (
             <div className="overflow-y-auto" style={{ maxHeight: '220px' }}>

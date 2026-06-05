@@ -56,7 +56,7 @@ function MissionKRProgress({ missionId }: { missionId: string }) {
   const krLabel = summary.total === 1 ? 'KR' : 'KRs'
   return (
     <span
-      className="text-[10px] text-[var(--text-3)]"
+      className="text-[0.625rem] text-[var(--text-3)]"
       title={`${summary.completed} / ${summary.total} ${krLabel} complete`}
     >
       {summary.pct}% · {summary.total} {krLabel}
@@ -106,7 +106,7 @@ export function MissionsSidebarSection({ projectId }: { projectId: string | null
 
   if (visibleMissions.length === 0) {
     return (
-      <div className="px-4 py-2 text-[11px] text-[var(--text-3)]">
+      <div className="px-4 py-2 text-[0.6875rem] text-[var(--text-3)]">
         No active missions
       </div>
     )
@@ -125,7 +125,7 @@ export function MissionsSidebarSection({ projectId }: { projectId: string | null
           >
             <MissionStatusIcon status={mission.status} />
             <div className="flex-1 min-w-0">
-              <div className="text-[13px] text-[var(--text-2)] truncate leading-tight">
+              <div className="text-[0.8125rem] text-[var(--text-2)] truncate leading-tight">
                 {mission.title}
               </div>
               <MissionKRProgress missionId={mission.id} />

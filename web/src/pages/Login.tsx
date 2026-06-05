@@ -55,15 +55,15 @@ function BrandHero() {
           <path d={HEX_ACCENT_EDGE} stroke="#3B82F6" strokeWidth="14" strokeLinecap="round" />
           <circle cx="207" cy="82" r="14" fill="#3B82F6" />
         </svg>
-        <span className="text-[17px] font-semibold tracking-[-0.03em]">agen8</span>
+        <span className="text-[1.0625rem] font-semibold tracking-[-0.03em]">agen8</span>
       </div>
 
       {/* Headline + tagline */}
       <div className="relative z-10 max-w-[26ch]">
-        <h2 className="m-0 text-[30px] font-semibold leading-[1.15] tracking-[-0.03em]">
+        <h2 className="m-0 text-[1.875rem] font-semibold leading-[1.15] tracking-[-0.03em]">
           Mission control for your agents.
         </h2>
-        <p className="mt-3 mb-0 text-[14px] leading-relaxed text-white/65">
+        <p className="mt-3 mb-0 text-[0.875rem] leading-relaxed text-white/65">
           Register work context, coordinate autonomous roles, and stay in the loop on every decision.
         </p>
       </div>
@@ -125,16 +125,16 @@ export default function Login() {
               <path d={HEX_ACCENT_EDGE} stroke="var(--accent)" strokeWidth="14" strokeLinecap="round" />
               <circle cx="207" cy="82" r="14" fill="var(--accent)" />
             </svg>
-            <span className="text-[17px] font-semibold tracking-[-0.03em] text-[var(--text-1)]">agen8</span>
+            <span className="text-[1.0625rem] font-semibold tracking-[-0.03em] text-[var(--text-1)]">agen8</span>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <h1 className="m-0 text-[26px] font-semibold tracking-[-0.03em] text-[var(--text-1)]">Welcome back</h1>
-            <p className="m-0 text-[13px] text-[var(--text-3)]">Sign in to your agen8 workspace.</p>
+            <h1 className="m-0 text-[1.625rem] font-semibold tracking-[-0.03em] text-[var(--text-1)]">Welcome back</h1>
+            <p className="m-0 text-[0.8125rem] text-[var(--text-3)]">Sign in to your agen8 workspace.</p>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email" className="text-[12px] text-[var(--text-2)]">
+            <Label htmlFor="email" className="text-[0.75rem] text-[var(--text-2)]">
               Email
             </Label>
             <Input
@@ -148,7 +148,7 @@ export default function Login() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password" className="text-[12px] text-[var(--text-2)]">
+            <Label htmlFor="password" className="text-[0.75rem] text-[var(--text-2)]">
               Password
             </Label>
             <Input
@@ -164,7 +164,7 @@ export default function Login() {
           {error && (
             <div
               role="alert"
-              className="rounded-[var(--r-md)] border border-[var(--red)]/30 bg-[var(--red)]/10 px-3 py-2 text-[12px] text-[var(--red)]"
+              className="rounded-[var(--r-md)] border border-[var(--red)]/30 bg-[var(--red)]/10 px-3 py-2 text-[0.75rem] text-[var(--red)]"
             >
               {error}
             </div>

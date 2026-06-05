@@ -38,7 +38,7 @@ export function EnvEditor({ env, onChange }: {
         <button
           type="button"
           onClick={add}
-          className="inline-flex items-center gap-1 px-2.5 py-[3px] text-[11px] font-medium bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--r-sm)] text-[var(--text-2)] cursor-pointer font-[inherit]"
+          className="inline-flex items-center gap-1 px-2.5 py-[3px] text-[0.6875rem] font-medium bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--r-sm)] text-[var(--text-2)] cursor-pointer font-[inherit]"
         >
           <Plus size={11} />
           Add
@@ -75,7 +75,7 @@ export function EnvEditor({ env, onChange }: {
           ))}
         </div>
       )}
-      <p className="text-[11px] text-[var(--text-3)] mt-2 mb-0 leading-[1.5]">
+      <p className="text-[0.6875rem] text-[var(--text-3)] mt-2 mb-0 leading-[1.5]">
         Non-secret defaults only. API keys should use the OS keychain.
       </p>
     </div>

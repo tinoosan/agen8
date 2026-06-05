@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SidebarProvider } from '@/components/ui/sidebar'
 
@@ -65,7 +65,7 @@ describe('Sidebar', () => {
     })
   })
 
-  it('shows the local daemon status inside the account chip popover', () => {
+  it('shows the local daemon status in the sidebar footer', () => {
     mockUseAuth.mockReturnValue({
       isHosted: false,
       bridge: { connected: true, projects: [{ id: 'project-1', name: 'Playground' }] },
@@ -75,10 +75,7 @@ describe('Sidebar', () => {
 
     renderSidebar()
 
-    // Daemon status lives in the unified AccountChip popover. Click
-    // the user identity chip to open it.
-    const accountChip = screen.getByRole('button', { name: /^User$/i })
-    fireEvent.click(accountChip)
+    // Daemon status is always visible in the footer (no popover to open).
     expect(screen.getAllByText(/^Local daemon$/).length).toBeGreaterThan(0)
     expect(screen.getByText(/^Connected$/)).toBeInTheDocument()
   })

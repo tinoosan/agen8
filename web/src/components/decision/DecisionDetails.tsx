@@ -3,7 +3,7 @@ import type { DecisionView } from '../../lib/types'
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <>
-      <div className="text-[10px] font-semibold uppercase tracking-[0.04em] text-[var(--text-3)] mb-1">{label}</div>
+      <div className="text-[0.625rem] font-semibold uppercase tracking-[0.04em] text-[var(--text-3)] mb-1">{label}</div>
       {children}
     </>
   )
@@ -11,7 +11,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 
 export default function DecisionDetails({ decision }: { decision: DecisionView }) {
   return (
-    <div className="text-[11px] text-[var(--text-2)] space-y-3 leading-[1.55]">
+    <div className="text-[0.6875rem] text-[var(--text-2)] space-y-3 leading-[1.55]">
       <div>
         <Section label="Rationale">
           <p className="m-0 whitespace-pre-wrap">{decision.rationale}</p>

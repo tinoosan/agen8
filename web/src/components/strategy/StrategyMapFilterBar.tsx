@@ -57,7 +57,7 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
             style={{
               padding: '5px 10px',
               borderRadius: 20,
-              fontSize: '11px',
+              fontSize: '0.6875rem',
               fontWeight: 600,
               letterSpacing: '0.01em',
               border: `1px solid ${isActive ? btn.color : 'var(--border)'}`,
@@ -80,7 +80,7 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
                   height: 16,
                   padding: '0 4px',
                   borderRadius: 8,
-                  fontSize: '10px',
+                  fontSize: '0.625rem',
                   fontWeight: 700,
                   background: `color-mix(in srgb, ${btn.color} 20%, transparent)`,
                   color: btn.color,

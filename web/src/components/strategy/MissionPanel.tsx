@@ -110,13 +110,13 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
         <div className="flex-1 min-w-0">
           <p
             className="uppercase mb-1"
-            style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)' }}
+            style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)' }}
           >
             Mission
           </p>
           <h2
             className="text-foreground line-clamp-2"
-            style={{ fontFamily: SF_TEXT, fontSize: '17px', fontWeight: 600, lineHeight: 1.24, letterSpacing: '-0.374px' }}
+            style={{ fontFamily: SF_TEXT, fontSize: '1.0625rem', fontWeight: 600, lineHeight: 1.24, letterSpacing: '-0.374px' }}
           >
             {mission.title}
           </h2>
@@ -150,7 +150,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
           <Badge
             variant="outline"
             className="gap-1.5"
-            style={{ border: 'none', padding: 0, background: 'transparent', fontSize: '12px', fontWeight: 600, letterSpacing: '-0.12px', lineHeight: 1.33 }}
+            style={{ border: 'none', padding: 0, background: 'transparent', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '-0.12px', lineHeight: 1.33 }}
           >
             <span
               style={{ width: 6, height: 6, borderRadius: '50%', background: STATUS_DOT_COLOR[mission.status], flexShrink: 0, display: 'inline-block' }}
@@ -160,7 +160,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
           {(mission.startDate || mission.endDate) && (
             <span
               className="flex items-center gap-1"
-              style={{ fontSize: '10px', letterSpacing: '-0.08px', lineHeight: 1.47, color: 'var(--text-3)' }}
+              style={{ fontSize: '0.625rem', letterSpacing: '-0.08px', lineHeight: 1.47, color: 'var(--text-3)' }}
             >
               <Calendar size={10} />
               {mission.startDate?.slice(0, 10) ?? '—'} → {mission.endDate?.slice(0, 10) ?? '—'}
@@ -172,7 +172,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
         {mission.description && (
           <div
             className="md-prose"
-            style={{ fontFamily: SF_TEXT, fontSize: '14px', letterSpacing: '-0.224px', color: 'var(--text-2)' }}
+            style={{ fontFamily: SF_TEXT, fontSize: '0.875rem', letterSpacing: '-0.224px', color: 'var(--text-2)' }}
           >
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {mission.description}
@@ -188,10 +188,10 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
         style={{ background: 'var(--bg-panel)', padding: '10px 16px', gap: '5px' }}
       >
         <div className="flex justify-between items-baseline">
-          <span style={{ fontSize: '11px', fontWeight: 400, letterSpacing: '-0.12px', lineHeight: 1.33, color: 'var(--text-3)' }}>
+          <span style={{ fontSize: '0.6875rem', fontWeight: 400, letterSpacing: '-0.12px', lineHeight: 1.33, color: 'var(--text-3)' }}>
             Avg KR progress
           </span>
-          <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '-0.12px', lineHeight: 1.33, color: 'var(--text-2)' }}>
+          <span style={{ fontSize: '0.6875rem', fontWeight: 600, letterSpacing: '-0.12px', lineHeight: 1.33, color: 'var(--text-2)' }}>
             {avgProgress}%
           </span>
         </div>
@@ -239,7 +239,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
           className="w-full gap-2"
           style={{
             fontFamily: SF_TEXT,
-            fontSize: '14px',
+            fontSize: '0.875rem',
             fontWeight: 400,
             lineHeight: 1.43,
             letterSpacing: '-0.224px',
