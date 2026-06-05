@@ -16,9 +16,9 @@ func taskWhere(filter domain.TaskFilter) (string, []any, error) {
 	}
 	var clauses []string
 	var args []any
-	if filter.SpaceID != "" {
-		clauses = append(clauses, "space_id = ?")
-		args = append(args, strings.TrimSpace(string(filter.SpaceID)))
+	if filter.ProjectID != "" {
+		clauses = append(clauses, "project_id = ?")
+		args = append(args, strings.TrimSpace(string(filter.ProjectID)))
 	}
 	if filter.AssignedTo != "" {
 		clauses = append(clauses, "assigned_to = ?")

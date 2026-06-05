@@ -1,7 +1,4 @@
 export { ProjectSwitcher } from './ProjectSwitcher'
 export { AccountChip } from './AccountChip'
-export { SpaceList } from './SpaceList'
-export { MemberSubList } from './MemberList'
 export { MissionsSidebarSection } from './MissionSection'
 export { GlobalSidebarContent } from './GlobalContent'
-export { SpaceRenameDialog, SpaceDeleteDialog, MemberRemoveDialog } from './SpaceDialogs'

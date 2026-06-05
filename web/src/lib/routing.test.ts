@@ -3,7 +3,7 @@ import { renderHook } from '@testing-library/react'
 
 // Mock dependencies used by useNavigation
 vi.mock('wouter', () => ({
-  useLocation: () => ['/project/proj-1/space/space-abc', vi.fn()],
+  useLocation: () => ['/project/proj-1/dashboard', vi.fn()],
 }))
 
 vi.mock('../hooks/useProjects', () => ({
@@ -23,11 +23,6 @@ describe('useNavigation', () => {
     expect(result.current.projectId).toBe('proj-1')
   })
 
-  it('parses spaceId from URL', () => {
-    const { result } = renderHook(() => useNavigation())
-    expect(result.current.focusedSpaceId).toBe('space-abc')
-  })
-
   it('resolves focusedProjectRoot from project data', () => {
     const { result } = renderHook(() => useNavigation())
     expect(result.current.focusedProjectRoot).toBe('/repo')
@@ -36,7 +31,6 @@ describe('useNavigation', () => {
   it('returns setter functions', () => {
     const { result } = renderHook(() => useNavigation())
     expect(typeof result.current.setFocusedProjectRoot).toBe('function')
-    expect(typeof result.current.setFocusedSpaceId).toBe('function')
     expect(typeof result.current.setActiveView).toBe('function')
   })
 
@@ -45,11 +39,11 @@ describe('useNavigation', () => {
     expect(result.current.projectLoading).toBe(false)
   })
 
-  it('builds board task links for the space board tab', () => {
-    expect(boardTaskLink('proj-1', 'space-abc', 'task-123')).toBe('/project/proj-1/space/space-abc?tab=board&task=task-123')
+  it('builds dashboard board task links', () => {
+    expect(boardTaskLink('proj-1', 'task-123')).toBe('/project/proj-1/dashboard?panel=overview&task=task-123')
   })
 
   it('omits the task query parameter when the task id is empty', () => {
-    expect(boardTaskLink('proj-1', 'space-abc', '')).toBe('/project/proj-1/space/space-abc?tab=board')
+    expect(boardTaskLink('proj-1', '')).toBe('/project/proj-1/dashboard?panel=overview')
   })
 })

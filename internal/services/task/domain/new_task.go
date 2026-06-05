@@ -6,15 +6,14 @@ import (
 	"strings"
 	"time"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 // NewTaskInput is the validated input shape for task creation.
 type NewTaskInput struct {
-	SpaceID            spacedomain.SpaceID
+	ProjectID          types.ProjectID
 	CreatedBy          string
 	AssignedTo         member.ID
 	Description        string
@@ -30,9 +29,9 @@ type NewTaskInput struct {
 
 // NewTask validates creation input and returns a pending task.
 func NewTask(input NewTaskInput, now time.Time) (Task, error) {
-	spaceID := spacedomain.SpaceID(strings.TrimSpace(string(input.SpaceID)))
-	if spaceID == "" {
-		return Task{}, fmt.Errorf("new task: space id is required")
+	projectID := types.ProjectID(strings.TrimSpace(string(input.ProjectID)))
+	if projectID == "" {
+		return Task{}, fmt.Errorf("new task: project id is required")
 	}
 	createdBy := strings.TrimSpace(input.CreatedBy)
 	if createdBy == "" {
@@ -55,7 +54,7 @@ func NewTask(input NewTaskInput, now time.Time) (Task, error) {
 	stamped := now.UTC()
 	t := Task{
 		ID:                 id,
-		SpaceID:            spaceID,
+		ProjectID:          projectID,
 		AssignedTo:         assignedTo,
 		CreatedBy:          createdBy,
 		Title:              strings.TrimSpace(input.Title),

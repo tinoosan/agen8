@@ -5,7 +5,6 @@ import {
   forceCenter,
   forceCollide,
   forceY,
-  forceX,
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from 'd3-force'
@@ -43,7 +42,6 @@ interface SimNode extends SimulationNodeDatum {
   radius: number
   tier: 'mission' | 'kr' | 'leaf'
   rank: number
-  spaceName?: string
 }
 
 interface SimLink extends SimulationLinkDatum<SimNode> {
@@ -54,7 +52,6 @@ interface SimLink extends SimulationLinkDatum<SimNode> {
 export interface ClusterMetaEntry {
   color: string
   rank: number
-  spaceName?: string
 }
 
 // ── Cluster meta assignment ───────────────────────────────────────────────────
@@ -68,12 +65,11 @@ export function assignClusterMeta(
   const missions = nodes.filter(n => n.type === 'mission')
 
   missions.forEach((mission, i) => {
-    const spaceName = mission.data?.spaceName as string | undefined
     const colour = CLUSTER_PALETTE[i % CLUSTER_PALETTE.length]
 
     const visited = new Set<string>([mission.id])
     const queue = [{ id: mission.id, rank: 0 }]
-    meta.set(mission.id, { color: colour, rank: 0, spaceName })
+    meta.set(mission.id, { color: colour, rank: 0 })
 
     while (queue.length > 0) {
       const { id: current, rank } = queue.shift()!
@@ -81,7 +77,7 @@ export function assignClusterMeta(
         if (edge.source === current && !visited.has(edge.target)) {
           visited.add(edge.target)
           const childRank = rank + 1
-          meta.set(edge.target, { color: colour, rank: childRank, spaceName })
+          meta.set(edge.target, { color: colour, rank: childRank })
           queue.push({ id: edge.target, rank: childRank })
         }
       }
@@ -108,9 +104,6 @@ export function runForceLayout(
 ): Map<string, { x: number; y: number }> {
   if (nodes.length === 0) return new Map()
 
-  const uniqueSpaces = Array.from(
-    new Set(Array.from(meta.values()).map(m => m.spaceName).filter(Boolean)),
-  ) as string[]
   const nodeIds = new Set(nodes.map(node => node.id))
 
   // Compute the set of leaves attached DIRECTLY to a mission (not via a KR).
@@ -129,15 +122,6 @@ export function runForceLayout(
       }
     }
   }
-
-  // Adaptive space-column gap. With 2-3 spaces keep the breathing room of the
-  // original 1200px layout. As space count grows, shrink sub-linearly so the
-  // graph doesn't blow out of the viewport. Floor at 600px so clusters never
-  // collide. Scales from 1200 (2 spaces) to roughly 850 (4) to 600 (8+).
-  const spaceGap = Math.max(
-    600,
-    1200 / Math.max(1, Math.sqrt(Math.max(2, uniqueSpaces.length) / 2)),
-  )
 
   const simNodes: SimNode[] = nodes.map((n, i) => {
     const radius = NODE_RADIUS[n.type ?? ''] ?? DEFAULT_RADIUS
@@ -167,7 +151,6 @@ export function runForceLayout(
       radius,
       tier,
       rank,
-      spaceName: m?.spaceName,
       x: initialX,
       y: initialY,
     }
@@ -204,38 +187,6 @@ export function runForceLayout(
       forceY<SimNode>()
         .y(0)
         .strength(d => (d.tier === 'mission' ? 0.05 : 0)),
-    )
-    // Space-column X-force. Pulls missions onto horizontal columns, one
-    // per space, and lightly nudges KRs and leaves toward their parent
-    // mission's column so clusters stay legible side-by-side.
-    //
-    // CRITICAL: this force is DISABLED when there's 0 or 1 space. With a
-    // single space, every mission's target x resolves to 0, every KR's
-    // target x resolves to 0, every leaf's target x resolves to 0 — so
-    // the force effectively collapses the whole graph onto the y-axis
-    // at x=0. Combined with the initial y=rank*200 positions (all KRs
-    // start at y=200, all leaves at y=200 too), the simulation lands in
-    // a local minimum where the cluster is a tall thin stack at x=0
-    // instead of a readable radial arrangement around the mission.
-    // Disabling the X-force for single-space graphs lets the charge,
-    // link, and collide forces push nodes outward radially — which is
-    // what actually produces a legible strategy map for the 1-space
-    // case. Multi-space graphs still get proper columnar separation.
-    .force(
-      'x',
-      forceX<SimNode>()
-        .x(d => {
-          if (d.tier !== 'mission' || !d.spaceName) return 0
-          const idx = uniqueSpaces.indexOf(d.spaceName)
-          return (idx - (uniqueSpaces.length - 1) / 2) * spaceGap
-        })
-        .strength(d => {
-          if (uniqueSpaces.length < 2) return 0
-          if (!d.spaceName) return 0
-          if (d.tier === 'mission') return 0.25
-          if (d.tier === 'kr') return 0.08
-          return 0.08
-        }),
     )
     .force('center', forceCenter(0, 0).strength(0.01))
     .force(

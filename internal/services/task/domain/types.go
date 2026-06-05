@@ -6,14 +6,13 @@ import (
 	"strings"
 	"time"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 type TaskFilter struct {
-	SpaceID        spacedomain.SpaceID
+	ProjectID      types.ProjectID
 	AssignedTo     member.ID
 	ClaimedBy      member.ID
 	TaskKind       string
@@ -48,9 +47,6 @@ const (
 
 	TaskMetadataBlockedBy        = "blockedBy"
 	TaskMetadataBlockedSignature = "blockedSignature"
-
-	TaskBlockerKindOperatorAction = "operator_action"
-	TaskBlockerKindEscalation     = "escalation"
 )
 
 var (

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8-mcp-server/internal/services/task/app"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
@@ -30,72 +30,72 @@ func (s *stubService) capture(ctx context.Context, called string) {
 func (s *stubService) Create(ctx context.Context, req taskapp.CreateTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "create")
 	s.createReq = req
-	return taskdomain.Task{ID: "task-1", SpaceID: req.SpaceID, AssignedTo: req.AssignedTo, Description: req.Description, Status: taskdomain.TaskStatusPending}, nil
+	return taskdomain.Task{ID: "task-1", ProjectID: req.ProjectID, AssignedTo: req.AssignedTo, Description: req.Description, Status: taskdomain.TaskStatusPending}, nil
 }
 
 func (s *stubService) Get(ctx context.Context, id taskdomain.TaskID) (taskdomain.Task, error) {
 	s.capture(ctx, "get")
-	return taskdomain.Task{ID: id, SpaceID: "space-1", AssignedTo: "worker-1", Status: taskdomain.TaskStatusPending}, nil
+	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", Status: taskdomain.TaskStatusPending}, nil
 }
 
 func (s *stubService) List(ctx context.Context, filter taskdomain.TaskFilter) ([]taskdomain.Task, error) {
 	s.capture(ctx, "list")
 	s.listReq = filter
-	return []taskdomain.Task{{ID: "task-1", SpaceID: filter.SpaceID, AssignedTo: filter.AssignedTo, Status: taskdomain.TaskStatusPending}}, nil
+	return []taskdomain.Task{{ID: "task-1", ProjectID: filter.ProjectID, AssignedTo: filter.AssignedTo, Status: taskdomain.TaskStatusPending}}, nil
 }
 
 func (s *stubService) Claim(ctx context.Context, id taskdomain.TaskID) (taskdomain.Task, error) {
 	s.capture(ctx, "claim")
-	return taskdomain.Task{ID: id, SpaceID: "space-1", AssignedTo: "worker-1", ClaimedByMemberID: "worker-1", Status: taskdomain.TaskStatusActive}, nil
+	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", ClaimedByMemberID: "worker-1", Status: taskdomain.TaskStatusActive}, nil
 }
 
 func (s *stubService) Release(ctx context.Context, id taskdomain.TaskID) (taskdomain.Task, error) {
 	s.capture(ctx, "release")
-	return taskdomain.Task{ID: id, SpaceID: "space-1", AssignedTo: "worker-1", Status: taskdomain.TaskStatusPending}, nil
+	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", Status: taskdomain.TaskStatusPending}, nil
 }
 
 func (s *stubService) Complete(ctx context.Context, req taskapp.CompleteTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "complete")
-	return taskdomain.Task{ID: req.TaskID, SpaceID: "space-1", CreatedBy: "coord-1", AssignedTo: "worker-1", Summary: req.Summary, Status: taskdomain.TaskStatusInReview}, nil
+	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", CreatedBy: "coord-1", AssignedTo: "worker-1", Summary: req.Summary, Status: taskdomain.TaskStatusInReview}, nil
 }
 
 func (s *stubService) Block(ctx context.Context, id taskdomain.TaskID, reason string) (taskdomain.Task, error) {
 	s.capture(ctx, "block")
-	return taskdomain.Task{ID: id, SpaceID: "space-1", AssignedTo: "worker-1", Error: reason, Status: taskdomain.TaskStatusBlocked}, nil
+	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", Error: reason, Status: taskdomain.TaskStatusBlocked}, nil
 }
 
 func (s *stubService) Unblock(ctx context.Context, id taskdomain.TaskID, note string) (taskdomain.Task, error) {
 	s.capture(ctx, "unblock")
-	return taskdomain.Task{ID: id, SpaceID: "space-1", AssignedTo: "worker-1", Error: note, Status: taskdomain.TaskStatusActive}, nil
+	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", Error: note, Status: taskdomain.TaskStatusActive}, nil
 }
 
 func (s *stubService) Assign(ctx context.Context, req taskapp.AssignTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "assign")
 	s.assignReq = req
-	return taskdomain.Task{ID: req.TaskID, SpaceID: "space-1", AssignedTo: req.AssignedTo, Status: taskdomain.TaskStatusPending}, nil
+	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: req.AssignedTo, Status: taskdomain.TaskStatusPending}, nil
 }
 
 func (s *stubService) Cancel(ctx context.Context, id taskdomain.TaskID, reason string) (taskdomain.Task, error) {
 	s.capture(ctx, "cancel")
-	return taskdomain.Task{ID: id, SpaceID: "space-1", AssignedTo: "worker-1", Error: reason, Status: taskdomain.TaskStatusCanceled}, nil
+	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", Error: reason, Status: taskdomain.TaskStatusCanceled}, nil
 }
 
 func (s *stubService) ApproveReview(ctx context.Context, req taskapp.ReviewTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "approve")
 	s.reviewReq = req
-	return taskdomain.Task{ID: req.TaskID, SpaceID: "space-1", AssignedTo: "worker-1", Status: taskdomain.TaskStatusSucceeded}, nil
+	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: "worker-1", Status: taskdomain.TaskStatusSucceeded}, nil
 }
 
 func (s *stubService) RetryReview(ctx context.Context, req taskapp.ReviewTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "retry")
 	s.reviewReq = req
-	return taskdomain.Task{ID: req.TaskID, SpaceID: "space-1", AssignedTo: "worker-1", Error: req.Reason, Status: taskdomain.TaskStatusActive}, nil
+	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: "worker-1", Error: req.Reason, Status: taskdomain.TaskStatusActive}, nil
 }
 
 func (s *stubService) FailReview(ctx context.Context, req taskapp.ReviewTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "fail")
 	s.reviewReq = req
-	return taskdomain.Task{ID: req.TaskID, SpaceID: "space-1", AssignedTo: "worker-1", Error: req.Reason, Status: taskdomain.TaskStatusFailed}, nil
+	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: "worker-1", Error: req.Reason, Status: taskdomain.TaskStatusFailed}, nil
 }
 
 type stubMembers struct {
@@ -115,7 +115,7 @@ func TestHandleCreateCallsTaskService(t *testing.T) {
 	if svc.called != "create" {
 		t.Fatalf("called=%q want create", svc.called)
 	}
-	if svc.createReq.AssignedTo != "worker-1" || svc.createReq.Description != "ship it" || svc.createReq.SpaceID != "space-1" {
+	if svc.createReq.AssignedTo != "worker-1" || svc.createReq.Description != "ship it" || svc.createReq.ProjectID != "space-1" {
 		t.Fatalf("create req = %+v", svc.createReq)
 	}
 	if svc.createReq.MissionRef != "mission-1" {
@@ -165,7 +165,7 @@ func TestHandleWorkerListScopesToAssignedMember(t *testing.T) {
 	if svc.called != "list" {
 		t.Fatalf("called=%q want list", svc.called)
 	}
-	if svc.listReq.AssignedTo != "worker-1" || svc.listReq.SpaceID != "space-1" || svc.listReq.Limit != 10 {
+	if svc.listReq.AssignedTo != "worker-1" || svc.listReq.ProjectID != "space-1" || svc.listReq.Limit != 10 {
 		t.Fatalf("list req = %+v", svc.listReq)
 	}
 }
@@ -281,7 +281,7 @@ func TestContextWithSessionActorStampsMemberCaller(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveCaller: %v", err)
 	}
-	if resolved.MemberID != "member-1" || resolved.SpaceID != "space-1" {
+	if resolved.MemberID != "member-1" || resolved.ProjectID != "space-1" {
 		t.Fatalf("caller=%+v want member-1 in space-1", resolved)
 	}
 }
@@ -331,14 +331,14 @@ func callContext(svc *stubService, actorMemberID string) CallContext {
 	return CallContext{
 		Tasks:         svc,
 		Members:       stubMembers{members: members()},
-		SpaceID:       "space-1",
+		ProjectID:     "space-1",
 		ActorMemberID: actorMemberID,
 	}
 }
 
 func members() map[member.ID]member.Record {
 	return map[member.ID]member.Record{
-		"coord-1":  {ID: "coord-1", SpaceID: "space-1", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive, DisplayName: "Coordinator"},
-		"worker-1": {ID: "worker-1", SpaceID: "space-1", MemberType: member.TypeWorker, LifecycleState: member.LifecycleActive, DisplayName: "Worker"},
+		"coord-1":  {ID: "coord-1", ProjectID: "space-1", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive, DisplayName: "Coordinator"},
+		"worker-1": {ID: "worker-1", ProjectID: "space-1", MemberType: member.TypeWorker, LifecycleState: member.LifecycleActive, DisplayName: "Worker"},
 	}
 }

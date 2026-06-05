@@ -1,45 +1,43 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/app"
+	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/logging"
 	"github.com/tinoosan/agen8-mcp-server/internal/mcp"
+	projecttool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/project"
 	"github.com/tinoosan/agen8-mcp-server/internal/rpc"
-	harnessapp "github.com/tinoosan/agen8-mcp-server/internal/services/harness/app"
-	harnessdomain "github.com/tinoosan/agen8-mcp-server/internal/services/harness/domain"
-	codexruntime "github.com/tinoosan/agen8-mcp-server/internal/services/harness/infra/codex"
-	messageapp "github.com/tinoosan/agen8-mcp-server/internal/services/message/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/message/domain/conversation"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
-	"github.com/tinoosan/agen8-mcp-server/pkg/protocol"
-	"github.com/tinoosan/agen8-mcp-server/pkg/signalhub"
+	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
+	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	userapp "github.com/tinoosan/agen8-mcp-server/internal/services/user/app"
+	userdomain "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	"github.com/tinoosan/agen8-mcp-server/internal/web"
 )
 
 type Daemon struct {
-	cfg        Config
-	app        *app.Application
-	rpc        *rpc.Server
-	mcpTokens  *mcp.TokenStore
-	mcp        *mcp.Server
-	events     *signalhub.PayloadHub[string, protocol.Message]
-	identity   localIdentityTracker
-	mcpBinding mcpSessionBindingTracker
-	logger     *slog.Logger
-}
-
-type localIdentityTracker struct {
-	mu     sync.RWMutex
-	userID string
+	cfg       Config
+	app       *app.Application
+	rpc       *rpc.Server
+	mcpTokens *mcp.TokenStore
+	mcp       *mcp.Server
+	logger    *slog.Logger
 }
 
 func New(cfg Config) (*Daemon, error) {
@@ -55,669 +53,495 @@ func New(cfg Config) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build application: %w", err)
 	}
-	if application.AuthSvc == nil {
-		return nil, fmt.Errorf("auth service is required")
-	}
-	if application.UserSvc == nil {
-		return nil, fmt.Errorf("user service is required")
-	}
-	if application.TaskSvc == nil {
-		return nil, fmt.Errorf("task service is required")
-	}
-	if application.ScheduleSvc == nil {
-		return nil, fmt.Errorf("schedule service is required")
-	}
-	if application.DecisionSvc == nil {
-		return nil, fmt.Errorf("decision service is required")
-	}
-	if application.MissionSvc == nil {
-		return nil, fmt.Errorf("mission service is required")
-	}
-	if application.SpaceSvc == nil {
-		return nil, fmt.Errorf("space service is required")
-	}
-	if application.CredentialSvc == nil {
-		return nil, fmt.Errorf("credential service is required")
-	}
-	if application.MessageSvc == nil {
-		return nil, fmt.Errorf("message service is required")
-	}
-	if application.ProjectSvc == nil {
-		return nil, fmt.Errorf("project service is required")
-	}
-	if application.FileSvc == nil {
-		return nil, fmt.Errorf("file service is required")
-	}
-	if application.LocationSvc == nil {
-		return nil, fmt.Errorf("location service is required")
-	}
-	if application.HarnessSvc == nil {
-		return nil, fmt.Errorf("harness service is required")
-	}
-	if application.OperatorSvc == nil {
-		return nil, fmt.Errorf("operator service is required")
-	}
-	if application.HumanInputSvc == nil || application.HumanInputWake == nil {
-		return nil, fmt.Errorf("human input service is required")
-	}
 	reg := rpc.NewRegistry()
-	if err := rpc.RegisterAuth(reg, application.AuthSvc); err != nil {
-		return nil, fmt.Errorf("register auth rpc: %w", err)
+	for _, register := range []func() error{
+		func() error { return rpc.RegisterAuth(reg, application.AuthSvc) },
+		func() error { return rpc.RegisterUser(reg, application.UserSvc) },
+		func() error { return rpc.RegisterCredential(reg, application.CredentialSvc) },
+		func() error { return rpc.RegisterTask(reg, application.TaskSvc, application.ProjectSvc) },
+		func() error {
+			return rpc.RegisterDecision(reg, application.DecisionSvc, application.ProjectSvc, application.UserSvc)
+		},
+		func() error { return rpc.RegisterGraph(reg, application.GraphSvc, application.GraphLinks) },
+		func() error { return rpc.RegisterMission(reg, application.MissionSvc) },
+		func() error { return rpc.RegisterProject(reg, application.ProjectSvc) },
+		func() error { return rpc.RegisterFile(reg, application.FileSvc) },
+		func() error { return rpc.RegisterLocation(reg, application.LocationSvc) },
+	} {
+		if err := register(); err != nil {
+			return nil, err
+		}
 	}
-	if err := rpc.RegisterUser(reg, application.UserSvc); err != nil {
-		return nil, fmt.Errorf("register user rpc: %w", err)
-	}
-	if err := rpc.RegisterSpace(reg, application.SpaceSvc); err != nil {
-		return nil, fmt.Errorf("register space rpc: %w", err)
-	}
-	if err := rpc.RegisterCredential(reg, application.CredentialSvc); err != nil {
-		return nil, fmt.Errorf("register credential rpc: %w", err)
-	}
-	if err := rpc.RegisterTask(reg, application.TaskSvc); err != nil {
-		return nil, fmt.Errorf("register task rpc: %w", err)
-	}
-	if err := rpc.RegisterSchedule(reg, application.ScheduleSvc); err != nil {
-		return nil, fmt.Errorf("register schedule rpc: %w", err)
-	}
-	if err := rpc.RegisterDecision(reg, application.DecisionSvc, application.SpaceSvc, application.UserSvc); err != nil {
-		return nil, fmt.Errorf("register decision rpc: %w", err)
-	}
-	if err := rpc.RegisterGraph(reg, application.GraphSvc, application.GraphLinks); err != nil {
-		return nil, fmt.Errorf("register graph rpc: %w", err)
-	}
-	if err := rpc.RegisterHumanInput(reg, application.HumanInputSvc, application.HumanInputWake); err != nil {
-		return nil, fmt.Errorf("register human input rpc: %w", err)
-	}
-	if err := rpc.RegisterOperator(reg, application.OperatorSvc); err != nil {
-		return nil, fmt.Errorf("register operator rpc: %w", err)
-	}
-	if err := rpc.RegisterMission(reg, application.MissionSvc); err != nil {
-		return nil, fmt.Errorf("register mission rpc: %w", err)
-	}
-	if err := rpc.RegisterMessage(reg, application.MessageSvc, application.SpaceSvc); err != nil {
-		return nil, fmt.Errorf("register message rpc: %w", err)
-	}
-	if err := rpc.RegisterProject(reg, application.ProjectSvc); err != nil {
-		return nil, fmt.Errorf("register project rpc: %w", err)
-	}
-	if err := rpc.RegisterFile(reg, application.FileSvc); err != nil {
-		return nil, fmt.Errorf("register file rpc: %w", err)
-	}
-	if err := rpc.RegisterLocation(reg, application.LocationSvc); err != nil {
-		return nil, fmt.Errorf("register location rpc: %w", err)
-	}
-	if err := rpc.RegisterHarness(reg, application.HarnessSvc); err != nil {
-		return nil, fmt.Errorf("register harness rpc: %w", err)
-	}
-	server, err := rpc.NewServer(reg)
+	rpcServer, err := rpc.NewServer(reg)
 	if err != nil {
 		return nil, err
 	}
-	mcpTokens := mcp.NewTokenStore()
-	mcpServer, err := mcp.NewServer(mcpTokens)
+	tokenStore := mcp.NewTokenStore()
+	mcpServer, err := mcp.NewServer(tokenStore)
 	if err != nil {
 		return nil, fmt.Errorf("build mcp server: %w", err)
 	}
-	daemonLogger, err := logging.NewLogger(cfg.Logging)
+	logger, err := logging.NewLogger(cfg.Logging)
 	if err != nil {
 		return nil, fmt.Errorf("build daemon logger: %w", err)
 	}
 	d := &Daemon{
 		cfg:       cfg,
 		app:       application,
-		rpc:       server,
-		mcpTokens: mcpTokens,
+		rpc:       rpcServer,
+		mcpTokens: tokenStore,
 		mcp:       mcpServer,
-		events:    signalhub.NewPayload[string, protocol.Message](),
-		mcpBinding: mcpSessionBindingTracker{
-			byToken:                     make(map[string]string),
-			appServerBySession:          make(map[string]string),
-			claudeChannelURLBySessionID: make(map[string]string),
-		},
-		logger: daemonLogger.With("service", "daemon"),
+		logger:    logger.With("service", "daemon"),
 	}
-	mcpServer.SetSessionResolver(d.resolveMCPSessionForRequest)
-	application.HarnessSvc.SetMCPProvisioner(d)
-	application.HarnessSvc.SetRuntimeHostResolver(d)
-	application.MessageSvc.SetHarnessChatSender(d)
-	application.MessageSvc.SetConversationNotifier(d)
-	application.HumanInputSvc.SetNotifier(d)
+	mcpServer.SetSessionResolver(d.resolveMCPSession)
 	if err := d.registerBootstrapMCPToken(); err != nil {
 		return nil, fmt.Errorf("register bootstrap mcp token: %w", err)
-	}
-	if err := d.restoreActiveMCPSessions(context.Background()); err != nil {
-		return nil, fmt.Errorf("restore active mcp sessions: %w", err)
-	}
-	if err := d.registerHarnessEventHandlers(); err != nil {
-		return nil, fmt.Errorf("register harness event handlers: %w", err)
 	}
 	return d, nil
 }
 
-type mcpSessionBindingTracker struct {
-	mu                          sync.RWMutex
-	byToken                     map[string]string
-	appServerBySession          map[string]string
-	claudeChannelURLBySessionID map[string]string
-	activeTurnBySession         map[string]activeCodexTurn
-	activeTurnByRef             map[string]activeCodexTurn
-}
+type HTTPStrategy struct{}
 
-type activeCodexTurn struct {
-	threadID string
-	turnID   string
-}
-
-func (t *mcpSessionBindingTracker) bind(token string, sessionID string) {
-	token = strings.TrimSpace(token)
-	sessionID = strings.TrimSpace(sessionID)
-	if token == "" || sessionID == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.byToken == nil {
-		t.byToken = make(map[string]string)
-	}
-	t.byToken[token] = sessionID
-}
-
-func (t *mcpSessionBindingTracker) sessionID(token string) string {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return ""
-	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return strings.TrimSpace(t.byToken[token])
-}
-
-func (t *mcpSessionBindingTracker) unbind(token string) {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	delete(t.byToken, token)
-}
-
-func (t *mcpSessionBindingTracker) bindAppServerURL(sessionID string, appServerURL string) {
-	sessionID = strings.TrimSpace(sessionID)
-	appServerURL = strings.TrimSpace(appServerURL)
-	if sessionID == "" || appServerURL == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.appServerBySession == nil {
-		t.appServerBySession = make(map[string]string)
-	}
-	t.appServerBySession[sessionID] = appServerURL
-}
-
-func (t *mcpSessionBindingTracker) appServerURL(sessionID string) string {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return ""
-	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return strings.TrimSpace(t.appServerBySession[sessionID])
-}
-
-func (t *mcpSessionBindingTracker) bindClaudeChannelURL(sessionID string, notifyURL string) {
-	sessionID = strings.TrimSpace(sessionID)
-	notifyURL = strings.TrimSpace(notifyURL)
-	if sessionID == "" || notifyURL == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.claudeChannelURLBySessionID == nil {
-		t.claudeChannelURLBySessionID = make(map[string]string)
-	}
-	t.claudeChannelURLBySessionID[sessionID] = notifyURL
-}
-
-func (t *mcpSessionBindingTracker) claudeChannelURL(sessionID string) string {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return ""
-	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return strings.TrimSpace(t.claudeChannelURLBySessionID[sessionID])
-}
-
-func (t *mcpSessionBindingTracker) bindActiveCodexTurn(sessionID string, threadID string, turnID string) {
-	sessionID = strings.TrimSpace(sessionID)
-	threadID = strings.TrimSpace(threadID)
-	turnID = strings.TrimSpace(turnID)
-	if threadID == "" || turnID == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	turn := activeCodexTurn{threadID: threadID, turnID: turnID}
-	if sessionID != "" {
-		if t.activeTurnBySession == nil {
-			t.activeTurnBySession = make(map[string]activeCodexTurn)
-		}
-		t.activeTurnBySession[sessionID] = turn
-	}
-	if t.activeTurnByRef == nil {
-		t.activeTurnByRef = make(map[string]activeCodexTurn)
-	}
-	t.activeTurnByRef[threadID] = turn
-}
-
-func (t *mcpSessionBindingTracker) activeCodexTurn(sessionID string) activeCodexTurn {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return activeCodexTurn{}
-	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.activeTurnBySession[sessionID]
-}
-
-func (t *mcpSessionBindingTracker) activeCodexTurnForRef(threadID string) activeCodexTurn {
-	threadID = strings.TrimSpace(threadID)
-	if threadID == "" {
-		return activeCodexTurn{}
-	}
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.activeTurnByRef[threadID]
-}
-
-var _ harnessapp.RuntimeHostResolver = (*Daemon)(nil)
-var _ messageapp.HarnessChatSender = (*Daemon)(nil)
-
-func (d *Daemon) SendMessage(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {
-	if d.isActiveHarnessKind(ctx, input.MemberID, "claude-cli") {
-		return d.sendClaudeChannelMessage(ctx, input)
-	}
-	if input.AllowSteering {
-		result, err := d.trySteerActiveCodexTurn(ctx, input)
-		if err == nil {
-			if d != nil && d.logger != nil {
-				d.logger.InfoContext(ctx, "agent message steered into active codex turn",
-					"member_id", input.MemberID,
-					"space_id", input.SpaceID,
-					"channel_id", input.ChannelID,
-					"conversation_message_id", input.ConversationMessageID,
-					"session_id", result.SessionID,
-					"turn_id", result.TurnID,
-				)
-			}
-			return result, nil
-		}
-		if d != nil && d.logger != nil {
-			d.logger.InfoContext(ctx, "agent message active-turn steering unavailable",
-				"member_id", input.MemberID,
-				"space_id", input.SpaceID,
-				"channel_id", input.ChannelID,
-				"conversation_message_id", input.ConversationMessageID,
-				"steer_only", input.SteerOnly,
-				"error", err,
-			)
-		}
-		if input.SteerOnly {
-			return messageapp.HarnessChatResult{}, err
-		}
-	}
-	return d.sendMessageThroughHarness(ctx, input)
-}
-
-func (d *Daemon) isActiveHarnessKind(ctx context.Context, memberID string, harnessKind string) bool {
-	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
-		return false
-	}
-	session, err := d.app.HarnessSvc.GetActiveSession(ctx, strings.TrimSpace(memberID))
-	if err != nil || session == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(session.Kind), strings.TrimSpace(harnessKind))
-}
-
-func (d *Daemon) sendClaudeChannelMessage(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {
-	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("harness service is required")
-	}
-	session, err := d.app.HarnessSvc.GetActiveSession(ctx, strings.TrimSpace(input.MemberID))
+func (HTTPStrategy) Run(ctx context.Context, d *Daemon) error {
+	ln, err := net.Listen("tcp", d.cfg.HTTPAddr)
 	if err != nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("load active claude session for member %s: %w", input.MemberID, err)
+		return fmt.Errorf("listen http daemon: %w", err)
 	}
-	if session == nil || !strings.EqualFold(strings.TrimSpace(session.Kind), "claude-cli") {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("member %q has no active claude-cli session", input.MemberID)
-	}
-	notifyURL := d.mcpBinding.claudeChannelURL(session.ID)
-	if notifyURL == "" {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("claude channel is not registered for harness session %q", session.ID)
-	}
-	payload := map[string]any{
-		"content": input.Text,
-		"meta": map[string]any{
-			"source":                "agen8",
-			"memberId":              input.MemberID,
-			"spaceId":               input.SpaceID,
-			"channelId":             input.ChannelID,
-			"conversationMessageId": input.ConversationMessageID,
-			"senderType":            input.SenderType,
-			"senderId":              input.SenderID,
-		},
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("marshal claude channel payload: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, notifyURL, bytes.NewReader(data))
-	if err != nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("build claude channel request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("send claude channel notification: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("claude channel notification status %d", resp.StatusCode)
-	}
-	if d.logger != nil {
-		d.logger.InfoContext(ctx, "agent message delivered to claude channel",
-			"member_id", input.MemberID,
-			"session_id", session.ID,
-			"notify_url", notifyURL,
-			"conversation_message_id", input.ConversationMessageID,
-		)
-	}
-	return messageapp.HarnessChatResult{
-		SessionID: session.ID,
-		TurnID:    strings.TrimSpace(session.Ref),
-		Delivery:  "claude-channel",
-	}, nil
+	defer ln.Close()
+	return d.serveHTTP(ctx, ln)
 }
 
-func (d *Daemon) trySteerActiveCodexTurn(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {
-	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("harness service is required")
-	}
-	session, err := d.app.HarnessSvc.GetActiveSession(ctx, strings.TrimSpace(input.MemberID))
+func (d *Daemon) serveHTTP(ctx context.Context, ln net.Listener) error {
+	handler, err := d.httpHandler()
 	if err != nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("load active harness session for member %s: %w", input.MemberID, err)
-	}
-	if session == nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("member %q has no active harness session", input.MemberID)
-	}
-	if !strings.EqualFold(strings.TrimSpace(session.Kind), "codex") {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("active harness session %q is not codex", session.ID)
-	}
-	turn := d.mcpBinding.activeCodexTurn(session.ID)
-	threadID := strings.TrimSpace(turn.threadID)
-	if threadID == "" {
-		threadID = strings.TrimSpace(session.Ref)
-	}
-	if threadID == "" {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("codex thread is not registered for harness session %q", session.ID)
-	}
-	host, err := d.ResolveRuntimeHost(ctx, harnessapp.RuntimeHostRequest{
-		LocationID:  session.LocationID,
-		HarnessKind: session.Kind,
-		SessionID:   session.ID,
-		ProjectID:   session.ProjectID,
-		MemberID:    session.MemberID,
-		SessionRef:  threadID,
-		MCPToken:    session.MCPToken,
-	})
-	if err != nil {
-		return messageapp.HarnessChatResult{}, err
-	}
-	appServerURL := strings.TrimSpace(host.AppServerURL)
-	if appServerURL == "" {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("codex app-server url is not registered for harness session %q", session.ID)
-	}
-	if d.logger != nil {
-		d.logger.InfoContext(ctx, "steering agent message to active codex turn",
-			"member_id", input.MemberID,
-			"session_id", session.ID,
-			"thread_id", threadID,
-			"turn_id", turn.turnID,
-			"app_server_url", appServerURL,
-			"conversation_message_id", input.ConversationMessageID,
-		)
-	}
-	params := harnessdomain.StartParams{
-		Workdir:         strings.TrimSpace(session.Workdir),
-		Model:           strings.TrimSpace(session.Model),
-		ReasoningEffort: strings.TrimSpace(session.Effort),
-		SystemPrompt:    strings.TrimSpace(session.SystemPrompt),
-		MCPServers:      append([]string(nil), session.MCPServers...),
-		PermissionMode:  strings.TrimSpace(session.PermissionMode),
-		ConfigRef:       strings.TrimSpace(session.ConfigRef),
-		SessionRef:      threadID,
-		AppServerURL:    appServerURL,
-	}
-	if strings.TrimSpace(turn.turnID) == "" {
-		return d.injectCodexThreadMessage(ctx, session.ID, threadID, appServerURL, input, params)
-	}
-	if err := codexruntime.SteerAppServerTurn(ctx, params, turn.turnID, input.Text, daemonDomainAttachments(input.Attachments)); err != nil {
-		if isStaleOrUnavailableCodexTurnError(err) {
-			if d.logger != nil {
-				d.logger.InfoContext(ctx, "active codex turn stale; starting new codex turn for agent message",
-					"member_id", input.MemberID,
-					"session_id", session.ID,
-					"thread_id", threadID,
-					"turn_id", turn.turnID,
-					"app_server_url", appServerURL,
-					"conversation_message_id", input.ConversationMessageID,
-					"error", err,
-				)
-			}
-			return d.injectCodexThreadMessage(ctx, session.ID, threadID, appServerURL, input, params)
-		}
-		return messageapp.HarnessChatResult{}, fmt.Errorf("steer active codex turn: %w", err)
-	}
-	return messageapp.HarnessChatResult{
-		SessionID: session.ID,
-		TurnID:    strings.TrimSpace(turn.turnID),
-		Delivery:  "steered",
-	}, nil
-}
-
-func (d *Daemon) injectCodexThreadMessage(ctx context.Context, sessionID string, threadID string, appServerURL string, input messageapp.HarnessChatMessage, params harnessdomain.StartParams) (messageapp.HarnessChatResult, error) {
-	if d != nil && d.logger != nil {
-		d.logger.InfoContext(ctx, "starting codex turn for agent message",
-			"member_id", input.MemberID,
-			"session_id", sessionID,
-			"thread_id", threadID,
-			"app_server_url", appServerURL,
-			"conversation_message_id", input.ConversationMessageID,
-		)
-	}
-	turnID, err := codexruntime.StartAppServerThreadTurn(ctx, params, input.Text, daemonDomainAttachments(input.Attachments))
-	if err != nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("start codex turn for message: %w", err)
-	}
-	return messageapp.HarnessChatResult{
-		SessionID: sessionID,
-		TurnID:    turnID,
-		Delivery:  "turn_started",
-	}, nil
-}
-
-func isStaleOrUnavailableCodexTurnError(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "expected active turn id") ||
-		strings.Contains(text, "no active turn") ||
-		strings.Contains(text, "turn not found") ||
-		strings.Contains(text, "thread not found") ||
-		strings.Contains(text, "is not loaded")
-}
-
-func (d *Daemon) sendMessageThroughHarness(ctx context.Context, input messageapp.HarnessChatMessage) (messageapp.HarnessChatResult, error) {
-	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
-		return messageapp.HarnessChatResult{}, fmt.Errorf("harness service is required")
-	}
-	result, err := d.app.HarnessSvc.SendMessage(ctx, harnessapp.SendMessageParams{
-		SpaceID:               input.SpaceID,
-		MemberID:              input.MemberID,
-		ChannelID:             input.ChannelID,
-		ConversationMessageID: input.ConversationMessageID,
-		SenderType:            input.SenderType,
-		SenderID:              input.SenderID,
-		Text:                  input.Text,
-		Attachments:           daemonHarnessAttachments(input.Attachments),
-		AllowSteering:         input.AllowSteering,
-		SteerOnly:             input.SteerOnly,
-		OnAssistantDelta: func(ctx context.Context, delta harnessapp.AssistantDelta) error {
-			if input.Stream == nil {
-				return nil
-			}
-			return input.Stream.AppendAssistantDelta(ctx, messageapp.HarnessAssistantDelta{
-				SessionID: delta.SessionID,
-				TurnID:    delta.TurnID,
-				Sequence:  delta.Sequence,
-				Text:      delta.Text,
-			})
-		},
-		OnThinkingDelta: func(ctx context.Context, delta harnessapp.ThinkingDelta) error {
-			if input.Stream == nil {
-				return nil
-			}
-			return input.Stream.AppendThinkingDelta(ctx, messageapp.HarnessThinkingDelta{
-				SessionID: delta.SessionID,
-				TurnID:    delta.TurnID,
-				Sequence:  delta.Sequence,
-				Text:      delta.Text,
-				Data:      delta.Data,
-			})
-		},
-		OnActivity: func(ctx context.Context, activity harnessapp.ActivityEvent) error {
-			if input.Stream == nil {
-				return nil
-			}
-			return input.Stream.AppendActivity(ctx, messageapp.HarnessActivity{
-				SessionID:  activity.SessionID,
-				TurnID:     activity.TurnID,
-				ToolCallID: activity.ToolCallID,
-				ToolName:   activity.ToolName,
-				Sequence:   activity.Sequence,
-				Status:     activity.Status,
-				Text:       activity.Text,
-				Data:       activity.Data,
-			})
-		},
-	})
-	if err != nil {
-		return messageapp.HarnessChatResult{}, err
-	}
-	return messageapp.HarnessChatResult{
-		SessionID: result.SessionID,
-		RunID:     result.RunID,
-		TurnID:    result.TurnID,
-		Delivery:  result.Delivery,
-		Text:      result.Text,
-	}, nil
-}
-
-func daemonHarnessAttachments(in []conversation.Attachment) []harnessapp.PromptAttachment {
-	out := make([]harnessapp.PromptAttachment, 0, len(in))
-	for _, attachment := range in {
-		out = append(out, harnessapp.PromptAttachment{
-			ID:        attachment.ID,
-			Name:      attachment.Name,
-			MediaType: attachment.MediaType,
-			SizeBytes: attachment.SizeBytes,
-			URI:       attachment.URI,
-		})
-	}
-	return out
-}
-
-func daemonDomainAttachments(in []conversation.Attachment) []harnessdomain.PromptAttachment {
-	out := make([]harnessdomain.PromptAttachment, 0, len(in))
-	for _, attachment := range in {
-		out = append(out, harnessdomain.PromptAttachment{
-			ID:        attachment.ID,
-			Name:      attachment.Name,
-			MediaType: attachment.MediaType,
-			SizeBytes: attachment.SizeBytes,
-			URI:       attachment.URI,
-		})
-	}
-	return out
-}
-
-func (d *Daemon) Run(ctx context.Context) error {
-	if d == nil {
-		return fmt.Errorf("daemon is nil")
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	errCh := make(chan error, 1)
-	if d.app != nil && d.app.EventBus != nil {
-		go func() {
-			if err := d.app.EventBus.Run(ctx); err != nil && ctx.Err() == nil {
-				errCh <- fmt.Errorf("run event bus: %w", err)
-			}
-		}()
-		select {
-		case <-d.app.EventBus.Running():
-		case err := <-errCh:
-			return err
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	if err := d.startScheduleRunner(ctx); err != nil {
 		return err
 	}
-	var runErr error
-	switch d.cfg.Listener {
-	case ListenerLocal:
-		runErr = LocalStrategy{}.Run(ctx, d)
-	case ListenerHTTP:
-		runErr = HTTPStrategy{}.Run(ctx, d)
-	default:
-		runErr = fmt.Errorf("unknown daemon listener %q", d.cfg.Listener)
-	}
-	select {
-	case err := <-errCh:
-		return err
-	default:
-	}
-	return runErr
-}
-
-func (d *Daemon) startMessageDeliveryForActiveSessions(ctx context.Context) error {
-	if d == nil || d.app == nil || d.app.HarnessSvc == nil {
-		return fmt.Errorf("harness service is required")
-	}
-	sessions, err := d.app.HarnessSvc.ListActiveSessions(ctx)
-	if err != nil {
-		return fmt.Errorf("list active harness sessions for message delivery: %w", err)
-	}
-	for _, session := range sessions {
-		if session == nil {
-			continue
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	if d.cfg.Out != nil {
+		if d.setupAvailable(ctx) {
+			fmt.Fprintf(d.cfg.Out, "agen8 setup: http://%s/setup?token=%s\n", ln.Addr().String(), d.cfg.SetupToken)
 		}
-		if err := d.app.MessageSvc.StartAgentDelivery(ctx, member.ID(session.MemberID)); err != nil {
-			return fmt.Errorf("start message delivery for member %s: %w", session.MemberID, err)
-		}
+		fmt.Fprintf(d.cfg.Out, "agen8 daemon listening on http://%s\n", ln.Addr().String())
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+	if err := server.Serve(ln); err != nil && err != http.ErrServerClosed && ctx.Err() == nil {
+		return fmt.Errorf("serve http daemon: %w", err)
 	}
 	return nil
 }
 
-func (d *Daemon) Config() Config {
-	if d == nil {
-		return Config{}
+func (d *Daemon) httpHandler() (http.Handler, error) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", d.handleHealthz)
+	mux.HandleFunc("POST /rpc", d.handleRPC)
+	mux.Handle("/mcp", d.mcp.Handler())
+	mux.HandleFunc("GET /events", d.handleEvents)
+	mux.HandleFunc("GET /setup", d.handleSetupPage)
+	mux.HandleFunc("POST /setup", d.handleSetupCreate)
+	webHandler, err := d.webHandler()
+	if err != nil {
+		return nil, fmt.Errorf("mount web ui: %w", err)
 	}
-	return d.cfg
+	mux.Handle("/", d.handleWeb(webHandler))
+	return mux, nil
 }
+
+func (d *Daemon) webHandler() (http.Handler, error) {
+	devWebURL := strings.TrimSpace(os.Getenv(EnvDevWebURL))
+	if devWebURL == "" {
+		return web.Handler()
+	}
+	target, err := url.Parse(devWebURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", EnvDevWebURL, err)
+	}
+	if target.Scheme == "" || target.Host == "" {
+		return nil, fmt.Errorf("%s must be an absolute URL", EnvDevWebURL)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	director := proxy.Director
+	proxy.Director = func(r *http.Request) {
+		director(r)
+		r.Header.Del("Authorization")
+		r.Header.Del("Cookie")
+	}
+	return proxy, nil
+}
+
+func (d *Daemon) handleWeb(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && d.setupAvailable(r.Context()) && wantsHTML(r) {
+			http.Redirect(w, r, "/setup?token="+d.cfg.SetupToken, http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (d *Daemon) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read request body", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	if methodRequiresHTTPIdentity(rpcMethod(body), r.Header.Get("Authorization")) {
+		identity, err := d.httpIdentity(r.Context(), r.Header.Get("Authorization"))
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx = rpc.ContextWithIdentity(ctx, identity)
+		ctx = caller.ContextWithCaller(ctx, caller.Caller{
+			UserID:   identity.UserID,
+			MemberID: member.ID(identity.MemberID),
+			Role:     identity.Role,
+		})
+	}
+	resp, err := d.rpc.Handle(ctx, body)
+	if err != nil {
+		http.Error(w, "handle rpc request", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(resp)
+}
+
+func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, _ := w.(http.Flusher)
+	_, _ = io.WriteString(w, ": connected\n\n")
+	if flusher != nil {
+		flusher.Flush()
+	}
+	<-r.Context().Done()
+}
+
+func (d *Daemon) registerBootstrapMCPToken() error {
+	const token = "agen8-local"
+	d.mcpTokens.Register(token, mcp.Session{
+		Token:       token,
+		Bootstrap:   false,
+		UserID:      "local",
+		HarnessKind: "codex",
+		ContextRegistrar: projectMCPContextRegistrar{
+			projects: d.app.ProjectSvc,
+			users:    d.app.UserSvc,
+			baseURL:  "http://" + d.cfg.HTTPAddr,
+		},
+		MemberDirectory: d.app.ProjectSvc,
+		MemberRegistrar: d.app.ProjectSvc,
+		TaskMembers:     d.app.ProjectSvc,
+		DecisionService: d.app.DecisionSvc,
+		GraphService:    d.app.GraphSvc,
+		TaskService:     d.app.TaskSvc,
+		MissionService:  d.app.MissionSvc,
+		MissionKRs:      d.app.MissionSvc,
+		MissionProgress: d.app.MissionSvc,
+	})
+	return nil
+}
+
+func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header http.Header, body []byte) (mcp.Session, error) {
+	session, err := d.mcpTokens.Resolve(token)
+	if err != nil {
+		return mcp.Session{}, err
+	}
+	sessionID, threadID := mcp.SessionRefsFromHTTPHeader(header)
+	if sessionID == "" && threadID == "" {
+		bodyRefs := mcp.SessionRequestContextFromJSONRPCBody(body)
+		sessionID = bodyRefs.SessionID
+		threadID = bodyRefs.ThreadID
+	}
+	if sessionID == "" && threadID == "" {
+		return session, nil
+	}
+	userID := d.mcpUserID(ctx, token)
+	rosterMember, err := d.app.ProjectSvc.ResolveMCPContext(ctx, projectapp.ResolveMCPContextInput{
+		Token:       token,
+		UserID:      userID,
+		ProjectID:   session.ProjectID,
+		HarnessKind: session.HarnessKind,
+		SessionID:   sessionID,
+		ThreadID:    threadID,
+	})
+	if err != nil {
+		if errors.Is(err, member.ErrNotFound) {
+			return session, nil
+		}
+		return mcp.Session{}, err
+	}
+	session.UserID = strings.TrimSpace(rosterMember.UserID)
+	session.MemberID = strings.TrimSpace(string(rosterMember.ID))
+	session.ProjectID = strings.TrimSpace(rosterMember.ProjectID)
+	session.ChannelID = types.ChannelID(strings.TrimSpace(rosterMember.ChannelID))
+	session.HarnessKind = strings.TrimSpace(rosterMember.HarnessKind)
+	return session, nil
+}
+
+type projectMCPContextRegistrar struct {
+	projects *projectapp.Service
+	users    *userapp.Service
+	baseURL  string
+}
+
+func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req projecttool.RegisterContextRequest) (projecttool.RegisterContextResult, error) {
+	if r.projects == nil {
+		return projecttool.RegisterContextResult{}, fmt.Errorf("project service is required")
+	}
+	result, err := r.projects.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
+		Token:            req.Token,
+		UserID:           mcpUserID(ctx, r.users, req.Token),
+		ProjectID:        req.ProjectID,
+		ProjectRoot:      req.ProjectRoot,
+		LocationID:       req.LocationID,
+		DisplayName:      req.DisplayName,
+		HarnessKind:      req.HarnessKind,
+		SessionID:        req.SessionID,
+		ThreadID:         req.ThreadID,
+		NativeSessionRef: req.NativeSessionRef,
+		Model:            req.Model,
+		Effort:           req.Effort,
+		PermissionMode:   req.PermissionMode,
+		ConfigRef:        req.ConfigRef,
+	})
+	if err != nil {
+		return projecttool.RegisterContextResult{}, err
+	}
+	mcpURL := strings.TrimRight(r.baseURL, "/") + "/mcp?token=" + result.Token
+	return projecttool.RegisterContextResult{
+		ProjectID:        result.ProjectID,
+		ProjectRoot:      result.ProjectRoot,
+		LocationID:       result.LocationID,
+		MemberID:         result.MemberID,
+		DisplayName:      result.DisplayName,
+		MemberType:       result.MemberType,
+		ChannelID:        result.ChannelID,
+		SessionID:        result.SessionID,
+		ThreadID:         result.ThreadID,
+		NativeSessionRef: result.NativeSessionRef,
+		Token:            result.Token,
+		URL:              mcpURL,
+		MCPServers:       result.MCPServers,
+	}, nil
+}
+
+func (d *Daemon) mcpUserID(ctx context.Context, token string) string {
+	if d == nil || d.app == nil {
+		return "local"
+	}
+	return mcpUserID(ctx, d.app.UserSvc, token)
+}
+
+func mcpUserID(ctx context.Context, users *userapp.Service, token string) string {
+	if strings.TrimSpace(token) == "agen8-local" && users != nil {
+		record, err := users.FirstActive(ctx)
+		if err == nil && strings.TrimSpace(record.ID.String()) != "" {
+			return strings.TrimSpace(record.ID.String())
+		}
+	}
+	return "local"
+}
+
+type rpcEnvelope struct {
+	Method string `json:"method"`
+}
+
+func rpcMethod(body []byte) string {
+	var env rpcEnvelope
+	_ = json.Unmarshal(body, &env)
+	return strings.TrimSpace(env.Method)
+}
+
+func methodRequiresHTTPIdentity(method string, authorization string) bool {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return false
+	}
+	switch method {
+	case "auth.login", "auth.setupStatus", "user.setupStatus":
+		return false
+	default:
+		return strings.TrimSpace(authorization) != ""
+	}
+}
+
+func (d *Daemon) httpIdentity(ctx context.Context, authorization string) (rpc.Identity, error) {
+	token := bearerToken(authorization)
+	if token == "" {
+		return rpc.Identity{}, fmt.Errorf("bearer token is required")
+	}
+	user, err := d.app.AuthSvc.ValidateSession(ctx, token)
+	if err != nil {
+		return rpc.Identity{}, err
+	}
+	role := string(userdomain.RoleUser)
+	if user.Role != "" {
+		role = string(user.Role)
+	}
+	return rpc.Identity{UserID: user.ID.String(), Role: role}, nil
+}
+
+func bearerToken(header string) string {
+	header = strings.TrimSpace(header)
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+}
+
+func (d *Daemon) handleSetupPage(w http.ResponseWriter, r *http.Request) {
+	if !d.setupAvailable(r.Context()) || !d.validSetupToken(r.URL.Query().Get("token")) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, strings.ReplaceAll(setupPageHTML, "{{TOKEN}}", html.EscapeString(d.cfg.SetupToken)))
+}
+
+type setupRequest struct {
+	Token    string `json:"token"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Password string `json:"password"`
+	KeyName  string `json:"keyName"`
+}
+
+func (d *Daemon) handleSetupCreate(w http.ResponseWriter, r *http.Request) {
+	if !d.setupAvailable(r.Context()) {
+		http.Error(w, "setup is closed", http.StatusConflict)
+		return
+	}
+	req, err := decodeSetupRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !d.validSetupToken(req.Token) {
+		http.Error(w, "invalid setup token", http.StatusForbidden)
+		return
+	}
+	if err := d.app.AuthSvc.ValidatePassword(req.Password); err != nil {
+		http.Error(w, "invalid password", http.StatusBadRequest)
+		return
+	}
+	created, err := d.app.UserSvc.SetupFirstUser(r.Context(), userapp.SetupFirstUserParams{Email: req.Email, Name: req.Name})
+	if err != nil {
+		http.Error(w, "create setup user", http.StatusBadRequest)
+		return
+	}
+	if err := d.app.AuthSvc.CreatePassword(r.Context(), authapp.CreatePasswordParams{UserID: created.User.ID, Password: req.Password}); err != nil {
+		http.Error(w, "create setup credential", http.StatusInternalServerError)
+		return
+	}
+	sessionResult, err := d.app.AuthSvc.CreateSession(r.Context(), authapp.CreateSessionParams{UserID: created.User.ID})
+	if err != nil {
+		http.Error(w, "create setup session", http.StatusInternalServerError)
+		return
+	}
+	keyName := strings.TrimSpace(req.KeyName)
+	if keyName == "" {
+		keyName = "initial daemon key"
+	}
+	apiKeyResult, err := d.app.AuthSvc.CreateAPIKey(r.Context(), authapp.CreateAPIKeyParams{UserID: created.User.ID, Name: keyName})
+	if err != nil {
+		http.Error(w, "create setup api key", http.StatusInternalServerError)
+		return
+	}
+	if !setupWantsJSON(r) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprintf(w, `<!doctype html><html><head><title>agen8 setup complete</title></head><body><script>localStorage.setItem("agen8.sessionToken", %q); location.href = "/";</script><p>Setup complete. Opening agen8...</p></body></html>`, sessionResult.Token)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"user":    created.User,
+		"session": map[string]any{"token": sessionResult.Token, "expiresAt": sessionResult.Session.ExpiresAt},
+		"apiKey":  map[string]any{"id": apiKeyResult.APIKey.ID.String(), "name": apiKeyResult.APIKey.Name, "prefix": apiKeyResult.APIKey.Prefix, "secret": apiKeyResult.Token},
+	})
+}
+
+func setupWantsJSON(r *http.Request) bool {
+	contentType := strings.ToLower(r.Header.Get("Content-Type"))
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return strings.Contains(contentType, "application/json") || strings.Contains(accept, "application/json")
+}
+
+func wantsHTML(r *http.Request) bool {
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return accept == "" || strings.Contains(accept, "text/html") || strings.Contains(accept, "*/*")
+}
+
+func decodeSetupRequest(r *http.Request) (setupRequest, error) {
+	var req setupRequest
+	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return req, fmt.Errorf("invalid setup json")
+		}
+		return req, nil
+	}
+	if err := r.ParseForm(); err != nil {
+		return req, fmt.Errorf("invalid setup form")
+	}
+	req.Token = r.Form.Get("token")
+	req.Email = r.Form.Get("email")
+	req.Name = r.Form.Get("name")
+	req.Password = r.Form.Get("password")
+	req.KeyName = r.Form.Get("keyName")
+	return req, nil
+}
+
+func (d *Daemon) setupAvailable(ctx context.Context) bool {
+	open, err := d.app.UserSvc.SetupOpen(ctx)
+	return err == nil && open
+}
+
+func (d *Daemon) validSetupToken(token string) bool {
+	return strings.TrimSpace(token) != "" && strings.TrimSpace(token) == strings.TrimSpace(d.cfg.SetupToken)
+}
+
+const setupPageHTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>agen8 setup</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1115; color: #f4f5f7; }
+    main { width: min(420px, calc(100vw - 32px)); }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    p { margin: 0 0 20px; color: #a7adb8; line-height: 1.5; }
+    form { display: grid; gap: 12px; }
+    label { display: grid; gap: 6px; color: #c5c9d1; }
+    input { border: 1px solid #303641; border-radius: 8px; background: #171a21; color: #fff; padding: 11px 12px; font: inherit; }
+    button { border: 0; border-radius: 8px; background: #3b82f6; color: white; padding: 11px 12px; font: inherit; font-weight: 650; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Set up agen8</h1>
+    <p>Create the first local account for this daemon.</p>
+    <form method="post" action="/setup">
+      <input type="hidden" name="token" value="{{TOKEN}}" />
+      <label>Email <input name="email" type="email" required autocomplete="email" /></label>
+      <label>Name <input name="name" required autocomplete="name" /></label>
+      <label>Password <input name="password" type="password" required autocomplete="new-password" /></label>
+      <button type="submit">Create account</button>
+    </form>
+  </main>
+</body>
+</html>`

@@ -19,11 +19,8 @@ import {
 import { cn } from '@/lib/utils'
 import { useNavigation, dashboardLink } from '../lib/routing'
 import { useStore } from '../lib/store'
-import { useCreateSpace } from '../hooks/useCreateSpace'
-import { useNotificationUserId } from '../hooks/useNotificationUserId'
-import NotificationBell from './notifications/NotificationBell'
 import CreateMissionDialog from './mission/CreateMissionDialog'
-import { ProjectSwitcher, AccountChip, SpaceList, MissionsSidebarSection, GlobalSidebarContent } from './sidebar-parts'
+import { ProjectSwitcher, AccountChip, MissionsSidebarSection, GlobalSidebarContent } from './sidebar-parts'
 import {
   Sidebar as ShadcnSidebar,
   SidebarContent,
@@ -93,7 +90,6 @@ function SidebarCollapseToggle() {
 
 export default function Sidebar() {
   const [, navigate] = useLocation()
-  const userId = useNotificationUserId()
   const theme = useStore((s) => s.theme)
   const { state } = useSidebar()
   const collapsed = state === 'collapsed'
@@ -101,7 +97,6 @@ export default function Sidebar() {
   const hasProject = !!focusedProjectRoot
 
   const [createMissionOpen, setCreateMissionOpen] = useState(false)
-  const { createSpace } = useCreateSpace()
 
   const SIDEBAR_CARD_CHROME = [
     'agen8-sidebar-shell',
@@ -140,7 +135,6 @@ export default function Sidebar() {
           <div className="flex-1 min-w-0">
             <ProjectSwitcher />
           </div>
-          <NotificationBell userId={userId} />
           <SidebarCollapseToggle />
         </div>
       </SidebarHeader>
@@ -172,20 +166,6 @@ export default function Sidebar() {
                     <Network size={15} className="shrink-0" />
                     <span>Strategy</span>
                   </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroup>
-
-            <div className="h-px mx-3.5 my-1 bg-[var(--border)]" />
-
-            {/* Spaces section */}
-            <SidebarGroup className="py-0 px-0 mt-0">
-              <SidebarSectionLabel action={
-                <SectionAddButton onClick={() => void createSpace()} label="New space" tourAnchor="add-space" />
-              }>Spaces</SidebarSectionLabel>
-              <SidebarMenu className="gap-0">
-                <SidebarMenuItem>
-                  {!collapsed && <SpaceList />}
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroup>

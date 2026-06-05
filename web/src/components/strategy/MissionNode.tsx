@@ -9,7 +9,6 @@ export interface MissionNodeData {
   mission: MissionView
   avgProgress: number
   krCount: number
-  spaceName?: string
   clusterColor?: string
   [key: string]: unknown
 }
@@ -98,7 +97,7 @@ export const MissionNode = memo(function MissionNode({ data, selected, id }: Nod
         <div className="w-full transition-opacity duration-300"
           style={{ opacity: isDimmed ? 0.15 : 1 }}>
 
-          {/* Mission icon + space eyebrow */}
+          {/* Mission icon + label */}
           <div className="flex w-full items-center gap-1.5 mb-2">
             <Target size={14} className="shrink-0 transition-all duration-200"
               style={{
@@ -107,7 +106,7 @@ export const MissionNode = memo(function MissionNode({ data, selected, id }: Nod
                 filter: isActive ? `drop-shadow(0 0 4px ${color})` : undefined,
               }} />
             <span className="uppercase font-semibold text-foreground tracking-[0.4px] opacity-[0.65]" style={{ fontSize: '9px' }}>
-              {d.spaceName ? d.spaceName : 'STRATEGY'}
+              MISSION
             </span>
           </div>
 

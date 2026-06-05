@@ -28,7 +28,6 @@ type Writer interface {
 type DecisionFilter struct {
 	ProjectID string
 	Sources   []DecisionSource // Filter by source(s) — AND with other filters
-	SpaceID   string           // Filter by owning space
 	Tags      []string         // Filter by tags (AND semantics — all tags must match)
 	Query     string           // Free-text query across decision content
 	Since     *time.Time       // Filter by created_at >= since

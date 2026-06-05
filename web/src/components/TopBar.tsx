@@ -1,8 +1,4 @@
 import { useNavigation, type ActiveView } from '../lib/routing'
-import { useProjectSpaces } from '../hooks/useProjectSpaces'
-import { useNotificationUserId } from '../hooks/useNotificationUserId'
-import { spaceDisplayName } from '../lib/spaceDisplayName'
-import NotificationBell from './notifications/NotificationBell'
 import { useStore } from '../lib/store'
 import agen8IconDark from '../assets/agen8-app-icon-dark.svg'
 import agen8IconLight from '../assets/agen8-app-icon-light.svg'
@@ -12,18 +8,13 @@ const VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   dashboard: 'Dashboard',
   missions: 'Missions',
   decisions: 'Decision Log',
-  actions: 'Actions',
+  strategy: 'Strategy',
 }
 
 export default function TopBar() {
-  const { activeView, focusedSpaceId, projectId } = useNavigation()
-  const { data: spaces } = useProjectSpaces(projectId)
-  const userId = useNotificationUserId()
+  const { activeView } = useNavigation()
   const theme = useStore((s) => s.theme)
-  const focusedSpace = focusedSpaceId ? spaces?.find(space => space.spaceId === focusedSpaceId) : null
-  const title = focusedSpace
-    ? spaceDisplayName(focusedSpace.spaceId, focusedSpace.spaceName)
-    : VIEW_TITLES[activeView] ?? activeView
+  const title = VIEW_TITLES[activeView] ?? activeView
 
   return (
     <div className="h-12 border-b border-[var(--border)] bg-[var(--bg-panel)] flex items-center shrink-0">
@@ -40,7 +31,6 @@ export default function TopBar() {
 
       {/* Right section */}
       <div className="flex items-center gap-2 px-4 h-full">
-        <NotificationBell userId={userId} />
       </div>
     </div>
   )

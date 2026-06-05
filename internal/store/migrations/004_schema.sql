@@ -138,32 +138,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_space_entries_run_turn ON agent_space_entri
 CREATE INDEX IF NOT EXISTS idx_agent_space_entries_tool_call ON agent_space_entries(tool_call_id);
 
 --------------------------------------------------------------------------------
--- message conversation activities
---------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS message_conversation_activities (
-    activity_id  TEXT PRIMARY KEY,
-    channel_id   TEXT NOT NULL,
-    space_id     TEXT NOT NULL,
-    member_id    TEXT NOT NULL,
-    session_id   TEXT NOT NULL,
-    turn_id      TEXT NOT NULL,
-    tool_call_id TEXT NOT NULL,
-    sequence     INTEGER NOT NULL DEFAULT 0,
-    kind         TEXT NOT NULL,
-    title        TEXT NOT NULL,
-    status       TEXT NOT NULL,
-    text         TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL,
-    completed_at TEXT,
-    data_json    TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE INDEX IF NOT EXISTS idx_message_conversation_activities_channel_created
-    ON message_conversation_activities(channel_id, sequence, created_at, activity_id);
-CREATE INDEX IF NOT EXISTS idx_message_conversation_activities_tool_call
-    ON message_conversation_activities(session_id, turn_id, tool_call_id);
-
---------------------------------------------------------------------------------
 -- run_conversations
 --------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS run_conversations (
@@ -477,49 +451,6 @@ CREATE INDEX IF NOT EXISTS idx_notification_rules_user
     ON notification_rules(user_id, enabled);
 
 --------------------------------------------------------------------------------
--- schedule_entries
---------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS schedule_entries (
-    entry_id          TEXT PRIMARY KEY,
-    space_id          TEXT NOT NULL DEFAULT '',
-    status            TEXT NOT NULL DEFAULT '',
-    target_kind       TEXT NOT NULL DEFAULT '',
-    next_run_at       TEXT,
-    expires_at        TEXT,
-    created_at        TEXT NOT NULL,
-    updated_at        TEXT NOT NULL,
-    dedupe_key        TEXT NOT NULL DEFAULT '',
-    entry_json        TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_schedule_entries_space_status
-    ON schedule_entries(space_id, status);
-CREATE INDEX IF NOT EXISTS idx_schedule_entries_next_run
-    ON schedule_entries(status, next_run_at);
-CREATE INDEX IF NOT EXISTS idx_schedule_entries_dedupe
-    ON schedule_entries(space_id, dedupe_key, status);
-
-CREATE TABLE IF NOT EXISTS schedule_runs (
-    run_id           TEXT PRIMARY KEY,
-    entry_id         TEXT NOT NULL,
-    space_id         TEXT NOT NULL DEFAULT '',
-    due_at           TEXT NOT NULL,
-    started_at       TEXT NOT NULL,
-    finished_at      TEXT,
-    status           TEXT NOT NULL DEFAULT '',
-    target_kind      TEXT NOT NULL DEFAULT '',
-    target_object_id TEXT NOT NULL DEFAULT '',
-    error            TEXT NOT NULL DEFAULT '',
-    run_json         TEXT NOT NULL,
-    UNIQUE(entry_id, due_at)
-);
-
-CREATE INDEX IF NOT EXISTS idx_schedule_runs_entry_due
-    ON schedule_runs(entry_id, due_at DESC);
-CREATE INDEX IF NOT EXISTS idx_schedule_runs_space_started
-    ON schedule_runs(space_id, started_at DESC);
-
---------------------------------------------------------------------------------
 -- tool_sources / project_tool_source_attachments
 --------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS tool_sources (
@@ -760,7 +691,7 @@ CREATE TABLE IF NOT EXISTS key_results (
     key_result_id TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'open',
-    space_id TEXT NOT NULL DEFAULT '',
+    project_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     completed_at TEXT,
@@ -769,7 +700,7 @@ CREATE TABLE IF NOT EXISTS key_results (
 
 CREATE INDEX IF NOT EXISTS idx_key_results_mission ON key_results(mission_id);
 CREATE INDEX IF NOT EXISTS idx_key_results_status ON key_results(status);
-CREATE INDEX IF NOT EXISTS idx_key_results_space ON key_results(space_id);
+CREATE INDEX IF NOT EXISTS idx_key_results_project ON key_results(project_id);
 
 CREATE TABLE IF NOT EXISTS key_result_progress_entries (
     progress_entry_id TEXT PRIMARY KEY,
@@ -784,17 +715,12 @@ CREATE INDEX IF NOT EXISTS idx_key_result_progress_created ON key_result_progres
 CREATE TABLE IF NOT EXISTS decisions (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
-    space_id TEXT DEFAULT '',
-    run_id TEXT DEFAULT '',
     source TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT '',
     source_identity TEXT DEFAULT '',
     title TEXT NOT NULL,
     rationale TEXT NOT NULL,
     context TEXT DEFAULT '',
-    questions_json TEXT DEFAULT '[]',
-    answers_json TEXT DEFAULT '[]',
-    cancelled INTEGER NOT NULL DEFAULT 0,
     alternatives_rejected TEXT DEFAULT '',
     invalidation_conditions_json TEXT DEFAULT '[]',
     outcome TEXT DEFAULT '',
@@ -802,9 +728,6 @@ CREATE TABLE IF NOT EXISTS decisions (
     mission_ref TEXT DEFAULT '',
     key_result_ref TEXT DEFAULT '',
     task_ref TEXT DEFAULT '',
-    plan_ref TEXT DEFAULT '',
-    operator_action_ref TEXT DEFAULT '',
-    escalation_ref TEXT DEFAULT '',
     correlation_ref TEXT DEFAULT '',
     informed_by_ref TEXT DEFAULT '',
     tags_json TEXT DEFAULT '[]',
@@ -814,12 +737,9 @@ CREATE TABLE IF NOT EXISTS decisions (
 
 CREATE INDEX IF NOT EXISTS idx_dec_project ON decisions(project_id);
 CREATE INDEX IF NOT EXISTS idx_dec_key_result ON decisions(key_result_ref);
-CREATE INDEX IF NOT EXISTS idx_dec_operator_action ON decisions(operator_action_ref);
 CREATE INDEX IF NOT EXISTS idx_dec_source ON decisions(source);
 CREATE INDEX IF NOT EXISTS idx_dec_task ON decisions(task_ref);
 CREATE INDEX IF NOT EXISTS idx_dec_mission ON decisions(mission_ref);
-CREATE INDEX IF NOT EXISTS idx_dec_escalation ON decisions(escalation_ref);
-CREATE INDEX IF NOT EXISTS idx_dec_space ON decisions(space_id);
 
 CREATE TABLE IF NOT EXISTS context_links (
     id TEXT PRIMARY KEY,
@@ -840,105 +760,28 @@ CREATE INDEX IF NOT EXISTS idx_cl_edge_type ON context_links(edge_type);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cl_unique_edge ON context_links(source_type, source_id, target_type, target_id, edge_type);
 
 --------------------------------------------------------------------------------
--- operator actions
---------------------------------------------------------------------------------
--- Escalations table (formerly mis-named "operator_actions"; now correctly
--- named since the actual operator-action aggregate lives in op_actions).
--- Drops legacy run_id and delegated_to columns; renames space_id -> space_id.
-CREATE TABLE IF NOT EXISTS escalations (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL,
-    space_id TEXT DEFAULT '',
-    task_ref TEXT DEFAULT '',
-    key_result_ref TEXT NOT NULL DEFAULT '',
-    mission_ref TEXT NOT NULL DEFAULT '',
-    source TEXT NOT NULL,
-    member_id TEXT DEFAULT '',
-    category TEXT NOT NULL,
-    urgency TEXT NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT NOT NULL,
-    recommendation TEXT DEFAULT '',
-    confidence REAL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'pending',
-    resolution TEXT DEFAULT '',
-    resolution_note TEXT DEFAULT '',
-    deadline TEXT,
-    escalated_at TEXT,
-    original_urgency TEXT DEFAULT '',
-    metadata_json TEXT DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    resolved_at TEXT,
-    resolved_by TEXT DEFAULT ''
-);
-
-CREATE INDEX IF NOT EXISTS idx_esc_project_status ON escalations(project_id, status);
-CREATE INDEX IF NOT EXISTS idx_esc_task_ref ON escalations(task_ref);
-CREATE INDEX IF NOT EXISTS idx_esc_status ON escalations(status);
-CREATE INDEX IF NOT EXISTS idx_esc_deadline ON escalations(deadline);
-CREATE INDEX IF NOT EXISTS idx_esc_space ON escalations(space_id);
-
-CREATE TABLE IF NOT EXISTS op_actions (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL,
-    space_id TEXT,
-    task_ref TEXT,
-    run_id TEXT,
-    blocking INTEGER NOT NULL DEFAULT 0,
-    key_result_ref TEXT NOT NULL DEFAULT '',
-    mission_ref TEXT NOT NULL DEFAULT '',
-    source TEXT NOT NULL,
-    member_id TEXT,
-    escalation_ref TEXT,
-    category TEXT NOT NULL,
-    urgency TEXT NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT,
-    requires_verification INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'pending',
-    outcome_status TEXT,
-    outcome_summary TEXT,
-    outcome_pairs_json TEXT,
-    attachments_json TEXT,
-    progress_notes_json TEXT,
-    comments_json TEXT,
-    deadline TEXT,
-    metadata_json TEXT,
-    created_at TEXT NOT NULL,
-    acknowledged_at TEXT,
-    started_at TEXT,
-    completed_at TEXT,
-    verified_at TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_op_actions_project_status ON op_actions(project_id, status);
-CREATE INDEX IF NOT EXISTS idx_op_actions_project_urgency ON op_actions(project_id, urgency);
-CREATE INDEX IF NOT EXISTS idx_op_actions_task_ref ON op_actions(task_ref);
-CREATE INDEX IF NOT EXISTS idx_op_actions_space_id ON op_actions(space_id);
-CREATE INDEX IF NOT EXISTS idx_op_actions_created_at ON op_actions(created_at DESC);
-
---------------------------------------------------------------------------------
--- space members
+-- project members
 --------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS members (
     member_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
     user_id TEXT NOT NULL DEFAULT 'local',
-    project_id TEXT DEFAULT '',
-    space_id TEXT NOT NULL,
+    native_session_ref TEXT NOT NULL DEFAULT '',
     member_type TEXT NOT NULL,
     lifecycle_state TEXT NOT NULL,
-    harness_kind TEXT DEFAULT '',
+    harness_kind TEXT NOT NULL DEFAULT '',
     member_json TEXT NOT NULL,
     registered_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     last_seen_at TEXT DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_members_space_state
-    ON members(space_id, lifecycle_state, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_members_project_space
-    ON members(project_id, space_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_members_project_state
+    ON members(project_id, lifecycle_state, updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_members_one_active_coordinator
-    ON members(space_id)
+    ON members(project_id)
     WHERE lifecycle_state = 'active'
       AND member_type = 'coordinator';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_members_native_session
+    ON members(project_id, harness_kind, native_session_ref)
+    WHERE native_session_ref <> '';

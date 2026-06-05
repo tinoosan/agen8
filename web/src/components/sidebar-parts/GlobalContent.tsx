@@ -1,20 +1,15 @@
 /**
  * GlobalSidebarContent — shown when no project is selected.
- * Displays aggregated spaces and missions across all projects,
- * each tagged with the project they belong to. Clicking a row
- * navigates into that project + space/mission.
+ * Displays projects and missions across projects without the old space layer.
  */
 import { useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { useQuery } from '@tanstack/react-query'
-import { Clock, CircleCheck, CircleAlert, Target } from 'lucide-react'
+import { Clock, CircleCheck, CircleAlert, Target, FolderOpen } from 'lucide-react'
 import { rpcCall } from '../../lib/rpc'
-import { spaceLink, missionDetailLink } from '../../lib/routing'
-import { projectDisplayName } from '../../lib/spaceHelpers'
-import { sanitizeSpaceTitle } from '../../lib/displaySanitizers'
+import { dashboardLink, missionDetailLink } from '../../lib/routing'
 import { useProjects } from '../../hooks/useProjects'
-import { resolveSpaceIcon, spaceColorVar } from '../../lib/spaceCustomization'
-import type { Space, MissionView } from '../../lib/types'
+import type { MissionView, Project } from '../../lib/types'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /* ── Mission status icon (mirrors MissionSection) ────── */
@@ -59,6 +54,13 @@ function SectionSkeleton({ rows }: { rows: number }) {
   )
 }
 
+function projectDisplayName(project: Project) {
+  const title = project.title?.trim()
+  if (title) return title
+  const rootName = project.root.split('/').filter(Boolean).at(-1)
+  return rootName || project.id
+}
+
 /* ── Main component ────────────────────────────────────── */
 
 export function GlobalSidebarContent() {
@@ -71,7 +73,6 @@ export function GlobalSidebarContent() {
     [projects],
   )
 
-  // Build project name lookup
   const projectNameMap = useMemo(() => {
     const map = new Map<string, string>()
     for (const p of projects) {
@@ -80,25 +81,6 @@ export function GlobalSidebarContent() {
     return map
   }, [projects])
 
-  // Fetch all spaces across projects
-  const allSpacesQuery = useQuery<Array<Space & { _projectId: string }>>({
-    queryKey: ['sidebar.globalSpaces', projectIds],
-    queryFn: async () => {
-      const results = await Promise.all(
-        projectIds.map(async (pid) => {
-          const res = await rpcCall<{ spaces: Space[] }>('space.list', { projectId: pid, status: 'open' })
-          return (res.spaces ?? []).map(s => ({ ...s, _projectId: pid }))
-        }),
-      )
-      return results.flat()
-    },
-    enabled: projectIds.length > 0,
-    staleTime: 10_000,
-    refetchInterval: 10_000,
-    retry: false,
-  })
-
-  // Fetch all missions across projects
   const allMissionsQuery = useQuery<Array<MissionView & { _projectId: string }>>({
     queryKey: ['sidebar.globalMissions', projectIds],
     queryFn: async () => {
@@ -116,13 +98,6 @@ export function GlobalSidebarContent() {
     retry: false,
   })
 
-  // Sort spaces by most recently updated
-  const spaces = useMemo(() => {
-    const list = allSpacesQuery.data ?? []
-    return [...list].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
-  }, [allSpacesQuery.data])
-
-  // Filter + sort missions: active/paused first, then by status priority
   const missions = useMemo(() => {
     const list = allMissionsQuery.data ?? []
     const statusOrder: Record<string, number> = { active: 0, paused: 1, completed: 2 }
@@ -136,46 +111,27 @@ export function GlobalSidebarContent() {
 
   return (
     <>
-      {/* Spaces section */}
-      <SectionLabel count={spaces.length}>Spaces</SectionLabel>
-      {allSpacesQuery.isLoading ? (
+      <SectionLabel count={projects.length}>Projects</SectionLabel>
+      {projectsQuery.isLoading ? (
         <SectionSkeleton rows={3} />
-      ) : spaces.length === 0 ? (
+      ) : projects.length === 0 ? (
         <div className="px-4 py-2 text-[11px] text-[var(--text-4)]">
-          No spaces yet
+          No projects yet
         </div>
       ) : (
         <div className="flex flex-col gap-0 px-1.5">
-          {spaces.map(space => {
-            const rawTitle = (space.title ?? '').trim()
-            const name = sanitizeSpaceTitle(rawTitle) || 'Untitled space'
-            const customization = space.customization ?? null
-            const SpaceIcon = resolveSpaceIcon(customization?.icon)
-            const accentVar = spaceColorVar(customization?.color)
-            const projName = projectNameMap.get(space._projectId) ?? ''
-
-            return (
-              <button
-                key={`${space._projectId}:${space.id}`}
-                type="button"
-                className="flex items-center gap-2 w-full mx-1 rounded-[6px] px-2.5 py-[5px] text-[13px] text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-2)] cursor-pointer border-0 bg-transparent transition-colors text-left"
-                style={{ letterSpacing: '-0.08px' }}
-                onClick={() => navigate(spaceLink(space._projectId, space.id))}
-              >
-                <SpaceIcon
-                  size={13}
-                  className="shrink-0"
-                  style={{ color: accentVar ?? 'var(--text-3)' }}
-                />
-                <span className="flex-1 min-w-0 truncate">{name}</span>
-                {showMultipleProjects && (
-                  <span className="shrink-0 text-[10px] text-[var(--text-4)] tabular-nums ml-auto">
-                    {projName}
-                  </span>
-                )}
-              </button>
-            )
-          })}
+          {projects.map(project => (
+            <button
+              key={project.id}
+              type="button"
+              className="flex items-center gap-2 w-full mx-1 rounded-[6px] px-2.5 py-[5px] text-[13px] text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-2)] cursor-pointer border-0 bg-transparent transition-colors text-left"
+              style={{ letterSpacing: '-0.08px' }}
+              onClick={() => navigate(dashboardLink(project.id))}
+            >
+              <FolderOpen size={13} className="shrink-0 text-[var(--text-3)]" />
+              <span className="flex-1 min-w-0 truncate">{projectDisplayName(project)}</span>
+            </button>
+          ))}
         </div>
       )}
 

@@ -16,15 +16,6 @@ interface AppStore {
   defaultProjectView: DefaultProjectView
   setDefaultProjectView: (view: DefaultProjectView) => void
 
-  /**
-   * The space that the user explicitly focused (primary selection key).
-   * Null when unset — route normalization will derive it from the URL's
-   * spaceId via the adapter and set it here. Cleared on space navigation so
-   * normalization re-runs for the new space.
-   */
-  focusedSpaceId: string | null
-  setFocusedSpaceId: (id: string | null) => void
-
   /** Reset ephemeral UI state (called on navigation changes) */
   resetEphemeral: () => void
 }
@@ -67,9 +58,6 @@ export const useStore = create<AppStore>((set) => ({
     localStorage.setItem('agen8-default-project-view', defaultProjectView)
     set({ defaultProjectView })
   },
-
-  focusedSpaceId: null,
-  setFocusedSpaceId: (id) => set({ focusedSpaceId: id }),
 
   resetEphemeral: () => set({
     artifactsOpen: false,

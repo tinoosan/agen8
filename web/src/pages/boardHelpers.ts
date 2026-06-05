@@ -1,4 +1,4 @@
-import type { AcceptanceCriterion, ProjectSpaceSummary, Task, TaskAttempt, AttemptReview, HeartbeatOutcome } from '../lib/types'
+import type { AcceptanceCriterion, Task, TaskAttempt, AttemptReview, HeartbeatOutcome } from '../lib/types'
 
 export interface TaskBlockerInfo {
   kind: string
@@ -11,11 +11,10 @@ export interface TaskBlockerInfo {
 export function isSystemTask(t: Task): boolean {
   const source = String(t.metadata?.source ?? '')
   const systemSources = [
-    'spawn_worker', 'escalation',
+    'spawn_worker',
     'coordinator.continuation', 'coordinator.stalled',
   ]
   if (systemSources.includes(source)) return true
-  if (t.description?.startsWith('Escalation:')) return true
   // Heartbeat tasks are now shown on the board with badges (F26) — only hide coordinator tasks
   if (t.taskKind === 'coordinator') return true
   return false
@@ -138,55 +137,6 @@ export function getTaskBlockers(task: Task): TaskBlockerInfo[] {
     })
   }
   return blockers
-}
-
-export function getOperatorActionBlocker(task: Task): TaskBlockerInfo | null {
-  return getTaskBlockers(task).find(blocker => blocker.kind === 'operator_action') ?? null
-}
-
-/* ── Board space filter / deep link ──────────────────── */
-
-/**
- * Distinct non-empty space ids that may appear on a task from the API.
- */
-export function taskSpaceIdCandidates(task: Task): string[] {
-  const raw = [task.spaceId]
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const v of raw) {
-    const s = typeof v === 'string' ? v.trim() : ''
-    if (!s || seen.has(s)) continue
-    seen.add(s)
-    out.push(s)
-  }
-  return out
-}
-
-export function taskMatchesSpaceFilter(task: Task, spaceFilter: string | null): boolean {
-  if (!spaceFilter) return true
-  return taskSpaceIdCandidates(task).includes(spaceFilter)
-}
-
-/** Map `?space=` to a project space id, or null. */
-export function resolveBoardSpaceQueryParam(raw: string, spaces: ProjectSpaceSummary[]): string | null {
-  const q = raw.trim()
-  if (!q || spaces.length === 0) return null
-  const direct = spaces.find(space => space.spaceId === q)
-  if (direct) return direct.spaceId
-  const ql = q.toLowerCase()
-  const byName = spaces.find(space => (space.spaceName ?? '').trim().toLowerCase() === ql)
-  return byName ? byName.spaceId : null
-}
-
-export function lookupSpaceForTask(
-  task: Task,
-  spaceLookup: Map<string, ProjectSpaceSummary>,
-): ProjectSpaceSummary | null {
-  for (const id of taskSpaceIdCandidates(task)) {
-    const row = spaceLookup.get(id)
-    if (row) return row
-  }
-  return null
 }
 
 /**

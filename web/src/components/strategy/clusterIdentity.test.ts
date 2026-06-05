@@ -12,33 +12,34 @@ function makeNode(partial: Partial<Node>): Node {
 }
 
 describe('deriveNodeClusterIdentity', () => {
-  it('prefers decision spaceName over spaceId/source identity', () => {
+  it('prefers readable decision member label over raw source identity', () => {
     const node = makeNode({
       id: 'decision:1',
       type: 'decision',
       data: {
         decision: {
-          spaceName: 'market-research',
-          spaceId: 'space-abc',
           sourceIdentity: 'cfo',
+          sourceMemberLabel: 'Chief Financial Officer',
+          id: 'decision-1',
         },
       },
     })
-    expect(deriveNodeClusterIdentity(node)).toBe('market-research')
+    expect(deriveNodeClusterIdentity(node)).toBe('Chief Financial Officer')
   })
 
-  it('falls back to task spaceId when spaceName is absent', () => {
+  it('prefers readable task assignedToLabel over raw assignedTo id', () => {
     const node = makeNode({
       id: 'task:1',
       type: 'task',
       data: {
         task: {
-          spaceId: 'space-xyz',
-          assignedRole: 'qa-engineer',
+          assignedToLabel: 'QA engineer',
+          assignedTo: 'member:qa-engineer',
+          id: 'task-1',
         },
       },
     })
-    expect(deriveNodeClusterIdentity(node)).toBe('space-xyz')
+    expect(deriveNodeClusterIdentity(node)).toBe('QA engineer')
   })
 
   it('uses node id as a final fallback', () => {

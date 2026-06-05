@@ -7,17 +7,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	decisiontool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/decision"
 	graphtool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/graph"
-	harnessapprovaltool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/harnessapproval"
 	httptool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/http"
-	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/message"
 	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/mission"
-	operatortool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/operator"
-	scheduletool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/schedule"
-	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/space"
+	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/project"
 	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/task"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 type toolDef struct {
@@ -36,13 +32,9 @@ func buildToolDefs() ([]toolDef, error) {
 	natives := []nativeToolDef{
 		{name: decisiontool.Name, description: decisiontool.Description, schema: decisiontool.NewHandler().Schema()},
 		{name: graphtool.Name, description: graphtool.Description, schema: graphtool.NewHandler().Schema()},
-		{name: harnessapprovaltool.Name, description: harnessapprovaltool.Description, schema: harnessapprovaltool.NewHandler().Schema(), internal: true},
 		{name: httptool.Name, description: httptool.Description, schema: httptool.NewHandler().Schema()},
-		{name: message.Name, description: message.Description, schema: message.NewHandler().Schema()},
 		{name: mission.Name, description: mission.Description, schema: mission.NewHandler().Schema()},
-		{name: operatortool.Name, description: operatortool.Description, schema: operatortool.NewHandler().Schema()},
-		{name: scheduletool.Name, description: scheduletool.Description, schema: scheduletool.NewHandler().Schema()},
-		{name: space.Name, description: space.Description, schema: space.NewHandler().Schema()},
+		{name: project.Name, description: project.Description, schema: project.NewHandler().Schema()},
 		{name: task.Name, description: task.Description, schema: task.NewHandler().Schema()},
 	}
 	names := make([]string, 0, len(natives))
@@ -58,10 +50,7 @@ func buildToolDefs() ([]toolDef, error) {
 	sort.Strings(names)
 	out := make([]toolDef, 0, len(names))
 	for _, name := range names {
-		if !exposeTool(name) {
-			continue
-		}
-		if native, ok := nativeByName[name]; ok {
+			if native, ok := nativeByName[name]; ok {
 			schema, err := normalizeToolSchema(native.name, native.schema)
 			if err != nil {
 				return nil, err
@@ -73,13 +62,6 @@ func buildToolDefs() ([]toolDef, error) {
 	return out, nil
 }
 
-func exposeTool(name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	return !strings.EqualFold(name, "final_answer")
-}
 
 func buildToolDiscoveryCatalog(defs []toolDef) types.ToolDiscoveryCatalog {
 	if len(defs) == 0 {

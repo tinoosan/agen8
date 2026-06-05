@@ -139,19 +139,19 @@ func TestKeyResultReopenDropped(t *testing.T) {
 	}
 }
 
-func TestKeyResultAssignOwnerSpace(t *testing.T) {
+func TestKeyResultAssignOwnerProject(t *testing.T) {
 	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
 	keyResult := newKeyResultForTest(t, now)
 
-	got, err := keyResult.AssignOwnerSpace("space-1", "Research", now.Add(time.Hour))
+	got, err := keyResult.AssignOwnerProject("project-1", "Research", now.Add(time.Hour))
 	if err != nil {
-		t.Fatalf("AssignOwnerSpace: %v", err)
+		t.Fatalf("AssignOwnerProject: %v", err)
 	}
-	if got.SpaceID != "space-1" {
-		t.Fatalf("SpaceID=%q want space-1", got.SpaceID)
+	if got.ProjectID != "project-1" {
+		t.Fatalf("ProjectID=%q want project-1", got.ProjectID)
 	}
-	if got.OwnerSpaceName != "Research" {
-		t.Fatalf("OwnerSpaceName=%q want Research", got.OwnerSpaceName)
+	if got.OwnerProjectName != "Research" {
+		t.Fatalf("OwnerProjectName=%q want Research", got.OwnerProjectName)
 	}
 	if got.OwnerAssignedAt == nil || !got.OwnerAssignedAt.Equal(now.Add(time.Hour)) {
 		t.Fatalf("OwnerAssignedAt=%v", got.OwnerAssignedAt)
@@ -164,7 +164,7 @@ func TestKeyResultAssignOwnerSpace(t *testing.T) {
 	}
 }
 
-func TestKeyResultAssignOwnerSpaceRejectsLockedStatuses(t *testing.T) {
+func TestKeyResultAssignOwnerProjectRejectsLockedStatuses(t *testing.T) {
 	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
 	tests := []KeyResultStatus{
 		KeyResultStatusInProgress,
@@ -175,8 +175,8 @@ func TestKeyResultAssignOwnerSpaceRejectsLockedStatuses(t *testing.T) {
 		t.Run(string(status), func(t *testing.T) {
 			keyResult := newKeyResultForTest(t, now)
 			keyResult.Status = status
-			if _, err := keyResult.AssignOwnerSpace("space-1", "Research", now); err == nil {
-				t.Fatal("AssignOwnerSpace error is nil")
+			if _, err := keyResult.AssignOwnerProject("project-1", "Research", now); err == nil {
+				t.Fatal("AssignOwnerProject error is nil")
 			}
 		})
 	}

@@ -99,6 +99,9 @@ export default function SpreadsheetTable({
     })),
   ], [numericCols, sheet.colWidths, sheet.headers])
 
+  // TanStack Table intentionally returns callable table helpers that React
+  // Compiler cannot memoize safely; keep this component outside compiler memoization.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: sheet.rows,
     columns,

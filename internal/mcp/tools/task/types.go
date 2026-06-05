@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8-mcp-server/internal/services/task/app"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
@@ -33,7 +33,6 @@ type CallContext struct {
 	Tasks         Service
 	Members       MemberDirectory
 	ProjectID     string
-	SpaceID       string
 	ActorMemberID string
 }
 

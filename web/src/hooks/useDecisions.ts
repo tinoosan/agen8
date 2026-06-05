@@ -4,7 +4,6 @@ import type { DecisionView, DecisionSource } from '../lib/types'
 
 export interface DecisionListFilter {
   source?: DecisionSource
-  spaceId?: string
   tags?: string[]
   query?: string
   since?: string // ISO 8601
@@ -22,20 +21,18 @@ export function useRecentDecisions(
   options?: DecisionQueryOptions,
 ) {
   const source = filter?.source ?? ''
-  const spaceId = filter?.spaceId ?? ''
   const query = filter?.query ?? ''
   const since = filter?.since ?? ''
   const until = filter?.until ?? ''
   const sort = filter?.sort ?? 'newest'
   return useQuery<DecisionView[]>({
-    queryKey: ['decision.list', projectId ?? '', source, spaceId, query, since, until, sort],
+    queryKey: ['decision.list', projectId ?? '', source, query, since, until, sort],
     queryFn: async () => {
       const params: Record<string, unknown> = {
         projectId: projectId ?? '',
         limit: 50,
       }
       if (filter?.source) params.source = filter.source
-      if (filter?.spaceId) params.spaceId = filter.spaceId
       if (filter?.tags?.length) params.tags = filter.tags
       if (filter?.query) params.query = filter.query
       if (filter?.since) params.since = filter.since
@@ -56,7 +53,6 @@ export interface DecisionLogFilter extends DecisionListFilter {
 
 export function useDecisionLog(projectId: string | null, filter: DecisionLogFilter) {
   const source = filter.source ?? ''
-  const spaceId = filter.spaceId ?? ''
   const query = filter.query ?? ''
   const since = filter.since ?? ''
   const until = filter.until ?? ''
@@ -65,14 +61,13 @@ export function useDecisionLog(projectId: string | null, filter: DecisionLogFilt
   const offset = Math.max(0, (filter.page - 1) * filter.pageSize)
 
   return useQuery<{ decisions: DecisionView[]; total: number }>({
-    queryKey: ['decision.log', projectId ?? '', source, spaceId, tagsKey, query, since, until, sort, filter.page, filter.pageSize],
+    queryKey: ['decision.log', projectId ?? '', source, tagsKey, query, since, until, sort, filter.page, filter.pageSize],
     queryFn: async () => {
       const baseParams: Record<string, unknown> = {
         projectId: projectId ?? '',
         sort,
       }
       if (filter.source) baseParams.source = filter.source
-      if (filter.spaceId) baseParams.spaceId = filter.spaceId
       if (filter.tags?.length) baseParams.tags = filter.tags
       if (filter.query) baseParams.query = filter.query
       if (filter.since) baseParams.since = filter.since

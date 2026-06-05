@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8-mcp-server/internal/services/task/app"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
@@ -32,12 +31,12 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	if call.Members == nil {
 		return Result{}, fmt.Errorf("task: member service is not configured")
 	}
-	ctx = contextWithSessionActor(ctx, call.ActorMemberID, call.SpaceID)
+	ctx = contextWithSessionActor(ctx, call.ActorMemberID, call.ProjectID)
 	actor, err := h.actor(ctx, call)
 	if err != nil {
 		return Result{}, err
 	}
-	taskCtx := caller.ContextWithCaller(ctx, caller.Caller{UserID: actor.UserID, MemberID: actor.MemberID, SpaceID: actor.SpaceID})
+	taskCtx := caller.ContextWithCaller(ctx, caller.Caller{UserID: actor.UserID, MemberID: actor.MemberID, ProjectID: actor.ProjectID})
 
 	switch input.Action {
 	case "create":
@@ -50,7 +49,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		task, err := call.Tasks.Create(taskCtx, taskapp.CreateTaskParams{
-			SpaceID:            spacedomain.SpaceID(actor.SpaceID),
+			ProjectID:          actor.ProjectID,
 			AssignedTo:         assignee.MemberID,
 			Description:        description,
 			AcceptanceCriteria: input.AcceptanceCriteria,
@@ -177,22 +176,22 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 }
 
 type actor struct {
-	MemberID   member.ID           `json:"memberId"`
-	UserID     string              `json:"userId"`
-	SpaceID    spacedomain.SpaceID `json:"spaceId"`
-	MemberType string              `json:"memberType"`
-	Label      string              `json:"label"`
+	MemberID   member.ID       `json:"memberId"`
+	UserID     string          `json:"userId"`
+	ProjectID  types.ProjectID `json:"projectId"`
+	MemberType string          `json:"memberType"`
+	Label      string          `json:"label"`
 }
 
-func contextWithSessionActor(ctx context.Context, actorMemberID, spaceID string) context.Context {
+func contextWithSessionActor(ctx context.Context, actorMemberID, projectID string) context.Context {
 	actorMemberID = strings.TrimSpace(actorMemberID)
-	spaceID = strings.TrimSpace(spaceID)
-	if actorMemberID == "" && spaceID == "" {
+	projectID = strings.TrimSpace(projectID)
+	if actorMemberID == "" && projectID == "" {
 		return ctx
 	}
 	return caller.ContextWithCaller(ctx, caller.Caller{
-		MemberID: member.ID(actorMemberID),
-		SpaceID:  spacedomain.SpaceID(spaceID),
+		MemberID:  member.ID(actorMemberID),
+		ProjectID: types.ProjectID(projectID),
 	})
 }
 
@@ -208,17 +207,17 @@ func (h Handler) actor(ctx context.Context, call CallContext) (actor, error) {
 	if strings.TrimSpace(rosterMember.LifecycleState) != "" && !strings.EqualFold(rosterMember.LifecycleState, member.LifecycleActive) {
 		return actor{}, fmt.Errorf("task: caller member %q is not active", memberID)
 	}
-	spaceID := strings.TrimSpace(call.SpaceID)
-	if spaceID == "" {
-		spaceID = strings.TrimSpace(string(rosterMember.SpaceID))
+	projectID := strings.TrimSpace(call.ProjectID)
+	if projectID == "" {
+		projectID = strings.TrimSpace(rosterMember.ProjectID)
 	}
-	if spaceID == "" {
-		return actor{}, fmt.Errorf("task: caller space is required")
+	if projectID == "" {
+		return actor{}, fmt.Errorf("task: caller project is required")
 	}
 	return actor{
 		MemberID:   member.ID(memberID),
 		UserID:     strings.TrimSpace(rosterMember.UserID),
-		SpaceID:    spacedomain.SpaceID(spaceID),
+		ProjectID:  types.ProjectID(projectID),
 		MemberType: strings.TrimSpace(rosterMember.MemberType),
 		Label:      memberLabel(rosterMember),
 	}, nil
@@ -236,12 +235,12 @@ func (h Handler) assignee(ctx context.Context, call CallContext, caller actor, m
 	if strings.TrimSpace(rosterMember.LifecycleState) != "" && !strings.EqualFold(rosterMember.LifecycleState, member.LifecycleActive) {
 		return actor{}, fmt.Errorf("task: assignee member %q is not active", memberID)
 	}
-	if strings.TrimSpace(string(rosterMember.SpaceID)) != strings.TrimSpace(string(caller.SpaceID)) {
-		return actor{}, fmt.Errorf("task: assignee member %q belongs to space %q, not %q", memberID, rosterMember.SpaceID, caller.SpaceID)
+	if strings.TrimSpace(rosterMember.ProjectID) != strings.TrimSpace(string(caller.ProjectID)) {
+		return actor{}, fmt.Errorf("task: assignee member %q belongs to project %q, not %q", memberID, rosterMember.ProjectID, caller.ProjectID)
 	}
 	return actor{
 		MemberID:   member.ID(memberID),
-		SpaceID:    spacedomain.SpaceID(strings.TrimSpace(string(rosterMember.SpaceID))),
+		ProjectID:  types.ProjectID(strings.TrimSpace(rosterMember.ProjectID)),
 		MemberType: strings.TrimSpace(rosterMember.MemberType),
 		Label:      memberLabel(rosterMember),
 	}, nil
@@ -249,9 +248,9 @@ func (h Handler) assignee(ctx context.Context, call CallContext, caller actor, m
 
 func (h Handler) listFilter(caller actor, input requestInput) (taskdomain.TaskFilter, error) {
 	filter := taskdomain.TaskFilter{
-		SpaceID: spacedomain.SpaceID(strings.TrimSpace(string(caller.SpaceID))),
-		Limit:   input.Limit,
-		Offset:  input.Offset,
+		ProjectID: types.ProjectID(strings.TrimSpace(string(caller.ProjectID))),
+		Limit:     input.Limit,
+		Offset:    input.Offset,
 	}
 	if input.Status != "" {
 		status, err := parseStatus(input.Status)
@@ -271,8 +270,8 @@ func (h Handler) listFilter(caller actor, input requestInput) (taskdomain.TaskFi
 }
 
 func (h Handler) canSeeTask(caller actor, task taskdomain.Task) error {
-	if task.SpaceID != caller.SpaceID {
-		return fmt.Errorf("task: task %s is not visible in space %s", task.ID, caller.SpaceID)
+	if task.ProjectID != caller.ProjectID {
+		return fmt.Errorf("task: task %s is not visible in project %s", task.ID, caller.ProjectID)
 	}
 	if isCoordinatorType(caller.MemberType) {
 		return nil

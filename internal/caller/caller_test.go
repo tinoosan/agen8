@@ -8,10 +8,10 @@ import (
 
 func TestContextResolverReturnsStampedCaller(t *testing.T) {
 	ctx := ContextWithCaller(context.Background(), Caller{
-		UserID:   " user-1 ",
-		MemberID: " member-1 ",
-		SpaceID:  " space-1 ",
-		Role:     " admin ",
+		UserID:    " user-1 ",
+		MemberID:  " member-1 ",
+		ProjectID: " project-1 ",
+		Role:      " admin ",
 	})
 
 	caller, err := (ContextResolver{}).ResolveCaller(ctx)
@@ -24,8 +24,8 @@ func TestContextResolverReturnsStampedCaller(t *testing.T) {
 	if string(caller.MemberID) != "member-1" {
 		t.Fatalf("MemberID = %q, want member-1", caller.MemberID)
 	}
-	if string(caller.SpaceID) != "space-1" {
-		t.Fatalf("SpaceID = %q, want space-1", caller.SpaceID)
+	if string(caller.ProjectID) != "project-1" {
+		t.Fatalf("ProjectID = %q, want project-1", caller.ProjectID)
 	}
 	if caller.Role != "admin" {
 		t.Fatalf("Role = %q, want admin", caller.Role)

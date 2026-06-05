@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
 type taskEntry struct {
 	ID                 string                           `json:"id"`
-	SpaceID            string                           `json:"spaceId,omitempty"`
+	ProjectID          string                           `json:"projectId,omitempty"`
 	Status             string                           `json:"status,omitempty"`
 	Title              string                           `json:"title,omitempty"`
 	Description        string                           `json:"description,omitempty"`
@@ -112,7 +112,7 @@ func (h Handler) listResult(tasks []taskdomain.Task, err error, input requestInp
 func toTaskEntry(task taskdomain.Task) taskEntry {
 	entry := taskEntry{
 		ID:                 strings.TrimSpace(string(task.ID)),
-		SpaceID:            strings.TrimSpace(string(task.SpaceID)),
+		ProjectID:          strings.TrimSpace(string(task.ProjectID)),
 		Status:             strings.TrimSpace(string(task.Status)),
 		Title:              strings.TrimSpace(task.Title),
 		Description:        strings.TrimSpace(task.Description),

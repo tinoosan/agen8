@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
+	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 var rpcTestNow = time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
@@ -163,7 +163,7 @@ func TestUpdateMissionActivationReportsPreconditionAsInvalidParams(t *testing.T)
 		t.Fatal("error is nil")
 	}
 	assertRPCCode(t, err, -32602)
-	if !strings.Contains(err.Error(), "Every key result needs an assigned open space before activation.") {
+	if !strings.Contains(err.Error(), "Every key result needs an assigned open project before activation.") {
 		t.Fatalf("error=%q", err.Error())
 	}
 	if strings.Contains(err.Error(), "kr-1") {
@@ -229,7 +229,7 @@ func TestUpdateKeyResultUsesMissionService(t *testing.T) {
 	}
 }
 
-func TestAssignKeyResultSpaceUsesMissionService(t *testing.T) {
+func TestAssignKeyResultProjectUsesMissionService(t *testing.T) {
 	keyResult, err := krdomain.NewKeyResult(krdomain.NewKeyResultInput{
 		ID:              krdomain.KeyResultID("kr-1"),
 		MissionID:       missiondomain.MissionID("mission-1"),
@@ -244,22 +244,22 @@ func TestAssignKeyResultSpaceUsesMissionService(t *testing.T) {
 	}
 	handler := NewHandler(newServiceForTest(t, newFakeMissionRepository(), newFakeKeyResultRepository(keyResult)))
 
-	got, err := handler.AssignKeyResultSpace(context.Background(), AssignKeyResultSpaceParams{
+	got, err := handler.AssignKeyResultProject(context.Background(), AssignKeyResultProjectParams{
 		KeyResultID: " kr-1 ",
-		SpaceID:     " space-1 ",
+		ProjectID:   " project-1 ",
 	})
 	if err != nil {
-		t.Fatalf("AssignKeyResultSpace: %v", err)
+		t.Fatalf("AssignKeyResultProject: %v", err)
 	}
-	if got.KeyResult.SpaceID != "space-1" || got.KeyResult.OwnerSpaceName != "Research" {
+	if got.KeyResult.ProjectID != "project-1" || got.KeyResult.OwnerProjectName != "Research" {
 		t.Fatalf("KeyResult=%+v", got.KeyResult)
 	}
 }
 
-func TestAssignKeyResultSpaceRejectsMissingSpaceID(t *testing.T) {
+func TestAssignKeyResultProjectRejectsMissingProjectID(t *testing.T) {
 	handler := NewHandler(newServiceForTest(t, newFakeMissionRepository(), newFakeKeyResultRepository()))
 
-	_, err := handler.AssignKeyResultSpace(context.Background(), AssignKeyResultSpaceParams{KeyResultID: "kr-1"})
+	_, err := handler.AssignKeyResultProject(context.Background(), AssignKeyResultProjectParams{KeyResultID: "kr-1"})
 	if err == nil {
 		t.Fatal("error is nil")
 	}
@@ -343,7 +343,7 @@ func TestUpdateProgressRejectsDraftMissionKeyResultWithoutWrite(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: rpcTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -414,10 +414,9 @@ func TestLifecycleHistoryUsesMissionService(t *testing.T) {
 	events := &fakeLifecycleEventRepository{events: []types.EventRecord{{
 		EventID:   "event-1",
 		RunID:     types.RunID(mission.ID),
-		Timestamp: rpcTestNow,
+		CreatedAt: rpcTestNow.UTC().Format(time.RFC3339Nano),
 		Type:      string(missionapp.MissionEventActivated),
 		Message:   string(missionapp.MissionEventActivated),
-		Origin:    "mission",
 		Data: map[string]string{
 			"missionId": string(mission.ID),
 			"status":    "active",
@@ -431,7 +430,7 @@ func TestLifecycleHistoryUsesMissionService(t *testing.T) {
 		events,
 		fakeClock{now: rpcTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -497,7 +496,7 @@ func newServiceForTestWithProgressAndRepos(t *testing.T, missions *fakeMissionRe
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: rpcTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -641,10 +640,18 @@ func (fakeCallerResolver) ResolveCaller(context.Context) (caller.Caller, error) 
 	return caller.Caller{UserID: "user-1"}, nil
 }
 
-type fakeSpaceLoader struct{}
+type fakeProjectLoader struct{}
 
-func (fakeSpaceLoader) Get(context.Context, spacedomain.SpaceID) (spacedomain.SpaceRecord, error) {
-	return spacedomain.SpaceRecord{ID: "space-1", Title: "Research", Status: spacedomain.SpaceStatusOpen}, nil
+func (fakeProjectLoader) Get(context.Context, types.ProjectID) (projectdomain.Project, error) {
+	return projectdomain.New(projectdomain.NewInput{
+		ID:        types.ProjectID("project-1"),
+		Root:      "/tmp/project-1",
+		UserID:    "user-1",
+		Title:     "Research",
+		Status:    projectdomain.StatusOpen,
+		CreatedAt: rpcTestNow,
+		UpdatedAt: rpcTestNow,
+	})
 }
 
 type fakeTaskLoader struct{}

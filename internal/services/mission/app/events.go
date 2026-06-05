@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 type MissionEventKind string
@@ -48,11 +49,11 @@ func (s *Service) publishMissionEventWithData(ctx context.Context, kind MissionE
 	}
 	event := types.EventRecord{
 		RunID:     types.RunID(mission.ID),
-		Timestamp: s.clock.Now(),
+		CreatedAt: eventCreatedAt(s.clock.Now()),
 		Type:      spec.EventType,
 		Message:   spec.Message,
-		Origin:    "mission",
 		Data: map[string]string{
+			"origin":    "mission",
 			"missionId": string(mission.ID),
 			"projectId": mission.ProjectID,
 			"status":    string(mission.Status),
@@ -78,6 +79,13 @@ func noteData(note string) map[string]string {
 	return map[string]string{"note": note}
 }
 
+func eventCreatedAt(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
 func (s *Service) publishKREvent(ctx context.Context, kind MissionEventKind, keyResult krdomain.KeyResult) error {
 	return s.publishKREventWithData(ctx, kind, keyResult, nil)
 }
@@ -95,11 +103,11 @@ func (s *Service) publishKREventWithData(ctx context.Context, kind MissionEventK
 	}
 	event := types.EventRecord{
 		RunID:     types.RunID(keyResult.MissionID),
-		Timestamp: s.clock.Now(),
+		CreatedAt: eventCreatedAt(s.clock.Now()),
 		Type:      spec.EventType,
 		Message:   spec.Message,
-		Origin:    "mission",
 		Data: map[string]string{
+			"origin":          "mission",
 			"missionId":       string(keyResult.MissionID),
 			"keyResultId":     string(keyResult.ID),
 			"status":          string(keyResult.Status),
@@ -107,8 +115,8 @@ func (s *Service) publishKREventWithData(ctx context.Context, kind MissionEventK
 			"progressPercent": strconv.Itoa(keyResult.ProgressPercent),
 		},
 	}
-	if keyResult.SpaceID != "" {
-		event.Data["spaceId"] = keyResult.SpaceID
+	if keyResult.ProjectID != "" {
+		event.Data["projectId"] = keyResult.ProjectID
 	}
 	for key, value := range extra {
 		event.Data[key] = value
@@ -144,11 +152,11 @@ func (s *Service) recordMissionLifecycleNote(ctx context.Context, kind MissionEv
 	}
 	event := types.EventRecord{
 		RunID:     types.RunID(mission.ID),
-		Timestamp: s.clock.Now(),
+		CreatedAt: eventCreatedAt(s.clock.Now()),
 		Type:      spec.EventType,
 		Message:   spec.Message,
-		Origin:    "mission",
 		Data: map[string]string{
+			"origin":    "mission",
 			"missionId": string(mission.ID),
 			"projectId": mission.ProjectID,
 			"status":    string(mission.Status),
@@ -172,11 +180,11 @@ func (s *Service) recordKRLifecycleNote(ctx context.Context, kind MissionEventKi
 	}
 	event := types.EventRecord{
 		RunID:     types.RunID(keyResult.MissionID),
-		Timestamp: s.clock.Now(),
+		CreatedAt: eventCreatedAt(s.clock.Now()),
 		Type:      spec.EventType,
 		Message:   spec.Message,
-		Origin:    "mission",
 		Data: map[string]string{
+			"origin":          "mission",
 			"missionId":       string(keyResult.MissionID),
 			"keyResultId":     string(keyResult.ID),
 			"status":          string(keyResult.Status),

@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
-	humaninput "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
 
@@ -20,12 +19,10 @@ var _ domain.Repository = (*SQLiteRepository)(nil)
 // selectColumns is the canonical column list for all SELECT queries.
 // Must match the scan order in scanFromScanner.
 const selectColumns = `
-	id, project_id, space_id, source, kind, source_identity,
-	run_id, title, rationale, context, questions_json, answers_json, cancelled, alternatives_rejected, invalidation_conditions_json, confidence,
+	id, project_id, source, kind, source_identity,
+	title, rationale, context, alternatives_rejected, invalidation_conditions_json, confidence,
 	outcome, task_ref, key_result_ref, mission_ref,
-	plan_ref,
-	operator_action_ref, escalation_ref, correlation_ref,
-	informed_by_ref, tags_json, metadata_json, created_at`
+	correlation_ref, informed_by_ref, tags_json, metadata_json, created_at`
 
 // SQLiteRepository implements domain.Repository backed by SQLite.
 type SQLiteRepository struct {
@@ -44,11 +41,6 @@ func (r *SQLiteRepository) rebind(query string) string {
 
 // CreateDecision persists a decision. If the ID is empty, a new one is generated.
 // Uses INSERT OR REPLACE for upsert semantics.
-//
-// Kind-specific columns are populated from whichever payload pointer is
-// set; columns belonging to the other kind are zero-valued. Validation
-// (exactly one payload set) is the caller's responsibility; CreateDecision
-// returns an error if both or neither are set.
 func (r *SQLiteRepository) CreateDecision(ctx context.Context, decision domain.Decision) error {
 	if strings.TrimSpace(string(decision.ID)) == "" {
 		decision.ID = domain.DecisionID("dec-" + uuid.NewString())
@@ -70,89 +62,53 @@ func (r *SQLiteRepository) CreateDecision(ctx context.Context, decision domain.D
 		tagsJSON = []byte("[]")
 	}
 
-	// Pull payload fields out into per-column variables. Exactly one of
-	// Log or AskUser must be set; the other path's columns stay zero.
+	// Pull payload fields out into per-column variables.
 	var (
-		kind                       domain.DecisionKind
+		kind                       = domain.DecisionKindLog
 		rationale                  string
 		contextValue               string
-		questionsJSON              = []byte("[]")
-		answersJSON                = []byte("[]")
-		cancelled                  bool
 		alternativesRejected       string
 		invalidationConditionsJSON = []byte("[]")
 		outcome                    string
 	)
-	switch {
-	case decision.Log != nil && decision.AskUser != nil:
-		return errors.New("save decision: exactly one payload may be set, got both Log and AskUser")
-	case decision.Log != nil:
-		kind = domain.DecisionKindLog
-		p := decision.Log
-		rationale = strings.TrimSpace(p.Rationale)
-		contextValue = strings.TrimSpace(p.Context)
-		alternativesRejected = strings.TrimSpace(p.AlternativesRejected)
-		outcome = strings.TrimSpace(p.Outcome)
-		if p.InvalidationConditions != nil {
-			b, err := json.Marshal(p.InvalidationConditions)
-			if err != nil {
-				return fmt.Errorf("marshal invalidation conditions: %w", err)
-			}
-			invalidationConditionsJSON = b
+	if decision.Log == nil {
+		return errors.New("save decision: log payload is required")
+	}
+	p := decision.Log
+	rationale = strings.TrimSpace(p.Rationale)
+	contextValue = strings.TrimSpace(p.Context)
+	alternativesRejected = strings.TrimSpace(p.AlternativesRejected)
+	outcome = strings.TrimSpace(p.Outcome)
+	if p.InvalidationConditions != nil {
+		b, err := json.Marshal(p.InvalidationConditions)
+		if err != nil {
+			return fmt.Errorf("marshal invalidation conditions: %w", err)
 		}
-	case decision.AskUser != nil:
-		kind = domain.DecisionKindAskUser
-		p := decision.AskUser
-		contextValue = strings.TrimSpace(p.Context)
-		cancelled = p.Cancelled
-		if p.Questions != nil {
-			b, err := json.Marshal(p.Questions)
-			if err != nil {
-				return fmt.Errorf("marshal questions: %w", err)
-			}
-			questionsJSON = b
-		}
-		if p.Answers != nil {
-			b, err := json.Marshal(p.Answers)
-			if err != nil {
-				return fmt.Errorf("marshal answers: %w", err)
-			}
-			answersJSON = b
-		}
-	default:
-		return errors.New("save decision: a payload (Log or AskUser) is required")
+		invalidationConditionsJSON = b
 	}
 
 	createdAt := decision.CreatedAt.UTC().Format(time.RFC3339Nano)
 
 	_, err = r.db.ExecContext(ctx, r.rebind(`
 		INSERT OR REPLACE INTO decisions (
-			id, project_id, space_id, source, kind, source_identity,
-			run_id, title, rationale, context, questions_json, answers_json, cancelled, alternatives_rejected, invalidation_conditions_json, confidence,
+			id, project_id, source, kind, source_identity,
+			title, rationale, context, alternatives_rejected, invalidation_conditions_json, confidence,
 			outcome, task_ref, key_result_ref, mission_ref,
-			plan_ref,
-			operator_action_ref, escalation_ref, correlation_ref,
-			informed_by_ref, tags_json, metadata_json, created_at
+			correlation_ref, informed_by_ref, tags_json, metadata_json, created_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?,
-			?, ?, ?,
-			?, ?, ?, ?
+			?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?,
+			?, ?, ?, ?, ?
 		)`),
 		string(decision.ID),
 		strings.TrimSpace(decision.ProjectID),
-		strings.TrimSpace(decision.SpaceID),
 		string(decision.Source),
 		string(kind),
 		strings.TrimSpace(decision.SourceIdentity),
-		strings.TrimSpace(decision.RunID),
 		strings.TrimSpace(decision.Title),
 		rationale,
 		contextValue,
-		string(questionsJSON),
-		string(answersJSON),
-		cancelled,
 		alternativesRejected,
 		string(invalidationConditionsJSON),
 		decision.Confidence,
@@ -160,9 +116,6 @@ func (r *SQLiteRepository) CreateDecision(ctx context.Context, decision domain.D
 		strings.TrimSpace(decision.TaskRef),
 		strings.TrimSpace(decision.KeyResultRef),
 		strings.TrimSpace(decision.MissionRef),
-		strings.TrimSpace(decision.PlanRef),
-		strings.TrimSpace(decision.OperatorActionRef),
-		strings.TrimSpace(decision.EscalationRef),
 		strings.TrimSpace(decision.CorrelationRef),
 		strings.TrimSpace(decision.InformedByRef),
 		string(tagsJSON),
@@ -287,11 +240,6 @@ func buildFilterClauses(filter domain.DecisionFilter) ([]string, []any) {
 		where = append(where, "source IN ("+strings.Join(placeholders, ", ")+")")
 	}
 
-	if strings.TrimSpace(filter.SpaceID) != "" {
-		where = append(where, "space_id = ?")
-		args = append(args, strings.TrimSpace(filter.SpaceID))
-	}
-
 	if q := strings.TrimSpace(filter.Query); q != "" {
 		like := "%" + strings.ToLower(q) + "%"
 		where = append(where, `(LOWER(title) LIKE ? OR LOWER(rationale) LIKE ? OR LOWER(alternatives_rejected) LIKE ? OR LOWER(invalidation_conditions_json) LIKE ? OR LOWER(outcome) LIKE ?)`)
@@ -384,17 +332,12 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 		d                          domain.Decision
 		id                         string
 		projectID                  string
-		spaceID                    string
 		source                     string
 		kindStr                    string
 		sourceIdentity             string
-		runID                      string
 		title                      string
 		rationale                  string
 		contextValue               string
-		questionsJSON              string
-		answersJSON                string
-		cancelled                  bool
 		alternativesRejected       string
 		invalidationConditionsJSON string
 		confidence                 float64
@@ -402,9 +345,6 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 		taskRef                    string
 		keyResultRef               string
 		missionRef                 string
-		planRef                    string
-		operatorActionRef          string
-		escalationRef              string
 		correlationRef             string
 		informedByRef              string
 		tagsJSON                   string
@@ -413,10 +353,9 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 	)
 
 	err := s.Scan(
-		&id, &projectID, &spaceID, &source, &kindStr, &sourceIdentity,
-		&runID, &title, &rationale, &contextValue, &questionsJSON, &answersJSON, &cancelled, &alternativesRejected, &invalidationConditionsJSON, &confidence,
-		&outcome, &taskRef, &keyResultRef, &missionRef, &planRef,
-		&operatorActionRef, &escalationRef, &correlationRef,
+		&id, &projectID, &source, &kindStr, &sourceIdentity,
+		&title, &rationale, &contextValue, &alternativesRejected, &invalidationConditionsJSON, &confidence,
+		&outcome, &taskRef, &keyResultRef, &missionRef, &correlationRef,
 		&informedByRef, &tagsJSON, &metadataJSON, &createdAt,
 	)
 	if err != nil {
@@ -425,18 +364,13 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 
 	d.ID = domain.DecisionID(strings.TrimSpace(id))
 	d.ProjectID = strings.TrimSpace(projectID)
-	d.SpaceID = strings.TrimSpace(spaceID)
 	d.Source = domain.DecisionSource(strings.TrimSpace(source))
 	d.SourceIdentity = strings.TrimSpace(sourceIdentity)
-	d.RunID = strings.TrimSpace(runID)
 	d.Title = strings.TrimSpace(title)
 	d.Confidence = confidence
 	d.TaskRef = strings.TrimSpace(taskRef)
 	d.KeyResultRef = strings.TrimSpace(keyResultRef)
 	d.MissionRef = strings.TrimSpace(missionRef)
-	d.PlanRef = strings.TrimSpace(planRef)
-	d.OperatorActionRef = strings.TrimSpace(operatorActionRef)
-	d.EscalationRef = strings.TrimSpace(escalationRef)
 	d.CorrelationRef = strings.TrimSpace(correlationRef)
 	d.InformedByRef = strings.TrimSpace(informedByRef)
 
@@ -464,7 +398,8 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 		d.Metadata = m
 	}
 
-	// Set the matching payload pointer based on the row's kind column.
+	// Set the retained log payload. Historical rows with removed kinds are
+	// treated as malformed instead of being revived into the new model.
 	switch kind := domain.DecisionKind(strings.TrimSpace(kindStr)); kind {
 	case domain.DecisionKindLog:
 		var conditions []string
@@ -479,27 +414,6 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 			AlternativesRejected:   strings.TrimSpace(alternativesRejected),
 			InvalidationConditions: conditions,
 			Outcome:                strings.TrimSpace(outcome),
-		}
-	case domain.DecisionKindAskUser:
-		var (
-			questions []humaninput.Question
-			answers   []humaninput.Answer
-		)
-		if strings.TrimSpace(questionsJSON) != "" && strings.TrimSpace(questionsJSON) != "[]" {
-			if jsonErr := json.Unmarshal([]byte(questionsJSON), &questions); jsonErr != nil {
-				return domain.Decision{}, fmt.Errorf("parse questions_json: %w", jsonErr)
-			}
-		}
-		if strings.TrimSpace(answersJSON) != "" && strings.TrimSpace(answersJSON) != "[]" {
-			if jsonErr := json.Unmarshal([]byte(answersJSON), &answers); jsonErr != nil {
-				return domain.Decision{}, fmt.Errorf("parse answers_json: %w", jsonErr)
-			}
-		}
-		d.AskUser = &domain.AskUserPayload{
-			Context:   strings.TrimSpace(contextValue),
-			Questions: questions,
-			Answers:   answers,
-			Cancelled: cancelled,
 		}
 	default:
 		return domain.Decision{}, fmt.Errorf("scan decision: unknown kind %q", kind)

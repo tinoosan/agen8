@@ -11,7 +11,7 @@ import (
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 var missionTestTime = time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC)
@@ -109,9 +109,9 @@ func (s *stubMissionService) UpdateKeyResult(ctx context.Context, req missionapp
 	return krdomain.KeyResult{ID: req.KeyResultID, MissionID: "mission-1", Title: "KR", MeasurementType: krdomain.MeasurementPercentage, Direction: krdomain.DirectionIncrease, TargetValue: 100, Status: krdomain.KeyResultStatusOpen, CreatedAt: missionTestTime, UpdatedAt: missionTestTime}, nil
 }
 
-func (s *stubMissionService) AssignKeyResultSpace(ctx context.Context, id krdomain.KeyResultID, spaceID string) (krdomain.KeyResult, error) {
-	s.capture(ctx, "kr_assign_space")
-	return krdomain.KeyResult{ID: id, MissionID: "mission-1", Title: "KR", SpaceID: spaceID, MeasurementType: krdomain.MeasurementPercentage, Direction: krdomain.DirectionIncrease, TargetValue: 100, Status: krdomain.KeyResultStatusOpen, CreatedAt: missionTestTime, UpdatedAt: missionTestTime}, nil
+func (s *stubMissionService) AssignKeyResultProject(ctx context.Context, id krdomain.KeyResultID, projectID string) (krdomain.KeyResult, error) {
+	s.capture(ctx, "kr_assign_project")
+	return krdomain.KeyResult{ID: id, MissionID: "mission-1", Title: "KR", ProjectID: projectID, MeasurementType: krdomain.MeasurementPercentage, Direction: krdomain.DirectionIncrease, TargetValue: 100, Status: krdomain.KeyResultStatusOpen, CreatedAt: missionTestTime, UpdatedAt: missionTestTime}, nil
 }
 
 func (s *stubMissionService) DeleteKeyResult(ctx context.Context, req missionapp.DeleteKeyResultParams) (krdomain.KeyResult, error) {
@@ -145,7 +145,7 @@ func (s *stubMissionService) ComputeMissionProgress(ctx context.Context, id miss
 type stubMembers struct{}
 
 func (stubMembers) GetMember(context.Context, member.ID) (member.Record, error) {
-	return member.Record{ID: "member-1", UserID: "user-1", SpaceID: "space-1", DisplayName: "Coordinator", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive}, nil
+	return member.Record{ID: "member-1", UserID: "user-1", ProjectID: "space-1", DisplayName: "Coordinator", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive}, nil
 }
 
 func TestHandleCreateMissionCallsServiceWithSessionProjectAndCaller(t *testing.T) {
@@ -160,7 +160,7 @@ func TestHandleCreateMissionCallsServiceWithSessionProjectAndCaller(t *testing.T
 	if svc.createReq.ProjectID != "project-1" || svc.createReq.Title != "Launch v1" || svc.createReq.ID == "" {
 		t.Fatalf("create req = %+v", svc.createReq)
 	}
-	if svc.seenCaller.UserID != "user-1" || svc.seenCaller.MemberID != "member-1" || svc.seenCaller.SpaceID != "space-1" {
+	if svc.seenCaller.UserID != "user-1" || svc.seenCaller.MemberID != "member-1" || svc.seenCaller.ProjectID != "space-1" {
 		t.Fatalf("caller = %+v", svc.seenCaller)
 	}
 	if !strings.Contains(result.Text, `"action":"create"`) {
@@ -251,7 +251,7 @@ func TestContextWithSessionActorStampsMemberCaller(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveCaller: %v", err)
 	}
-	if resolved.MemberID != "member-1" || resolved.SpaceID != "space-1" {
+	if resolved.MemberID != "member-1" || resolved.ProjectID != "space-1" {
 		t.Fatalf("caller=%+v want member-1 in space-1", resolved)
 	}
 }
@@ -263,7 +263,6 @@ func testCallContext(svc *stubMissionService) CallContext {
 		Progress:      svc,
 		Members:       stubMembers{},
 		ProjectID:     "project-1",
-		SpaceID:       "space-1",
 		ActorMemberID: "member-1",
 	}
 }

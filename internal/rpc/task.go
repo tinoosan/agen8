@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8-mcp-server/internal/services/task/app"
 	taskrpc "github.com/tinoosan/agen8-mcp-server/internal/services/task/rpc"
 )
@@ -18,11 +18,11 @@ const (
 	MethodTaskCancel = "task.cancel"
 )
 
-func RegisterTask(reg *Registry, taskSvc *taskapp.Service) error {
+func RegisterTask(reg *Registry, taskSvc *taskapp.Service, members taskrpc.MemberLookup) error {
 	if taskSvc == nil {
 		return fmt.Errorf("task service is required")
 	}
-	handler := taskrpc.NewHandler(taskSvc)
+	handler := taskrpc.NewHandler(taskSvc, members)
 	return RegisterHandlers(
 		func() error {
 			return AddBoundHandler(reg, MethodTaskCreate, false, withTaskCaller(handler.Create))

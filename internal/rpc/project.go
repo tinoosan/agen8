@@ -5,24 +5,25 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 
 	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
 	projectrpc "github.com/tinoosan/agen8-mcp-server/internal/services/project/rpc"
 )
 
 const (
-	MethodProjectGet           = "project.get"
-	MethodProjectCreate        = "project.create"
-	MethodProjectSave          = "project.save"
-	MethodProjectArchive       = "project.archive"
-	MethodProjectDelete        = "project.delete"
-	MethodProjectList          = "project.list"
-	MethodProjectSpaceList     = "project.space.list"
-	MethodProjectClusterSave   = "project.cluster.save"
-	MethodProjectClusterList   = "project.cluster.list"
-	MethodProjectClusterSpace  = "project.cluster.space.save"
-	MethodProjectClusterRemove = "project.cluster.space.remove"
+	MethodProjectGet     = "project.get"
+	MethodProjectCreate  = "project.create"
+	MethodProjectSave    = "project.save"
+	MethodProjectArchive = "project.archive"
+	MethodProjectDelete  = "project.delete"
+	MethodProjectList    = "project.list"
+
+	MethodProjectMemberRegister     = "project.member.register"
+	MethodProjectMemberGet          = "project.member.get"
+	MethodProjectMemberList         = "project.member.list"
+	MethodProjectMemberUpdateConfig = "project.member.updateConfig"
+	MethodProjectMemberRemove       = "project.member.remove"
 )
 
 func withProjectCaller[Params any, Result any](fn func(context.Context, Params) (Result, error)) func(context.Context, Params) (Result, error) {
@@ -66,19 +67,19 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service) error {
 			return AddBoundHandler(reg, MethodProjectList, true, handler.ProjectList)
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectSpaceList, false, withProjectCaller(handler.ProjectSpaceList))
+			return AddBoundHandler(reg, MethodProjectMemberRegister, false, withProjectCaller(handler.MemberRegister))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectClusterSave, false, handler.ClusterSave)
+			return AddBoundHandler(reg, MethodProjectMemberGet, false, withProjectCaller(handler.MemberGet))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectClusterList, false, handler.ClusterList)
+			return AddBoundHandler(reg, MethodProjectMemberList, false, withProjectCaller(handler.MemberList))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectClusterSpace, false, handler.ClusterSpaceSave)
+			return AddBoundHandler(reg, MethodProjectMemberUpdateConfig, false, withProjectCaller(handler.MemberUpdateConfig))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectClusterRemove, false, handler.ClusterSpaceRemove)
+			return AddBoundHandler(reg, MethodProjectMemberRemove, false, withProjectCaller(handler.MemberRemove))
 		},
 	)
 }

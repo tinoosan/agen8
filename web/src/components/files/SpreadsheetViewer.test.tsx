@@ -69,7 +69,7 @@ describe('SpreadsheetViewer', () => {
       <SpreadsheetViewer file={makeFile('/workspace/data.csv')} preview={makePreview({ content: 'X,Y\n1,2' })} isLoading={false} error={false} />
     )
     expect(screen.getByText('CSV')).toBeTruthy()
-    expect(screen.getByText('XLSX')).toBeTruthy()
+    expect(screen.queryByText('XLSX')).toBeNull()
   })
 
   it('renders file name in toolbar', () => {

@@ -17,8 +17,8 @@ export interface ContextLinkEntity {
  * and the provided leaf entity IDs (as sources).
  *
  * Querying both directions gives full coverage:
- *   - graph.linksByTarget(KRs, missions)  → task/decision/oa/escalation → KR/mission
- *   - graph.linksBySource(leaf nodes)     → decision → task (made_during), task → escalation (blocked_by), etc.
+ *   - graph.linksByTarget(KRs, missions)  → task/decision → KR/mission
+ *   - graph.linksBySource(leaf nodes)     → decision → task (made_during), etc.
  *
  * Returns a deduplicated flat array of ContextLink records.
  */

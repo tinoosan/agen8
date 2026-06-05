@@ -5,52 +5,73 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/cluster"
+	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 type Service struct {
 	projects project.Repository
-	clusters cluster.Repository
-	spaces   SpaceLoader
+	members  member.Repository
 	clock    Clock
+	caller   caller.Resolver
+	configs  ConfigValidator
+	events   EventPublisher
+	logger   *slog.Logger
 }
+
+type Caller = caller.Caller
 
 type Config struct {
 	Projects project.Repository
-	Clusters cluster.Repository
-	Spaces   SpaceLoader
+	Members  member.Repository
 	Clock    Clock
+	Caller   caller.Resolver
+	Configs  ConfigValidator
+	Events   EventPublisher
+	Logger   *slog.Logger
 }
 
 func NewService(cfg Config) (*Service, error) {
 	if cfg.Projects == nil {
 		return nil, fmt.Errorf("project repository is required")
 	}
-	if cfg.Clusters == nil {
-		return nil, fmt.Errorf("project cluster repository is required")
+	if cfg.Members == nil {
+		return nil, fmt.Errorf("project member repository is required")
 	}
-	if cfg.Spaces == nil {
-		return nil, fmt.Errorf("project space loader is required")
+	if cfg.Caller == nil {
+		return nil, fmt.Errorf("project caller resolver is required")
+	}
+	if cfg.Configs == nil {
+		return nil, fmt.Errorf("project member config validator is required")
+	}
+	if cfg.Events == nil {
+		return nil, fmt.Errorf("project event publisher is required")
 	}
 	clock := cfg.Clock
 	if clock == nil {
 		clock = systemClock{}
 	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default().With("service", "project")
+	}
 	return &Service{
 		projects: cfg.Projects,
-		clusters: cfg.Clusters,
-		spaces:   cfg.Spaces,
+		members:  cfg.Members,
 		clock:    clock,
+		caller:   cfg.Caller,
+		configs:  cfg.Configs,
+		events:   cfg.Events,
+		logger:   logger,
 	}, nil
 }
 
@@ -92,11 +113,16 @@ func (s *Service) SaveProject(ctx context.Context, input SaveProjectInput) (proj
 		return project.Project{}, fmt.Errorf("project service is nil")
 	}
 	now := s.now()
+	userID := ""
+	if c, err := s.caller.ResolveCaller(ctx); err == nil {
+		userID = c.Normalize().UserID
+	}
 	agg, err := project.New(project.NewInput{
 		ID:         input.ID,
 		LocationID: input.LocationID,
 		Root:       input.Root,
 		Title:      input.Title,
+		UserID:     userID,
 		Status:     input.Status,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -180,263 +206,59 @@ func (s *Service) DeleteProject(ctx context.Context, projectID types.ProjectID) 
 	return s.projects.Delete(ctx, current.ID())
 }
 
-type ProjectSpaceView struct {
-	ProjectID types.ProjectID
-	SpaceID   spacedomain.SpaceID
-	Status    string
-	SortOrder int
-	Pinned    bool
-	Title     string
-	SpaceOpen bool
-	Members   []SpaceMemberView
+func (s *Service) resolveCaller(ctx context.Context) (Caller, error) {
+	c, err := s.caller.ResolveCaller(ctx)
+	if err != nil {
+		return Caller{}, fmt.Errorf("resolve project caller: %w", err)
+	}
+	c = c.Normalize()
+	if c.UserID == "" && c.MemberID == "" {
+		return Caller{}, fmt.Errorf("project caller user id or member id is required")
+	}
+	return c, nil
 }
 
-type SpaceMemberView struct {
-	MemberID member.ID
-	Label    string
+func requireVisibleProject(c Caller, p project.Project) error {
+	if c.UserID != "" && strings.TrimSpace(p.UserID()) == c.UserID {
+		return nil
+	}
+	if c.ProjectID != "" && p.ID() == c.ProjectID {
+		return nil
+	}
+	return fmt.Errorf("project %s is not visible to caller", p.ID())
 }
 
-func (s *Service) ListProjectSpaces(ctx context.Context, projectID types.ProjectID) ([]ProjectSpaceView, error) {
-	if s == nil {
-		return nil, fmt.Errorf("project service is nil")
+func requireOwnedProject(c Caller, p project.Project) error {
+	if c.UserID != "" && strings.TrimSpace(p.UserID()) == c.UserID {
+		return nil
 	}
-	projectID = cleanProjectID(projectID)
-	if projectID == "" {
-		return nil, fmt.Errorf("project id is required")
+	return fmt.Errorf("project %s is not owned by caller", p.ID())
+}
+
+func (s *Service) publishMemberLifecycle(eventType string, rosterMember member.Record) error {
+	if s.events == nil {
+		return fmt.Errorf("project event publisher is required")
 	}
-	spaces, err := s.spaces.List(ctx, spacedomain.SpaceFilter{ProjectID: string(projectID)})
-	if err != nil {
-		return nil, err
-	}
-	refs, err := s.clusterRefsByProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	members, err := s.spaces.ListMembers(ctx, member.Filter{
-		ProjectID:      string(projectID),
-		LifecycleState: member.LifecycleActive,
-		Limit:          1000,
+	return s.events.Publish(eventbus.TopicSpaceMemberLifecycle, eventbus.SpaceMemberLifecycleEvent{
+		UserID:    rosterMember.UserID,
+		ProjectID: rosterMember.ProjectID,
+		// SpaceID carries the coordination-boundary id consumed by the harness
+		// daemon. In the project-first model the project is that boundary; the
+		// event field is renamed to ProjectID in the M5 eventbus pass.
+		SpaceID:        rosterMember.ProjectID,
+		MemberID:       string(rosterMember.ID),
+		ChannelID:      rosterMember.ChannelID,
+		DisplayName:    rosterMember.DisplayName,
+		MemberType:     rosterMember.MemberType,
+		EventType:      eventType,
+		LifecycleState: rosterMember.LifecycleState,
+		HarnessKind:    rosterMember.HarnessKind,
+		Model:          rosterMember.Model,
+		Effort:         rosterMember.Effort,
+		PermissionMode: rosterMember.PermissionMode,
+		ConfigRef:      rosterMember.ConfigRef,
+		Timestamp:      s.clock.Now().UTC(),
 	})
-	if err != nil {
-		return nil, fmt.Errorf("list project space members: %w", err)
-	}
-	membersBySpace := make(map[spacedomain.SpaceID][]SpaceMemberView)
-	for _, rosterMember := range members {
-		label := strings.TrimSpace(rosterMember.DisplayName)
-		if label == "" {
-			label = strings.TrimSpace(rosterMember.MemberType)
-		}
-		if label == "" {
-			label = string(rosterMember.ID)
-		}
-		membersBySpace[spacedomain.SpaceID(rosterMember.SpaceID)] = append(membersBySpace[spacedomain.SpaceID(rosterMember.SpaceID)], SpaceMemberView{
-			MemberID: rosterMember.ID,
-			Label:    label,
-		})
-	}
-	out := make([]ProjectSpaceView, 0, len(spaces))
-	for _, space := range spaces {
-		ref := refs[space.ID]
-		out = append(out, ProjectSpaceView{
-			ProjectID: projectID,
-			SpaceID:   space.ID,
-			Status:    strings.TrimSpace(space.Status),
-			SortOrder: ref.SortOrder,
-			Pinned:    ref.Pinned,
-			Title:     strings.TrimSpace(space.Title),
-			SpaceOpen: strings.TrimSpace(space.Status) == spacedomain.SpaceStatusOpen,
-			Members:   membersBySpace[space.ID],
-		})
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Pinned != out[j].Pinned {
-			return out[i].Pinned
-		}
-		if out[i].SpaceOpen != out[j].SpaceOpen {
-			return out[i].SpaceOpen
-		}
-		if out[i].SortOrder != out[j].SortOrder {
-			return out[i].SortOrder < out[j].SortOrder
-		}
-		return out[i].Title < out[j].Title
-	})
-	return out, nil
-}
-
-type ClusterView struct {
-	ID        cluster.ID
-	ProjectID types.ProjectID
-	Name      string
-	Status    cluster.Status
-	Spaces    []cluster.SpaceRefRecord
-}
-
-type SaveClusterInput struct {
-	ID        cluster.ID
-	ProjectID types.ProjectID
-	Name      string
-	Status    cluster.Status
-}
-
-func (s *Service) SaveCluster(ctx context.Context, input SaveClusterInput) (ClusterView, error) {
-	if s == nil {
-		return ClusterView{}, fmt.Errorf("project service is nil")
-	}
-	now := s.now()
-	agg, err := cluster.New(cluster.NewInput{
-		ID:        input.ID,
-		ProjectID: input.ProjectID,
-		Name:      input.Name,
-		Status:    input.Status,
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-	if err != nil {
-		return ClusterView{}, err
-	}
-	saved, err := s.clusters.Save(ctx, agg.Record())
-	if err != nil {
-		return ClusterView{}, err
-	}
-	wrapped, err := cluster.Wrap(saved)
-	if err != nil {
-		return ClusterView{}, err
-	}
-	return ClusterView{
-		ID:        wrapped.ID(),
-		ProjectID: wrapped.ProjectID(),
-		Name:      wrapped.Name(),
-		Status:    wrapped.Status(),
-	}, nil
-}
-
-func (s *Service) ListClusters(ctx context.Context, projectID types.ProjectID) ([]ClusterView, error) {
-	if s == nil {
-		return nil, fmt.Errorf("project service is nil")
-	}
-	projectID = cleanProjectID(projectID)
-	if projectID == "" {
-		return nil, fmt.Errorf("project id is required")
-	}
-	records, err := s.clusters.List(ctx, cluster.Filter{ProjectID: projectID})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ClusterView, 0, len(records))
-	for _, record := range records {
-		agg, err := cluster.Wrap(record)
-		if err != nil {
-			return nil, err
-		}
-		refs, err := s.clusters.ListSpaces(ctx, agg.ID())
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, ClusterView{
-			ID:        agg.ID(),
-			ProjectID: agg.ProjectID(),
-			Name:      agg.Name(),
-			Status:    agg.Status(),
-			Spaces:    refs,
-		})
-	}
-	return out, nil
-}
-
-type SaveClusterSpaceInput struct {
-	ClusterID cluster.ID
-	ProjectID types.ProjectID
-	SpaceID   spacedomain.SpaceID
-	SortOrder int
-	Pinned    bool
-}
-
-func (s *Service) SaveClusterSpace(ctx context.Context, input SaveClusterSpaceInput) (cluster.SpaceRefRecord, error) {
-	if s == nil {
-		return cluster.SpaceRefRecord{}, fmt.Errorf("project service is nil")
-	}
-	projectID := cleanProjectID(input.ProjectID)
-	if projectID == "" {
-		return cluster.SpaceRefRecord{}, fmt.Errorf("project id is required")
-	}
-	ref, err := cluster.NewSpaceRef(cluster.NewSpaceRefInput{
-		ClusterID: input.ClusterID,
-		SpaceID:   input.SpaceID,
-		SortOrder: input.SortOrder,
-		Pinned:    input.Pinned,
-	})
-	if err != nil {
-		return cluster.SpaceRefRecord{}, err
-	}
-	if err := s.requireClusterInProject(ctx, ref.ClusterID(), projectID); err != nil {
-		return cluster.SpaceRefRecord{}, err
-	}
-	if err := s.requireSpaceInProject(ctx, ref.SpaceID(), projectID); err != nil {
-		return cluster.SpaceRefRecord{}, err
-	}
-	return s.clusters.SaveSpace(ctx, ref.Record())
-}
-
-func (s *Service) RemoveClusterSpace(ctx context.Context, projectID types.ProjectID, clusterID cluster.ID, spaceID spacedomain.SpaceID) error {
-	if s == nil {
-		return fmt.Errorf("project service is nil")
-	}
-	projectID = cleanProjectID(projectID)
-	if projectID == "" {
-		return fmt.Errorf("project id is required")
-	}
-	ref, err := cluster.NewSpaceRef(cluster.NewSpaceRefInput{ClusterID: clusterID, SpaceID: spaceID})
-	if err != nil {
-		return err
-	}
-	if err := s.requireClusterInProject(ctx, ref.ClusterID(), projectID); err != nil {
-		return err
-	}
-	return s.clusters.RemoveSpace(ctx, ref.ClusterID(), ref.SpaceID())
-}
-
-func (s *Service) clusterRefsByProject(ctx context.Context, projectID types.ProjectID) (map[spacedomain.SpaceID]cluster.SpaceRefRecord, error) {
-	clusters, err := s.clusters.List(ctx, cluster.Filter{ProjectID: projectID, Status: cluster.StatusOpen})
-	if err != nil {
-		return nil, err
-	}
-	out := map[spacedomain.SpaceID]cluster.SpaceRefRecord{}
-	for _, item := range clusters {
-		refs, err := s.clusters.ListSpaces(ctx, item.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, ref := range refs {
-			if _, exists := out[ref.SpaceID]; !exists || ref.Pinned {
-				out[ref.SpaceID] = ref
-			}
-		}
-	}
-	return out, nil
-}
-
-func (s *Service) requireClusterInProject(ctx context.Context, clusterID cluster.ID, projectID types.ProjectID) error {
-	clusters, err := s.clusters.List(ctx, cluster.Filter{ProjectID: projectID})
-	if err != nil {
-		return err
-	}
-	for _, item := range clusters {
-		if item.ID == clusterID {
-			return nil
-		}
-	}
-	return fmt.Errorf("cluster %q is not in project %q", clusterID, projectID)
-}
-
-func (s *Service) requireSpaceInProject(ctx context.Context, spaceID spacedomain.SpaceID, projectID types.ProjectID) error {
-	space, err := s.spaces.Get(ctx, spaceID)
-	if err != nil {
-		return err
-	}
-	if types.ProjectID(strings.TrimSpace(string(space.ProjectID))) != projectID {
-		return fmt.Errorf("space %q is not in project %q", spaceID, projectID)
-	}
-	return nil
 }
 
 func (s *Service) now() time.Time {

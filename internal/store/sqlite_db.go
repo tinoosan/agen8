@@ -172,35 +172,8 @@ func migratePostgres(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("postgres: record schema version: %w", err)
 		}
 	}
-	if err := ensurePostgresCoordinatorMemberCutover(ctx, tx); err != nil {
-		tx.Rollback()
-		return err
-	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("postgres: commit migration: %w", err)
-	}
-	return nil
-}
-
-func ensurePostgresCoordinatorMemberCutover(ctx context.Context, tx *sql.Tx) error {
-	if tx == nil {
-		return fmt.Errorf("postgres: ensure coordinator member cutover: transaction is nil")
-	}
-	statements := []string{
-		`UPDATE members
-		 SET member_type = 'coordinator',
-		     member_json = REPLACE(member_json, '"memberType":"lone_coordinator"', '"memberType":"coordinator"')
-		 WHERE member_type = 'lone_coordinator'`,
-		`DROP INDEX IF EXISTS idx_members_one_active_coordinator`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_members_one_active_coordinator
-		 ON members(space_id)
-		 WHERE lifecycle_state = 'active'
-		   AND member_type = 'coordinator'`,
-	}
-	for _, stmt := range statements {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("postgres: ensure coordinator member cutover: %w", err)
-		}
 	}
 	return nil
 }
@@ -277,10 +250,6 @@ func migrateSQLite(db *sql.DB) error {
 	}
 
 	if err := ensureChannelSchema(tx); err != nil {
-		tx.Rollback()
-		return err
-	}
-	if err := ensureCoordinatorMemberCutover(tx); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -376,29 +345,6 @@ func ensureChannelSchema(tx *sql.Tx) error {
 	return nil
 }
 
-func ensureCoordinatorMemberCutover(tx *sql.Tx) error {
-	if tx == nil {
-		return fmt.Errorf("sqlite: ensure coordinator member cutover: transaction is nil")
-	}
-	statements := []string{
-		`UPDATE members
-		 SET member_type = 'coordinator',
-		     member_json = REPLACE(member_json, '"memberType":"lone_coordinator"', '"memberType":"coordinator"')
-		 WHERE member_type = 'lone_coordinator'`,
-		`DROP INDEX IF EXISTS idx_members_one_active_coordinator`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_members_one_active_coordinator
-		 ON members(space_id)
-		 WHERE lifecycle_state = 'active'
-		   AND member_type = 'coordinator'`,
-	}
-	for _, stmt := range statements {
-		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("sqlite: ensure coordinator member cutover: %w", err)
-		}
-	}
-	return nil
-}
-
 func rebuildChannelsCanonical(tx *sql.Tx, hasLastMessageAt bool, memberLabelSelect string) error {
 	lastMessageSelect := `last_message_at`
 	if !hasLastMessageAt {
@@ -463,7 +409,7 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 		{name: "integration_credentials", columns: []string{"user_id", "project_id", "owner_type", "owner_id"}, forbid: nil},
 		{name: "decisions", columns: []string{"id", "project_id", "invalidation_conditions_json"}, forbid: nil},
 		{name: "agent_space_entries", columns: []string{"entry_id", "event_id", "run_id", "kind", "surface", "created_at"}, forbid: nil},
-		{name: "members", columns: []string{"member_id", "space_id", "member_type", "lifecycle_state", "harness_kind", "member_json"}, forbid: []string{"role_id", "session_token_hash", "session_token_prefix", "provisioning_mode", "external_session_id"}},
+		{name: "members", columns: []string{"member_id", "project_id", "member_type", "lifecycle_state", "harness_kind", "member_json"}, forbid: []string{"space_id", "role_id", "session_token_hash", "session_token_prefix", "provisioning_mode", "external_session_id"}},
 		{name: "plans", columns: []string{"id", "space_id", "mission_id", "kr_refs_json"}, forbid: nil},
 	}
 

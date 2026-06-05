@@ -7,8 +7,6 @@ const (
 	NodeTypeDecision       = "decision"
 	NodeTypeKeyResult      = "key_result"
 	NodeTypeMission        = "mission"
-	NodeTypeOperatorAction = "operator_action"
-	NodeTypeEscalation     = "escalation"
 	NodeTypePlan           = "plan"
 	NodeTypeAll            = "all"
 )

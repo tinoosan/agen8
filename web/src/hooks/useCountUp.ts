@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 /**
  * Animates a number from 0 to the target value over `duration` ms.
@@ -11,7 +11,10 @@ export function useCountUp(
   opts?: { duration?: number; format?: (n: number) => string },
 ): string {
   const duration = opts?.duration ?? 600
-  const format = opts?.format ?? ((n: number) => String(Math.round(n)))
+  const format = useMemo(
+    () => opts?.format ?? ((n: number) => String(Math.round(n))),
+    [opts?.format],
+  )
 
   const [display, setDisplay] = useState(() => format(0))
   const prevTarget = useRef(0)

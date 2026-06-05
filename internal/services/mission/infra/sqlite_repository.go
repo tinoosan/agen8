@@ -245,16 +245,16 @@ func (r *SQLiteRepository) saveKeyResult(ctx context.Context, keyResult kr.KeyRe
 	}
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO key_results (
-			key_result_id, mission_id, status, space_id, created_at, updated_at, completed_at, key_result_json
+			key_result_id, mission_id, status, project_id, created_at, updated_at, completed_at, key_result_json
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(key_result_id) DO UPDATE SET
 			mission_id = excluded.mission_id,
 			status = excluded.status,
-			space_id = excluded.space_id,
+			project_id = excluded.project_id,
 			updated_at = excluded.updated_at,
 			completed_at = excluded.completed_at,
 			key_result_json = excluded.key_result_json
-	`, string(keyResult.ID), string(keyResult.MissionID), string(keyResult.Status), strings.TrimSpace(keyResult.SpaceID), timeString(keyResult.CreatedAt), timeString(keyResult.UpdatedAt), optionalTimeString(keyResult.CompletedAt), string(payload))
+	`, string(keyResult.ID), string(keyResult.MissionID), string(keyResult.Status), strings.TrimSpace(keyResult.ProjectID), timeString(keyResult.CreatedAt), timeString(keyResult.UpdatedAt), optionalTimeString(keyResult.CompletedAt), string(payload))
 	if err != nil {
 		return fmt.Errorf("save key result %s: %w", keyResult.ID, err)
 	}
@@ -285,7 +285,7 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 			key_result_id TEXT PRIMARY KEY,
 			mission_id TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT '',
-			space_id TEXT NOT NULL DEFAULT '',
+			project_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT,
 			updated_at TEXT,
 			completed_at TEXT,
@@ -293,7 +293,7 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_key_results_mission ON key_results(mission_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_key_results_status ON key_results(status)`,
-		`CREATE INDEX IF NOT EXISTS idx_key_results_space ON key_results(space_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_key_results_project ON key_results(project_id)`,
 		`CREATE TABLE IF NOT EXISTS key_result_progress_entries (
 			progress_entry_id TEXT PRIMARY KEY,
 			key_result_id TEXT NOT NULL DEFAULT '',

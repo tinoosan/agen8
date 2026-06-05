@@ -588,9 +588,6 @@ func inferNodeTypeFromID(nodeID string) (string, error) {
 		{"dec-", domain.NodeTypeDecision},
 		{"kr-", domain.NodeTypeKeyResult},
 		{"mis-", domain.NodeTypeMission},
-		{"oa-", domain.NodeTypeOperatorAction},
-		{"op-", domain.NodeTypeOperatorAction},
-		{"esc-", domain.NodeTypeEscalation},
 	}
 	for _, candidate := range prefixMap {
 		if strings.HasPrefix(id, candidate.prefix) {
@@ -698,8 +695,6 @@ func edgeCreatedByFromLink(link contextlink.Link, origin string) string {
 			return "task_service"
 		case domain.NodeTypeDecision:
 			return "decision_service"
-		case domain.NodeTypeOperatorAction, domain.NodeTypeEscalation:
-			return "operator_service"
 		}
 	}
 	return createdBy

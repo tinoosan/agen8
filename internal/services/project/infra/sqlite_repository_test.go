@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/cluster"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
@@ -15,7 +14,7 @@ import (
 func TestSQLiteRepository_ProjectLifecycle(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo, _ := newSQLiteProjectReposForTest(t)
+	repo := newSQLiteProjectRepoForTest(t)
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 
 	saved, err := repo.Save(ctx, project.Record{
@@ -60,7 +59,7 @@ func TestSQLiteRepository_ProjectLifecycle(t *testing.T) {
 func TestSQLiteRepository_ProjectValidationAndNotFound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo, _ := newSQLiteProjectReposForTest(t)
+	repo := newSQLiteProjectRepoForTest(t)
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 
 	if _, err := repo.Save(ctx, project.Record{ID: "project-1", CreatedAt: now}); err == nil {
@@ -71,88 +70,6 @@ func TestSQLiteRepository_ProjectValidationAndNotFound(t *testing.T) {
 	}
 	if err := repo.Delete(ctx, "missing"); !errors.Is(err, project.ErrNotFound) {
 		t.Fatalf("Delete missing error = %v", err)
-	}
-}
-
-func TestSQLiteClusterRepository_ClusterAndSpaceRefs(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	_, clusters := newSQLiteProjectReposForTest(t)
-	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-
-	saved, err := clusters.Save(ctx, cluster.Record{
-		ID:        "cluster-1",
-		ProjectID: "project-1",
-		Name:      "Launch",
-		Status:    cluster.StatusOpen,
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-	if err != nil {
-		t.Fatalf("Save cluster: %v", err)
-	}
-	if saved.ID != "cluster-1" || saved.ProjectID != "project-1" {
-		t.Fatalf("saved cluster = %+v", saved)
-	}
-
-	if _, err := clusters.SaveSpace(ctx, cluster.SpaceRefRecord{
-		ClusterID: "cluster-1",
-		SpaceID:   "space-2",
-		SortOrder: 2,
-		Pinned:    false,
-	}); err != nil {
-		t.Fatalf("SaveSpace space-2: %v", err)
-	}
-	if _, err := clusters.SaveSpace(ctx, cluster.SpaceRefRecord{
-		ClusterID: "cluster-1",
-		SpaceID:   "space-1",
-		SortOrder: 1,
-		Pinned:    true,
-	}); err != nil {
-		t.Fatalf("SaveSpace space-1: %v", err)
-	}
-
-	listed, err := clusters.List(ctx, cluster.Filter{ProjectID: "project-1", Status: cluster.StatusOpen})
-	if err != nil {
-		t.Fatalf("List clusters: %v", err)
-	}
-	if len(listed) != 1 || listed[0].Name != "Launch" {
-		t.Fatalf("listed clusters = %+v", listed)
-	}
-	spaces, err := clusters.ListSpaces(ctx, "cluster-1")
-	if err != nil {
-		t.Fatalf("ListSpaces: %v", err)
-	}
-	if len(spaces) != 2 || spaces[0].SpaceID != "space-1" || !spaces[0].Pinned {
-		t.Fatalf("cluster spaces = %+v", spaces)
-	}
-
-	if err := clusters.RemoveSpace(ctx, "cluster-1", "space-1"); err != nil {
-		t.Fatalf("RemoveSpace: %v", err)
-	}
-	spaces, err = clusters.ListSpaces(ctx, "cluster-1")
-	if err != nil {
-		t.Fatalf("ListSpaces after remove: %v", err)
-	}
-	if len(spaces) != 1 || spaces[0].SpaceID != "space-2" {
-		t.Fatalf("cluster spaces after remove = %+v", spaces)
-	}
-}
-
-func TestSQLiteClusterRepository_ValidationAndNotFound(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	_, clusters := newSQLiteProjectReposForTest(t)
-	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-
-	if _, err := clusters.Save(ctx, cluster.Record{ID: "cluster-1", ProjectID: "project-1", CreatedAt: now}); err == nil {
-		t.Fatalf("expected missing cluster name error")
-	}
-	if _, err := clusters.SaveSpace(ctx, cluster.SpaceRefRecord{ClusterID: "cluster-1"}); err == nil {
-		t.Fatalf("expected missing space id error")
-	}
-	if err := clusters.RemoveSpace(ctx, "cluster-1", "missing"); !errors.Is(err, cluster.ErrNotFound) {
-		t.Fatalf("RemoveSpace missing error = %v", err)
 	}
 }
 
@@ -167,28 +84,16 @@ func TestRepositoryBuildersSelectSQLiteFromHandle(t *testing.T) {
 	if _, ok := projects.(*SQLiteRepository); !ok {
 		t.Fatalf("NewRepository type = %T, want *SQLiteRepository", projects)
 	}
-
-	clusters, err := NewClusterRepository(handle)
-	if err != nil {
-		t.Fatalf("NewClusterRepository: %v", err)
-	}
-	if _, ok := clusters.(*SQLiteClusterRepository); !ok {
-		t.Fatalf("NewClusterRepository type = %T, want *SQLiteClusterRepository", clusters)
-	}
 }
 
-func newSQLiteProjectReposForTest(t *testing.T) (*SQLiteRepository, *SQLiteClusterRepository) {
+func newSQLiteProjectRepoForTest(t *testing.T) *SQLiteRepository {
 	t.Helper()
 	handle := newSQLiteHandleForTest(t)
 	projects, err := NewSQLiteRepository(handle.DB())
 	if err != nil {
 		t.Fatalf("NewSQLiteRepository: %v", err)
 	}
-	clusters, err := NewSQLiteClusterRepository(handle.DB())
-	if err != nil {
-		t.Fatalf("NewSQLiteClusterRepository: %v", err)
-	}
-	return projects, clusters
+	return projects
 }
 
 func newSQLiteHandleForTest(t *testing.T) *storagedb.Handle {

@@ -9,8 +9,6 @@ function edgeLabelForward(target: string): string {
   if (target.startsWith('task:')) return 'task'
   if (target.startsWith('decision:')) return 'decision'
   if (target.startsWith('plan:')) return 'plan'
-  if (target.startsWith('oa:')) return 'action'
-  if (target.startsWith('escalation:')) return 'escalation'
   return 'key result'  // KR IDs have no prefix
 }
 

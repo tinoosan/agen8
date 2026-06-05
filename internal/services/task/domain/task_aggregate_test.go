@@ -5,9 +5,8 @@ import (
 	"testing"
 	"time"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 var fixedTime = time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
@@ -15,7 +14,7 @@ var fixedTime = time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 func makeTask(status TaskStatus) Task {
 	return Task{
 		ID:          TaskID("task-1"),
-		SpaceID:     spacedomain.SpaceID("space-1"),
+		ProjectID:   types.ProjectID("project-1"),
 		AssignedTo:  member.ID("member-fred"),
 		Description: "do the thing",
 		AcceptanceCriteria: []AcceptanceCriterion{
@@ -265,7 +264,7 @@ func TestReview_RejectsMissingOrUnknownCriteria(t *testing.T) {
 }
 
 func TestBlockUnblock(t *testing.T) {
-	blocked, err := makeTask(TaskStatusActive).Block("waiting on operator", fixedTime)
+	blocked, err := makeTask(TaskStatusActive).Block("waiting on prerequisite task", fixedTime)
 	if err != nil {
 		t.Fatalf("Block returned error: %v", err)
 	}
@@ -338,7 +337,7 @@ func TestTransitions_DoNotMutateReceiver(t *testing.T) {
 
 func TestNewTask_HappyPath(t *testing.T) {
 	task, err := NewTask(NewTaskInput{
-		SpaceID:            spacedomain.SpaceID("space-1"),
+		ProjectID:          types.ProjectID("project-1"),
 		CreatedBy:          "coordinator",
 		AssignedTo:         member.ID("member-fred"),
 		Description:        "ship the thing",
@@ -351,8 +350,8 @@ func TestNewTask_HappyPath(t *testing.T) {
 	if task.Status != TaskStatusPending {
 		t.Fatalf("status=%s want pending", task.Status)
 	}
-	if task.SpaceID != "space-1" {
-		t.Fatalf("spaceId=%s want space-1", task.SpaceID)
+	if task.ProjectID != "project-1" {
+		t.Fatalf("projectId=%s want project-1", task.ProjectID)
 	}
 	if task.AssignedMemberID() != "member-fred" {
 		t.Fatalf("assignedTo=%q want member-fred", task.AssignedMemberID())
@@ -370,7 +369,7 @@ func TestNewTask_HappyPath(t *testing.T) {
 
 func TestNewTask_RejectsMissingRequiredFields(t *testing.T) {
 	base := NewTaskInput{
-		SpaceID:     spacedomain.SpaceID("space-1"),
+		ProjectID:   types.ProjectID("project-1"),
 		CreatedBy:   "coordinator",
 		AssignedTo:  member.ID("member-fred"),
 		Description: "do",
@@ -380,7 +379,7 @@ func TestNewTask_RejectsMissingRequiredFields(t *testing.T) {
 		mutate func(NewTaskInput) NewTaskInput
 		want   string
 	}{
-		{"empty SpaceID", func(in NewTaskInput) NewTaskInput { in.SpaceID = "  "; return in }, "space id"},
+		{"empty ProjectID", func(in NewTaskInput) NewTaskInput { in.ProjectID = "  "; return in }, "project id"},
 		{"empty CreatedBy", func(in NewTaskInput) NewTaskInput { in.CreatedBy = ""; return in }, "created by"},
 		{"empty AssignedTo", func(in NewTaskInput) NewTaskInput { in.AssignedTo = ""; return in }, "assigned member id"},
 		{"empty Description", func(in NewTaskInput) NewTaskInput { in.Description = ""; return in }, "description"},

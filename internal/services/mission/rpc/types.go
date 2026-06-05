@@ -92,8 +92,8 @@ type KeyResultView struct {
 	CurrentValue          float64  `json:"currentValue"`
 	ProgressPercent       int      `json:"progressPercent"`
 	Status                string   `json:"status"`
-	SpaceID               string   `json:"spaceId,omitempty"`
-	OwnerSpaceName        string   `json:"ownerSpaceName,omitempty"`
+	ProjectID             string   `json:"projectId,omitempty"`
+	OwnerProjectName      string   `json:"ownerProjectName,omitempty"`
 	LastMilestoneNotified int      `json:"lastMilestoneNotified"`
 	Version               int64    `json:"version"`
 }
@@ -135,12 +135,12 @@ type UpdateKeyResultResult struct {
 	KeyResult KeyResultView `json:"keyResult"`
 }
 
-type AssignKeyResultSpaceParams struct {
+type AssignKeyResultProjectParams struct {
 	KeyResultID string `json:"keyResultId"`
-	SpaceID     string `json:"spaceId"`
+	ProjectID   string `json:"projectId"`
 }
 
-type AssignKeyResultSpaceResult struct {
+type AssignKeyResultProjectResult struct {
 	KeyResult KeyResultView `json:"keyResult"`
 }
 

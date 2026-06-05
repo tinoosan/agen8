@@ -8,9 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
@@ -128,9 +127,9 @@ func (r *PostgresRepository) saveTask(ctx context.Context, task domain.Task) err
 	if task.ID == "" {
 		return fmt.Errorf("task id is required")
 	}
-	task.SpaceID = spacedomain.SpaceID(strings.TrimSpace(string(task.SpaceID)))
-	if task.SpaceID == "" {
-		return fmt.Errorf("task space id is required")
+	task.ProjectID = types.ProjectID(strings.TrimSpace(string(task.ProjectID)))
+	if task.ProjectID == "" {
+		return fmt.Errorf("task project id is required")
 	}
 	task.AssignedTo = member.ID(strings.TrimSpace(string(task.AssignedTo)))
 	task.ClaimedByMemberID = member.ID(strings.TrimSpace(string(task.ClaimedByMemberID)))
@@ -145,12 +144,12 @@ func (r *PostgresRepository) saveTask(ctx context.Context, task domain.Task) err
 	}
 	_, err = r.db.ExecContext(ctx, r.rebind(`
 		INSERT INTO tasks (
-			task_id, space_id, assigned_to, claimed_by_member_id, task_kind, status,
+			task_id, project_id, assigned_to, claimed_by_member_id, task_kind, status,
 			key_result_ref, plan_phase_id, plan_todo_id, created_at, updated_at,
 			completed_at, task_json
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
-			space_id = excluded.space_id,
+			project_id = excluded.project_id,
 			assigned_to = excluded.assigned_to,
 			claimed_by_member_id = excluded.claimed_by_member_id,
 			task_kind = excluded.task_kind,
@@ -164,7 +163,7 @@ func (r *PostgresRepository) saveTask(ctx context.Context, task domain.Task) err
 			task_json = excluded.task_json
 	`),
 		string(task.ID),
-		string(task.SpaceID),
+		string(task.ProjectID),
 		string(task.AssignedTo),
 		string(task.ClaimedByMemberID),
 		task.TaskKind,
@@ -187,7 +186,7 @@ func (r *PostgresRepository) ensureSchema(ctx context.Context) error {
 	if _, err := r.db.ExecContext(ctx, r.rebind(`
 		CREATE TABLE IF NOT EXISTS tasks (
 			task_id TEXT PRIMARY KEY,
-			space_id TEXT NOT NULL DEFAULT '',
+			project_id TEXT NOT NULL DEFAULT '',
 			assigned_to TEXT NOT NULL DEFAULT '',
 			claimed_by_member_id TEXT NOT NULL DEFAULT '',
 			task_kind TEXT NOT NULL DEFAULT '',
@@ -217,7 +216,7 @@ func (r *PostgresRepository) ensureSchema(ctx context.Context) error {
 		}
 	}
 	for _, stmt := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_tasks_space ON tasks(space_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by_member_id ON tasks(claimed_by_member_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,

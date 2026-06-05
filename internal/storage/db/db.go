@@ -186,6 +186,9 @@ func SQLitePath(dataDir string) string {
 }
 
 func SQLiteDSN(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	q := url.Values{}
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "foreign_keys(1)")

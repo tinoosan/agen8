@@ -34,8 +34,7 @@ function connectedEdges(nodeIds: Set<string>, edges: Edge[]): Set<string> {
 
 // ── Attention filter ────────────────────────────────────────────────────
 
-/** Nodes needing human action: blocked tasks, pending OAs/escalations,
- *  input-needed decisions, plans pending approval. */
+/** Nodes needing human action: blocked/review tasks and input-needed decisions. */
 export function computeAttentionFilter(
   nodes: Node[],
   edges: Edge[],
@@ -75,19 +74,6 @@ export function computeAttentionFilter(
         if (hasBlockingUnanswered) matchedIds.add(node.id)
         break
       }
-      case 'operatorAction': {
-        const oa = d.oa as { status?: string; blocking?: boolean } | undefined
-        if (!oa || oa.status === 'completed' || oa.status === 'canceled') break
-        if (oa.status === 'pending' || oa.status === 'blocked' || oa.blocking) {
-          matchedIds.add(node.id)
-        }
-        break
-      }
-      case 'escalation': {
-        const esc = d.escalation as { status?: string } | undefined
-        if (esc?.status === 'pending') matchedIds.add(node.id)
-        break
-      }
       case 'plan': {
         const plan = d.plan as { status?: string } | undefined
         if (plan?.status === 'pending_approval') matchedIds.add(node.id)
@@ -103,8 +89,7 @@ export function computeAttentionFilter(
 
 // ── Failed & Cancelled filter ───────────────────────────────────────────
 
-/** Dead/failed work: failed tasks, cancelled decisions, abandoned plans,
- *  expired/cancelled escalations, cancelled OAs. */
+/** Dead/failed work: failed tasks, cancelled decisions, and abandoned plans. */
 export function computeFailedFilter(
   nodes: Node[],
   edges: Edge[],
@@ -130,18 +115,6 @@ export function computeFailedFilter(
       case 'plan': {
         const plan = d.plan as { status?: string } | undefined
         if (plan?.status === 'abandoned') matchedIds.add(node.id)
-        break
-      }
-      case 'escalation': {
-        const esc = d.escalation as { status?: string } | undefined
-        if (esc?.status === 'expired' || esc?.status === 'canceled') {
-          matchedIds.add(node.id)
-        }
-        break
-      }
-      case 'operatorAction': {
-        const oa = d.oa as { status?: string } | undefined
-        if (oa?.status === 'canceled') matchedIds.add(node.id)
         break
       }
     }

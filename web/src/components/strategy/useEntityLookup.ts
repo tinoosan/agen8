@@ -1,10 +1,7 @@
 import { useMemo } from 'react'
 import { useRecentDecisions } from '../../hooks/useDecisions'
-import { useAllEscalations } from '../../hooks/useEscalations'
 import { useMissions, useProjectKRs } from '../../hooks/useMissions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
-import { useProjectSpaces } from '../../hooks/useProjectSpaces'
-import { useStrategyMapOpActions } from '../../hooks/useOpActions'
 
 interface EntityResult {
   type: string
@@ -34,18 +31,13 @@ function parseNodeId(nodeId: string): { prefix: string; id: string } {
 export function useEntityLookup(
   nodeId: string | null,
   projectId: string | null,
-  _projectRoot: string | null,
 ): EntityResult | null {
   const { prefix, id } = nodeId ? parseNodeId(nodeId) : { prefix: '', id: '' }
 
-  const spacesQuery = useProjectSpaces(projectId, { refetchInterval: false })
-  const spaces = spacesQuery.data ?? []
   const missionsQuery = useMissions(projectId)
   const krsQuery = useProjectKRs(projectId)
-  const tasksQuery = useProjectTasks(spaces)
+  const tasksQuery = useProjectTasks(projectId)
   const decisionsQuery = useRecentDecisions(projectId)
-  const oasQuery = useStrategyMapOpActions(projectId)
-  const escalationsQuery = useAllEscalations(projectId)
 
   return useMemo(() => {
     if (!nodeId || !id) return null
@@ -62,18 +54,6 @@ export function useEntityLookup(
       return { type: 'decision', data: { decision }, title: decision.title }
     }
 
-    if (prefix === 'oa') {
-      const oa = (oasQuery.data ?? []).find(o => o.id === id)
-      if (!oa) return null
-      return { type: 'operatorAction', data: { oa }, title: oa.title }
-    }
-
-    if (prefix === 'escalation') {
-      const escalation = (escalationsQuery.data ?? []).find(e => e.id === id)
-      if (!escalation) return null
-      return { type: 'escalation', data: { escalation }, title: escalation.title }
-    }
-
     // No prefix — could be a KR or mission (both use raw UUIDs)
     const kr = krsQuery.data?.get(id)
     if (kr) {
@@ -86,5 +66,5 @@ export function useEntityLookup(
     }
 
     return null
-  }, [nodeId, id, prefix, tasksQuery.data, decisionsQuery.data, oasQuery.data, escalationsQuery.data, krsQuery.data, missionsQuery.data])
+  }, [nodeId, id, prefix, tasksQuery.data, decisionsQuery.data, krsQuery.data, missionsQuery.data])
 }

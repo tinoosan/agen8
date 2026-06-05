@@ -5,29 +5,33 @@ import (
 	"fmt"
 	"strings"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8-mcp-server/internal/services/task/app"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
-type Handler struct {
-	svc *taskapp.Service
+type MemberLookup interface {
+	GetMember(ctx context.Context, id member.ID) (member.Record, error)
 }
 
-func NewHandler(svc *taskapp.Service) *Handler {
+type Handler struct {
+	svc     *taskapp.Service
+	members MemberLookup
+}
+
+func NewHandler(svc *taskapp.Service, members MemberLookup) *Handler {
 	if svc == nil {
 		panic("task RPC handler requires task service")
 	}
-	return &Handler{svc: svc}
+	return &Handler{svc: svc, members: members}
 }
 
 func (h *Handler) Create(ctx context.Context, p TaskCreateParams) (TaskCreateResult, error) {
-	spaceID := strings.TrimSpace(p.SpaceID)
-	if spaceID == "" {
-		return TaskCreateResult{}, invalidParams("spaceId is required")
+	projectID := strings.TrimSpace(p.ProjectID)
+	if projectID == "" {
+		return TaskCreateResult{}, invalidParams("projectId is required")
 	}
 	assignedTo := strings.TrimSpace(p.AssignedTo)
 	if assignedTo == "" {
@@ -47,7 +51,7 @@ func (h *Handler) Create(ctx context.Context, p TaskCreateParams) (TaskCreateRes
 	}
 
 	task, err := h.svc.Create(ctx, taskapp.CreateTaskParams{
-		SpaceID:            spacedomain.SpaceID(spaceID),
+		ProjectID:          types.ProjectID(projectID),
 		AssignedTo:         member.ID(assignedTo),
 		Description:        description,
 		AcceptanceCriteria: append([]string(nil), p.AcceptanceCriteria...),
@@ -62,7 +66,7 @@ func (h *Handler) Create(ctx context.Context, p TaskCreateParams) (TaskCreateRes
 	if err != nil {
 		return TaskCreateResult{}, internalError("create task", err)
 	}
-	return TaskCreateResult{Task: NewTaskView(task)}, nil
+	return TaskCreateResult{Task: h.newTaskView(ctx, task)}, nil
 }
 
 func (h *Handler) Get(ctx context.Context, p TaskGetParams) (TaskGetResult, error) {
@@ -74,7 +78,7 @@ func (h *Handler) Get(ctx context.Context, p TaskGetParams) (TaskGetResult, erro
 	if err != nil {
 		return TaskGetResult{}, internalError("get task", err)
 	}
-	return TaskGetResult{Task: NewTaskView(task)}, nil
+	return TaskGetResult{Task: h.newTaskView(ctx, task)}, nil
 }
 
 func (h *Handler) List(ctx context.Context, p TaskListParams) (TaskListResult, error) {
@@ -101,7 +105,7 @@ func (h *Handler) List(ctx context.Context, p TaskListParams) (TaskListResult, e
 		return TaskListResult{}, err
 	}
 	filter := domain.TaskFilter{
-		SpaceID:     spacedomain.SpaceID(strings.TrimSpace(p.SpaceID)),
+		ProjectID:   types.ProjectID(strings.TrimSpace(p.ProjectID)),
 		AssignedTo:  member.ID(strings.TrimSpace(p.AssignedTo)),
 		ClaimedBy:   member.ID(strings.TrimSpace(p.ClaimedBy)),
 		TaskKind:    strings.TrimSpace(p.TaskKind),
@@ -124,7 +128,7 @@ func (h *Handler) List(ctx context.Context, p TaskListParams) (TaskListResult, e
 	}
 	views := make([]TaskView, 0, len(tasks))
 	for _, task := range tasks {
-		views = append(views, NewTaskView(task))
+		views = append(views, h.newTaskView(ctx, task))
 	}
 	return TaskListResult{Tasks: views, TotalCount: count}, nil
 }
@@ -156,7 +160,7 @@ func (h *Handler) Update(ctx context.Context, p TaskUpdateParams) (TaskUpdateRes
 	if err != nil {
 		return TaskUpdateResult{}, internalError("update task", err)
 	}
-	return TaskUpdateResult{Task: NewTaskView(task)}, nil
+	return TaskUpdateResult{Task: h.newTaskView(ctx, task)}, nil
 }
 
 func (h *Handler) Cancel(ctx context.Context, p TaskCancelParams) (TaskCancelResult, error) {
@@ -172,7 +176,51 @@ func (h *Handler) Cancel(ctx context.Context, p TaskCancelParams) (TaskCancelRes
 	if err != nil {
 		return TaskCancelResult{}, internalError("cancel task", err)
 	}
-	return TaskCancelResult{Task: NewTaskView(task)}, nil
+	return TaskCancelResult{Task: h.newTaskView(ctx, task)}, nil
+}
+
+func (h *Handler) newTaskView(ctx context.Context, task domain.Task) TaskView {
+	view := NewTaskView(task)
+	view.AssignedToLabel = h.memberLabel(ctx, task.AssignedTo)
+	view.ClaimedByLabel = h.memberLabel(ctx, task.ClaimedByMemberID)
+	view.CreatedByLabel = h.memberLabel(ctx, member.ID(task.CreatedBy))
+	return view
+}
+
+func (h *Handler) memberLabel(ctx context.Context, id member.ID) string {
+	if h == nil || h.members == nil {
+		return ""
+	}
+	id = member.ID(strings.TrimSpace(string(id)))
+	if id == "" {
+		return ""
+	}
+	rosterMember, err := h.members.GetMember(ctx, id)
+	if err != nil {
+		return ""
+	}
+	if label := strings.TrimSpace(rosterMember.DisplayName); label != "" {
+		return label
+	}
+	if label := strings.TrimSpace(rosterMember.HarnessKind); label != "" {
+		return label
+	}
+	if label := strings.TrimSpace(rosterMember.MemberType); label != "" {
+		return strings.ReplaceAll(label, "_", " ")
+	}
+	return shortMemberID(id)
+}
+
+func shortMemberID(id member.ID) string {
+	raw := strings.TrimSpace(string(id))
+	if raw == "" {
+		return ""
+	}
+	const prefix = "member-"
+	if !strings.HasPrefix(raw, prefix) || len(raw) <= len(prefix)+6 {
+		return raw
+	}
+	return "Member " + raw[len(raw)-6:]
 }
 
 func parseOptionalUUID(raw, field string) (*uuid.UUID, error) {

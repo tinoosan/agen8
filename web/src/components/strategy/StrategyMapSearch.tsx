@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Node } from '@xyflow/react'
-import { Search, Target, Diamond, UserCog, AlertTriangle } from 'lucide-react'
+import { Search, Target, Diamond } from 'lucide-react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { memberDisplayName } from '../../lib/memberDisplay'
 
 interface StrategyMapSearchProps {
   open: boolean
@@ -27,9 +28,6 @@ interface ResultMeta {
   progress?: number
   confidence?: number
   confidenceTone?: string
-  urgency?: string
-  urgencyTone?: string
-  blocking?: boolean
   phaseCount?: number
   todosDone?: number
   todosTotal?: number
@@ -51,13 +49,11 @@ const TYPE_FILTERS: TypeFilter[] = [
   { key: 'keyResult', label: 'KR', prefix: 'kr:' },
   { key: 'task', label: 'Task', prefix: 't:' },
   { key: 'decision', label: 'Decision', prefix: 'd:' },
-  { key: 'operatorAction', label: 'OA', prefix: 'oa:' },
-  { key: 'escalation', label: 'Escalation', prefix: 'e:' },
 ]
 
 // ── Group ordering ──────────────────────────────────────────────────────
 
-const TYPE_ORDER = ['mission', 'keyResult', 'task', 'decision', 'operatorAction', 'escalation']
+const TYPE_ORDER = ['mission', 'keyResult', 'task', 'decision']
 
 function getTypeGroupLabel(type: string): string {
   switch (type) {
@@ -65,8 +61,6 @@ function getTypeGroupLabel(type: string): string {
     case 'keyResult': return 'Key Results'
     case 'decision': return 'Decisions'
     case 'task': return 'Tasks'
-    case 'escalation': return 'Escalations'
-    case 'operatorAction': return 'Operator Actions'
     default: return type
   }
 }
@@ -87,10 +81,6 @@ function getNodeTitle(node: Node): string {
   const task = data.task as { title?: string; description?: string } | undefined
   if (task?.title) return task.title
   if (task?.description) return task.description
-  const escalation = data.escalation as { title?: string } | undefined
-  if (escalation?.title) return escalation.title
-  const oa = data.oa as { title?: string } | undefined
-  if (oa?.title) return oa.title
   return '(untitled)'
 }
 
@@ -100,8 +90,6 @@ function getNodeTypeLabel(type: string | undefined): string {
     case 'keyResult': return 'Key Result'
     case 'decision': return 'Decision'
     case 'task': return 'Task'
-    case 'escalation': return 'Escalation'
-    case 'operatorAction': return 'Operator Action'
     default: return ''
   }
 }
@@ -110,13 +98,6 @@ function confidenceColor(value: number): string {
   if (value >= 0.8) return 'var(--green)'
   if (value >= 0.6) return 'var(--amber)'
   return 'var(--red)'
-}
-
-const URGENCY_TONE: Record<string, string> = {
-  low: 'var(--green)',
-  medium: 'var(--amber)',
-  high: 'var(--amber)',
-  critical: 'var(--red)',
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -192,31 +173,10 @@ function getNodeMeta(node: Node): ResultMeta {
 
   const task = data.task as { status?: string; assignedTo?: string; assignedToLabel?: string } | undefined
   if (task) {
-    const owner = task.assignedToLabel || task.assignedTo
     return {
       status: task.status,
       statusTone: STATUS_TONE[task.status ?? ''],
-      owner: owner?.replaceAll('_', ' ') || undefined,
-    }
-  }
-
-  const oa = data.oa as { status?: string; blocking?: boolean; sourceMemberLabel?: string } | undefined
-  if (oa) {
-    return {
-      status: oa.status,
-      statusTone: STATUS_TONE[oa.status ?? ''],
-      blocking: oa.blocking,
-      owner: oa.sourceMemberLabel?.replaceAll('_', ' ') || undefined,
-    }
-  }
-
-  const escalation = data.escalation as { status?: string; urgency?: string } | undefined
-  if (escalation) {
-    return {
-      status: escalation.status,
-      statusTone: STATUS_TONE[escalation.status ?? ''],
-      urgency: escalation.urgency,
-      urgencyTone: URGENCY_TONE[escalation.urgency ?? ''],
+      owner: memberDisplayName(task.assignedToLabel, task.assignedTo),
     }
   }
 
@@ -545,8 +505,6 @@ function ResultIcon({ type }: { type: string }) {
     case 'keyResult': return <div style={{ width: 13, height: 8, borderRadius: 2, border: '1.5px solid var(--text-3)', flexShrink: 0 }} />
     case 'decision': return <Diamond size={size} style={style} />
     case 'task': return <div style={{ width: 11, height: 11, borderRadius: '50%', border: '1.5px solid var(--text-3)', flexShrink: 0 }} />
-    case 'operatorAction': return <UserCog size={size} style={style} />
-    case 'escalation': return <AlertTriangle size={size} style={style} />
     default: return null
   }
 }
@@ -570,17 +528,6 @@ function ResultMetaRow({ meta, type }: { meta: ResultMeta; type: string }) {
       text: `${Math.round(meta.confidence * 100)}%`,
       color: meta.confidenceTone,
     })
-  }
-
-  if (meta.urgency) {
-    items.push({
-      text: meta.urgency,
-      color: meta.urgencyTone,
-    })
-  }
-
-  if (meta.blocking) {
-    items.push({ text: 'blocking', color: 'var(--red)' })
   }
 
   if (type === 'mission' && meta.decisionCount != null) {

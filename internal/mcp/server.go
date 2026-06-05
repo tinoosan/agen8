@@ -3,8 +3,6 @@ package mcp
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,49 +13,31 @@ import (
 	"sync"
 	"time"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	decisiontool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/decision"
 	graphtool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/graph"
-	harnessapprovaltool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/harnessapproval"
 	httptool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/http"
-	messagetool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/message"
 	missiontool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/mission"
-	operatortool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/operator"
-	scheduletool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/schedule"
-	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/space"
+	projecttool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/project"
 	tasktool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/task"
-	humaninput "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
-
-type HumanInputAwaiter interface {
-	Await(context.Context, humaninput.PendingRequest) (json.RawMessage, error)
-}
 
 type Session struct {
 	Token              string
 	Bootstrap          bool
 	UserID             string
 	ChannelID          types.ChannelID
-	SpaceID            spacedomain.SpaceID
 	MemberID           string
 	HarnessKind        string
-	ContextRegistrar   space.ContextRegistrar
-	SpaceSetup         space.SetupService
-	SpaceReader        space.SpaceService
-	MemberDirectory    space.MemberService
-	MemberRegistrar    space.MemberRegistrar
+	ContextRegistrar   projecttool.ContextRegistrar
+	MemberDirectory    projecttool.MemberService
+	MemberRegistrar    projecttool.MemberRegistrar
 	TaskMembers        tasktool.MemberDirectory
-	MessagePublisher   messagetool.MessagePublisher
 	DecisionService    decisiontool.Service
 	GraphService       graphtool.Service
-	HumanInputAwaiter  HumanInputAwaiter
 	CredentialResolver httptool.CredentialResolver
 	TaskService        tasktool.Service
-	ScheduleService    scheduletool.Service
-	OperatorService    operatortool.Service
 	MissionService     missiontool.MissionLifecycleService
 	MissionKRs         missiontool.KeyResultService
 	MissionProgress    missiontool.ProgressService
@@ -458,8 +438,8 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 				if threadID == "" {
 					threadID = bodyRefs.ThreadID
 				}
-				if strings.EqualFold(strings.TrimSpace(native.name), space.Name) {
-					argSessionID, argThreadID := explicitNativeSessionRefsFromSpaceRegisterArguments(req)
+				if strings.EqualFold(strings.TrimSpace(native.name), projecttool.Name) {
+					argSessionID, argThreadID := explicitNativeSessionRefsFromProjectRegisterArguments(req)
 					if sessionID == "" {
 						sessionID = argSessionID
 					}
@@ -473,7 +453,7 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 				}
 				ctx = contextWithSessionRefs(ctx, sessionID, threadID)
 				result, err := executeNativeMCPTool(ctx, native, session, req)
-				if err == nil && strings.EqualFold(strings.TrimSpace(native.name), space.Name) && strings.EqualFold(mcpToolAction(argumentsFromToolRequest(req)), "register") {
+				if err == nil && strings.EqualFold(strings.TrimSpace(native.name), projecttool.Name) && strings.EqualFold(mcpToolAction(argumentsFromToolRequest(req)), "register") {
 					resultSessionID, resultThreadID := nativeSessionRefsFromToolResult(result)
 					if resultSessionID == "" {
 						resultSessionID = sessionID
@@ -625,15 +605,7 @@ func syntheticJSONRPCMethodBody(method string) []byte {
 }
 
 func toolVisibleForSession(def toolDef, session Session) bool {
-	if !def.native.internal {
-		return true
-	}
-	switch strings.ToLower(strings.TrimSpace(session.HarnessKind)) {
-	case "claude-cli", "claude-code":
-		return strings.EqualFold(strings.TrimSpace(def.name()), harnessapprovaltool.Name)
-	default:
-		return false
-	}
+	return !def.native.internal
 }
 
 func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Session, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -648,11 +620,11 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 		return mcpToolCallErrorResult(fmt.Sprintf("tool %q arguments must be valid JSON", def.name)), nil
 	}
 	if session.Bootstrap {
-		if !strings.EqualFold(strings.TrimSpace(def.name), space.Name) {
-			return mcpToolCallErrorResult("mcp session is not registered; call space.register first"), nil
+		if !strings.EqualFold(strings.TrimSpace(def.name), projecttool.Name) {
+			return mcpToolCallErrorResult("mcp session is not registered; call project.register first"), nil
 		}
-		if !space.BootstrapActionAllowed(mcpToolAction(arguments)) {
-			return mcpToolCallErrorResult("mcp session is not registered; call space.register first"), nil
+		if !projecttool.BootstrapActionAllowed(mcpToolAction(arguments)) {
+			return mcpToolCallErrorResult("mcp session is not registered; call project.register first"), nil
 		}
 	}
 	switch strings.TrimSpace(def.name) {
@@ -661,39 +633,8 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 		call := decisiontool.CallContext{
 			Decisions:     session.DecisionService,
 			ProjectID:     strings.TrimSpace(session.ProjectID),
-			SpaceID:       strings.TrimSpace(string(session.SpaceID)),
 			ActorMemberID: strings.TrimSpace(session.MemberID),
-		}
-		declaration, pending, err := handler.DeclareHumanInput(ctx, arguments)
-		if err != nil {
-			return mcpToolCallErrorResult(err.Error()), nil
-		}
-		if pending {
-			if session.HumanInputAwaiter == nil {
-				return mcpToolCallErrorResult("decision: human input awaiter is not configured"), nil
-			}
-			toolCallID := stableHumanInputToolCallID(def.name, arguments)
-			resolved, err := session.HumanInputAwaiter.Await(ctx, humaninput.PendingRequest{
-				ToolCallID:     toolCallID,
-				ToolName:       decisiontool.Name,
-				IdempotencyKey: toolCallID,
-				Declaration:    declaration,
-				ProjectID:      strings.TrimSpace(session.ProjectID),
-				SpaceID:        strings.TrimSpace(string(session.SpaceID)),
-				MemberID:       strings.TrimSpace(session.MemberID),
-				ChannelID:      strings.TrimSpace(string(session.ChannelID)),
-			})
-			if err != nil {
-				return mcpToolCallErrorResult(err.Error()), nil
-			}
-			result, err := handler.ResolveHumanInput(ctx, arguments, resolved, call)
-			if err != nil {
-				return mcpToolCallErrorResult(err.Error()), nil
-			}
-			return &mcp.CallToolResult{
-				Content:           []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(result.Text)}},
-				StructuredContent: result.Structured,
-			}, nil
+			UserID:        strings.TrimSpace(session.UserID),
 		}
 		result, err := handler.Handle(ctx, call, arguments)
 		if err != nil {
@@ -714,26 +655,11 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 			Content:           []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(result.Text)}},
 			StructuredContent: result.Structured,
 		}, nil
-	case harnessapprovaltool.Name:
-		result, err := harnessapprovaltool.NewHandler().Handle(ctx, harnessapprovaltool.CallContext{
-			HumanInputAwaiter: session.HumanInputAwaiter,
-			ProjectID:         strings.TrimSpace(session.ProjectID),
-			SpaceID:           strings.TrimSpace(string(session.SpaceID)),
-			MemberID:          strings.TrimSpace(session.MemberID),
-			ChannelID:         strings.TrimSpace(string(session.ChannelID)),
-		}, arguments)
-		if err != nil {
-			return mcpToolCallErrorResult(err.Error()), nil
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(result.Text)}},
-		}, nil
 	case graphtool.Name:
 		result, err := graphtool.NewHandler().Handle(ctx, graphtool.CallContext{
 			Graph:         session.GraphService,
 			Members:       session.MemberDirectory,
 			ProjectID:     strings.TrimSpace(session.ProjectID),
-			SpaceID:       strings.TrimSpace(string(session.SpaceID)),
 			ActorMemberID: strings.TrimSpace(session.MemberID),
 		}, arguments)
 		if err != nil {
@@ -743,34 +669,16 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 			Content:           []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(result.Text)}},
 			StructuredContent: result.Structured,
 		}, nil
-	case messagetool.Name:
-		result, err := messagetool.NewHandler().Handle(ctx, messagetool.CallContext{
-			Members:       session.MemberDirectory,
-			Messages:      session.MessagePublisher,
-			ProjectID:     strings.TrimSpace(session.ProjectID),
-			SpaceID:       strings.TrimSpace(string(session.SpaceID)),
-			ActorMemberID: strings.TrimSpace(session.MemberID),
-		}, arguments)
-		if err != nil {
-			return mcpToolCallErrorResult(err.Error()), nil
-		}
-		return &mcp.CallToolResult{
-			Content:           []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(result.Text)}},
-			StructuredContent: result.Structured,
-		}, nil
-	case space.Name:
+	case projecttool.Name:
 		sessionID, threadID := explicitNativeSessionRefsFromToolRequest(req)
-		result, err := space.NewHandler().Handle(ctx, space.CallContext{
-			Spaces:           session.SpaceReader,
+		result, err := projecttool.NewHandler().Handle(ctx, projecttool.CallContext{
 			Members:          session.MemberDirectory,
 			Registrar:        session.MemberRegistrar,
 			ContextRegistrar: session.ContextRegistrar,
-			SpaceSetup:       session.SpaceSetup,
 			MCPToken:         strings.TrimSpace(session.Token),
 			UserID:           strings.TrimSpace(session.UserID),
 			HarnessKind:      strings.TrimSpace(session.HarnessKind),
 			ProjectID:        strings.TrimSpace(session.ProjectID),
-			SpaceID:          strings.TrimSpace(string(session.SpaceID)),
 			ActorMemberID:    strings.TrimSpace(session.MemberID),
 			SessionID:        sessionID,
 			ThreadID:         threadID,
@@ -790,34 +698,6 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 			Progress:      session.MissionProgress,
 			Members:       session.MemberDirectory,
 			ProjectID:     strings.TrimSpace(session.ProjectID),
-			SpaceID:       strings.TrimSpace(string(session.SpaceID)),
-			ActorMemberID: strings.TrimSpace(session.MemberID),
-		}, arguments)
-		if err != nil {
-			return mcpToolCallErrorResult(err.Error()), nil
-		}
-		return &mcp.CallToolResult{
-			Content:           []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(result.Text)}},
-			StructuredContent: result.Structured,
-		}, nil
-	case operatortool.Name:
-		result, err := operatortool.NewHandler().Handle(ctx, operatortool.CallContext{
-			Operator:      session.OperatorService,
-			ProjectID:     strings.TrimSpace(session.ProjectID),
-			SpaceID:       strings.TrimSpace(string(session.SpaceID)),
-			ActorMemberID: strings.TrimSpace(session.MemberID),
-		}, arguments)
-		if err != nil {
-			return mcpToolCallErrorResult(err.Error()), nil
-		}
-		return &mcp.CallToolResult{
-			Content:           []mcp.Content{&mcp.TextContent{Text: strings.TrimSpace(result.Text)}},
-			StructuredContent: result.Structured,
-		}, nil
-	case scheduletool.Name:
-		result, err := scheduletool.NewHandler().Handle(ctx, scheduletool.CallContext{
-			Schedules:     session.ScheduleService,
-			SpaceID:       strings.TrimSpace(string(session.SpaceID)),
 			ActorMemberID: strings.TrimSpace(session.MemberID),
 		}, arguments)
 		if err != nil {
@@ -832,7 +712,6 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 			Tasks:         session.TaskService,
 			Members:       session.TaskMembers,
 			ProjectID:     strings.TrimSpace(session.ProjectID),
-			SpaceID:       strings.TrimSpace(string(session.SpaceID)),
 			ActorMemberID: strings.TrimSpace(session.MemberID),
 		}, arguments)
 		if err != nil {
@@ -885,7 +764,7 @@ func explicitNativeSessionRefsFromToolRequest(req *mcp.CallToolRequest) (session
 	if sessionID != "" || threadID != "" {
 		return sessionID, threadID
 	}
-	sessionID, threadID = explicitNativeSessionRefsFromSpaceRegisterArguments(req)
+	sessionID, threadID = explicitNativeSessionRefsFromProjectRegisterArguments(req)
 	if sessionID != "" || threadID != "" {
 		return sessionID, threadID
 	}
@@ -896,7 +775,7 @@ func explicitNativeSessionRefsFromToolRequest(req *mcp.CallToolRequest) (session
 	return strings.TrimSpace(header.Get(agen8NativeSessionIDHeader)), strings.TrimSpace(header.Get(agen8NativeThreadIDHeader))
 }
 
-func explicitNativeSessionRefsFromSpaceRegisterArguments(req *mcp.CallToolRequest) (sessionID, threadID string) {
+func explicitNativeSessionRefsFromProjectRegisterArguments(req *mcp.CallToolRequest) (sessionID, threadID string) {
 	if req == nil || req.Params == nil || len(req.Params.Arguments) == 0 {
 		return "", ""
 	}
@@ -973,7 +852,7 @@ func SessionRequestContextFromJSONRPCBody(body []byte) SessionRequestContext {
 		}
 	}
 	if strings.TrimSpace(envelope.Method) == "tools/call" &&
-		strings.TrimSpace(envelope.Params.Name) == space.Name &&
+		strings.TrimSpace(envelope.Params.Name) == projecttool.Name &&
 		strings.TrimSpace(envelope.Params.Arguments.Action) == "register" {
 		if sessionID == "" {
 			sessionID = strings.TrimSpace(envelope.Params.Arguments.SessionID)
@@ -1053,11 +932,6 @@ func metaString(value any) string {
 	default:
 		return ""
 	}
-}
-
-func stableHumanInputToolCallID(toolName string, arguments json.RawMessage) string {
-	sum := sha256.Sum256(bytes.TrimSpace(arguments))
-	return "mcp:" + strings.TrimSpace(toolName) + ":" + hex.EncodeToString(sum[:8])
 }
 
 func (s *Server) hasToolForSession(name string, session Session) bool {

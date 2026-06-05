@@ -14,7 +14,6 @@ import {
   basename,
   isDiffSkipped,
   guessLang,
-  looksLikeSpaceUUID,
   FILE_WRITE_KINDS,
 } from './activityHelpers'
 import { DiffBlock } from './DiffBlock'
@@ -26,22 +25,6 @@ const ActivityCodeBlock = lazy(() => import('./ActivityCodeBlock'))
 function renderJSONOrText(data: unknown): string {
   if (typeof data === 'string') return data
   return JSON.stringify(data, null, 2)
-}
-
-function isInternalMemberRef(value: string): boolean {
-  return /^member-[0-9a-f-]{8,}$/i.test(String(value ?? '').trim())
-}
-
-function isInternalSpaceRef(value: string): boolean {
-  return /^space-[0-9a-f-]{8,}$/i.test(String(value ?? '').trim())
-}
-
-function productSpaceDestination(value: string): string {
-  const text = String(value ?? '').trim()
-  if (!text) return ''
-  if (isInternalMemberRef(text) || text.includes(':member:')) return 'Member'
-  if (isInternalSpaceRef(text) || looksLikeSpaceUUID(text)) return 'Space'
-  return text
 }
 
 function parseSpaceEntryLine(line: string): { displayName: string; status: string; roles: string[]; coordinatorRole: string } | null {
@@ -120,7 +103,6 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
   const isPending = statusClass === 'pending'
   const kindLower = (event.kind ?? '').toLowerCase()
   const spaceAction = kindLower === 'space' ? (event.data?.action || '').toLowerCase() : ''
-  const isSpaceMessageEvent = kindLower === 'space_message' || (kindLower === 'space' && spaceAction === 'message')
   const isSpaceListEvent = kindLower === 'list_spaces' || (kindLower === 'space' && spaceAction === 'list')
 
   // Inline context: file path, command, spawned role, error
@@ -128,11 +110,6 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
   const inlineCommand = kindLower.includes('exec') ? (event.data?.command || event.data?.cmd) : null
   const inlineExitCode = event.data?.exit_code ?? event.data?.exitCode
   const inlineSpawnRole = kindLower.includes('spawn') ? (event.data?.spawned_role || event.data?.role_name || event.data?.spawnedRole) : null
-  const rawSpaceDest = isSpaceMessageEvent
-    ? (event.data?.destinationLabel || event.data?.destinationMemberLabel || event.data?.destinationSpaceRef || event.data?.destinationSpaceId || event.data?.destinationChannelId)
-    : null
-  const inlineSpaceDest = rawSpaceDest ? productSpaceDestination(rawSpaceDest) : null
-  const inlineSpaceKind = isSpaceMessageEvent ? (event.data?.kind || event.data?.message_kind) : null
   const inlineError = isError ? (event.error || event.data?.error) : null
 
   // Duration
@@ -186,29 +163,6 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
       }
     }
 
-    // Structured display for space message events.
-    if (isSpaceMessageEvent && event.data) {
-      const {
-        kind: msgKind,
-        destinationLabel,
-        destinationMemberLabel,
-        destinationSpaceRef,
-        destinationSpaceId,
-        destinationChannelId,
-        subject,
-        body,
-        correlationId,
-        broadcast,
-      } = event.data
-      const rawDest = destinationLabel || destinationMemberLabel || destinationSpaceRef || destinationSpaceId || destinationChannelId
-      const dest = rawDest ? productSpaceDestination(rawDest) : ''
-      if (msgKind) d['Kind'] = <span className="font-semibold">{msgKind}</span>
-      if (dest) d['To'] = <span className="text-[var(--accent)] font-semibold">{dest}</span>
-      if (broadcast === 'true') d['Broadcast'] = <span className="text-[var(--amber)]">Yes</span>
-      if (subject) d['Subject'] = <span>{subject}</span>
-      if (body) d['Body'] = <span className="whitespace-pre-wrap">{body}</span>
-      if (correlationId) d['Space'] = <span className="mono text-[10px] text-[var(--text-3)]">{correlationId}</span>
-    }
     if (isSpaceListEvent) {
       const rows = parseSpaceRows(event.data)
       if (rows.length === 0) {
@@ -244,11 +198,6 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
         delete remainingData.textBytes
       }
       // Suppress fields already shown in structured views
-      if (isSpaceMessageEvent) {
-        for (const k of ['kind', 'destinationLabel', 'destinationMemberLabel', 'destinationMemberId', 'destinationSpaceRef', 'destinationSpaceId', 'destinationChannelId', 'subject', 'body', 'correlationId', 'broadcast', 'timeoutSeconds']) {
-          delete remainingData[k]
-        }
-      }
       if (isSpaceListEvent) {
         for (const k of ['spacesJson', 'spaceEntries', 'result', 'count']) {
           delete remainingData[k]
@@ -261,12 +210,12 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
     }
 
     if (event.path) d['Path'] = <span className="mono">{event.path}</span>
-    if (event.outputPreview && !isSpaceMessageEvent && !isSpaceListEvent) {
+    if (event.outputPreview && !isSpaceListEvent) {
       d['Output'] = <div className="md-prose"><ReactMarkdown remarkPlugins={[remarkGfm]}>{event.outputPreview}</ReactMarkdown></div>
     }
     if (event.error) d['Error'] = <span className="mono text-[var(--red)]">{event.error}</span>
     return d
-  }, [event, isSpaceListEvent, isSpaceMessageEvent])
+  }, [event, isSpaceListEvent])
 
   const hasDetail = Object.keys(detailsList).length > 0
 
@@ -357,14 +306,6 @@ export const EventRow = memo(function EventRow({ event }: { event: AgentEvent })
           {inlineSpawnRole && (
             <span className="text-[11px] text-[var(--accent)] font-medium">
               {inlineSpawnRole}
-            </span>
-          )}
-
-          {/* Inline space message destination */}
-          {inlineSpaceDest && (
-            <span className="text-[10px] text-[var(--accent)] font-semibold">
-              {inlineSpaceKind && <span className="text-[var(--text-3)] font-medium mr-[3px]">{inlineSpaceKind}</span>}
-              → {inlineSpaceDest}
             </span>
           )}
 

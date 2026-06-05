@@ -8,12 +8,9 @@ import {
   useUpdateKeyResult,
   useUpdateKRProgress,
   useDeleteKeyResult,
-  useSetSpace,
 } from '../hooks/useMissions'
-import { mergeProjectSpaces, useAssignableProjectSpaces } from '../hooks/useAssignableProjectSpaces'
 import { formatKRProgress } from '../lib/missionUtils'
 import { missionsPanelLink } from '../lib/routing'
-import { assignableSpaces, keyResultSpaceOwnerLabelFromKR, spaceSummaryLabel } from '../lib/spaceOwnerLabels'
 import ProgressHistory from '../components/mission/ProgressHistory'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,12 +26,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import {
   ChevronRight,
@@ -44,7 +35,6 @@ import {
   TrendingUp,
   TrendingDown,
   Calendar,
-  Users,
   Pencil,
   Trash2,
   BarChart2,
@@ -55,7 +45,6 @@ import type {
   KeyResultView,
   KeyResultStatus,
   KeyResultDirection,
-  ProjectSpaceSummary,
 } from '../lib/types'
 
 /* ── Constants ──────────────────────────────────────────── */
@@ -123,12 +112,11 @@ function shortAgent(raw: string): string {
 /* ── KR row ─────────────────────────────────────────────── */
 
 function KRRow({
-  kr, missionId, spaces,
+  kr, missionId,
   expanded: expandedProp, onExpandedChange,
 }: {
   kr: KeyResultView
   missionId: string
-  spaces: ProjectSpaceSummary[]
   expanded?: boolean
   onExpandedChange?: (v: boolean) => void
 }) {
@@ -149,7 +137,6 @@ function KRRow({
   const [targetValue, setTargetValue]         = useState(String(kr.targetValue ?? ''))
   const [unit, setUnit]                       = useState(kr.unit ?? '')
   const [baseline, setBaseline]               = useState(kr.baseline != null ? String(kr.baseline) : '')
-  const [selectedSpace, setSelectedSpace]     = useState(kr.spaceId ?? '')
 
   // Progress report state
   const [progressValue, setProgressValue] = useState('')
@@ -158,11 +145,8 @@ function KRRow({
   const updateKR      = useUpdateKeyResult()
   const updateProgress = useUpdateKRProgress()
   const deleteKR      = useDeleteKeyResult()
-  const setSpaceMut   = useSetSpace()
 
   const badge    = krStatusBadge(kr.status)
-  const assignableSpaceOptions = assignableSpaces(spaces)
-  const spaceName = keyResultSpaceOwnerLabelFromKR(kr, spaces)
 
   function startEdit() {
     setTitle(kr.title)
@@ -172,7 +156,6 @@ function KRRow({
     setTargetValue(String(kr.targetValue ?? ''))
     setUnit(kr.unit ?? '')
     setBaseline(kr.baseline != null ? String(kr.baseline) : '')
-    setSelectedSpace(kr.spaceId ?? '')
     setExpanded(true)
     setEditing(true)
   }
@@ -207,10 +190,6 @@ function KRRow({
         unit: unit.trim() || undefined,
         baseline: parsedBaseline,
       })
-      const oldSpace = kr.spaceId ?? ''
-      if (selectedSpace !== oldSpace) {
-        await setSpaceMut.mutateAsync({ keyResultId: kr.id, spaceId: selectedSpace, missionId })
-      }
       toast.success('Key result updated')
       setEditing(false)
     } catch (err) {
@@ -242,24 +221,10 @@ function KRRow({
     }
   }
 
-  async function handleAssignSpace(spaceId: string) {
-    try {
-      await setSpaceMut.mutateAsync({ keyResultId: kr.id, spaceId, missionId })
-      toast.success('Key result assigned')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to assign key result')
-    }
-  }
-
   // Selects rendered in the edit secondary strip
   const editSelects = [
     { label: 'Type',      value: measurementType,          set: setMeasurementType, options: MEASUREMENT_TYPES.map(t => ({ value: t.value, label: t.label })) },
     { label: 'Direction', value: direction,                 set: setDirection,       options: DIRECTIONS.map(d => ({ value: d.value, label: d.label })) },
-    ...(assignableSpaceOptions.length > 0 ? [{
-      label: 'Space', value: selectedSpace || '__none__',
-      set: (v: string) => setSelectedSpace(v === '__none__' ? '' : v),
-      options: [{ value: '__none__', label: 'None' }, ...assignableSpaceOptions.map(t => ({ value: t.spaceId, label: spaceSummaryLabel(t) }))],
-    }] : []),
   ] as Array<{ label: string; value: string; set: (v: string) => void; options: { value: string; label: string }[] }>
 
   return (
@@ -327,9 +292,9 @@ function KRRow({
               className="text-[12px] text-[var(--accent)] font-medium hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer p-0 disabled:opacity-40"
               style={{ letterSpacing: '-0.12px' }}
               onClick={handleSave}
-              disabled={updateKR.isPending || setSpaceMut.isPending}
+              disabled={updateKR.isPending}
             >
-              {updateKR.isPending || setSpaceMut.isPending ? 'Saving…' : 'Save'}
+              {updateKR.isPending ? 'Saving…' : 'Save'}
             </button>
           </div>
         ) : (
@@ -396,28 +361,20 @@ function KRRow({
               {/* Row 2: dropdowns */}
               <div className="flex items-center gap-4 flex-wrap">
                 {editSelects.map(({ label, value, set, options }) => {
-                  const currentLabel = options.find(o => o.value === value)?.label ?? value
                   return (
                     <div key={label} className="flex items-center gap-1.5">
                       <span className="text-[11px] text-[var(--text-3)]" style={{ letterSpacing: '-0.06px' }}>{label}</span>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger className="inline-flex items-center gap-0.5 text-[var(--text-1)] bg-transparent border-none outline-none cursor-pointer font-[inherit]" style={{ fontSize: '12px', letterSpacing: '-0.12px' }}>
-                          {currentLabel}
-                          <ChevronDown size={9} className="text-[var(--text-3)] ml-0.5 shrink-0" />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" sideOffset={4} className="min-w-[100px] p-1 !shadow-[0_4px_24px_rgba(0,0,0,0.07)] dark:!shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
-                          {options.map(o => (
-                            <DropdownMenuItem
-                              key={o.value}
-                              className={cn('text-[12px] py-1 px-2 cursor-pointer', o.value === value && 'text-[var(--accent)] font-medium')}
-                              style={{ letterSpacing: '-0.12px' }}
-                              onClick={() => set(o.value)}
-                            >
-                              {o.label}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <select
+                        className="bg-transparent border-none text-[var(--text-1)] outline-none"
+                        style={{ fontSize: '12px', letterSpacing: '-0.12px' }}
+                        value={value}
+                        onChange={(event) => set(event.target.value)}
+                        aria-label={label}
+                      >
+                        {options.map(o => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
                     </div>
                   )
                 })}
@@ -519,29 +476,6 @@ function KRRow({
                     <span className="opacity-60">Baseline</span>{' '}{kr.baseline}
                   </span>
                 )}
-                {spaceName && (
-                  <span className="text-[11px] text-[var(--text-3)]">
-                    <span className="opacity-60">Space</span>{' '}{spaceName}
-                  </span>
-                )}
-                {!spaceName && assignableSpaceOptions.length > 0 && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger className="text-[11px] text-[var(--accent)] hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer p-0">
-                      Assign space
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" sideOffset={4} className="min-w-[140px] p-1">
-                      {assignableSpaceOptions.map(space => (
-                        <DropdownMenuItem
-                          key={space.spaceId}
-                          className="text-[12px] py-1 px-2 cursor-pointer"
-                          onClick={() => handleAssignSpace(space.spaceId)}
-                        >
-                          {spaceSummaryLabel(space)}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
                 {kr.lastUpdatedBy && (
                   <span className="text-[11px] text-[var(--text-3)]">
                     <span className="opacity-60">Updated by</span>{' '}{shortAgent(kr.lastUpdatedBy)}
@@ -603,13 +537,6 @@ export default function MissionDetail() {
   const { data: keyResults, isLoading: krsLoading, isError: krsError, error: krsErr } =
     useKeyResults(missionId)
 
-  const { data: routeProjectSpaces = [] } = useAssignableProjectSpaces(projectId, { includeDeleted: true })
-  const missionProjectSpacesQuery = useAssignableProjectSpaces(
-    mission?.projectId && mission.projectId !== projectId ? mission.projectId : null,
-    { includeDeleted: true },
-  )
-  const availableSpaces = mergeProjectSpaces(routeProjectSpaces, missionProjectSpacesQuery.data ?? [])
-
   if (!projectId || !missionId) {
     return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Mission not found.</div>
   }
@@ -637,12 +564,6 @@ export default function MissionDetail() {
   const overallProgress = keyResults && keyResults.length > 0
     ? keyResults.reduce((sum, kr) => sum + kr.progressPercent, 0) / keyResults.length
     : 0
-  const spaceNames = [
-    ...new Set((keyResults ?? [])
-      .map(kr => keyResultSpaceOwnerLabelFromKR(kr, availableSpaces))
-      .filter((label): label is string => Boolean(label))),
-  ]
-
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Sticky header — full-width outer for background coverage, max-w inner for centering */}
@@ -694,12 +615,6 @@ export default function MissionDetail() {
                   : mission.endDate
                     ? `Due ${new Date(mission.endDate).toLocaleDateString()}`
                     : 'No deadline'}
-              </span>
-            )}
-            {spaceNames.length > 0 && (
-              <span className="inline-flex items-center gap-1 text-[var(--text-3)]" style={{ fontSize: '12px', letterSpacing: '-0.08px' }}>
-                <Users size={11} />
-                {spaceNames.length <= 2 ? spaceNames.join(', ') : `${spaceNames.length} spaces`}
               </span>
             )}
             {keyResults && keyResults.length > 0 && (
@@ -760,7 +675,6 @@ export default function MissionDetail() {
                 key={kr.id}
                 kr={kr}
                 missionId={missionId}
-                spaces={availableSpaces}
                 expanded={!!expandedKrIds[kr.id]}
                 onExpandedChange={(v) => setExpandedKrIds(prev => ({ ...prev, [kr.id]: v }))}
               />

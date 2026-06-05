@@ -10,9 +10,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
+	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
@@ -23,7 +24,7 @@ type Service struct {
 	lifecycleEvents LifecycleEventRepository
 	clock           missiondomain.Clock
 	caller          caller.Resolver
-	spaces          SpaceLoader
+	projects        ProjectLoader
 	tasks           TaskLoader
 	linkedTasks     LinkedTaskLoader
 	events          EventPublisher
@@ -37,7 +38,7 @@ func NewService(
 	lifecycleEvents LifecycleEventRepository,
 	clock missiondomain.Clock,
 	caller caller.Resolver,
-	spaces SpaceLoader,
+	projects ProjectLoader,
 	tasks TaskLoader,
 	linkedTasks LinkedTaskLoader,
 	events EventPublisher,
@@ -56,8 +57,8 @@ func NewService(
 		return nil, fmt.Errorf("mission service: clock is required")
 	case caller == nil:
 		return nil, fmt.Errorf("mission service: caller resolver is required")
-	case spaces == nil:
-		return nil, fmt.Errorf("mission service: space loader is required")
+	case projects == nil:
+		return nil, fmt.Errorf("mission service: project loader is required")
 	case tasks == nil:
 		return nil, fmt.Errorf("mission service: task loader is required")
 	case linkedTasks == nil:
@@ -75,7 +76,7 @@ func NewService(
 		lifecycleEvents: lifecycleEvents,
 		clock:           clock,
 		caller:          caller,
-		spaces:          spaces,
+		projects:        projects,
 		tasks:           tasks,
 		linkedTasks:     linkedTasks,
 		events:          events,
@@ -462,27 +463,34 @@ func (s *Service) ReopenKeyResult(ctx context.Context, params ReopenKeyResultPar
 	return next, nil
 }
 
-func (s *Service) AssignKeyResultSpace(ctx context.Context, keyResultID krdomain.KeyResultID, spaceID string) (krdomain.KeyResult, error) {
+func (s *Service) AssignKeyResultProject(ctx context.Context, keyResultID krdomain.KeyResultID, projectID string) (krdomain.KeyResult, error) {
 	keyResultID = krdomain.KeyResultID(strings.TrimSpace(string(keyResultID)))
 	if keyResultID == "" {
 		return krdomain.KeyResult{}, fmt.Errorf("mission service: key result id is required")
 	}
-	spaceID = strings.TrimSpace(spaceID)
-	if spaceID == "" {
-		return krdomain.KeyResult{}, fmt.Errorf("mission service: space id is required")
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return krdomain.KeyResult{}, fmt.Errorf("mission service: project id is required")
 	}
 	keyResult, err := s.keyResults.GetKeyResult(ctx, keyResultID)
 	if err != nil {
 		return krdomain.KeyResult{}, err
 	}
-	space, err := s.spaces.Get(ctx, spacedomain.SpaceID(spaceID))
+	ownerProject, err := s.projects.Get(ctx, types.ProjectID(projectID))
 	if err != nil {
-		return krdomain.KeyResult{}, fmt.Errorf("load owner space: %w", err)
+		return krdomain.KeyResult{}, fmt.Errorf("load owner project: %w", err)
 	}
-	if strings.TrimSpace(space.Status) != spacedomain.SpaceStatusOpen {
-		return krdomain.KeyResult{}, fmt.Errorf("mission service: owner space %s is not open", spaceID)
+	if ownerProject.Status() != projectdomain.StatusOpen {
+		return krdomain.KeyResult{}, fmt.Errorf("mission service: owner project %s is not open", projectID)
 	}
-	keyResult, err = keyResult.AssignOwnerSpace(spaceID, space.Title, s.clock.Now())
+	ownerName := strings.TrimSpace(ownerProject.Title())
+	if ownerName == "" {
+		ownerName = strings.TrimSpace(ownerProject.Root())
+	}
+	if ownerName == "" {
+		ownerName = projectID
+	}
+	keyResult, err = keyResult.AssignOwnerProject(projectID, ownerName, s.clock.Now())
 	if err != nil {
 		return krdomain.KeyResult{}, err
 	}
@@ -656,16 +664,16 @@ func (s *Service) validateMissionActivation(ctx context.Context, missionID missi
 			continue
 		}
 		liveCount++
-		spaceID := strings.TrimSpace(keyResult.SpaceID)
-		if spaceID == "" {
-			return validationError("Every key result needs an assigned open space before activation.")
+		projectID := strings.TrimSpace(keyResult.ProjectID)
+		if projectID == "" {
+			return validationError("Every key result needs an assigned open project before activation.")
 		}
-		space, err := s.spaces.Get(ctx, spacedomain.SpaceID(spaceID))
+		ownerProject, err := s.projects.Get(ctx, types.ProjectID(projectID))
 		if err != nil {
-			return fmt.Errorf("load owner space: %w", err)
+			return fmt.Errorf("load owner project: %w", err)
 		}
-		if strings.TrimSpace(space.Status) != spacedomain.SpaceStatusOpen {
-			return validationError("Every key result needs an assigned open space before activation.")
+		if ownerProject.Status() != projectdomain.StatusOpen {
+			return validationError("Every key result needs an assigned open project before activation.")
 		}
 	}
 	if liveCount == 0 {

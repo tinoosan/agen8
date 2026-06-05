@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
+	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 var serviceTestNow = time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
@@ -153,22 +153,35 @@ func (fakeCallerResolver) ResolveCaller(context.Context) (caller.Caller, error) 
 	return caller.Caller{UserID: "user-1"}, nil
 }
 
-type fakeSpaceLoader struct{}
+type fakeProjectLoader struct{}
 
-func (fakeSpaceLoader) Get(context.Context, spacedomain.SpaceID) (spacedomain.SpaceRecord, error) {
-	return spacedomain.SpaceRecord{}, fmt.Errorf("space not found")
+func (fakeProjectLoader) Get(context.Context, types.ProjectID) (projectdomain.Project, error) {
+	return projectdomain.Project{}, fmt.Errorf("project not found")
 }
 
-type fakeSpaceLoaderWithSpaces struct {
-	spaces map[string]spacedomain.SpaceRecord
+type fakeProject struct {
+	title  string
+	status projectdomain.Status
 }
 
-func (l fakeSpaceLoaderWithSpaces) Get(_ context.Context, spaceID spacedomain.SpaceID) (spacedomain.SpaceRecord, error) {
-	space, ok := l.spaces[string(spaceID)]
+type fakeProjectLoaderWithProjects struct {
+	projects map[string]fakeProject
+}
+
+func (l fakeProjectLoaderWithProjects) Get(_ context.Context, projectID types.ProjectID) (projectdomain.Project, error) {
+	p, ok := l.projects[string(projectID)]
 	if !ok {
-		return spacedomain.SpaceRecord{}, fmt.Errorf("space %s not found", spaceID)
+		return projectdomain.Project{}, fmt.Errorf("project %s not found", projectID)
 	}
-	return space, nil
+	return projectdomain.New(projectdomain.NewInput{
+		ID:        projectID,
+		Root:      "/tmp/" + string(projectID),
+		UserID:    "user-1",
+		Title:     p.title,
+		Status:    p.status,
+		CreatedAt: serviceTestNow,
+		UpdatedAt: serviceTestNow,
+	})
 }
 
 type fakeTaskLoader struct{}
@@ -285,10 +298,10 @@ func eventMilestones(events []types.EventRecord) []string {
 
 func newServiceForTest(t *testing.T, missions *fakeMissionRepository, keyResults *fakeKeyResultRepository) *Service {
 	t.Helper()
-	return newServiceForTestWithSpaces(t, missions, keyResults, fakeSpaceLoader{})
+	return newServiceForTestWithProjects(t, missions, keyResults, fakeProjectLoader{})
 }
 
-func newServiceForTestWithSpaces(t *testing.T, missions *fakeMissionRepository, keyResults *fakeKeyResultRepository, spaces SpaceLoader) *Service {
+func newServiceForTestWithProjects(t *testing.T, missions *fakeMissionRepository, keyResults *fakeKeyResultRepository, projects ProjectLoader) *Service {
 	t.Helper()
 	svc, err := NewService(
 		missions,
@@ -297,7 +310,7 @@ func newServiceForTestWithSpaces(t *testing.T, missions *fakeMissionRepository, 
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		spaces,
+		projects,
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -329,7 +342,7 @@ func TestCreateMissionLogsTransition(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -451,7 +464,7 @@ func TestDeleteMissionPublishesArchivedEventAfterPersistence(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -482,7 +495,7 @@ func TestCreateKeyResultPublishesCreatedEventAfterPersistence(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -541,7 +554,7 @@ func TestCreateKeyResultRequiresExistingMission(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -578,7 +591,7 @@ func TestCreateKeyResultReactivatesCompletedMission(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -624,7 +637,7 @@ func TestCreateKeyResultDoesNotPublishCreatedEventWhenPersistenceFails(t *testin
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -750,7 +763,7 @@ func TestDeleteKeyResultPublishesDroppedEventAfterPersistence(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -858,7 +871,7 @@ func TestDeleteKeyResultRecomputePublishesMissionLifecycleEvent(t *testing.T) {
 				&fakeLifecycleEventRepository{},
 				fakeClock{now: serviceTestNow},
 				fakeCallerResolver{},
-				fakeSpaceLoader{},
+				fakeProjectLoader{},
 				fakeTaskLoader{},
 				&fakeLinkedTaskLoader{},
 				events,
@@ -945,7 +958,7 @@ func TestReopenKeyResultReactivatesCompletedMission(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1035,7 +1048,7 @@ func TestReopenKeyResultReopensDroppedAndResetsProgress(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1060,7 +1073,7 @@ func TestReopenKeyResultReopensDroppedAndResetsProgress(t *testing.T) {
 	}
 }
 
-func TestAssignKeyResultSpacePersistsOwner(t *testing.T) {
+func TestAssignKeyResultProjectPersistsOwner(t *testing.T) {
 	keyResult, err := krdomain.NewKeyResult(krdomain.NewKeyResultInput{
 		ID:              krdomain.KeyResultID("kr-1"),
 		MissionID:       missiondomain.MissionID("mission-1"),
@@ -1074,21 +1087,21 @@ func TestAssignKeyResultSpacePersistsOwner(t *testing.T) {
 		t.Fatalf("NewKeyResult: %v", err)
 	}
 	repo := newFakeKeyResultRepository(keyResult)
-	svc := newServiceForTestWithSpaces(t, newFakeMissionRepository(), repo, fakeSpaceLoaderWithSpaces{
-		spaces: map[string]spacedomain.SpaceRecord{
-			"space-1": {ID: spacedomain.SpaceID("space-1"), Title: "Research", Status: spacedomain.SpaceStatusOpen},
+	svc := newServiceForTestWithProjects(t, newFakeMissionRepository(), repo, fakeProjectLoaderWithProjects{
+		projects: map[string]fakeProject{
+			"project-1": {title: "Research", status: projectdomain.StatusOpen},
 		},
 	})
 
-	got, err := svc.AssignKeyResultSpace(context.Background(), keyResult.ID, " space-1 ")
+	got, err := svc.AssignKeyResultProject(context.Background(), keyResult.ID, " project-1 ")
 	if err != nil {
-		t.Fatalf("AssignKeyResultSpace: %v", err)
+		t.Fatalf("AssignKeyResultProject: %v", err)
 	}
-	if got.SpaceID != "space-1" {
-		t.Fatalf("SpaceID=%q want space-1", got.SpaceID)
+	if got.ProjectID != "project-1" {
+		t.Fatalf("ProjectID=%q want project-1", got.ProjectID)
 	}
-	if got.OwnerSpaceName != "Research" {
-		t.Fatalf("OwnerSpaceName=%q want Research", got.OwnerSpaceName)
+	if got.OwnerProjectName != "Research" {
+		t.Fatalf("OwnerProjectName=%q want Research", got.OwnerProjectName)
 	}
 	if got.Status != krdomain.KeyResultStatusOpen {
 		t.Fatalf("Status=%q want %q", got.Status, krdomain.KeyResultStatusOpen)
@@ -1097,12 +1110,12 @@ func TestAssignKeyResultSpacePersistsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetKeyResult: %v", err)
 	}
-	if stored.SpaceID != "space-1" {
-		t.Fatalf("stored SpaceID=%q want space-1", stored.SpaceID)
+	if stored.ProjectID != "project-1" {
+		t.Fatalf("stored ProjectID=%q want project-1", stored.ProjectID)
 	}
 }
 
-func TestAssignKeyResultSpacePublishesOwnerAssignedEventAfterPersistence(t *testing.T) {
+func TestAssignKeyResultProjectPublishesOwnerAssignedEventAfterPersistence(t *testing.T) {
 	keyResult, err := krdomain.NewKeyResult(krdomain.NewKeyResultInput{
 		ID:              krdomain.KeyResultID("kr-1"),
 		MissionID:       missiondomain.MissionID("mission-1"),
@@ -1123,8 +1136,8 @@ func TestAssignKeyResultSpacePublishesOwnerAssignedEventAfterPersistence(t *test
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoaderWithSpaces{spaces: map[string]spacedomain.SpaceRecord{
-			"space-1": {ID: "space-1", Title: "Research", Status: spacedomain.SpaceStatusOpen},
+		fakeProjectLoaderWithProjects{projects: map[string]fakeProject{
+			"project-1": {title: "Research", status: projectdomain.StatusOpen},
 		}},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
@@ -1135,9 +1148,9 @@ func TestAssignKeyResultSpacePublishesOwnerAssignedEventAfterPersistence(t *test
 		t.Fatalf("NewService: %v", err)
 	}
 
-	got, err := svc.AssignKeyResultSpace(context.Background(), keyResult.ID, "space-1")
+	got, err := svc.AssignKeyResultProject(context.Background(), keyResult.ID, "project-1")
 	if err != nil {
-		t.Fatalf("AssignKeyResultSpace: %v", err)
+		t.Fatalf("AssignKeyResultProject: %v", err)
 	}
 	if len(events.events) != 1 {
 		t.Fatalf("events=%d want 1", len(events.events))
@@ -1152,7 +1165,7 @@ func TestAssignKeyResultSpacePublishesOwnerAssignedEventAfterPersistence(t *test
 		"status":          string(got.Status),
 		"measurementType": string(got.MeasurementType),
 		"progressPercent": "0",
-		"spaceId":         "space-1",
+		"projectId":       "project-1",
 	} {
 		if event.Data[key] != want {
 			t.Fatalf("event Data[%q]=%q want %q", key, event.Data[key], want)
@@ -1160,7 +1173,7 @@ func TestAssignKeyResultSpacePublishesOwnerAssignedEventAfterPersistence(t *test
 	}
 }
 
-func TestAssignKeyResultSpaceDoesNotPublishOwnerAssignedEventWhenPersistenceFails(t *testing.T) {
+func TestAssignKeyResultProjectDoesNotPublishOwnerAssignedEventWhenPersistenceFails(t *testing.T) {
 	keyResult, err := krdomain.NewKeyResult(krdomain.NewKeyResultInput{
 		ID:              krdomain.KeyResultID("kr-1"),
 		MissionID:       missiondomain.MissionID("mission-1"),
@@ -1184,8 +1197,8 @@ func TestAssignKeyResultSpaceDoesNotPublishOwnerAssignedEventWhenPersistenceFail
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoaderWithSpaces{spaces: map[string]spacedomain.SpaceRecord{
-			"space-1": {ID: "space-1", Title: "Research", Status: spacedomain.SpaceStatusOpen},
+		fakeProjectLoaderWithProjects{projects: map[string]fakeProject{
+			"project-1": {title: "Research", status: projectdomain.StatusOpen},
 		}},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
@@ -1196,15 +1209,15 @@ func TestAssignKeyResultSpaceDoesNotPublishOwnerAssignedEventWhenPersistenceFail
 		t.Fatalf("NewService: %v", err)
 	}
 
-	if _, err := svc.AssignKeyResultSpace(context.Background(), keyResult.ID, "space-1"); err == nil {
-		t.Fatal("AssignKeyResultSpace error is nil")
+	if _, err := svc.AssignKeyResultProject(context.Background(), keyResult.ID, "project-1"); err == nil {
+		t.Fatal("AssignKeyResultProject error is nil")
 	}
 	if len(events.events) != 0 {
 		t.Fatalf("events=%d want 0", len(events.events))
 	}
 }
 
-func TestAssignKeyResultSpaceRejectsClosedSpace(t *testing.T) {
+func TestAssignKeyResultProjectRejectsClosedProject(t *testing.T) {
 	keyResult, err := krdomain.NewKeyResult(krdomain.NewKeyResultInput{
 		ID:              krdomain.KeyResultID("kr-1"),
 		MissionID:       missiondomain.MissionID("mission-1"),
@@ -1217,19 +1230,19 @@ func TestAssignKeyResultSpaceRejectsClosedSpace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewKeyResult: %v", err)
 	}
-	svc := newServiceForTestWithSpaces(t, newFakeMissionRepository(), newFakeKeyResultRepository(keyResult), fakeSpaceLoaderWithSpaces{
-		spaces: map[string]spacedomain.SpaceRecord{
-			"space-1": {ID: spacedomain.SpaceID("space-1"), Title: "Research", Status: spacedomain.SpaceStatusClosed},
+	svc := newServiceForTestWithProjects(t, newFakeMissionRepository(), newFakeKeyResultRepository(keyResult), fakeProjectLoaderWithProjects{
+		projects: map[string]fakeProject{
+			"project-1": {title: "Research", status: projectdomain.StatusClosed},
 		},
 	})
 
-	_, err = svc.AssignKeyResultSpace(context.Background(), keyResult.ID, "space-1")
+	_, err = svc.AssignKeyResultProject(context.Background(), keyResult.ID, "project-1")
 	if err == nil {
-		t.Fatal("AssignKeyResultSpace error is nil")
+		t.Fatal("AssignKeyResultProject error is nil")
 	}
 }
 
-func TestAssignKeyResultSpaceRejectsInProgressKeyResult(t *testing.T) {
+func TestAssignKeyResultProjectRejectsInProgressKeyResult(t *testing.T) {
 	keyResult, err := krdomain.NewKeyResult(krdomain.NewKeyResultInput{
 		ID:              krdomain.KeyResultID("kr-1"),
 		MissionID:       missiondomain.MissionID("mission-1"),
@@ -1243,15 +1256,15 @@ func TestAssignKeyResultSpaceRejectsInProgressKeyResult(t *testing.T) {
 		t.Fatalf("NewKeyResult: %v", err)
 	}
 	keyResult.Status = krdomain.KeyResultStatusInProgress
-	svc := newServiceForTestWithSpaces(t, newFakeMissionRepository(), newFakeKeyResultRepository(keyResult), fakeSpaceLoaderWithSpaces{
-		spaces: map[string]spacedomain.SpaceRecord{
-			"space-1": {ID: spacedomain.SpaceID("space-1"), Title: "Research", Status: spacedomain.SpaceStatusOpen},
+	svc := newServiceForTestWithProjects(t, newFakeMissionRepository(), newFakeKeyResultRepository(keyResult), fakeProjectLoaderWithProjects{
+		projects: map[string]fakeProject{
+			"project-1": {title: "Research", status: projectdomain.StatusOpen},
 		},
 	})
 
-	_, err = svc.AssignKeyResultSpace(context.Background(), keyResult.ID, "space-1")
+	_, err = svc.AssignKeyResultProject(context.Background(), keyResult.ID, "project-1")
 	if err == nil {
-		t.Fatal("AssignKeyResultSpace error is nil")
+		t.Fatal("AssignKeyResultProject error is nil")
 	}
 }
 
@@ -1278,7 +1291,7 @@ func TestUpdateProgressPersistsKeyResultAndProgressEntry(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -1339,7 +1352,7 @@ func TestUpdateProgressPublishesProgressUpdatedEventAfterPersistence(t *testing.
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1393,7 +1406,7 @@ func TestUpdateProgressDoesNotPublishProgressEventWhenPersistenceFails(t *testin
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1438,7 +1451,7 @@ func TestUpdateProgressCompletesKeyResultWhenLinkedTasksAreTerminal(t *testing.T
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
 			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusSucceeded},
 			"task-2": {ID: "task-2", Status: taskdomain.TaskStatusFailed},
@@ -1493,7 +1506,7 @@ func TestUpdateProgressPublishesCompletedEventWhenProgressCompletesKeyResult(t *
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
 			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusSucceeded},
 		}},
@@ -1557,7 +1570,7 @@ func TestUpdateProgressCompletingLastLiveKeyResultCompletesMission(t *testing.T)
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1610,7 +1623,7 @@ func TestUpdateProgressRejectsDraftMissionBeforeWrite(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1673,7 +1686,7 @@ func TestUpdateProgressDoesNotCompleteMissionWhenAnotherLiveKeyResultIsIncomplet
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1726,7 +1739,7 @@ func TestUpdateProgressPublishesEveryNewlyCrossedMilestoneEvent(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1784,7 +1797,7 @@ func TestUpdateProgressDoesNotRefireAlreadyNotifiedMilestones(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1832,7 +1845,7 @@ func TestUpdateProgressRejectsKeyResultCompletionWhenLinkedTaskIsNonTerminalBefo
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
 			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusActive},
 		}},
@@ -1888,7 +1901,7 @@ func TestUpdateProgressBelowCompletionDoesNotLoadLinkedTasks(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
 			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusActive},
 		}},
@@ -1935,7 +1948,7 @@ func TestUpdateProgressRejectsCompletedKeyResultBeforeWrite(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -2009,17 +2022,17 @@ func TestComputeMissionProgressNoNonDroppedKeyResults(t *testing.T) {
 	}
 }
 
-func TestUpdateMissionActivatesWhenEveryLiveKeyResultHasOpenOwnerSpace(t *testing.T) {
+func TestUpdateMissionActivatesWhenEveryLiveKeyResultHasOpenOwnerProject(t *testing.T) {
 	mission := missionForServiceTest(t, missiondomain.MissionStatusDraft)
 	keyResults := newFakeKeyResultRepository(
-		krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, SpaceID: "space-1"},
-		krdomain.KeyResult{ID: "kr-2", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, SpaceID: "space-2"},
+		krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-1"},
+		krdomain.KeyResult{ID: "kr-2", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-2"},
 		krdomain.KeyResult{ID: "kr-dropped", MissionID: mission.ID, Status: krdomain.KeyResultStatusDropped},
 	)
-	svc := newServiceForTestWithSpaces(t, newFakeMissionRepository(mission), keyResults, fakeSpaceLoaderWithSpaces{
-		spaces: map[string]spacedomain.SpaceRecord{
-			"space-1": {ID: "space-1", Title: "Research", Status: spacedomain.SpaceStatusOpen},
-			"space-2": {ID: "space-2", Title: "Build", Status: spacedomain.SpaceStatusOpen},
+	svc := newServiceForTestWithProjects(t, newFakeMissionRepository(mission), keyResults, fakeProjectLoaderWithProjects{
+		projects: map[string]fakeProject{
+			"project-1": {title: "Research", status: projectdomain.StatusOpen},
+			"project-2": {title: "Build", status: projectdomain.StatusOpen},
 		},
 	})
 	status := missiondomain.MissionStatusActive
@@ -2040,7 +2053,7 @@ func TestUpdateMissionActivationPublishesMissionActivatedEventAfterPersistence(t
 	mission := missionForServiceTest(t, missiondomain.MissionStatusDraft)
 	missions := newFakeMissionRepository(mission)
 	keyResults := newFakeKeyResultRepository(
-		krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, SpaceID: "space-1"},
+		krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-1"},
 	)
 	events := &fakeEventPublisher{}
 	svc, err := NewService(
@@ -2050,8 +2063,8 @@ func TestUpdateMissionActivationPublishesMissionActivatedEventAfterPersistence(t
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoaderWithSpaces{spaces: map[string]spacedomain.SpaceRecord{
-			"space-1": {ID: "space-1", Title: "Research", Status: spacedomain.SpaceStatusOpen},
+		fakeProjectLoaderWithProjects{projects: map[string]fakeProject{
+			"project-1": {title: "Research", status: projectdomain.StatusOpen},
 		}},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
@@ -2105,14 +2118,14 @@ func TestUpdateMissionActivationDoesNotPublishEventWhenPersistenceFails(t *testi
 	svc, err := NewService(
 		missions,
 		newFakeKeyResultRepository(
-			krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, SpaceID: "space-1"},
+			krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-1"},
 		),
 		&fakeProgressEntryRepository{},
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoaderWithSpaces{spaces: map[string]spacedomain.SpaceRecord{
-			"space-1": {ID: "space-1", Title: "Research", Status: spacedomain.SpaceStatusOpen},
+		fakeProjectLoaderWithProjects{projects: map[string]fakeProject{
+			"project-1": {title: "Research", status: projectdomain.StatusOpen},
 		}},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
@@ -2132,7 +2145,7 @@ func TestUpdateMissionActivationDoesNotPublishEventWhenPersistenceFails(t *testi
 	}
 }
 
-func TestUpdateMissionActivationRequiresNonDroppedKeyResultAndOpenOwnerSpace(t *testing.T) {
+func TestUpdateMissionActivationRequiresNonDroppedKeyResultAndOpenOwnerProject(t *testing.T) {
 	mission := missionForServiceTest(t, missiondomain.MissionStatusDraft)
 	status := missiondomain.MissionStatusActive
 
@@ -2155,11 +2168,11 @@ func TestUpdateMissionActivationRequiresNonDroppedKeyResultAndOpenOwnerSpace(t *
 	})
 
 	t.Run("closed owner", func(t *testing.T) {
-		svc := newServiceForTestWithSpaces(t, newFakeMissionRepository(mission), newFakeKeyResultRepository(
-			krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, SpaceID: "space-1"},
-		), fakeSpaceLoaderWithSpaces{
-			spaces: map[string]spacedomain.SpaceRecord{
-				"space-1": {ID: "space-1", Title: "Research", Status: spacedomain.SpaceStatusClosed},
+		svc := newServiceForTestWithProjects(t, newFakeMissionRepository(mission), newFakeKeyResultRepository(
+			krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-1"},
+		), fakeProjectLoaderWithProjects{
+			projects: map[string]fakeProject{
+				"project-1": {title: "Research", status: projectdomain.StatusClosed},
 			},
 		})
 		if _, err := svc.UpdateMission(context.Background(), UpdateMissionParams{MissionID: mission.ID, Status: &status}); err == nil {
@@ -2232,7 +2245,7 @@ func TestUpdateMissionPublishesLifecycleEventAfterPersistence(t *testing.T) {
 				&fakeLifecycleEventRepository{},
 				fakeClock{now: serviceTestNow},
 				fakeCallerResolver{},
-				fakeSpaceLoader{},
+				fakeProjectLoader{},
 				fakeTaskLoader{},
 				&fakeLinkedTaskLoader{},
 				events,
@@ -2299,7 +2312,7 @@ func TestUpdateMissionLifecycleIsIdempotent(t *testing.T) {
 				&fakeLifecycleEventRepository{},
 				fakeClock{now: serviceTestNow},
 				fakeCallerResolver{},
-				fakeSpaceLoader{},
+				fakeProjectLoader{},
 				fakeTaskLoader{},
 				&fakeLinkedTaskLoader{},
 				events,
@@ -2329,10 +2342,9 @@ func TestGetLifecycleHistoryReturnsStoredNotes(t *testing.T) {
 		{
 			EventID:   "event-1",
 			RunID:     types.RunID(mission.ID),
-			Timestamp: serviceTestNow,
+			CreatedAt: eventCreatedAt(serviceTestNow),
 			Type:      string(MissionEventActivated),
 			Message:   string(MissionEventActivated),
-			Origin:    "mission",
 			Data: map[string]string{
 				"missionId": string(mission.ID),
 				"status":    string(missiondomain.MissionStatusActive),
@@ -2342,10 +2354,9 @@ func TestGetLifecycleHistoryReturnsStoredNotes(t *testing.T) {
 		{
 			EventID:   "event-2",
 			RunID:     types.RunID(mission.ID),
-			Timestamp: serviceTestNow.Add(time.Minute),
+			CreatedAt: eventCreatedAt(serviceTestNow.Add(time.Minute)),
 			Type:      string(KREventDropped),
 			Message:   string(KREventDropped),
-			Origin:    "mission",
 			Data: map[string]string{
 				"missionId":   string(mission.ID),
 				"keyResultId": "kr-1",
@@ -2356,7 +2367,7 @@ func TestGetLifecycleHistoryReturnsStoredNotes(t *testing.T) {
 		{
 			EventID:   "event-progress",
 			RunID:     types.RunID(mission.ID),
-			Timestamp: serviceTestNow.Add(2 * time.Minute),
+			CreatedAt: eventCreatedAt(serviceTestNow.Add(2 * time.Minute)),
 			Type:      string(KREventProgressUpdated),
 			Message:   string(KREventProgressUpdated),
 			Data:      map[string]string{"missionId": string(mission.ID)},
@@ -2369,7 +2380,7 @@ func TestGetLifecycleHistoryReturnsStoredNotes(t *testing.T) {
 		lifecycleEvents,
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -2405,7 +2416,7 @@ func TestIdempotentLifecycleNoteIsRecordedInHistoryOnly(t *testing.T) {
 		lifecycleEvents,
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeSpaceLoader{},
+		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		published,

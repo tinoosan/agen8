@@ -1,14 +1,18 @@
 package app
 
-import (
-	"context"
+type ConfigValidator interface {
+	ValidateConfig(harnessKind, model, effort string) error
+}
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
-)
+type runtimeConfigValidator interface {
+	ValidateRuntimeConfig(harnessKind, model, effort, permissionMode, configRef string) error
+}
 
-type SpaceLoader interface {
-	Get(ctx context.Context, id spacedomain.SpaceID) (spacedomain.SpaceRecord, error)
-	List(ctx context.Context, filter spacedomain.SpaceFilter) ([]spacedomain.SpaceRecord, error)
-	ListMembers(ctx context.Context, filter member.Filter) ([]member.Record, error)
+type permissionModeDefaults interface {
+	DefaultPermissionMode(harnessKind string) string
+	CompatibilityPermissionMode(harnessKind string) string
+}
+
+type EventPublisher interface {
+	Publish(topic string, event any) error
 }

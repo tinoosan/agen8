@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
 	decisiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
 	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
@@ -38,23 +38,23 @@ func (s stubTaskReader) Get(_ context.Context, taskID taskdomain.TaskID) (taskdo
 }
 
 func (s stubTaskReader) List(_ context.Context, filter taskdomain.TaskFilter) ([]taskdomain.Task, error) {
-	if filter.SpaceID == "" {
+	if filter.ProjectID == "" {
 		return append([]taskdomain.Task(nil), s.tasks...), nil
 	}
 	out := make([]taskdomain.Task, 0, len(s.tasks))
 	for _, task := range s.tasks {
-		if task.SpaceID == filter.SpaceID {
+		if task.ProjectID == filter.ProjectID {
 			out = append(out, task)
 		}
 	}
 	return out, nil
 }
 
-func TestTaskHydrator_FetchCoordinatorScopeCanReadCrossSpaceTask(t *testing.T) {
+func TestTaskHydrator_FetchCoordinatorScopeCanReadCrossProjectTask(t *testing.T) {
 	now := time.Now().UTC()
 	other := taskdomain.Task{
-		ID:          "task-space-b",
-		SpaceID:     spacedomain.SpaceID("space-b"),
+		ID:          "task-project-b",
+		ProjectID:   types.ProjectID("project-b"),
 		Description: "Investigate prior work",
 		Title:       "Investigate prior work",
 		Status:      taskdomain.TaskStatusPending,
@@ -62,52 +62,51 @@ func TestTaskHydrator_FetchCoordinatorScopeCanReadCrossSpaceTask(t *testing.T) {
 	}
 	reader := stubTaskReader{
 		byID: map[taskdomain.TaskID]taskdomain.Task{
-			"task-space-b": other,
+			"task-project-b": other,
 		},
 		tasks: []taskdomain.Task{other},
 	}
 
-	coordinatorHydrator := taskHydrator{tasks: reader, spaceID: ""}
-	if _, err := coordinatorHydrator.Fetch(context.Background(), "proj-1", "task-space-b"); err != nil {
-		t.Fatalf("Fetch with empty space scope: %v", err)
+	coordinatorHydrator := taskHydrator{tasks: reader}
+	if _, err := coordinatorHydrator.Fetch(context.Background(), "", "task-project-b"); err != nil {
+		t.Fatalf("Fetch with empty project scope: %v", err)
 	}
 
-	spaceScopedHydrator := taskHydrator{tasks: reader, spaceID: "space-a"}
-	if _, err := spaceScopedHydrator.Fetch(context.Background(), "proj-1", "task-space-b"); err == nil {
-		t.Fatal("expected space-scoped fetch to reject cross-space task")
+	if _, err := coordinatorHydrator.Fetch(context.Background(), "project-a", "task-project-b"); err == nil {
+		t.Fatal("expected project-scoped fetch to reject cross-project task")
 	}
 }
 
-func TestTaskHydrator_SearchCoordinatorScopeListsTasksAcrossSpaces(t *testing.T) {
+func TestTaskHydrator_SearchCoordinatorScopeListsTasksAcrossProjects(t *testing.T) {
 	now := time.Now().UTC()
 	taskA := taskdomain.Task{
-		ID:          "task-space-a",
-		SpaceID:     spacedomain.SpaceID("space-a"),
-		Description: "Cross-space search A",
-		Title:       "Cross-space search A",
+		ID:          "task-project-a",
+		ProjectID:   types.ProjectID("project-a"),
+		Description: "Cross-project search A",
+		Title:       "Cross-project search A",
 		Status:      taskdomain.TaskStatusPending,
 		CreatedAt:   &now,
 	}
 	taskB := taskdomain.Task{
-		ID:          "task-space-b",
-		SpaceID:     spacedomain.SpaceID("space-b"),
-		Description: "Cross-space search B",
-		Title:       "Cross-space search B",
+		ID:          "task-project-b",
+		ProjectID:   types.ProjectID("project-b"),
+		Description: "Cross-project search B",
+		Title:       "Cross-project search B",
 		Status:      taskdomain.TaskStatusPending,
 		CreatedAt:   &now,
 	}
 	reader := stubTaskReader{
 		byID: map[taskdomain.TaskID]taskdomain.Task{
-			"task-space-a": taskA,
-			"task-space-b": taskB,
+			"task-project-a": taskA,
+			"task-project-b": taskB,
 		},
 		tasks: []taskdomain.Task{taskA, taskB},
 	}
 
-	coordinatorHydrator := taskHydrator{tasks: reader, spaceID: ""}
-	results, err := coordinatorHydrator.Search(context.Background(), "proj-1", "cross-space", 10)
+	coordinatorHydrator := taskHydrator{tasks: reader}
+	results, err := coordinatorHydrator.Search(context.Background(), "", "cross-project", 10)
 	if err != nil {
-		t.Fatalf("Search with empty space scope: %v", err)
+		t.Fatalf("Search with empty project scope: %v", err)
 	}
 	if len(results) != 2 {
 		t.Fatalf("results=%d want 2", len(results))

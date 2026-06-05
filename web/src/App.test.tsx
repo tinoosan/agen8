@@ -20,28 +20,14 @@ vi.mock('./pages/Login', () => ({
   default: () => <div>Login Page</div>,
 }))
 
-vi.mock('./pages/Overview', () => ({
-  default: () => <div>Overview Page</div>,
-}))
-
 vi.mock('./pages/Dashboard', () => ({
   default: () => <div>Dashboard Page</div>,
-}))
-
-vi.mock('./pages/Locations', () => ({
-  default: () => <div>Locations Page</div>,
 }))
 
 vi.mock('./pages/StrategyMap', () => ({
   default: () => {
     throw new Error('strategy-map-route-crash')
   },
-}))
-
-vi.mock('./pages/SpaceFocus', () => ({
-  default: ({ spaceId }: { spaceId?: string }) => (
-    <div>Space Focus {spaceId}</div>
-  ),
 }))
 
 vi.mock('./components/CommandPalette', () => ({
@@ -113,19 +99,6 @@ describe('App', () => {
   it('redirects removed metrics route to the dashboard', async () => {
     renderWithRouter('/project/myapp/metrics')
     expect(await screen.findByText('Dashboard Page')).toBeInTheDocument()
-  })
-
-  it('renders the locations page at /locations', async () => {
-    renderWithRouter('/locations')
-    expect(await screen.findByText('Locations Page')).toBeInTheDocument()
-  })
-
-  it('preserves the action type when redirecting legacy actions routes', async () => {
-    const { history } = renderWithRouter('/project/myapp/actions?type=oa')
-
-    expect(await screen.findByText('Dashboard Page')).toBeInTheDocument()
-    expect(history.at(-1)).toContain('panel=actions')
-    expect(history.at(-1)).toContain('type=oa')
   })
 
   it('shows page crash fallback when a route component throws', async () => {

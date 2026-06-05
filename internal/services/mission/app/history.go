@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
@@ -54,10 +55,10 @@ func (s *Service) GetLifecycleHistory(ctx context.Context, missionID missiondoma
 			Status:          event.Data["status"],
 			Note:            event.Data["note"],
 			Actor:           event.Data["actor"],
-			Origin:          event.Origin,
+			Origin:          event.Data["origin"],
 			Message:         event.Message,
 			ProgressPercent: event.Data["progressPercent"],
-			Timestamp:       event.Timestamp,
+			Timestamp:       parseEventTimestamp(event.CreatedAt),
 		})
 	}
 	return LifecycleHistory{
@@ -123,4 +124,16 @@ func keyResultIDFromData(data map[string]string) krdomain.KeyResultID {
 		return ""
 	}
 	return krdomain.KeyResultID(strings.TrimSpace(data["keyResultId"]))
+}
+
+func parseEventTimestamp(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }

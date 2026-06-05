@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 type Handler struct{}
@@ -27,12 +27,12 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	if err != nil {
 		return Result{}, err
 	}
-	ctx = contextWithSessionActor(ctx, call.ActorMemberID, call.SpaceID)
+	ctx = contextWithSessionActor(ctx, call.ActorMemberID, call.ProjectID)
 	actor, err := h.actor(ctx, call)
 	if err != nil {
 		return Result{}, err
 	}
-	ctx = caller.ContextWithCaller(ctx, caller.Caller{UserID: actor.UserID, MemberID: actor.ID, SpaceID: spacedomain.SpaceID(actor.SpaceID)})
+	ctx = caller.ContextWithCaller(ctx, caller.Caller{UserID: actor.UserID, MemberID: actor.ID, ProjectID: types.ProjectID(actor.ProjectID)})
 
 	switch input.Action {
 	case "create":
@@ -64,8 +64,8 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		return h.krList(ctx, call, input)
 	case "kr_update":
 		return h.krUpdate(ctx, call, input)
-	case "kr_assign_space":
-		return h.krAssignSpace(ctx, call, input)
+	case "kr_assign_project":
+		return h.krAssignProject(ctx, call, input)
 	case "kr_drop":
 		return h.krDrop(ctx, call, input)
 	case "kr_reopen":
@@ -81,15 +81,15 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	}
 }
 
-func contextWithSessionActor(ctx context.Context, actorMemberID, spaceID string) context.Context {
+func contextWithSessionActor(ctx context.Context, actorMemberID, projectID string) context.Context {
 	actorMemberID = strings.TrimSpace(actorMemberID)
-	spaceID = strings.TrimSpace(spaceID)
-	if actorMemberID == "" && spaceID == "" {
+	projectID = strings.TrimSpace(projectID)
+	if actorMemberID == "" && projectID == "" {
 		return ctx
 	}
 	return caller.ContextWithCaller(ctx, caller.Caller{
-		MemberID: member.ID(actorMemberID),
-		SpaceID:  spacedomain.SpaceID(spaceID),
+		MemberID:  member.ID(actorMemberID),
+		ProjectID: types.ProjectID(projectID),
 	})
 }
 
@@ -111,8 +111,8 @@ func (h Handler) actor(ctx context.Context, call CallContext) (member.Record, er
 	if strings.TrimSpace(actor.LifecycleState) != "" && strings.TrimSpace(actor.LifecycleState) != member.LifecycleActive {
 		return member.Record{}, fmt.Errorf("mission: actor member is not active")
 	}
-	if strings.TrimSpace(string(actor.SpaceID)) == "" {
-		return member.Record{}, fmt.Errorf("mission: actor member space id is empty")
+	if strings.TrimSpace(actor.ProjectID) == "" {
+		return member.Record{}, fmt.Errorf("mission: actor member project id is empty")
 	}
 	return actor, nil
 }
@@ -354,7 +354,7 @@ func (h Handler) krUpdate(ctx context.Context, call CallContext, input requestIn
 	return keyResultResult("kr_update", keyResult)
 }
 
-func (h Handler) krAssignSpace(ctx context.Context, call CallContext, input requestInput) (Result, error) {
+func (h Handler) krAssignProject(ctx context.Context, call CallContext, input requestInput) (Result, error) {
 	if call.KeyResults == nil {
 		return Result{}, fmt.Errorf("mission: key result service is not configured")
 	}
@@ -362,15 +362,15 @@ func (h Handler) krAssignSpace(ctx context.Context, call CallContext, input requ
 	if err != nil {
 		return Result{}, err
 	}
-	spaceID, err := requireString(input.SpaceID, "space_id")
+	projectID, err := requireString(input.ProjectID, "project_id")
 	if err != nil {
 		return Result{}, err
 	}
-	keyResult, err := call.KeyResults.AssignKeyResultSpace(ctx, id, spaceID)
+	keyResult, err := call.KeyResults.AssignKeyResultProject(ctx, id, projectID)
 	if err != nil {
 		return Result{}, err
 	}
-	return keyResultResult("kr_assign_space", keyResult)
+	return keyResultResult("kr_assign_project", keyResult)
 }
 
 func (h Handler) krDrop(ctx context.Context, call CallContext, input requestInput) (Result, error) {

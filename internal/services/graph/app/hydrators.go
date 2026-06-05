@@ -7,14 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
 	decisiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	operatordomain "github.com/tinoosan/agen8-mcp-server/internal/services/operator/domain"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 	implstore "github.com/tinoosan/agen8-mcp-server/internal/store"
 )
@@ -24,23 +23,14 @@ type TaskReader interface {
 	List(ctx context.Context, filter taskdomain.TaskFilter) ([]taskdomain.Task, error)
 }
 
-type OperatorReader interface {
-	Get(ctx context.Context, id operatordomain.OperatorActionID) (operatordomain.OperatorAction, error)
-	List(ctx context.Context, projectID string, filter operatordomain.ActionFilter) ([]operatordomain.OperatorAction, error)
-	GetEscalation(ctx context.Context, id operatordomain.EscalationID) (operatordomain.Escalation, error)
-	ListEscalations(ctx context.Context, projectID string, filter operatordomain.EscalationFilter) ([]operatordomain.Escalation, error)
-}
-
 func DefaultHydrators(
 	taskSvc TaskReader,
 	decisionSvc *decisionapp.Service,
 	missionSvc *missionapp.Service,
-	operatorSvc OperatorReader,
-	spaceID string,
 ) []domain.NodeHydrator {
-	out := make([]domain.NodeHydrator, 0, 6)
+	out := make([]domain.NodeHydrator, 0, 4)
 	if taskSvc != nil {
-		out = append(out, taskHydrator{tasks: taskSvc, spaceID: strings.TrimSpace(spaceID)})
+		out = append(out, taskHydrator{tasks: taskSvc})
 	}
 	if decisionSvc != nil {
 		out = append(out, decisionHydrator{decisions: decisionSvc})
@@ -49,26 +39,21 @@ func DefaultHydrators(
 		out = append(out, missionHydrator{missions: missionSvc})
 		out = append(out, keyResultHydrator{missions: missionSvc})
 	}
-	if operatorSvc != nil {
-		out = append(out, operatorActionHydrator{operator: operatorSvc})
-		out = append(out, escalationHydrator{operator: operatorSvc})
-	}
 	return out
 }
 
 type taskHydrator struct {
-	tasks   TaskReader
-	spaceID string
+	tasks TaskReader
 }
 
 func (h taskHydrator) NodeType() string { return domain.NodeTypeTask }
 
-func (h taskHydrator) Fetch(ctx context.Context, _ string, nodeID string) (domain.GraphNodeCore, error) {
+func (h taskHydrator) Fetch(ctx context.Context, projectID string, nodeID string) (domain.GraphNodeCore, error) {
 	task, err := h.tasks.Get(ctx, taskdomain.TaskID(strings.TrimSpace(nodeID)))
 	if err != nil {
 		return domain.GraphNodeCore{}, err
 	}
-	if !taskVisibleToScope(task, h.spaceID) {
+	if !taskVisibleToProject(task, projectID) {
 		return domain.GraphNodeCore{}, fmt.Errorf("task %q not found", strings.TrimSpace(nodeID))
 	}
 	createdAt, err := taskCreatedAt(task)
@@ -84,7 +69,7 @@ func (h taskHydrator) Fetch(ctx context.Context, _ string, nodeID string) (domai
 		Type:      domain.NodeTypeTask,
 		Title:     title,
 		Status:    strings.TrimSpace(string(task.Status)),
-		ScopeID:   strings.TrimSpace(string(task.SpaceID)),
+		ScopeID:   strings.TrimSpace(string(task.ProjectID)),
 		CreatedAt: createdAt.Format(time.RFC3339Nano),
 		Fields: map[string]any{
 			"description": strings.TrimSpace(task.Description),
@@ -99,17 +84,17 @@ func (h taskHydrator) FetchMany(ctx context.Context, projectID string, nodeIDs [
 	return fetchManyUsingFetch(ctx, h, projectID, nodeIDs)
 }
 
-func (h taskHydrator) Search(ctx context.Context, _ string, query string, limit int) ([]domain.GraphNodeSummary, error) {
+func (h taskHydrator) Search(ctx context.Context, projectID string, query string, limit int) ([]domain.GraphNodeSummary, error) {
 	tasks, err := h.tasks.List(ctx, taskdomain.TaskFilter{
-		SpaceID: spacedomain.SpaceID(strings.TrimSpace(h.spaceID)),
-		Limit:   max(200, limit*20),
+		ProjectID: types.ProjectID(strings.TrimSpace(projectID)),
+		Limit:     max(200, limit*20),
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.GraphNodeSummary, 0, limit)
 	for _, task := range tasks {
-		if !taskVisibleToScope(task, h.spaceID) {
+		if !taskVisibleToProject(task, projectID) {
 			continue
 		}
 		title := strings.TrimSpace(task.Title)
@@ -128,7 +113,7 @@ func (h taskHydrator) Search(ctx context.Context, _ string, query string, limit 
 			Type:      domain.NodeTypeTask,
 			Title:     title,
 			Status:    strings.TrimSpace(string(task.Status)),
-			ScopeID:   strings.TrimSpace(string(task.SpaceID)),
+			ScopeID:   strings.TrimSpace(string(task.ProjectID)),
 			CreatedAt: createdAt.Format(time.RFC3339Nano),
 		})
 		if len(out) >= limit {
@@ -156,35 +141,27 @@ func (h decisionHydrator) Fetch(ctx context.Context, projectID string, nodeID st
 		return domain.GraphNodeCore{}, fmt.Errorf("decision %q not found", strings.TrimSpace(nodeID))
 	}
 	fields := map[string]any{
-		"confidence":        decision.Confidence,
-		"operatorActionRef": strings.TrimSpace(decision.OperatorActionRef),
-		"escalationRef":     strings.TrimSpace(decision.EscalationRef),
-		"source":            strings.TrimSpace(string(decision.Source)),
-		"sourceIdentity":    strings.TrimSpace(decision.SourceIdentity),
-		"correlationRef":    strings.TrimSpace(decision.CorrelationRef),
-		"informedByRef":     strings.TrimSpace(decision.InformedByRef),
-		"kind":              strings.TrimSpace(string(decision.Kind())),
-		"taskRef":           strings.TrimSpace(decision.TaskRef),
-		"keyResultRef":      strings.TrimSpace(decision.KeyResultRef),
-		"missionRef":        strings.TrimSpace(decision.MissionRef),
-		"planRef":           strings.TrimSpace(decision.PlanRef),
+		"confidence":     decision.Confidence,
+		"source":         strings.TrimSpace(string(decision.Source)),
+		"sourceIdentity": strings.TrimSpace(decision.SourceIdentity),
+		"correlationRef": strings.TrimSpace(decision.CorrelationRef),
+		"informedByRef":  strings.TrimSpace(decision.InformedByRef),
+		"kind":           strings.TrimSpace(string(decision.Kind())),
+		"taskRef":        strings.TrimSpace(decision.TaskRef),
+		"keyResultRef":   strings.TrimSpace(decision.KeyResultRef),
+		"missionRef":     strings.TrimSpace(decision.MissionRef),
 	}
 	if p := decision.Log; p != nil {
 		fields["rationale"] = strings.TrimSpace(p.Rationale)
 		fields["alternativesRejected"] = strings.TrimSpace(p.AlternativesRejected)
 		fields["invalidationConditions"] = append([]string(nil), p.InvalidationConditions...)
 	}
-	if p := decision.AskUser; p != nil {
-		fields["cancelled"] = p.Cancelled
-		fields["questionCount"] = len(p.Questions)
-		fields["answerCount"] = len(p.Answers)
-	}
 	return domain.GraphNodeCore{
 		ID:        strings.TrimSpace(string(decision.ID)),
 		Type:      domain.NodeTypeDecision,
 		Title:     strings.TrimSpace(decision.Title),
 		Status:    decisionStatus(decision),
-		ScopeID:   strings.TrimSpace(decision.SpaceID),
+		ScopeID:   strings.TrimSpace(decision.ProjectID),
 		CreatedAt: decision.CreatedAt.UTC().Format(time.RFC3339Nano),
 		Fields:    fields,
 	}, nil
@@ -211,7 +188,7 @@ func (h decisionHydrator) Search(ctx context.Context, projectID, query string, l
 			Type:      domain.NodeTypeDecision,
 			Title:     strings.TrimSpace(item.Title),
 			Status:    decisionStatus(item),
-			ScopeID:   strings.TrimSpace(item.SpaceID),
+			ScopeID:   strings.TrimSpace(item.ProjectID),
 			CreatedAt: item.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 		if len(out) >= limit {
@@ -310,7 +287,7 @@ func (h keyResultHydrator) Fetch(ctx context.Context, projectID string, nodeID s
 		Type:      domain.NodeTypeKeyResult,
 		Title:     strings.TrimSpace(kr.Title),
 		Status:    strings.TrimSpace(string(kr.Status)),
-		ScopeID:   strings.TrimSpace(kr.SpaceID),
+		ScopeID:   strings.TrimSpace(kr.ProjectID),
 		CreatedAt: kr.CreatedAt.UTC().Format(time.RFC3339Nano),
 		Fields: map[string]any{
 			"measurementType": strings.TrimSpace(string(kr.MeasurementType)),
@@ -350,143 +327,12 @@ func (h keyResultHydrator) Search(ctx context.Context, projectID, query string, 
 				Type:      domain.NodeTypeKeyResult,
 				Title:     strings.TrimSpace(kr.Title),
 				Status:    strings.TrimSpace(string(kr.Status)),
-				ScopeID:   strings.TrimSpace(kr.SpaceID),
+				ScopeID:   strings.TrimSpace(kr.ProjectID),
 				CreatedAt: kr.CreatedAt.UTC().Format(time.RFC3339Nano),
 			})
 			if len(out) >= limit {
 				return out, nil
 			}
-		}
-	}
-	if out == nil {
-		return []domain.GraphNodeSummary{}, nil
-	}
-	return out, nil
-}
-
-type operatorActionHydrator struct {
-	operator OperatorReader
-}
-
-func (h operatorActionHydrator) NodeType() string { return domain.NodeTypeOperatorAction }
-
-func (h operatorActionHydrator) Fetch(ctx context.Context, projectID string, nodeID string) (domain.GraphNodeCore, error) {
-	action, err := h.operator.Get(ctx, operatordomain.OperatorActionID(strings.TrimSpace(nodeID)))
-	if err != nil {
-		return domain.GraphNodeCore{}, err
-	}
-	if !strings.EqualFold(strings.TrimSpace(projectID), strings.TrimSpace(action.ProjectID)) {
-		return domain.GraphNodeCore{}, fmt.Errorf("operator_action %q not found", strings.TrimSpace(nodeID))
-	}
-	return domain.GraphNodeCore{
-		ID:        strings.TrimSpace(string(action.ID)),
-		Type:      domain.NodeTypeOperatorAction,
-		Title:     strings.TrimSpace(action.Title),
-		Status:    strings.TrimSpace(string(action.Status)),
-		ScopeID:   strings.TrimSpace(action.SpaceID),
-		CreatedAt: action.CreatedAt.UTC().Format(time.RFC3339Nano),
-		Fields: map[string]any{
-			"description":          strings.TrimSpace(action.Description),
-			"urgency":              strings.TrimSpace(string(action.Urgency)),
-			"blocking":             action.Blocking,
-			"requiresVerification": action.RequiresVerification,
-			"deadlineHours":        deadlineHours(action.CreatedAt, action.Deadline),
-		},
-	}, nil
-}
-
-func (h operatorActionHydrator) FetchMany(ctx context.Context, projectID string, nodeIDs []string) ([]domain.GraphNodeSummary, error) {
-	return fetchManyUsingFetch(ctx, h, projectID, nodeIDs)
-}
-
-func (h operatorActionHydrator) Search(ctx context.Context, projectID, query string, limit int) ([]domain.GraphNodeSummary, error) {
-	items, err := h.operator.List(ctx, strings.TrimSpace(projectID), operatordomain.ActionFilter{
-		Limit: max(limit*5, 100),
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.GraphNodeSummary, 0, len(items))
-	for _, item := range items {
-		if !matchesQuery(query, item.Title, item.Description, string(item.ID), string(item.Category)) {
-			continue
-		}
-		out = append(out, domain.GraphNodeSummary{
-			ID:        strings.TrimSpace(string(item.ID)),
-			Type:      domain.NodeTypeOperatorAction,
-			Title:     strings.TrimSpace(item.Title),
-			Status:    strings.TrimSpace(string(item.Status)),
-			ScopeID:   strings.TrimSpace(item.SpaceID),
-			CreatedAt: item.CreatedAt.UTC().Format(time.RFC3339Nano),
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	if out == nil {
-		return []domain.GraphNodeSummary{}, nil
-	}
-	return out, nil
-}
-
-type escalationHydrator struct {
-	operator OperatorReader
-}
-
-func (h escalationHydrator) NodeType() string { return domain.NodeTypeEscalation }
-
-func (h escalationHydrator) Fetch(ctx context.Context, projectID string, nodeID string) (domain.GraphNodeCore, error) {
-	escalation, err := h.operator.GetEscalation(ctx, operatordomain.EscalationID(strings.TrimSpace(nodeID)))
-	if err != nil {
-		return domain.GraphNodeCore{}, err
-	}
-	if !strings.EqualFold(strings.TrimSpace(projectID), strings.TrimSpace(escalation.ProjectID)) {
-		return domain.GraphNodeCore{}, fmt.Errorf("escalation %q not found", strings.TrimSpace(nodeID))
-	}
-	return domain.GraphNodeCore{
-		ID:        strings.TrimSpace(string(escalation.ID)),
-		Type:      domain.NodeTypeEscalation,
-		Title:     strings.TrimSpace(escalation.Title),
-		Status:    strings.TrimSpace(string(escalation.Status)),
-		ScopeID:   strings.TrimSpace(escalation.SpaceID),
-		CreatedAt: escalation.CreatedAt.UTC().Format(time.RFC3339Nano),
-		Fields: map[string]any{
-			"category":       strings.TrimSpace(string(escalation.Category)),
-			"urgency":        strings.TrimSpace(string(escalation.Urgency)),
-			"description":    strings.TrimSpace(escalation.Description),
-			"recommendation": strings.TrimSpace(escalation.Recommendation),
-			"confidence":     escalation.Confidence,
-			"deadlineHours":  deadlineHours(escalation.CreatedAt, escalation.Deadline),
-		},
-	}, nil
-}
-
-func (h escalationHydrator) FetchMany(ctx context.Context, projectID string, nodeIDs []string) ([]domain.GraphNodeSummary, error) {
-	return fetchManyUsingFetch(ctx, h, projectID, nodeIDs)
-}
-
-func (h escalationHydrator) Search(ctx context.Context, projectID, query string, limit int) ([]domain.GraphNodeSummary, error) {
-	items, err := h.operator.ListEscalations(ctx, strings.TrimSpace(projectID), operatordomain.EscalationFilter{
-		Limit: max(limit*5, 100),
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.GraphNodeSummary, 0, len(items))
-	for _, item := range items {
-		if !matchesQuery(query, item.Title, item.Description, string(item.ID), string(item.Category)) {
-			continue
-		}
-		out = append(out, domain.GraphNodeSummary{
-			ID:        strings.TrimSpace(string(item.ID)),
-			Type:      domain.NodeTypeEscalation,
-			Title:     strings.TrimSpace(item.Title),
-			Status:    strings.TrimSpace(string(item.Status)),
-			ScopeID:   strings.TrimSpace(item.SpaceID),
-			CreatedAt: item.CreatedAt.UTC().Format(time.RFC3339Nano),
-		})
-		if len(out) >= limit {
-			break
 		}
 	}
 	if out == nil {
@@ -525,12 +371,12 @@ func fetchManyUsingFetch(
 	return out, nil
 }
 
-func taskVisibleToScope(task taskdomain.Task, spaceID string) bool {
-	spaceID = strings.TrimSpace(spaceID)
-	if spaceID == "" {
+func taskVisibleToProject(task taskdomain.Task, projectID string) bool {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(string(task.SpaceID)), spaceID)
+	return strings.EqualFold(strings.TrimSpace(string(task.ProjectID)), projectID)
 }
 
 func taskCreatedAt(task taskdomain.Task) (time.Time, error) {
@@ -554,9 +400,6 @@ func taskDueDate(task taskdomain.Task) string {
 }
 
 func decisionStatus(decision decisiondomain.Decision) string {
-	if decision.AskUser != nil && decision.AskUser.Cancelled {
-		return "cancelled"
-	}
 	if kind := decision.Kind(); kind != "" {
 		return string(kind)
 	}

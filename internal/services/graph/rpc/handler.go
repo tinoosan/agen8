@@ -139,8 +139,6 @@ func linkCreatedBy(link contextlink.Link) string {
 			return "task_service"
 		case domain.NodeTypeDecision:
 			return "decision_service"
-		case domain.NodeTypeOperatorAction, domain.NodeTypeEscalation:
-			return "operator_service"
 		}
 	}
 	return createdBy

@@ -19,7 +19,7 @@ import { sourceToClusterColor } from '../../lib/clusterColors'
 export function useStrategyGraph(projectId: string | null, projectRoot: string | null, options: { showArchived?: boolean } = {}) {
   // ── Data sources (add new sources here to extend the knowledge graph) ───
   const missionKR = useMissionKRNodes(projectId, projectRoot, { showArchived: options.showArchived })
-  const leafNodes = useLeafNodes(projectId, projectRoot)
+  const leafNodes = useLeafNodes(projectId)
 
   const allNodes = useMemo(
     () => [...missionKR.nodes, ...leafNodes.nodes],

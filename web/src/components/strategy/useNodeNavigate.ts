@@ -11,8 +11,6 @@ import { useStrategyMapStore } from './strategyMapStore'
  *   Task          → task:{id}
  *   Decision      → decision:{id}
  *   Plan          → plan:{id}
- *   OA            → oa:{id}
- *   Escalation    → escalation:{id}
  */
 export function useNodeNavigate() {
   return useCallback((nodeId: string) => {

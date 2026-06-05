@@ -18,7 +18,7 @@ interface Props {
 }
 
 // Order types appear in when grouped
-const TYPE_ORDER = ['Mission', 'Key Result', 'Task', 'Decision', 'Operator Action', 'Escalation']
+const TYPE_ORDER = ['Mission', 'Key Result', 'Task', 'Decision']
 
 function RelatedRow({ item, showType }: { item: RelatedItem; showType: boolean }) {
   return (

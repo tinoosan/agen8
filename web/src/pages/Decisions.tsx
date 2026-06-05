@@ -1,9 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { ArrowLeft, ScrollText, Download, ChevronDown, ChevronUp, Clock, Link2, Trash2 } from 'lucide-react'
 import { decisionsPanelLink, useNavigation } from '../lib/routing'
 import { useDecisionLog, useExportDecisions, useDeleteDecision } from '../hooks/useDecisions'
-import { useProjectSpaces } from '../hooks/useProjectSpaces'
-import { spaceDisplayName } from '../lib/spaceDisplayName'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,7 +17,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { CustomSelect } from '../components/fields'
 import type { DecisionView } from '../lib/types'
 import DecisionDetails from '../components/decision/DecisionDetails'
 import { toast } from 'sonner'
@@ -49,31 +46,29 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 function exportCsv(decisions: DecisionView[]) {
-  const header = 'id,title,source,spaceId,confidence,createdAt,taskRef,keyResultRef,operatorActionRef,rationale,alternativesRejected\n'
+  const header = 'id,title,source,confidence,createdAt,taskRef,keyResultRef,missionRef,rationale,alternativesRejected\n'
   const rows = decisions.map(decision => [
     decision.id,
     decision.title,
     decision.source,
-    decision.spaceId ?? '',
     String(decision.confidence ?? ''),
     decision.createdAt,
     decision.taskRef ?? '',
     decision.keyResultRef ?? '',
-    decision.operatorActionRef ?? '',
+    decision.missionRef ?? '',
     decision.rationale,
     decision.alternativesRejected ?? '',
   ].map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n')
   downloadBlob(new Blob([header + rows], { type: 'text/csv;charset=utf-8' }), 'decisions.csv')
 }
 
-function DecisionRow({ decision, spaceName }: { decision: DecisionView; spaceName?: string }) {
+function DecisionRow({ decision }: { decision: DecisionView }) {
   const [expanded, setExpanded] = useState(false)
   const deleteDecision = useDeleteDecision()
   const refs = [
     decision.missionRef ? `Mission: ${decision.missionRef}` : null,
     decision.taskRef ? `Task: ${decision.taskRef}` : null,
     decision.keyResultRef ? `KR: ${decision.keyResultRef}` : null,
-    decision.operatorActionRef ? `OA: ${decision.operatorActionRef}` : null,
   ].filter(Boolean) as string[]
 
   const handleDelete = async () => {
@@ -101,14 +96,9 @@ function DecisionRow({ decision, spaceName }: { decision: DecisionView; spaceNam
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-medium text-[var(--text-1)]">{decision.title}</span>
-                <Badge variant={decision.source === 'operator' ? 'success' : 'info'} className="text-[10px] px-1.5 py-0">
+                <Badge variant="info" className="text-[10px] px-1.5 py-0">
                   {decision.source}
                 </Badge>
-                {decision.spaceId && (
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                    {spaceName ?? 'Space'}
-                  </Badge>
-                )}
               </div>
               <div className="flex items-center gap-3 text-[11px] text-[var(--text-3)] mt-1 flex-wrap">
                 <span>{Math.round((decision.confidence ?? 0) * 100)}% confidence</span>
@@ -177,13 +167,11 @@ function DecisionRow({ decision, spaceName }: { decision: DecisionView; spaceNam
 export default function Decisions() {
   const { projectId } = useNavigation()
   const [query, setQuery] = useState('')
-  const [source, setSource] = useState<'' | 'agent' | 'operator'>('')
-  const [spaceId, setSpaceId] = useState('')
+  const [source, setSource] = useState<'' | 'agent'>('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
   const [page, setPage] = useState(1)
-  const spacesQuery = useProjectSpaces(projectId ?? null)
   const exportDecisions = useExportDecisions()
 
   const logQuery = useDecisionLog(projectId, {
@@ -191,7 +179,6 @@ export default function Decisions() {
     pageSize: PAGE_SIZE,
     query,
     source: source || undefined,
-    spaceId: spaceId || undefined,
     since: fromDate ? new Date(`${fromDate}T00:00:00Z`).toISOString() : undefined,
     until: toDate ? new Date(`${toDate}T23:59:59Z`).toISOString() : undefined,
     sort,
@@ -200,14 +187,6 @@ export default function Decisions() {
   const total = logQuery.data?.total ?? 0
   const decisions = logQuery.data?.decisions ?? []
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const spaces = useMemo(() => spacesQuery.data ?? [], [spacesQuery.data])
-  const spaceNameMap = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const t of spaces) {
-      map.set(t.spaceId, spaceDisplayName(t.spaceId, t.spaceName))
-    }
-    return map
-  }, [spaces])
 
   if (!projectId) {
     return (
@@ -224,7 +203,6 @@ export default function Decisions() {
       projectId,
       query: query || undefined,
       source: source || undefined,
-      spaceId: spaceId || undefined,
       since: fromDate ? new Date(`${fromDate}T00:00:00Z`).toISOString() : undefined,
       until: toDate ? new Date(`${toDate}T23:59:59Z`).toISOString() : undefined,
       sort,
@@ -297,24 +275,9 @@ export default function Decisions() {
             }}
           />
         </div>
-        <div className="w-[160px]">
-          <Label htmlFor="decision-space-filter" className="text-[11px] text-[var(--text-3)]">Space</Label>
-          <CustomSelect
-            value={spaceId}
-            onChange={(value) => {
-              setSpaceId(value)
-              setPage(1)
-            }}
-            options={[
-              { value: '', label: 'All spaces' },
-              ...spaces.map(space => ({ value: space.spaceId, label: spaceDisplayName(space.spaceId, space.spaceName) })),
-            ]}
-          />
-        </div>
         <div className="flex items-center gap-1 pb-0.5">
           <Button variant={source === '' ? 'secondary' : 'ghost'} size="xs" onClick={() => { setSource(''); setPage(1) }}>All</Button>
           <Button variant={source === 'agent' ? 'secondary' : 'ghost'} size="xs" onClick={() => { setSource('agent'); setPage(1) }}>Agent</Button>
-          <Button variant={source === 'operator' ? 'secondary' : 'ghost'} size="xs" onClick={() => { setSource('operator'); setPage(1) }}>Operator</Button>
         </div>
       </div>
 
@@ -327,14 +290,14 @@ export default function Decisions() {
             <ScrollText size={40} className="text-[var(--text-3)] opacity-30 mb-4" />
             <h3 className="text-base font-semibold text-[var(--text-1)] mb-1">No decisions found</h3>
             <p className="text-sm text-[var(--text-3)]">
-              {query || source || spaceId || fromDate || toDate
+              {query || source || fromDate || toDate
                 ? 'Try adjusting your filters.'
                 : 'Decisions are logged here as agents make choices during their work.'}
             </p>
           </div>
         ) : (
           <div className="max-w-4xl">
-            {decisions.map(decision => <DecisionRow key={decision.id} decision={decision} spaceName={decision.spaceId ? spaceNameMap.get(decision.spaceId) : undefined} />)}
+            {decisions.map(decision => <DecisionRow key={decision.id} decision={decision} />)}
           </div>
         )}
       </div>

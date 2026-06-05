@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
-import { useQuery } from '@tanstack/react-query'
 import { useProjects } from '../hooks/useProjects'
 import { useLocations } from '../hooks/useLocations'
 import { toast } from 'sonner'
@@ -10,7 +9,7 @@ import {
   Archive, Check, ChevronLeft, ChevronRight, FolderOpen,
   HardDrive, MoreHorizontal, Plus, Search, Server, Trash2,
 } from 'lucide-react'
-import type { ExecutionLocation, Project, ProjectSpaceSummary } from '../lib/types'
+import type { ExecutionLocation, Project } from '../lib/types'
 import DirectoryPicker, { type DirectoryPickerResult } from '../components/files/DirectoryPicker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -177,8 +176,8 @@ function CreateProjectDialog({
 }) {
   const [, navigate] = useLocation()
   const locationsQuery = useLocations()
-  const locations = locationsQuery.data ?? []
-  const readyLocations = locations.filter(l => l.ready)
+  const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
+  const readyLocations = useMemo(() => locations.filter(l => l.ready), [locations])
   const hasMultipleLocations = readyLocations.length > 1
 
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null)
@@ -198,25 +197,7 @@ function CreateProjectDialog({
   const skipLocation = !hasMultipleLocations && readyLocations.length > 0
   const initialStep: CreateStep = skipLocation ? 'directory' : 'location'
   const [step, setStep] = useState<CreateStep>(initialStep)
-
-  // Reset state when dialog opens/closes
-  useEffect(() => {
-    if (open) {
-      setStep(skipLocation ? 'directory' : 'location')
-      setSelectedPath(null)
-      setName('')
-      setError(null)
-      setBusy(false)
-    }
-  }, [open, skipLocation])
-
-  // Auto-select location when only one is available
-  useEffect(() => {
-    if (!selectedLocationId && readyLocations.length > 0) {
-      const local = readyLocations.find(l => l.id === 'local')
-      setSelectedLocationId((local ?? readyLocations[0]).id)
-    }
-  }, [readyLocations, selectedLocationId])
+  const currentStep: CreateStep = skipLocation && step === 'location' ? 'directory' : step
 
   async function handleCreate() {
     if (!selectedPath || !selectedLocation) return
@@ -271,10 +252,10 @@ function CreateProjectDialog({
             </div>
           ) : (
             <>
-              <StepIndicator currentStep={step} skipLocation={skipLocation} />
+              <StepIndicator currentStep={currentStep} skipLocation={skipLocation} />
 
               {/* Step 1: Location */}
-              {step === 'location' && (
+              {currentStep === 'location' && (
                 <div className="flex min-w-0 flex-col gap-3">
                   <label className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-3)]">
                     Choose execution location
@@ -331,7 +312,7 @@ function CreateProjectDialog({
               )}
 
               {/* Step 2: Directory */}
-              {step === 'directory' && selectedLocation && (
+              {currentStep === 'directory' && selectedLocation && (
                 <div className="flex flex-col gap-3">
                   {/* Selected location chip */}
                   <div className="flex items-center gap-2">
@@ -367,7 +348,7 @@ function CreateProjectDialog({
               )}
 
               {/* Step 3: Details */}
-              {step === 'details' && selectedPath && (
+              {currentStep === 'details' && selectedPath && (
                 <div className="flex flex-col gap-4">
                   {/* Selected path */}
                   <div>
@@ -413,12 +394,12 @@ function CreateProjectDialog({
         {!locationsQuery.isLoading && !noLocations && (
           <div className="flex items-center gap-2 border-t border-[var(--border)] px-5 py-3">
             {/* Back button */}
-            {((step === 'directory' && !skipLocation) || step === 'details') && (
+            {((currentStep === 'directory' && !skipLocation) || currentStep === 'details') && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  if (step === 'details') {
+                  if (currentStep === 'details') {
                     setSelectedPath(null)
                     setStep('directory')
                   } else {
@@ -441,7 +422,7 @@ function CreateProjectDialog({
             >
               Cancel
             </Button>
-            {step === 'location' && (
+            {currentStep === 'location' && (
               <Button
                 size="sm"
                 onClick={() => setStep('directory')}
@@ -452,7 +433,7 @@ function CreateProjectDialog({
                 <ChevronRight size={12} />
               </Button>
             )}
-            {step === 'details' && (
+            {currentStep === 'details' && (
               <Button
                 size="sm"
                 onClick={handleCreate}
@@ -480,11 +461,9 @@ function CreateProjectDialog({
 
 function ProjectTableRow({
   project,
-  spaceCount,
   onRemove,
 }: {
   project: Project
-  spaceCount: number
   onRemove: (action: ProjectRemoveAction) => void
 }) {
   const [, navigate] = useLocation()
@@ -526,11 +505,6 @@ function ProjectTableRow({
             {shortenPath(project.root)}
           </div>
         </div>
-      </TableCell>
-
-      {/* Spaces count — hidden below 520px */}
-      <TableCell className="hidden w-[70px] px-3 py-2.5 text-center tabular-nums text-[13px] text-[var(--text-2)] @[520px]:table-cell">
-        {spaceCount}
       </TableCell>
 
       {/* Status badge — hidden below 640px */}
@@ -688,7 +662,7 @@ export default function ProjectPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const projectsQuery = useProjects({ includeArchived: true })
-  const allProjects = projectsQuery.data ?? []
+  const allProjects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
   const isLoading = projectsQuery.isLoading
   const queryClient = useQueryClient()
   const [, navigate] = useLocation()
@@ -713,26 +687,6 @@ export default function ProjectPage() {
   }, [allProjects, statusFilter, searchQuery])
 
   const hasArchived = allProjects.some(p => p.status === 'archived')
-
-  // Fetch space counts
-  const projectIds = useMemo(() => filteredProjects.map(p => p.id), [filteredProjects])
-  const spaceCountsQuery = useQuery<Map<string, number>>({
-    queryKey: ['project.spaceCounts', projectIds],
-    queryFn: async () => {
-      const counts = new Map<string, number>()
-      const results = await Promise.all(
-        projectIds.map(projectId =>
-          rpcCall<{ spaces: ProjectSpaceSummary[] }>('project.space.list', { projectId })
-            .then(r => ({ projectId, count: r.spaces.length }))
-        )
-      )
-      for (const { projectId, count } of results) counts.set(projectId, count)
-      return counts
-    },
-    enabled: projectIds.length > 0,
-    refetchInterval: 5000,
-  })
-  const spaceCounts = spaceCountsQuery.data ?? new Map<string, number>()
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('new') === 'true') {
@@ -806,7 +760,7 @@ export default function ProjectPage() {
               </div>
               <div className="text-[13px] text-[var(--text-3)] leading-[1.6] max-w-[360px] mx-auto">
                 A project connects agen8 to a directory on your machine.
-                Your agents, spaces, and missions all live inside a project.
+                Missions, key results, tasks, decisions, and graph context live inside a project.
               </div>
             </div>
             <Button
@@ -859,9 +813,6 @@ export default function ProjectPage() {
                     <TableHead className="h-8 px-3 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-3)]">
                       Project
                     </TableHead>
-                    <TableHead className="hidden w-[70px] h-8 px-3 text-center text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-3)] @[520px]:table-cell">
-                      Spaces
-                    </TableHead>
                     <TableHead className="hidden w-[80px] h-8 px-3 text-center text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-3)] @[640px]:table-cell">
                       Status
                     </TableHead>
@@ -876,7 +827,6 @@ export default function ProjectPage() {
                     <ProjectTableRow
                       key={project.id}
                       project={project}
-                      spaceCount={spaceCounts.get(project.id) ?? 0}
                       onRemove={(action) => setRemoveTarget({ project, action })}
                     />
                   ))}
@@ -911,11 +861,13 @@ export default function ProjectPage() {
         )}
 
         {/* Create project dialog */}
-        <CreateProjectDialog
-          open={createOpen}
-          onOpenChange={setCreateOpen}
-          onSuccess={handleCreateSuccess}
-        />
+        {createOpen && (
+          <CreateProjectDialog
+            open={createOpen}
+            onOpenChange={setCreateOpen}
+            onSuccess={handleCreateSuccess}
+          />
+        )}
 
         {removeTarget && (
           <RemoveProjectDialog

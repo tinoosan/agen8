@@ -6,10 +6,9 @@ import (
 	"testing"
 	"time"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
@@ -23,7 +22,7 @@ func TestNewTaskViewMapsRebuiltTaskFields(t *testing.T) {
 
 	task := taskdomain.Task{
 		ID:                taskdomain.TaskID("task-1"),
-		SpaceID:           spacedomain.SpaceID("space-1"),
+		ProjectID:         types.ProjectID("project-1"),
 		AssignedTo:        member.ID("member-worker"),
 		ClaimedByMemberID: member.ID("member-worker"),
 		TaskKind:          "implementation",
@@ -55,8 +54,8 @@ func TestNewTaskViewMapsRebuiltTaskFields(t *testing.T) {
 	if view.ID != "task-1" {
 		t.Fatalf("id=%q want task-1", view.ID)
 	}
-	if view.SpaceID != "space-1" {
-		t.Fatalf("spaceId=%q want space-1", view.SpaceID)
+	if view.ProjectID != "project-1" {
+		t.Fatalf("projectId=%q want project-1", view.ProjectID)
 	}
 	if view.AssignedTo != "member-worker" {
 		t.Fatalf("assignedTo=%q want member-worker", view.AssignedTo)
@@ -134,7 +133,7 @@ func TestTaskViewJSONShape(t *testing.T) {
 
 	view := NewTaskView(taskdomain.Task{
 		ID:                taskdomain.TaskID("task-1"),
-		SpaceID:           spacedomain.SpaceID("space-1"),
+		ProjectID:         types.ProjectID("project-1"),
 		AssignedTo:        member.ID("member-worker"),
 		ClaimedByMemberID: member.ID("member-worker"),
 		TaskKind:          "implementation",
@@ -166,7 +165,7 @@ func TestTaskViewJSONShape(t *testing.T) {
 
 	for _, key := range []string{
 		"id",
-		"spaceId",
+		"projectId",
 		"assignedTo",
 		"claimedByMemberId",
 		"taskKind",

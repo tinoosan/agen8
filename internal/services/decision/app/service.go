@@ -3,7 +3,7 @@
 // What this service is responsible for:
 //   - Persisting decisions through the repository.
 //   - Auto-creating graph edges from a decision to anything it
-//     references (key result, mission, task, plan).
+//     references (key result, mission, task).
 //   - Publishing a "decision.logged" event so the notification evaluator
 //     and other subscribers see new decisions.
 //   - De-duplicating identical decisions logged within a short window
@@ -12,9 +12,8 @@
 //
 // What this service is NOT responsible for:
 //   - Validating the decision's shape — that lives on domain.Decision.Validate().
-//   - Constructing decisions for callers — Log/CompleteAskUser are thin
-//     mapping wrappers; tools or RPC handlers can also build a Decision
-//     directly and call Create.
+//   - Constructing decisions for callers — Log is a thin mapping wrapper;
+//     tools or RPC handlers can also build a Decision directly and call Create.
 package app
 
 import (
@@ -29,8 +28,7 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
 	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	humaninput "github.com/tinoosan/agen8-mcp-server/internal/services/humaninput/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 // Service orchestrates decision creation with side effects.
@@ -51,8 +49,6 @@ type Service struct {
 // formats onto this struct.
 type LogRequest struct {
 	ProjectID              string
-	SpaceID                string
-	RunID                  string
 	MemberID               string
 	Title                  string
 	Rationale              string
@@ -62,41 +58,17 @@ type LogRequest struct {
 	TaskRef                string
 	KeyResultRef           string
 	MissionRef             string
-	PlanRef                string
 }
 
-// AskUserRequest is the input shape for Service.CompleteAskUser — a
-// question posed by an agent that's now coming back with the human's
-// answers (or a cancellation).
-type AskUserRequest struct {
-	ProjectID    string
-	SpaceID      string
-	RunID        string
-	MemberID     string
-	Title        string
-	Context      string
-	Questions    []humaninput.Question
-	TaskRef      string
-	KeyResultRef string
-	MissionRef   string
-	PlanRef      string
-}
-
-// Result is the projected response shape returned by Log and
-// CompleteAskUser. Some fields apply only to one kind: Cancelled and
-// Answers are populated for ask_user; InvalidationConditions for log.
-// The unset fields are zero values.
+// Result is the projected response shape returned by Log.
 type Result struct {
 	ID                     string
 	Kind                   string
 	Title                  string
-	Cancelled              bool
-	Answers                []humaninput.Answer
 	InvalidationConditions []string
 	TaskRef                string
 	KeyResultRef           string
 	MissionRef             string
-	PlanRef                string
 	MemberID               string
 	MemberName             string
 	SourceType             string
@@ -256,7 +228,6 @@ func (s *Service) Create(ctx context.Context, d domain.Decision) (domain.Decisio
 	// hide product-visible state transitions.
 	if err := s.events.Publish(eventbus.TopicDecisionLogged, eventbus.DecisionLoggedEvent{
 		ProjectID:    d.ProjectID,
-		SpaceID:      d.SpaceID,
 		DecisionID:   string(d.ID),
 		Source:       string(d.Source),
 		MemberID:     d.SourceIdentity,
@@ -265,7 +236,6 @@ func (s *Service) Create(ctx context.Context, d domain.Decision) (domain.Decisio
 		Confidence:   d.Confidence,
 		KeyResultRef: d.KeyResultRef,
 		MissionRef:   d.MissionRef,
-		PlanRef:      d.PlanRef,
 		TaskRef:      d.TaskRef,
 		Timestamp:    d.CreatedAt,
 	}); err != nil {
@@ -306,7 +276,6 @@ func (s *Service) emitContextLinks(ctx context.Context, d domain.Decision) error
 		{d.KeyResultRef, graphdomain.NodeTypeKeyResult, graphdomain.EdgeTypeServes},
 		{d.MissionRef, graphdomain.NodeTypeMission, graphdomain.EdgeTypeServes},
 		{d.TaskRef, graphdomain.NodeTypeTask, graphdomain.EdgeTypeMadeDuring},
-		{d.PlanRef, graphdomain.NodeTypePlan, graphdomain.EdgeTypeRelatesTo},
 	}
 	for _, spec := range specs {
 		if strings.TrimSpace(spec.targetID) == "" {
@@ -340,8 +309,6 @@ func (s *Service) emitContextLinks(ctx context.Context, d domain.Decision) error
 func (s *Service) Log(ctx context.Context, req LogRequest) (Result, error) {
 	d, err := domain.NewLog(domain.NewLogInput{
 		ProjectID:              req.ProjectID,
-		SpaceID:                req.SpaceID,
-		RunID:                  req.RunID,
 		MemberID:               req.MemberID,
 		Title:                  req.Title,
 		Rationale:              req.Rationale,
@@ -352,7 +319,6 @@ func (s *Service) Log(ctx context.Context, req LogRequest) (Result, error) {
 		TaskRef:                req.TaskRef,
 		KeyResultRef:           req.KeyResultRef,
 		MissionRef:             req.MissionRef,
-		PlanRef:                req.PlanRef,
 	}, s.clock.Now())
 	if err != nil {
 		return Result{}, err
@@ -369,45 +335,8 @@ func (s *Service) Log(ctx context.Context, req LogRequest) (Result, error) {
 	return out, nil
 }
 
-// CompleteAskUser records the answers (or cancellation) to a previously-
-// posed ask_user question. The decision row holds the questions for
-// audit context plus whatever the human said back.
-func (s *Service) CompleteAskUser(ctx context.Context, req AskUserRequest, result humaninput.QuestionsResult) (Result, error) {
-	d, err := domain.NewAskUser(domain.NewAskUserInput{
-		ProjectID:    req.ProjectID,
-		SpaceID:      req.SpaceID,
-		RunID:        req.RunID,
-		MemberID:     req.MemberID,
-		Title:        req.Title,
-		Context:      req.Context,
-		Questions:    req.Questions,
-		Answers:      result.Answers,
-		Cancelled:    result.Cancelled,
-		TaskRef:      req.TaskRef,
-		KeyResultRef: req.KeyResultRef,
-		MissionRef:   req.MissionRef,
-		PlanRef:      req.PlanRef,
-	}, s.clock.Now())
-	if err != nil {
-		return Result{}, err
-	}
-	created, err := s.Create(ctx, d)
-	if err != nil {
-		return Result{}, err
-	}
-	out := buildResult(created)
-	out.MemberName = s.resolveMemberDisplay(ctx, created.SourceIdentity)
-	if created.AskUser != nil {
-		out.Cancelled = created.AskUser.Cancelled
-		out.Answers = append([]humaninput.Answer(nil), created.AskUser.Answers...)
-	}
-	return out, nil
-}
-
 // buildResult projects common fields from a persisted decision into the
-// Result shape. Kind-specific fields (Cancelled, Answers,
-// InvalidationConditions) are filled in by the calling method based on
-// which payload it built.
+// Result shape.
 func buildResult(d domain.Decision) Result {
 	return Result{
 		ID:           string(d.ID),
@@ -416,7 +345,6 @@ func buildResult(d domain.Decision) Result {
 		TaskRef:      d.TaskRef,
 		KeyResultRef: d.KeyResultRef,
 		MissionRef:   d.MissionRef,
-		PlanRef:      d.PlanRef,
 		MemberID:     d.SourceIdentity,
 		SourceType:   string(d.Source),
 	}
@@ -430,7 +358,7 @@ func (s *Service) Get(ctx context.Context, id domain.DecisionID) (domain.Decisio
 // Delete removes a decision and the context links pointing at it.
 //
 // We delete links first then the row — if link deletion fails, the
-// decision is preserved so the operator can retry. Deleting the row
+// decision is preserved so the caller can retry. Deleting the row
 // first would orphan the links if the second step failed.
 func (s *Service) Delete(ctx context.Context, id domain.DecisionID) error {
 	trimmed := strings.TrimSpace(string(id))
@@ -451,7 +379,6 @@ func (s *Service) Delete(ctx context.Context, id domain.DecisionID) error {
 
 func (s *Service) List(ctx context.Context, filter domain.DecisionFilter) ([]domain.Decision, error) {
 	filter.ProjectID = strings.TrimSpace(filter.ProjectID)
-	filter.SpaceID = strings.TrimSpace(filter.SpaceID)
 	filter.Query = strings.TrimSpace(filter.Query)
 	if filter.ProjectID == "" {
 		return nil, fmt.Errorf("projectId is required")

@@ -242,20 +242,20 @@ func (h *Handler) UpdateKeyResult(ctx context.Context, params UpdateKeyResultPar
 	return UpdateKeyResultResult{KeyResult: keyResultView(kr)}, nil
 }
 
-func (h *Handler) AssignKeyResultSpace(ctx context.Context, params AssignKeyResultSpaceParams) (AssignKeyResultSpaceResult, error) {
+func (h *Handler) AssignKeyResultProject(ctx context.Context, params AssignKeyResultProjectParams) (AssignKeyResultProjectResult, error) {
 	keyResultID := strings.TrimSpace(params.KeyResultID)
 	if keyResultID == "" {
-		return AssignKeyResultSpaceResult{}, invalidParams("keyResultId is required")
+		return AssignKeyResultProjectResult{}, invalidParams("keyResultId is required")
 	}
-	spaceID := strings.TrimSpace(params.SpaceID)
-	if spaceID == "" {
-		return AssignKeyResultSpaceResult{}, invalidParams("spaceId is required")
+	projectID := strings.TrimSpace(params.ProjectID)
+	if projectID == "" {
+		return AssignKeyResultProjectResult{}, invalidParams("projectId is required")
 	}
-	kr, err := h.service.AssignKeyResultSpace(ctx, krdomain.KeyResultID(keyResultID), spaceID)
+	kr, err := h.service.AssignKeyResultProject(ctx, krdomain.KeyResultID(keyResultID), projectID)
 	if err != nil {
-		return AssignKeyResultSpaceResult{}, internalError("assign key result space", err)
+		return AssignKeyResultProjectResult{}, internalError("assign key result project", err)
 	}
-	return AssignKeyResultSpaceResult{KeyResult: keyResultView(kr)}, nil
+	return AssignKeyResultProjectResult{KeyResult: keyResultView(kr)}, nil
 }
 
 func (h *Handler) DeleteKeyResult(ctx context.Context, params DeleteKeyResultParams) (DeleteKeyResultResult, error) {
@@ -512,8 +512,8 @@ func keyResultView(kr krdomain.KeyResult) KeyResultView {
 		CurrentValue:          kr.CurrentValue,
 		ProgressPercent:       kr.ProgressPercent,
 		Status:                string(kr.Status),
-		SpaceID:               kr.SpaceID,
-		OwnerSpaceName:        kr.OwnerSpaceName,
+		ProjectID:             kr.ProjectID,
+		OwnerProjectName:      kr.OwnerProjectName,
 		LastMilestoneNotified: kr.LastMilestoneNotified,
 		Version:               kr.Version,
 	}

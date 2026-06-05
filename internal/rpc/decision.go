@@ -7,9 +7,8 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
 	decisionrpc "github.com/tinoosan/agen8-mcp-server/internal/services/decision/rpc"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	userapp "github.com/tinoosan/agen8-mcp-server/internal/services/user/app"
-	userdomain "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
 )
 
 const (
@@ -28,9 +27,6 @@ func RegisterDecision(reg *Registry, decisionSvc *decisionapp.Service, memberDis
 	handler := decisionrpc.NewHandler(decisionSvc)
 	if memberDisplay != nil {
 		handler.SetMemberDisplayLookup(memberDisplay)
-	}
-	if userSvc != nil {
-		handler.SetUserDisplayLookup(currentUserDisplayLookup{users: userSvc})
 	}
 	return RegisterHandlers(
 		func() error {
@@ -52,29 +48,6 @@ func RegisterDecision(reg *Registry, decisionSvc *decisionapp.Service, memberDis
 			return AddBoundHandler(reg, MethodDecisionExport, false, withDecisionIdentity(handler.Export))
 		},
 	)
-}
-
-type currentUserDisplayLookup struct {
-	users *userapp.Service
-}
-
-func (l currentUserDisplayLookup) CurrentUserDisplayName(ctx context.Context) (string, error) {
-	if l.users == nil {
-		return "", fmt.Errorf("user service is required")
-	}
-	identity, err := RequireIdentity(ctx)
-	if err != nil {
-		return "", err
-	}
-	id, err := userdomain.NewID(identity.UserID)
-	if err != nil {
-		return "", err
-	}
-	user, err := l.users.Get(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	return user.Name, nil
 }
 
 func withDecisionIdentity[Params any, Result any](fn func(context.Context, Params) (Result, error)) func(context.Context, Params) (Result, error) {

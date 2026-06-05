@@ -81,52 +81,6 @@ describe('useContextLinkEdges — node ID mapping', () => {
     expect(result.current.edges[0].source).toBe('decision:dec-aaa')
     expect(result.current.edges[0].target).toBe('kr-bbb')
   })
-
-  it('emits edge with correct source ID for operator_action node (oa: prefix)', async () => {
-    const link = makeLink({
-      sourceType: 'operator_action', sourceId: 'oa-aaa',
-      targetType: 'key_result', targetId: 'kr-bbb',
-      edgeType: 'completed_by',
-    })
-    mockRpcCall.mockResolvedValue({ contextLinks: [link] })
-
-    const nodeIds = ['oa:oa-aaa', 'kr-bbb']
-
-    const { Wrapper } = createWrapper()
-    const { result } = renderHook(
-      () => useContextLinkEdges(['kr-bbb'], [], nodeIds),
-      { wrapper: Wrapper },
-    )
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    expect(result.current.edges).toHaveLength(1)
-    expect(result.current.edges[0].source).toBe('oa:oa-aaa')
-  })
-
-  it('emits edge with correct source ID for escalation node (escalation: prefix)', async () => {
-    const link = makeLink({
-      sourceType: 'escalation', sourceId: 'esc-aaa',
-      targetType: 'decision', targetId: 'dec-bbb',
-      edgeType: 'resolved_by',
-    })
-    mockRpcCall.mockResolvedValue({ contextLinks: [link] })
-
-    const nodeIds = ['escalation:esc-aaa', 'decision:dec-bbb']
-
-    const { Wrapper } = createWrapper()
-    const { result } = renderHook(
-      // escalation→decision: not a KR target so needs leaf source query
-      () => useContextLinkEdges([], [], nodeIds),
-      { wrapper: Wrapper },
-    )
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    expect(result.current.edges).toHaveLength(1)
-    expect(result.current.edges[0].source).toBe('escalation:esc-aaa')
-    expect(result.current.edges[0].target).toBe('decision:dec-bbb')
-  })
 })
 
 // ── Edge filtering tests ───────────────────────────────────────────────────────
@@ -244,40 +198,6 @@ describe('useContextLinkEdges — leaf source queries', () => {
       expect(mockRpcCall).toHaveBeenCalledWith('graph.linksBySource', {
         sourceType: 'decision',
         sourceId: 'dec-bbb',
-      }),
-    )
-  })
-
-  it('calls listBySource with raw oa id for operatorAction nodes', async () => {
-    const nodeIds = ['oa:oa-ccc']
-
-    const { Wrapper } = createWrapper()
-    renderHook(
-      () => useContextLinkEdges([], [], nodeIds),
-      { wrapper: Wrapper },
-    )
-
-    await waitFor(() =>
-      expect(mockRpcCall).toHaveBeenCalledWith('graph.linksBySource', {
-        sourceType: 'operator_action',
-        sourceId: 'oa-ccc',
-      }),
-    )
-  })
-
-  it('calls listBySource with raw escalation id for escalation nodes', async () => {
-    const nodeIds = ['escalation:esc-ddd']
-
-    const { Wrapper } = createWrapper()
-    renderHook(
-      () => useContextLinkEdges([], [], nodeIds),
-      { wrapper: Wrapper },
-    )
-
-    await waitFor(() =>
-      expect(mockRpcCall).toHaveBeenCalledWith('graph.linksBySource', {
-        sourceType: 'escalation',
-        sourceId: 'esc-ddd',
       }),
     )
   })

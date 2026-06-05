@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { ArrowRight, ClipboardList, ScrollText, Target } from 'lucide-react'
+import { ArrowRight, ScrollText, Target } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import type { DashboardPanel } from '../../lib/routing'
-import type { ProjectSpaceSummary } from '../../lib/types'
-import DashboardActionsPanel from './DashboardActionsPanel'
 import DashboardMissionsPanel from './DashboardMissionsPanel'
 import DecisionFeed from './DecisionFeed'
 
@@ -38,20 +36,15 @@ function writeContextWidth(value: number): void {
 interface DashboardContextPanelProps {
   open: boolean
   panel: DashboardPanel
-  actionType?: 'all' | 'oa' | 'escalation'
   projectId: string | null
   focusedProjectRoot: string | null
-  spaceLabelByOwnerId?: Map<string, string>
-  spaces?: ProjectSpaceSummary[]
   onPanelChange: (panel: DashboardPanel) => void
 }
 
 function DashboardOverviewPanel({
-  onOpenActions,
   onOpenDecisions,
   onOpenMissions,
 }: {
-  onOpenActions: () => void
   onOpenDecisions: () => void
   onOpenMissions: () => void
 }) {
@@ -71,23 +64,6 @@ function DashboardOverviewPanel({
       <section className="dashboard-context-overview-section">
         <div className="dashboard-context-overview-kicker">Work surfaces</div>
         <div className="dashboard-context-overview-list">
-          <button
-            type="button"
-            onClick={onOpenActions}
-            className="dashboard-context-overview-action"
-          >
-            <div className="dashboard-context-overview-action-copy">
-              <div className="dashboard-context-overview-action-title">
-                <ClipboardList size={14} />
-                <span>Actions</span>
-              </div>
-              <p>
-                Escalations, operator requests, and follow-through without leaving the dashboard.
-              </p>
-            </div>
-            <ArrowRight size={14} />
-          </button>
-
           <button
             type="button"
             onClick={onOpenMissions}
@@ -116,7 +92,7 @@ function DashboardOverviewPanel({
                 <span>Decisions</span>
               </div>
               <p>
-                Review the choices agents and operators have logged while work moves forward.
+                Review the choices agents have logged while work moves forward.
               </p>
             </div>
             <ArrowRight size={14} />
@@ -130,11 +106,8 @@ function DashboardOverviewPanel({
 export default function DashboardContextPanel({
   open,
   panel,
-  actionType = 'all',
   projectId,
   focusedProjectRoot,
-  spaceLabelByOwnerId,
-  spaces,
   onPanelChange,
 }: DashboardContextPanelProps) {
   const [contextWidth, setContextWidth] = useState(readContextWidth)
@@ -238,7 +211,6 @@ export default function DashboardContextPanel({
           <div className="dashboard-context-header shrink-0 h-12 flex items-center px-[var(--dashboard-context-gutter)] border-b border-[color-mix(in_srgb,var(--border)_48%,transparent)]">
             <TabsList className="dashboard-context-tabs h-auto bg-transparent gap-0 p-0 rounded-none shrink-0">
               <TabsTrigger value="overview" className="dashboard-context-tab">Overview</TabsTrigger>
-              <TabsTrigger value="actions" className="dashboard-context-tab">Actions</TabsTrigger>
               <TabsTrigger value="missions" className="dashboard-context-tab">Missions</TabsTrigger>
               <TabsTrigger value="decisions" className="dashboard-context-tab">Decisions</TabsTrigger>
             </TabsList>
@@ -246,20 +218,16 @@ export default function DashboardContextPanel({
 
           <TabsContent value="overview" className="flex-1 min-h-0 mt-0 overflow-y-auto">
             <DashboardOverviewPanel
-              onOpenActions={() => onPanelChange('actions')}
               onOpenDecisions={() => onPanelChange('decisions')}
               onOpenMissions={() => onPanelChange('missions')}
             />
-          </TabsContent>
-          <TabsContent value="actions" className="flex-1 min-h-0 mt-0 overflow-hidden">
-            <DashboardActionsPanel projectId={projectId} embedded initialType={actionType} />
           </TabsContent>
           <TabsContent value="missions" className="flex-1 min-h-0 mt-0 overflow-hidden">
             <DashboardMissionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
           </TabsContent>
           <TabsContent value="decisions" className="flex-1 min-h-0 mt-0 overflow-y-auto">
             <div className="p-[var(--dashboard-context-gutter)]">
-              <DecisionFeed projectId={projectId} hideHeader spaceLabelByOwnerId={spaceLabelByOwnerId} spaces={spaces ?? []} defaultExpanded />
+              <DecisionFeed projectId={projectId} hideHeader defaultExpanded />
             </div>
           </TabsContent>
         </Tabs>

@@ -4,18 +4,15 @@ import type { MissionView, KeyResultView } from '../../lib/types'
 import { useMissionKRNodes } from './useMissionKRNodes'
 
 vi.mock('../../hooks/useMissions', () => ({ useMissions: vi.fn() }))
-vi.mock('../../hooks/useProjectSpaces', () => ({ useProjectSpaces: vi.fn() }))
 vi.mock('@tanstack/react-query', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@tanstack/react-query')>()
   return { ...mod, useQuery: vi.fn() }
 })
 
 import { useMissions } from '../../hooks/useMissions'
-import { useProjectSpaces } from '../../hooks/useProjectSpaces'
 import { useQuery } from '@tanstack/react-query'
 
 const mockUseMissions = vi.mocked(useMissions)
-const mockUseProjectSpaces = vi.mocked(useProjectSpaces)
 const mockUseQuery = vi.mocked(useQuery)
 
 function mission(overrides: Partial<MissionView>): MissionView {
@@ -49,10 +46,7 @@ function kr(overrides: Partial<KeyResultView>): KeyResultView {
 
 beforeEach(() => {
   mockUseMissions.mockReset()
-  mockUseProjectSpaces.mockReset()
   mockUseQuery.mockReset()
-
-  mockUseProjectSpaces.mockReturnValue({ data: [], isLoading: false } as never)
 })
 
 describe('useMissionKRNodes', () => {

@@ -5,18 +5,14 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { DecisionNodeData } from './DecisionNode'
 import type { DecisionSource } from '../../lib/types'
-import { useStrategySpaceLabel } from './useStrategySpaceLabel'
-import { useProjectKRs, useMissions } from '../../hooks/useMissions'
+import { useKeyResult, useProjectKRs, useMissions } from '../../hooks/useMissions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
-import { useProjectSpaces } from '../../hooks/useProjectSpaces'
 import type { NodePanelProps } from './types'
 
 const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
 
 const SOURCE_DOT: Record<DecisionSource, string> = {
   agent: 'var(--accent)',
-  operator: 'var(--green)',
-  policy: 'var(--text-3)',
 }
 
 const LABEL_STYLE: CSSProperties = {
@@ -68,20 +64,20 @@ function answerText(answer: { selectedOption?: string; selectedOptions?: string[
 export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
   const d = data as DecisionNodeData
   const { decision } = d
-  const { resolveSpaceLabel } = useStrategySpaceLabel(projectId)
-  const spaceLabel = resolveSpaceLabel({ spaceLabel: (decision as { spaceLabel?: string }).spaceLabel, spaceId: decision.spaceId })
   const isAskUser = (decision.kind ?? '').trim().toLowerCase() === 'ask_user'
 
   // Fetch titles for related entities
-  const spacesQuery = useProjectSpaces(projectId, { refetchInterval: false })
-  const spaces = spacesQuery.data ?? []
-  const tasksQuery = useProjectTasks(spaces)
+  const tasksQuery = useProjectTasks(projectId)
   const taskTitle = decision.taskRef
     ? (tasksQuery.data ?? []).find(t => t.id === decision.taskRef)?.title ?? decision.taskRef.slice(0, 12)
     : null
   const krsQuery = useProjectKRs(projectId)
+  const directKrQuery = useKeyResult(decision.keyResultRef ?? null)
+  const kr = decision.keyResultRef
+    ? directKrQuery.data ?? krsQuery.data?.get(decision.keyResultRef)
+    : undefined
   const krTitle = decision.keyResultRef
-    ? krsQuery.data?.get(decision.keyResultRef)?.title ?? decision.keyResultRef.slice(0, 12)
+    ? kr?.title ?? null
     : null
   const missionsQuery = useMissions(projectId)
   const missionTitle = decision.missionRef
@@ -196,13 +192,6 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           )}
         </div>
 
-        {spaceLabel && (
-          <div className="flex flex-col" style={{ gap: '6px' }}>
-            <p className="uppercase" style={LABEL_STYLE}>Space</p>
-            <p style={PROSE_STYLE}>{spaceLabel}</p>
-          </div>
-        )}
-
         {isAskUser && decision.context && (
           <div className="flex flex-col" style={{ gap: '6px' }}>
             <p className="uppercase" style={LABEL_STYLE}>Context</p>
@@ -279,7 +268,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
         {isAskUser && decision.cancelled && (
           <div className="flex flex-col" style={{ gap: '6px' }}>
             <p className="uppercase" style={LABEL_STYLE}>Status</p>
-            <p style={PROSE_STYLE}>Cancelled by operator.</p>
+            <p style={PROSE_STYLE}>Cancelled.</p>
           </div>
         )}
 
@@ -361,7 +350,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
         {/* Related nodes — backlinks to parent entities */}
         <RelatedSection items={[
           ...(decision.taskRef && taskTitle ? [{ nodeId: `task:${decision.taskRef}`, type: 'Task', title: taskTitle }] : []),
-          ...(decision.keyResultRef && krTitle ? [{ nodeId: decision.keyResultRef, type: 'Key Result', title: krTitle }] : []),
+          ...(decision.keyResultRef ? [{ nodeId: decision.keyResultRef, type: 'Key Result', title: krTitle ?? 'Key result' }] : []),
           ...(decision.missionRef && missionTitle ? [{ nodeId: decision.missionRef, type: 'Mission', title: missionTitle }] : []),
         ]} />
       </div>

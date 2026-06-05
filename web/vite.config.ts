@@ -66,7 +66,6 @@ export default defineConfig({
       '@codemirror/lang-markdown',
       '@codemirror/lang-yaml',
       'sonner',
-      'exceljs',
       'wouter',
       'lucide-react',
       'clsx',

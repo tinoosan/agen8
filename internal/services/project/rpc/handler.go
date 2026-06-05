@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/cluster"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 type Handler struct {
@@ -114,102 +112,93 @@ func (h *Handler) ProjectDelete(ctx context.Context, p ProjectDeleteParams) (str
 	return struct{}{}, nil
 }
 
-func (h *Handler) ProjectSpaceList(ctx context.Context, p ProjectSpaceListParams) (ProjectSpaceListResult, error) {
-	projectID, err := requireProjectID(p.ProjectID)
+func (h *Handler) MemberRegister(ctx context.Context, p MemberRegisterParams) (MemberRegisterResult, error) {
+	projectID := strings.TrimSpace(p.ProjectID)
+	if projectID == "" {
+		return MemberRegisterResult{}, invalidParams("projectId is required")
+	}
+	rosterMember := member.Record{
+		ProjectID:      projectID,
+		DisplayName:    strings.TrimSpace(p.DisplayName),
+		MemberType:     strings.TrimSpace(p.RequestedMemberType),
+		HarnessKind:    strings.TrimSpace(p.HarnessKind),
+		Model:          strings.TrimSpace(p.Model),
+		Effort:         strings.TrimSpace(p.Effort),
+		PermissionMode: strings.TrimSpace(p.PermissionMode),
+		ConfigRef:      strings.TrimSpace(p.ConfigRef),
+	}
+	result, err := h.svc.RegisterMember(ctx, rosterMember)
 	if err != nil {
-		return ProjectSpaceListResult{}, err
+		return MemberRegisterResult{}, err
 	}
-	spaces, err := h.svc.ListProjectSpaces(ctx, projectID)
-	if err != nil {
-		return ProjectSpaceListResult{}, err
-	}
-	views := make([]ProjectSpaceView, 0, len(spaces))
-	for _, space := range spaces {
-		views = append(views, NewProjectSpaceView(space))
-	}
-	return ProjectSpaceListResult{Spaces: views}, nil
+	return MemberRegisterResult{
+		Member:            NewMemberView(result.Member),
+		GrantedMemberType: result.GrantedMemberType,
+	}, nil
 }
 
-func (h *Handler) ClusterSave(ctx context.Context, p ClusterSaveParams) (ClusterSaveResult, error) {
-	projectID, err := requireProjectID(p.ProjectID)
+func (h *Handler) MemberGet(ctx context.Context, p MemberGetParams) (MemberGetResult, error) {
+	id, err := requireMemberID(p.MemberID)
 	if err != nil {
-		return ClusterSaveResult{}, err
+		return MemberGetResult{}, err
 	}
-	clusterID := cluster.ID(strings.TrimSpace(p.ClusterID))
-	if clusterID == "" {
-		return ClusterSaveResult{}, invalidParams("clusterId is required")
-	}
-	view, err := h.svc.SaveCluster(ctx, projectapp.SaveClusterInput{
-		ID:        clusterID,
-		ProjectID: projectID,
-		Name:      strings.TrimSpace(p.Name),
-		Status:    cluster.Status(strings.TrimSpace(p.Status)),
-	})
+	rosterMember, err := h.svc.GetMember(ctx, id)
 	if err != nil {
-		return ClusterSaveResult{}, internalError("save project cluster", err)
+		return MemberGetResult{}, err
 	}
-	return ClusterSaveResult{Cluster: NewClusterView(view)}, nil
+	return MemberGetResult{Member: NewMemberView(rosterMember)}, nil
 }
 
-func (h *Handler) ClusterList(ctx context.Context, p ClusterListParams) (ClusterListResult, error) {
-	projectID, err := requireProjectID(p.ProjectID)
+func (h *Handler) MemberList(ctx context.Context, p MemberListParams) (MemberListResult, error) {
+	filter := member.Filter{
+		ProjectID:      strings.TrimSpace(p.ProjectID),
+		UserID:         strings.TrimSpace(p.UserID),
+		MemberType:     strings.TrimSpace(p.MemberType),
+		LifecycleState: strings.TrimSpace(p.LifecycleState),
+		Limit:          p.Limit,
+		Offset:         p.Offset,
+	}
+	members, err := h.svc.ListMembers(ctx, filter)
 	if err != nil {
-		return ClusterListResult{}, err
+		return MemberListResult{}, err
 	}
-	clusters, err := h.svc.ListClusters(ctx, projectID)
-	if err != nil {
-		return ClusterListResult{}, err
+	views := make([]MemberView, 0, len(members))
+	for _, rosterMember := range members {
+		views = append(views, NewMemberView(rosterMember))
 	}
-	views := make([]ClusterView, 0, len(clusters))
-	for _, cluster := range clusters {
-		views = append(views, NewClusterView(cluster))
-	}
-	return ClusterListResult{Clusters: views}, nil
+	return MemberListResult{Members: views}, nil
 }
 
-func (h *Handler) ClusterSpaceSave(ctx context.Context, p ClusterSpaceSaveParams) (ClusterSpaceSaveResult, error) {
-	projectID, err := requireProjectID(p.ProjectID)
+func (h *Handler) MemberUpdateConfig(ctx context.Context, p MemberUpdateConfigParams) (MemberUpdateConfigResult, error) {
+	id, err := requireMemberID(p.MemberID)
 	if err != nil {
-		return ClusterSpaceSaveResult{}, err
+		return MemberUpdateConfigResult{}, err
 	}
-	clusterID := cluster.ID(strings.TrimSpace(p.ClusterID))
-	if clusterID == "" {
-		return ClusterSpaceSaveResult{}, invalidParams("clusterId is required")
-	}
-	spaceID := spacedomain.SpaceID(strings.TrimSpace(p.SpaceID))
-	if spaceID == "" {
-		return ClusterSpaceSaveResult{}, invalidParams("spaceId is required")
-	}
-	ref, err := h.svc.SaveClusterSpace(ctx, projectapp.SaveClusterSpaceInput{
-		ClusterID: clusterID,
-		ProjectID: projectID,
-		SpaceID:   spaceID,
-		SortOrder: p.SortOrder,
-		Pinned:    p.Pinned,
-	})
+	rosterMember, err := h.svc.UpdateMemberConfig(ctx, id, p.Model, p.Effort, p.HarnessKind, p.PermissionMode, p.ConfigRef)
 	if err != nil {
-		return ClusterSpaceSaveResult{}, internalError("save project cluster space", err)
+		return MemberUpdateConfigResult{}, err
 	}
-	return ClusterSpaceSaveResult{Space: NewClusterSpaceView(ref)}, nil
+	return MemberUpdateConfigResult{Member: NewMemberView(rosterMember)}, nil
 }
 
-func (h *Handler) ClusterSpaceRemove(ctx context.Context, p ClusterSpaceRemoveParams) (struct{}, error) {
-	projectID, err := requireProjectID(p.ProjectID)
+func (h *Handler) MemberRemove(ctx context.Context, p MemberRemoveParams) (MemberRemoveResult, error) {
+	id, err := requireMemberID(p.MemberID)
 	if err != nil {
-		return struct{}{}, err
+		return MemberRemoveResult{}, err
 	}
-	clusterID := cluster.ID(strings.TrimSpace(p.ClusterID))
-	if clusterID == "" {
-		return struct{}{}, invalidParams("clusterId is required")
+	rosterMember, err := h.svc.RemoveMember(ctx, id)
+	if err != nil {
+		return MemberRemoveResult{}, err
 	}
-	spaceID := spacedomain.SpaceID(strings.TrimSpace(p.SpaceID))
-	if spaceID == "" {
-		return struct{}{}, invalidParams("spaceId is required")
+	return MemberRemoveResult{Member: NewMemberView(rosterMember)}, nil
+}
+
+func requireMemberID(raw string) (member.ID, error) {
+	id := member.ID(strings.TrimSpace(raw))
+	if id == "" {
+		return "", invalidParams("memberId is required")
 	}
-	if err := h.svc.RemoveClusterSpace(ctx, projectID, clusterID, spaceID); err != nil {
-		return struct{}{}, internalError("remove project cluster space", err)
-	}
-	return struct{}{}, nil
+	return id, nil
 }
 
 func requireProjectID(value string) (types.ProjectID, error) {

@@ -7,7 +7,7 @@ export type GraphEdge = Edge
 
 // ── Registry descriptor interfaces ───────────────────────────────────────────
 //
-// OCP extension model: adding a new node type (escalation, member, space, etc.)
+// OCP extension model: adding a new node type
 // means creating a component pair and adding an entry to nodeTypeRegistry in
 // registry.ts — zero changes to StrategyMap or DetailPanel.
 

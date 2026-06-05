@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { cn } from '@/lib/utils'
 import type { Task } from '../../lib/types'
+import { memberDisplayName } from '../../lib/memberDisplay'
 import { useStrategyMapStore } from './strategyMapStore'
 
 export interface TaskNodeData {
@@ -84,9 +85,7 @@ function ProgressRing({ progress, tone, glyph, active }: {
 }
 
 function taskOwnerLabel(task: Task): string | null {
-  const owner = task.assignedToLabel || task.assignedTo
-  if (!owner) return null
-  return owner.replaceAll('_', ' ')
+  return memberDisplayName(task.assignedToLabel, task.assignedTo) ?? null
 }
 
 export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps) {
@@ -111,9 +110,8 @@ export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps
   const isExiting = !isActive && leafPhase === 'toDot'
 
   if (showDot) {
-    // Dot-mode glyph: circle distinguishes tasks from decisions (diamond),
-    // escalations (triangle), and operator actions (square). Failed/blocked
-    // tasks break cluster colour and go red so they're visible at macro zoom.
+    // Dot-mode glyph: circle distinguishes tasks from decisions.
+    // Failed/blocked tasks break cluster colour and go red at macro zoom.
     const dotColor =
       status === 'failed' || status === 'blocked' ? 'var(--red)' : color
     return (

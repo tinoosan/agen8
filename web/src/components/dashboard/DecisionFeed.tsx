@@ -2,15 +2,13 @@ import { useState, useMemo } from 'react'
 import { useRecentDecisions, type DecisionListFilter } from '../../hooks/useDecisions'
 import { useMissions, useProjectKRs } from '../../hooks/useMissions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
-import { usePendingOpActions } from '../../hooks/useOpActions'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { ScrollText, ChevronRight, AlertCircle, Link2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { DecisionView, ProjectSpaceSummary } from '../../lib/types'
-import { spaceDisplayName } from '../../lib/spaceDisplayName'
+import type { DecisionView } from '../../lib/types'
 import { safeReferenceLabel, sanitizeDecisionTitle } from '../../lib/displaySanitizers'
 import DecisionDetails from '../decision/DecisionDetails'
 import { sourceToClusterColor } from '../../lib/clusterColors'
@@ -30,38 +28,6 @@ function timeAgo(iso: string): string {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return `${days}d ago`
-}
-
-function compactRef(ref: string): string {
-  if (ref.length <= 24) return ref
-  return `${ref.slice(0, 12)}…${ref.slice(-6)}`
-}
-
-function compactRole(role: string): string {
-  if (role.length <= 14) return role
-  return `${role.slice(0, 10)}…`
-}
-
-function spaceSummaryDetail(roles: Array<{ role: string; count: number }>): string | null {
-  const lead = roles[0]
-  if (!lead) return null
-  if (roles.length === 1) return `${compactRole(lead.role)} shapes this`
-  return `${compactRole(lead.role)} leads · +${roles.length - 1} more`
-}
-
-function displaySpaceLabel(spaceLabel: string): string {
-  const ref = spaceLabel.trim()
-  if (!ref || ref === 'unknown') return 'Unscoped'
-  if (/^space-[0-9a-f-]{8,}$/i.test(ref)) return 'Archived space'
-  return spaceDisplayName(undefined, ref)
-}
-
-function decisionSpaceLabel(decision: DecisionView, spaceLabelByOwnerId?: Map<string, string>): string {
-  const spaceLabel = decision.spaceName?.trim()
-  if (spaceLabel) return spaceLabel
-  const mappedLabel = decision.spaceId ? spaceLabelByOwnerId?.get(decision.spaceId)?.trim() : ''
-  if (mappedLabel) return mappedLabel
-  return 'unknown'
 }
 
 /* -- Confidence dots ------------------------------------------------------ */
@@ -105,7 +71,6 @@ type DecisionRefCatalogs = {
   missionTitles: Map<string, string>
   keyResultTitles: Map<string, string>
   taskTitles: Map<string, string>
-  operatorActionTitles: Map<string, string>
 }
 
 function firstSafeValue(...values: Array<string | null | undefined>): string | null {
@@ -118,7 +83,7 @@ function firstSafeValue(...values: Array<string | null | undefined>): string | n
 
 function resolveDecisionRef(
   decision: DecisionView,
-  key: 'mission' | 'keyResult' | 'task' | 'operatorAction',
+  key: 'mission' | 'keyResult' | 'task',
   ref: string | null | undefined,
   catalogs: DecisionRefCatalogs,
 ): string | null {
@@ -129,16 +94,14 @@ function resolveDecisionRef(
   const metadataLabel =
     key === 'mission' ? firstSafeValue(metadata.missionTitle, metadata['mission.title']) :
     key === 'keyResult' ? firstSafeValue(metadata.keyResultTitle, metadata.krTitle, metadata['keyResult.title']) :
-    key === 'task' ? firstSafeValue(metadata.taskTitle, metadata['task.title']) :
-    firstSafeValue(metadata.operatorActionTitle, metadata.actionTitle, metadata['operatorAction.title'])
+    firstSafeValue(metadata.taskTitle, metadata['task.title'])
 
   if (metadataLabel) return metadataLabel
 
   const mapLabel =
     key === 'mission' ? catalogs.missionTitles.get(trimmedRef) :
     key === 'keyResult' ? catalogs.keyResultTitles.get(trimmedRef) :
-    key === 'task' ? catalogs.taskTitles.get(trimmedRef) :
-    catalogs.operatorActionTitles.get(trimmedRef)
+    catalogs.taskTitles.get(trimmedRef)
 
   return firstSafeValue(mapLabel, trimmedRef)
 }
@@ -148,11 +111,9 @@ function RefLinks({ decision, catalogs }: { decision: DecisionView; catalogs: De
   const mission = resolveDecisionRef(decision, 'mission', decision.missionRef, catalogs)
   const keyResult = resolveDecisionRef(decision, 'keyResult', decision.keyResultRef, catalogs)
   const task = resolveDecisionRef(decision, 'task', decision.taskRef, catalogs)
-  const operatorAction = resolveDecisionRef(decision, 'operatorAction', decision.operatorActionRef, catalogs)
   if (mission) refs.push({ label: 'Mission', value: mission })
   if (keyResult) refs.push({ label: 'KR', value: keyResult })
   if (task) refs.push({ label: 'Task', value: task })
-  if (operatorAction) refs.push({ label: 'Action', value: operatorAction })
   if (refs.length === 0) return null
 
   return (
@@ -172,11 +133,9 @@ function PrimaryRefLink({ decision, catalogs }: { decision: DecisionView; catalo
   const mission = resolveDecisionRef(decision, 'mission', decision.missionRef, catalogs)
   const keyResult = resolveDecisionRef(decision, 'keyResult', decision.keyResultRef, catalogs)
   const task = resolveDecisionRef(decision, 'task', decision.taskRef, catalogs)
-  const operatorAction = resolveDecisionRef(decision, 'operatorAction', decision.operatorActionRef, catalogs)
   if (mission) refs.push({ label: 'Mission', value: mission })
   if (keyResult) refs.push({ label: 'KR', value: keyResult })
   if (task) refs.push({ label: 'Task', value: task })
-  if (operatorAction) refs.push({ label: 'Action', value: operatorAction })
   const primary = refs[0]
   if (!primary) return null
 
@@ -243,7 +202,7 @@ function DecisionRow({ decision, catalogs }: { decision: DecisionView; catalogs:
     : 'var(--text-3)'
   const clusterColor = `color-mix(in srgb, ${baseClusterColor} 58%, var(--text-2) 42%)`
   const recencyClass = getRecencyClass(decision.createdAt)
-  const identity = memberLabel || (decision.source === 'operator' ? 'you' : 'agent')
+  const identity = memberLabel || 'agent'
   const avatarStyle = {
     color: clusterColor,
     background: `color-mix(in srgb, ${baseClusterColor} 9%, var(--bg-panel) 91%)`,
@@ -345,19 +304,16 @@ function DecisionFeedSkeleton() {
 
 /* -- Main exported component ---------------------------------------------- */
 
-type SourceFilter = '' | 'agent' | 'operator'
+type SourceFilter = '' | 'agent'
 
 const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'agent', label: 'Agent' },
-  { value: 'operator', label: 'Operator' },
 ]
 
-export default function DecisionFeed({ projectId, hideHeader, spaceLabelByOwnerId, spaces = [], defaultExpanded = false }: {
+export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = false }: {
   projectId: string | null
   hideHeader?: boolean
-  spaceLabelByOwnerId?: Map<string, string>
-  spaces?: ProjectSpaceSummary[]
   defaultExpanded?: boolean
 }) {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('')
@@ -368,8 +324,7 @@ export default function DecisionFeed({ projectId, hideHeader, spaceLabelByOwnerI
   )
   const missionsQuery = useMissions(projectId)
   const projectKRsQuery = useProjectKRs(projectId)
-  const projectTasksQuery = useProjectTasks(spaces)
-  const opActionsQuery = usePendingOpActions(projectId)
+  const projectTasksQuery = useProjectTasks(projectId)
 
   // All hooks must be called before any early return (Rules of Hooks)
   const safeDecisions = useMemo(() => decisions ?? [], [decisions])
@@ -392,54 +347,20 @@ export default function DecisionFeed({ projectId, hideHeader, spaceLabelByOwnerI
       if (label) taskTitles.set(task.id, label)
     }
 
-    const operatorActionTitles = new Map<string, string>()
-    for (const action of opActionsQuery.data ?? []) {
-      const label = safeReferenceLabel(action.title)
-      if (label) operatorActionTitles.set(action.id, label)
-    }
-
     return {
       missionTitles,
       keyResultTitles,
       taskTitles,
-      operatorActionTitles,
     }
   }, [
     missionsQuery.data,
-    opActionsQuery.data,
     projectKRsQuery.data,
     projectTasksQuery.data,
   ])
 
-  const spaceStats = useMemo(() => {
-    const spaces = new Map<string, Map<string, number>>()
-    for (const d of safeDecisions) {
-      const ref = decisionSpaceLabel(d, spaceLabelByOwnerId)
-      // "shapes this" attribution prefers the resolved name; the
-      // memberId is a stable key so it remains a useful tie-breaker
-      // when multiple anonymous members share the same source label.
-      const role = d.memberName?.trim() || d.memberId?.trim() || d.sourceIdentity?.trim() || d.source
-      if (!spaces.has(ref)) spaces.set(ref, new Map())
-      const roles = spaces.get(ref)!
-      roles.set(role, (roles.get(role) ?? 0) + 1)
-    }
-    return Array.from(spaces.entries())
-      .map(([spaceLabel, roles]) => ({
-        spaceLabel,
-        displayName: displaySpaceLabel(spaceLabel),
-        total: Array.from(roles.values()).reduce((a, b) => a + b, 0),
-        roles: Array.from(roles.entries())
-          .map(([role, count]) => ({ role, count, color: `color-mix(in srgb, ${sourceToClusterColor(role)} 58%, var(--text-2) 42%)` }))
-          .sort((a, b) => b.count - a.count),
-      }))
-      .sort((a, b) => b.total - a.total)
-  }, [safeDecisions, spaceLabelByOwnerId])
-
   const PREVIEW_COUNT = 4
-  const SUMMARY_SPACE_LIMIT = 3
   const [expanded, setExpanded] = useState(defaultExpanded)
   const hasMore = safeDecisions.length > PREVIEW_COUNT
-  const hiddenSpaceCount = Math.max(0, spaceStats.length - SUMMARY_SPACE_LIMIT)
 
   // Early returns — all hooks already called above
   if (!projectId) return null
@@ -519,34 +440,6 @@ export default function DecisionFeed({ projectId, hideHeader, spaceLabelByOwnerI
           </Button>
         </div>
       )}
-
-      <div className="decision-space-summary mb-4">
-        {spaceStats.slice(0, SUMMARY_SPACE_LIMIT).map(({ spaceLabel, displayName, total, roles }) => (
-          <div
-            key={spaceLabel}
-            className="decision-space-summary-row"
-            title={roles.map(({ role, count }) => `${role} ${count}`).join(' · ')}
-          >
-            <div className="decision-space-summary-head">
-              <span className="decision-space-summary-name">{compactRef(displayName)}</span>
-              <span className="decision-space-summary-total">{total}</span>
-            </div>
-            {roles[0] && (
-              <div className="decision-space-summary-roles">
-                <span className="decision-space-summary-dot" style={{ backgroundColor: roles[0].color }} />
-                <span className="decision-space-summary-role-label">
-                  {spaceSummaryDetail(roles)}
-                </span>
-              </div>
-            )}
-          </div>
-        ))}
-        {hiddenSpaceCount > 0 && (
-          <span className="decision-space-summary-more">
-            +{hiddenSpaceCount} more {hiddenSpaceCount === 1 ? 'space' : 'spaces'}
-          </span>
-        )}
-      </div>
 
       {/* Decision feed — preview or full */}
       {expanded ? (

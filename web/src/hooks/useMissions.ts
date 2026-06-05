@@ -59,6 +59,20 @@ export function useKeyResults(missionId: string | null) {
   })
 }
 
+export function useKeyResult(keyResultId: string | null) {
+  return useQuery<KeyResultView>({
+    queryKey: ['keyResult.get', keyResultId ?? ''],
+    queryFn: async () => {
+      const res = await rpcCall<{ keyResult: KeyResultView }>('mission.kr.get', {
+        keyResultId: keyResultId ?? '',
+      })
+      return res.keyResult
+    },
+    enabled: !!keyResultId,
+    refetchInterval: 10_000,
+  })
+}
+
 /* ── Mission mutation hooks ──────────────────────────────────────────────
  *
  * Cross-surface invalidation strategy:
@@ -184,24 +198,6 @@ export function useDeleteKeyResult() {
   })
 }
 
-export function useSetSpace() {
-  const queryClient = useQueryClient()
-  return useMutation<
-    { keyResult: KeyResultView },
-    Error,
-    { keyResultId: string; spaceId: string; missionId: string }
-  >({
-    mutationFn: (vars) => {
-      const { missionId: _, ...params } = vars // eslint-disable-line @typescript-eslint/no-unused-vars
-      return rpcCall<{ keyResult: KeyResultView }>('mission.kr.assignSpace', params)
-    },
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['keyResult.list', vars.missionId] })
-      queryClient.invalidateQueries({ queryKey: ['mission.list'] })
-    },
-  })
-}
-
 export function useUpdateKRProgress() {
   const queryClient = useQueryClient()
   return useMutation<
@@ -240,7 +236,11 @@ export function useProjectKRs(projectId: string | null) {
       )
       const map = new Map<string, KeyResultView>()
       for (const krs of results) {
-        for (const kr of krs) map.set(kr.id, kr)
+        for (const kr of krs) {
+          map.set(kr.id, kr)
+          map.set(`key_result:${kr.id}`, kr)
+          map.set(`keyResult:${kr.id}`, kr)
+        }
       }
       return map
     },

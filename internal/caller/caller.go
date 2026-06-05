@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 type contextKey struct{}
 
 type Caller struct {
-	UserID   string
-	MemberID member.ID
-	SpaceID  domain.SpaceID
-	Role     string
+	UserID    string
+	MemberID  member.ID
+	ProjectID types.ProjectID
+	Role      string
 }
 
 type Resolver interface {
@@ -43,7 +43,7 @@ func (ContextResolver) ResolveCaller(ctx context.Context) (Caller, error) {
 func (c Caller) Normalize() Caller {
 	c.UserID = strings.TrimSpace(c.UserID)
 	c.MemberID = member.ID(strings.TrimSpace(string(c.MemberID)))
-	c.SpaceID = domain.SpaceID(strings.TrimSpace(string(c.SpaceID)))
+	c.ProjectID = types.ProjectID(strings.TrimSpace(string(c.ProjectID)))
 	c.Role = strings.TrimSpace(c.Role)
 	return c
 }

@@ -69,7 +69,7 @@ export default function DecisionDetails({ decision }: { decision: DecisionView }
         {decision.cancelled && (
           <div>
             <Section label="Status">
-              <p className="m-0 text-[var(--red)]">Cancelled by operator</p>
+              <p className="m-0 text-[var(--red)]">Cancelled</p>
             </Section>
           </div>
         )}

@@ -2,8 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-
-	"github.com/tinoosan/agen8-mcp-server/pkg/membertype"
 )
 
 // CatalogEntry is the product-facing listing for a registered tool.
@@ -17,12 +15,11 @@ type CatalogEntry struct {
 
 // RolePolicy captures tool access rules for a single running member.
 type RolePolicy struct {
-	MemberType     membertype.MemberType `json:"-"`
-	SpaceID        string                `json:"spaceId,omitempty"`
-	MemberCount    int                   `json:"memberCount,omitempty"`
-	HasReviewer    bool                  `json:"hasReviewer,omitempty"`
-	AllowedSources []string              `json:"allowedSources,omitempty"`
-	AllowedTools   []string              `json:"allowedTools,omitempty"`
+	SpaceID        string   `json:"spaceId,omitempty"`
+	MemberCount    int      `json:"memberCount,omitempty"`
+	HasReviewer    bool     `json:"hasReviewer,omitempty"`
+	AllowedSources []string `json:"allowedSources,omitempty"`
+	AllowedTools   []string `json:"allowedTools,omitempty"`
 }
 
 // MemberToolCatalog is the mode-aware catalog returned to a running member.

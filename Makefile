@@ -6,9 +6,9 @@ DATA_DIR_FLAG := $(if $(strip $(DATA_DIR)),--data-dir "$(DATA_DIR)",)
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS := -X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.Version=$(VERSION) -X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.Commit=$(COMMIT) -X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.BuildDate=$(BUILD_DATE)
-ENSURE_TOOL := ./scripts/ensure-tool.sh
-WEB_NPM := ../scripts/web-npm.sh
+GO_LDFLAGS :=
+WEB_NPM := npm
+AIR ?= air
 GO_PACKAGES ?= ./cmd/... ./internal/... ./pkg/...
 VITE_HOST := $(word 1,$(subst :, ,$(VITE_ADDR)))
 VITE_PORT := $(word 2,$(subst :, ,$(VITE_ADDR)))
@@ -22,7 +22,7 @@ clean:
 	@rm -rf ./tmp ./bin ~/.agen8/agen8.db ~/.agen8/agen8.db-shm ~/.agen8/agen8.db-wal ~/.agen8/daemon.log ~/.agen8/debug.log
 
 ensure-air:
-	@$(ENSURE_TOOL) air >/dev/null
+	@command -v $(AIR) >/dev/null
 
 # Web UI targets
 web-install:
@@ -33,7 +33,7 @@ web-build: web-install
 
 build-go:
 	@mkdir -p ./bin
-	@go build -ldflags "$(LDFLAGS)" -o bin/agen8-mcp-server ./cmd/agen8-mcp-server
+	@go build -ldflags "$(GO_LDFLAGS)" -o bin/agen8-mcp ./cmd/agen8-mcp
 
 # Build the full binary (requires web assets to be built first)
 build: web-build build-go
@@ -95,11 +95,11 @@ remote: dev-remote
 daemon-remote:
 	@AGEN8_DAEMON_LISTENER=http \
 	AGEN8_HTTP_ADDR="$(HTTP_ADDR)" \
-	go run ./cmd/agen8-mcp-server daemon start $(DATA_DIR_FLAG) --listener http --http-addr "$(HTTP_ADDR)"
+	go run ./cmd/agen8-mcp daemon start $(DATA_DIR_FLAG) --listener http --http-addr "$(HTTP_ADDR)"
 
 dev-remote: ensure-air web-install
 	@set -e; \
-	AIR_BIN="$$( $(ENSURE_TOOL) air )"; \
+	AIR_BIN="$(AIR)"; \
 	cd web; $(WEB_NPM) run dev -- --host "$(VITE_HOST)" --port "$(VITE_PORT)" & web_pid=$$!; cd ..; \
 	trap 'kill $$web_pid 2>/dev/null || true; wait $$web_pid 2>/dev/null || true' EXIT INT TERM; \
 	printf 'daemon: http://%s\n' "$(HTTP_ADDR)"; \
@@ -109,7 +109,7 @@ dev-remote: ensure-air web-install
 	AGEN8_LOG_FILE="tmp/daemon.log" \
 	AGEN8_DEV_WEB_URL="$(DEV_WEB_URL)" \
 	"$$AIR_BIN" \
-		-build.full_bin "./tmp/agen8-mcp-server daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(HTTP_ADDR)\""
+		-build.full_bin "./tmp/agen8-mcp daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(HTTP_ADDR)\""
 
 worktree-create:
 	@./scripts/worktree/create.sh "$(KIND)" "$(TASK)" "$(SLUG)" "$(or $(BASE),dev)"

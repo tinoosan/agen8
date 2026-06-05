@@ -8,8 +8,7 @@ import (
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 type stubGraphService struct {
@@ -48,7 +47,7 @@ func (stubMembers) GetMember(_ context.Context, id member.ID) (member.Record, er
 	return member.Record{
 		ID:             id,
 		UserID:         "user-1",
-		SpaceID:        "space-1",
+		ProjectID:      "proj-1",
 		LifecycleState: member.LifecycleActive,
 	}, nil
 }
@@ -66,7 +65,7 @@ func (m *callerRequiredMembers) GetMember(ctx context.Context, id member.ID) (me
 	return member.Record{
 		ID:             id,
 		UserID:         "user-1",
-		SpaceID:        string(seen.SpaceID),
+		ProjectID:      string(seen.ProjectID),
 		LifecycleState: member.LifecycleActive,
 	}, nil
 }
@@ -76,7 +75,6 @@ func graphCallContext(svc *stubGraphService) CallContext {
 		Graph:         svc,
 		Members:       stubMembers{},
 		ProjectID:     "proj-1",
-		SpaceID:       "space-1",
 		ActorMemberID: "member-1",
 	}
 }
@@ -194,14 +192,13 @@ func TestHandleStampsCallerBeforeLoadingMember(t *testing.T) {
 		Graph:         service,
 		Members:       members,
 		ProjectID:     "proj-1",
-		SpaceID:       "space-1",
 		ActorMemberID: "member-1",
 	}
 	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"search","node_type":"task","query":"ship","limit":10}`))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if members.seen.MemberID != member.ID("member-1") || members.seen.SpaceID != spacedomain.SpaceID("space-1") {
+	if members.seen.MemberID != member.ID("member-1") || string(members.seen.ProjectID) != "proj-1" {
 		t.Fatalf("caller=%+v", members.seen)
 	}
 }

@@ -12,11 +12,14 @@ import (
 // It projects the rebuilt task aggregate without carrying old run/role/lineage fields.
 type TaskView struct {
 	ID                 string                       `json:"id"`
-	SpaceID            string                       `json:"spaceId"`
+	ProjectID          string                       `json:"projectId"`
 	AssignedTo         string                       `json:"assignedTo,omitempty"`
+	AssignedToLabel    string                       `json:"assignedToLabel,omitempty"`
 	ClaimedByMemberID  string                       `json:"claimedByMemberId,omitempty"`
+	ClaimedByLabel     string                       `json:"claimedByMemberLabel,omitempty"`
 	TaskKind           string                       `json:"taskKind,omitempty"`
 	CreatedBy          string                       `json:"createdBy,omitempty"`
+	CreatedByLabel     string                       `json:"createdByLabel,omitempty"`
 	Title              string                       `json:"title,omitempty"`
 	Description        string                       `json:"description"`
 	AcceptanceCriteria []domain.AcceptanceCriterion `json:"acceptanceCriteria,omitempty"`
@@ -38,7 +41,7 @@ type TaskView struct {
 func NewTaskView(task domain.Task) TaskView {
 	return TaskView{
 		ID:                 string(task.ID),
-		SpaceID:            string(task.SpaceID),
+		ProjectID:          string(task.ProjectID),
 		AssignedTo:         string(task.AssignedTo),
 		ClaimedByMemberID:  string(task.ClaimedByMemberID),
 		TaskKind:           task.TaskKind,
@@ -78,7 +81,7 @@ func missionRefFromMetadata(metadata map[string]any) string {
 }
 
 type TaskCreateParams struct {
-	SpaceID            string         `json:"spaceId"`
+	ProjectID          string         `json:"projectId"`
 	AssignedTo         string         `json:"assignedTo"`
 	Description        string         `json:"description"`
 	AcceptanceCriteria []string       `json:"acceptanceCriteria,omitempty"`
@@ -104,7 +107,7 @@ type TaskGetResult struct {
 }
 
 type TaskListParams struct {
-	SpaceID     string   `json:"spaceId,omitempty"`
+	ProjectID   string   `json:"projectId,omitempty"`
 	AssignedTo  string   `json:"assignedTo,omitempty"`
 	ClaimedBy   string   `json:"claimedBy,omitempty"`
 	TaskKind    string   `json:"taskKind,omitempty"`

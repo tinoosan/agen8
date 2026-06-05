@@ -5,18 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
-
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	messagedomain "github.com/tinoosan/agen8-mcp-server/internal/services/message/domain"
-	messagechannel "github.com/tinoosan/agen8-mcp-server/internal/services/message/domain/channel"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 type Service struct {
@@ -24,8 +20,7 @@ type Service struct {
 	clock    domain.Clock
 	caller   caller.Resolver
 	members  MemberLoader
-	spaces   SpaceLoader
-	messages MessagePublisher
+	projects ProjectLoader
 	links    GraphLinkWriter
 	missions KeyResultMissionReader
 	logger   *slog.Logger
@@ -37,12 +32,8 @@ type MemberLoader interface {
 	GetMember(ctx context.Context, memberID member.ID) (member.Record, error)
 }
 
-type SpaceLoader interface {
-	Get(ctx context.Context, spaceID spacedomain.SpaceID) (spacedomain.SpaceRecord, error)
-}
-
-type MessagePublisher interface {
-	PublishAgentMessage(ctx context.Context, input messagedomain.NewMessageInput) (types.AgentMessage, error)
+type ProjectLoader interface {
+	Get(ctx context.Context, projectID types.ProjectID) (project.Project, error)
 }
 
 type GraphLinkWriter interface {
@@ -66,7 +57,7 @@ const (
 )
 
 type CreateTaskParams struct {
-	SpaceID            spacedomain.SpaceID
+	ProjectID          types.ProjectID
 	AssignedTo         member.ID
 	Description        string
 	AcceptanceCriteria []string
@@ -113,8 +104,7 @@ func NewService(
 	clock domain.Clock,
 	caller caller.Resolver,
 	members MemberLoader,
-	spaces SpaceLoader,
-	messages MessagePublisher,
+	projects ProjectLoader,
 	logger *slog.Logger,
 ) (*Service, error) {
 	switch {
@@ -126,10 +116,8 @@ func NewService(
 		return nil, fmt.Errorf("task service: caller resolver is required")
 	case members == nil:
 		return nil, fmt.Errorf("task service: member reader is required")
-	case spaces == nil:
-		return nil, fmt.Errorf("task service: space reader is required")
-	case messages == nil:
-		return nil, fmt.Errorf("task service: message publisher is required")
+	case projects == nil:
+		return nil, fmt.Errorf("task service: project reader is required")
 	}
 	if logger == nil {
 		logger = slog.Default().With("service", "task")
@@ -139,8 +127,7 @@ func NewService(
 		clock:    clock,
 		caller:   caller,
 		members:  members,
-		spaces:   spaces,
-		messages: messages,
+		projects: projects,
 		logger:   logger,
 	}, nil
 }
@@ -158,10 +145,10 @@ func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.T
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireCoordinatorOrUserOwner(ctx, caller, params.SpaceID); err != nil {
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, params.ProjectID); err != nil {
 		return domain.Task{}, err
 	}
-	assigned, err := s.memberInSpace(ctx, params.AssignedTo, params.SpaceID)
+	assigned, err := s.memberInProject(ctx, params.AssignedTo, params.ProjectID)
 	if err != nil {
 		return domain.Task{}, err
 	}
@@ -176,7 +163,7 @@ func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.T
 	}
 
 	task, err := domain.NewTask(domain.NewTaskInput{
-		SpaceID:            params.SpaceID,
+		ProjectID:          params.ProjectID,
 		CreatedBy:          caller.ActorID(),
 		AssignedTo:         assigned.ID,
 		Description:        params.Description,
@@ -218,7 +205,7 @@ func (s *Service) Get(ctx context.Context, taskID domain.TaskID) (domain.Task, e
 }
 
 func (s *Service) List(ctx context.Context, filter domain.TaskFilter) ([]domain.Task, error) {
-	filter.SpaceID = spacedomain.SpaceID(strings.TrimSpace(string(filter.SpaceID)))
+	filter.ProjectID = types.ProjectID(strings.TrimSpace(string(filter.ProjectID)))
 	filter.AssignedTo = member.ID(strings.TrimSpace(string(filter.AssignedTo)))
 	filter.ClaimedBy = member.ID(strings.TrimSpace(string(filter.ClaimedBy)))
 	filter.TaskKind = strings.TrimSpace(filter.TaskKind)
@@ -272,13 +259,9 @@ func (s *Service) emitContextLinks(ctx context.Context, task domain.Task) error 
 	if s.links == nil {
 		return fmt.Errorf("task service: graph link writer is required")
 	}
-	space, err := s.spaces.Get(ctx, task.SpaceID)
-	if err != nil {
-		return fmt.Errorf("load task space for context links: %w", err)
-	}
-	projectID := strings.TrimSpace(space.ProjectID)
+	projectID := strings.TrimSpace(string(task.ProjectID))
 	if projectID == "" {
-		return fmt.Errorf("task service: space %s is missing project id", task.SpaceID)
+		return fmt.Errorf("task service: task %s is missing project id", task.ID)
 	}
 	specs := []struct {
 		targetID, targetType, edge string
@@ -376,7 +359,7 @@ func (s *Service) Update(ctx context.Context, params UpdateTaskParams) (domain.T
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
 		return domain.Task{}, err
 	}
 	if params.Title != nil {
@@ -468,10 +451,10 @@ func (s *Service) Assign(ctx context.Context, params AssignTaskParams) (domain.T
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
 		return domain.Task{}, err
 	}
-	assigned, err := s.memberInSpace(ctx, params.AssignedTo, loaded.SpaceID)
+	assigned, err := s.memberInProject(ctx, params.AssignedTo, loaded.ProjectID)
 	if err != nil {
 		return domain.Task{}, err
 	}
@@ -529,7 +512,7 @@ func (s *Service) ApproveReview(ctx context.Context, params ReviewTaskParams) (d
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.ApproveReview(params.Criteria, s.clock.Now())
@@ -552,7 +535,7 @@ func (s *Service) RetryReview(ctx context.Context, params ReviewTaskParams) (dom
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.RetryReview(params.Reason, params.Criteria, s.clock.Now())
@@ -580,7 +563,7 @@ func (s *Service) FailReview(ctx context.Context, params ReviewTaskParams) (doma
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.FailReview(params.Reason, params.Criteria, s.clock.Now())
@@ -696,7 +679,7 @@ func (s *Service) Cancel(ctx context.Context, taskID domain.TaskID, reason strin
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.SpaceID); err != nil {
+	if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Cancel(reason, s.clock.Now())
@@ -738,20 +721,20 @@ func requireMemberCaller(caller Caller) error {
 	return nil
 }
 
-func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Caller, spaceID spacedomain.SpaceID) error {
+func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Caller, projectID types.ProjectID) error {
 	if caller.MemberID != "" {
-		return s.requireCoordinator(ctx, caller.MemberID, spaceID)
+		return s.requireCoordinator(ctx, caller.MemberID, projectID)
 	}
 	userID := strings.TrimSpace(caller.UserID)
 	if userID == "" {
 		return fmt.Errorf("task caller user id is required")
 	}
-	space, err := s.spaces.Get(ctx, spaceID)
+	proj, err := s.projects.Get(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("load task space: %w", err)
+		return fmt.Errorf("load task project: %w", err)
 	}
-	if strings.TrimSpace(space.UserID) != userID {
-		return fmt.Errorf("user %s does not own space %s", userID, spaceID)
+	if strings.TrimSpace(proj.UserID()) != userID {
+		return fmt.Errorf("user %s does not own project %s", userID, projectID)
 	}
 	return nil
 }
@@ -761,7 +744,7 @@ func (s *Service) reviewRecipient(ctx context.Context, task domain.Task) (member
 	if createdBy == "" {
 		return "", false
 	}
-	member, err := s.memberInSpace(ctx, createdBy, task.SpaceID)
+	member, err := s.memberInProject(ctx, createdBy, task.ProjectID)
 	if err != nil {
 		return "", false
 	}
@@ -771,8 +754,8 @@ func (s *Service) reviewRecipient(ctx context.Context, task domain.Task) (member
 	return member.ID, true
 }
 
-func (s *Service) requireCoordinator(ctx context.Context, memberID member.ID, spaceID spacedomain.SpaceID) error {
-	member, err := s.memberInSpace(ctx, memberID, spaceID)
+func (s *Service) requireCoordinator(ctx context.Context, memberID member.ID, projectID types.ProjectID) error {
+	member, err := s.memberInProject(ctx, memberID, projectID)
 	if err != nil {
 		return err
 	}
@@ -782,21 +765,21 @@ func (s *Service) requireCoordinator(ctx context.Context, memberID member.ID, sp
 	return nil
 }
 
-func (s *Service) memberInSpace(ctx context.Context, memberID member.ID, spaceID spacedomain.SpaceID) (member.Record, error) {
+func (s *Service) memberInProject(ctx context.Context, memberID member.ID, projectID types.ProjectID) (member.Record, error) {
 	memberID = member.ID(strings.TrimSpace(string(memberID)))
-	spaceID = spacedomain.SpaceID(strings.TrimSpace(string(spaceID)))
+	projectID = types.ProjectID(strings.TrimSpace(string(projectID)))
 	if memberID == "" {
 		return member.Record{}, fmt.Errorf("memberId is required")
 	}
-	if spaceID == "" {
-		return member.Record{}, fmt.Errorf("spaceId is required")
+	if projectID == "" {
+		return member.Record{}, fmt.Errorf("projectId is required")
 	}
 	rosterMember, err := s.members.GetMember(ctx, memberID)
 	if err != nil {
 		return member.Record{}, fmt.Errorf("load member: %w", err)
 	}
-	if spacedomain.SpaceID(rosterMember.SpaceID) != spaceID {
-		return member.Record{}, fmt.Errorf("member %s is not in space %s", memberID, spaceID)
+	if types.ProjectID(rosterMember.ProjectID) != projectID {
+		return member.Record{}, fmt.Errorf("member %s is not in project %s", memberID, projectID)
 	}
 	if strings.TrimSpace(rosterMember.LifecycleState) != "" && rosterMember.LifecycleState != member.LifecycleActive {
 		return member.Record{}, fmt.Errorf("member %s is not active", memberID)
@@ -834,7 +817,7 @@ func (s *Service) requireUnblockCaller(ctx context.Context, task domain.Task, me
 	if task.ClaimedByMemberID == memberID {
 		return nil
 	}
-	return s.requireCoordinator(ctx, memberID, task.SpaceID)
+	return s.requireCoordinator(ctx, memberID, task.ProjectID)
 }
 
 func (s *Service) publishTaskMessage(ctx context.Context, kind TaskMessageKind, task domain.Task, actor, target member.ID) error {
@@ -847,8 +830,8 @@ func (s *Service) publishTaskMessage(ctx context.Context, kind TaskMessageKind, 
 	if task.ID == "" {
 		return fmt.Errorf("task id is required")
 	}
-	if task.SpaceID == "" {
-		return fmt.Errorf("task space id is required")
+	if task.ProjectID == "" {
+		return fmt.Errorf("task project id is required")
 	}
 	if target == "" {
 		return fmt.Errorf("target member id is required")
@@ -857,68 +840,23 @@ func (s *Service) publishTaskMessage(ctx context.Context, kind TaskMessageKind, 
 		s.logger.Debug("self task message suppressed",
 			"message_kind", string(kind),
 			"task_id", string(task.ID),
-			"space_id", string(task.SpaceID),
+			"project_id", string(task.ProjectID),
 			"actor_member_id", string(actor),
 			"target_member_id", string(target),
 			"next_action", spec.NextAction,
 		)
 		return nil
 	}
-	body := map[string]any{
-		"event":          string(kind),
-		"taskId":         string(task.ID),
-		"spaceId":        string(task.SpaceID),
-		"actorMemberId":  string(actor),
-		"targetMemberId": string(target),
-		"nextAction":     spec.NextAction,
-		"guidance":       spec.Guidance,
-		"message":        taskMessageBody(task, spec),
-		"taskStatus":     string(task.Status),
-	}
-	if task.UpdatedAt != nil {
-		body["taskUpdatedAt"] = task.UpdatedAt.UTC().Format(time.RFC3339Nano)
-		body["taskVersion"] = task.UpdatedAt.UTC().UnixNano()
-	}
-	if summary := strings.TrimSpace(task.Summary); summary != "" && kind == TaskMessageReviewRequested {
-		body["summary"] = summary
-	}
-	if note := strings.TrimSpace(task.Error); note != "" {
-		switch kind {
-		case TaskMessageRetryRequested, TaskMessageBlocked, TaskMessageCanceled:
-			body["reason"] = note
-		case TaskMessageUnblocked:
-			body["note"] = note
-		}
-	}
-	_, err = s.messages.PublishAgentMessage(ctx, messagedomain.NewMessageInput{
-		Route: messagedomain.MessageRoute{
-			SpaceID:             task.SpaceID,
-			DestinationMemberID: target,
-			ChannelID:           messagechannel.MemberChannelID(task.SpaceID, target),
-		},
-		Content: messagedomain.MessageContent{
-			Kind:    types.AgentMessageKindSystem,
-			Subject: spec.Subject,
-			Body:    body,
-			TaskRef: task.ID,
-		},
-		Producer: messagedomain.MessageProducer{
-			IntentID:      types.IntentID("task:" + string(task.ID) + ":" + string(kind)),
-			CorrelationID: types.CorrelationID("task:" + string(task.ID)),
-			Producer:      "task-service",
-		},
-	})
-	if err == nil {
-		s.logger.Debug("task message published",
-			"message_kind", string(kind),
-			"task_id", string(task.ID),
-			"space_id", string(task.SpaceID),
-			"actor_member_id", string(actor),
-			"target_member_id", string(target),
-			"next_action", spec.NextAction,
-		)
-	}
-	return err
+	s.logger.Debug("task lifecycle notification skipped",
+		"message_kind", string(kind),
+		"subject", spec.Subject,
+		"task_id", string(task.ID),
+		"project_id", string(task.ProjectID),
+		"actor_member_id", string(actor),
+		"target_member_id", string(target),
+		"next_action", spec.NextAction,
+	)
+	return nil
 }
 
 func taskMessageKindUsesInlineResponse(kind TaskMessageKind) bool {
@@ -934,7 +872,7 @@ func (s *Service) logTaskTransition(action string, task domain.Task, caller Call
 	s.logger.Info("task transition",
 		"action", action,
 		"task_id", string(task.ID),
-		"space_id", string(task.SpaceID),
+		"project_id", string(task.ProjectID),
 		"status", string(task.Status),
 		"assigned_to", string(task.AssignedTo),
 		"claimed_by_member_id", string(task.ClaimedByMemberID),
@@ -999,10 +937,10 @@ func taskMessageSpec(kind TaskMessageKind) (taskMessageTemplate, error) {
 }
 
 func taskMessageBody(task domain.Task, spec taskMessageTemplate) string {
-	return fmt.Sprintf("%s\n\nThis task notification is addressed to you as the assigned Agen8 member. Treat it as work for this runtime identity; do not ask the human for permission unless you are genuinely blocked.\n\nTask %s in space %s.\n\nNext action: %s.\n\n%s",
+	return fmt.Sprintf("%s\n\nThis task notification is addressed to you as the assigned Agen8 member. Treat it as work for this runtime identity; do not ask the human for permission unless you are genuinely blocked.\n\nTask %s in project %s.\n\nNext action: %s.\n\n%s",
 		spec.Subject,
 		task.ID,
-		task.SpaceID,
+		task.ProjectID,
 		spec.NextAction,
 		spec.Guidance,
 	)

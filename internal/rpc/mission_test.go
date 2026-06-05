@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
 	missioninfra "github.com/tinoosan/agen8-mcp-server/internal/services/mission/infra"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
+	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 var rpcMissionTestNow = time.Date(2026, 5, 26, 9, 0, 0, 0, time.UTC)
@@ -219,9 +219,9 @@ func TestRegisterMissionDispatchesFullCRUDSurface(t *testing.T) {
 	}{}
 	if err := json.Unmarshal(call(MethodMissionKRAssign, map[string]any{
 		"keyResultId": keyResultID,
-		"spaceId":     "space-1",
+		"projectId":   "project-1",
 	}), &assignResult); err != nil {
-		t.Fatalf("unmarshal mission.kr.assignSpace result: %v", err)
+		t.Fatalf("unmarshal mission.kr.assignProject result: %v", err)
 	}
 	call(MethodMissionUpdate, map[string]any{"missionId": missionID, "status": "active"})
 
@@ -341,7 +341,7 @@ func newRPCMissionService(t *testing.T) *missionapp.Service {
 		repo,
 		rpcMissionClock{},
 		caller.ContextResolver{},
-		rpcMissionSpaceLoader{},
+		rpcMissionProjectLoader{},
 		rpcMissionTaskLoader{},
 		rpcMissionLinkedTaskLoader{},
 		&rpcMissionEventPublisher{},
@@ -357,18 +357,20 @@ type rpcMissionClock struct{}
 
 func (rpcMissionClock) Now() time.Time { return rpcMissionTestNow }
 
-type rpcMissionSpaceLoader struct{}
+type rpcMissionProjectLoader struct{}
 
-func (rpcMissionSpaceLoader) Get(_ context.Context, spaceID spacedomain.SpaceID) (spacedomain.SpaceRecord, error) {
-	if spaceID == "" {
-		return spacedomain.SpaceRecord{}, fmt.Errorf("space id is required")
+func (rpcMissionProjectLoader) Get(_ context.Context, projectID types.ProjectID) (projectdomain.Project, error) {
+	if projectID == "" {
+		return projectdomain.Project{}, fmt.Errorf("project id is required")
 	}
-	return spacedomain.SpaceRecord{
-		ID:        spaceID,
-		ProjectID: "project-1",
+	return projectdomain.New(projectdomain.NewInput{
+		ID:        projectID,
+		Root:      "/tmp/" + string(projectID),
 		Title:     "Research",
-		Status:    spacedomain.SpaceStatusOpen,
-	}, nil
+		Status:    projectdomain.StatusOpen,
+		CreatedAt: rpcMissionTestNow,
+		UpdatedAt: rpcMissionTestNow,
+	})
 }
 
 type rpcMissionTaskLoader struct{}
@@ -392,7 +394,7 @@ func (*rpcMissionEventPublisher) Append(context.Context, types.EventRecord) erro
 	return nil
 }
 
-var _ missionapp.SpaceLoader = rpcMissionSpaceLoader{}
+var _ missionapp.ProjectLoader = rpcMissionProjectLoader{}
 var _ missionapp.TaskLoader = rpcMissionTaskLoader{}
 var _ missionapp.LinkedTaskLoader = rpcMissionLinkedTaskLoader{}
 var _ missionapp.EventPublisher = (*rpcMissionEventPublisher)(nil)

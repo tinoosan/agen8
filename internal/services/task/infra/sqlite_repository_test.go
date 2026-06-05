@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
@@ -19,7 +18,7 @@ var infraTestNow = time.Date(2026, 5, 15, 13, 0, 0, 0, time.UTC)
 
 func TestSQLiteRepositoryCreateGetPreservesTaskDocument(t *testing.T) {
 	repo := newSQLiteRepositoryForTest(t)
-	task := infraTask("task-1", "space-1", domain.TaskStatusPending)
+	task := infraTask("task-1", "project-1", domain.TaskStatusPending)
 
 	if err := repo.CreateTask(context.Background(), task); err != nil {
 		t.Fatalf("CreateTask: %v", err)
@@ -48,7 +47,7 @@ func TestSQLiteRepositoryCreateGetPreservesTaskDocument(t *testing.T) {
 
 func TestSQLiteRepositoryUpdatePersistsLifecycleState(t *testing.T) {
 	repo := newSQLiteRepositoryForTest(t)
-	task := infraTask("task-1", "space-1", domain.TaskStatusPending)
+	task := infraTask("task-1", "project-1", domain.TaskStatusPending)
 	if err := repo.CreateTask(context.Background(), task); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
@@ -77,9 +76,9 @@ func TestSQLiteRepositoryUpdatePersistsLifecycleState(t *testing.T) {
 func TestSQLiteRepositoryListAndCountFilters(t *testing.T) {
 	repo := newSQLiteRepositoryForTest(t)
 	tasks := []domain.Task{
-		infraTask("task-1", "space-1", domain.TaskStatusPending),
-		infraTask("task-2", "space-1", domain.TaskStatusActive),
-		infraTask("task-3", "space-2", domain.TaskStatusActive),
+		infraTask("task-1", "project-1", domain.TaskStatusPending),
+		infraTask("task-2", "project-1", domain.TaskStatusActive),
+		infraTask("task-3", "project-2", domain.TaskStatusActive),
 	}
 	tasks[1].AssignedTo = member.ID("member-other")
 	tasks[1].ClaimedByMemberID = member.ID("member-other")
@@ -91,7 +90,7 @@ func TestSQLiteRepositoryListAndCountFilters(t *testing.T) {
 	}
 
 	filter := domain.TaskFilter{
-		SpaceID:    spacedomain.SpaceID("space-1"),
+		ProjectID:  types.ProjectID("project-1"),
 		AssignedTo: member.ID("member-other"),
 		ClaimedBy:  member.ID("member-other"),
 		TaskKind:   "heartbeat",
@@ -150,12 +149,12 @@ func newSQLiteRepositoryForTest(t *testing.T) *SQLiteRepository {
 	return repo
 }
 
-func infraTask(id string, spaceID string, status domain.TaskStatus) domain.Task {
+func infraTask(id string, projectID string, status domain.TaskStatus) domain.Task {
 	phaseID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	todoID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	return domain.Task{
 		ID:                domain.TaskID(id),
-		SpaceID:           spacedomain.SpaceID(spaceID),
+		ProjectID:         types.ProjectID(projectID),
 		AssignedTo:        member.ID("member-worker"),
 		ClaimedByMemberID: "",
 		TaskKind:          domain.TaskKindTask,

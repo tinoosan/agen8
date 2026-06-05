@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 )
 
 type Reference struct {

@@ -10,17 +10,17 @@ describe('isSpreadsheetFile', () => {
     expect(isSpreadsheetFile('/workspace/data.tsv')).toBe(true)
   })
 
-  it('returns true for XLSX', () => {
-    expect(isSpreadsheetFile('/workspace/report.xlsx')).toBe(true)
+  it('returns false for XLSX', () => {
+    expect(isSpreadsheetFile('/workspace/report.xlsx')).toBe(false)
   })
 
-  it('returns true for XLS', () => {
-    expect(isSpreadsheetFile('/workspace/legacy.xls')).toBe(true)
+  it('returns false for XLS', () => {
+    expect(isSpreadsheetFile('/workspace/legacy.xls')).toBe(false)
   })
 
   it('is case-insensitive for extension', () => {
     expect(isSpreadsheetFile('/workspace/DATA.CSV')).toBe(true)
-    expect(isSpreadsheetFile('/workspace/FILE.XLSX')).toBe(true)
+    expect(isSpreadsheetFile('/workspace/FILE.TSV')).toBe(true)
   })
 
   it('returns false for non-spreadsheet files', () => {

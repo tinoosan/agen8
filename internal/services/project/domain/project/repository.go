@@ -4,17 +4,20 @@ import (
 	"context"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 )
 
 type Record struct {
-	ID         types.ProjectID
-	LocationID types.LocationID
-	Root       string
-	Title      string
-	Status     Status
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID            types.ProjectID
+	LocationID    types.LocationID
+	Root          string
+	UserID        string
+	Title         string
+	Status        Status
+	PlanMode      string
+	Customization *Customization
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type Filter struct {

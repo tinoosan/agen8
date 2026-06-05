@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 func (r *SQLiteRepository) AppendLifecycleEvent(ctx context.Context, event types.EventRecord) error {
@@ -45,7 +45,7 @@ func appendLifecycleEvent(ctx context.Context, db *sql.DB, dialect storagedb.Dia
 			event_id, mission_id, key_result_id, event_type, created_at, event_json
 		) VALUES (?, ?, ?, ?, ?, ?)
 	`, dialect)
-	if _, err := db.ExecContext(ctx, query, string(event.EventID), missionID, keyResultID, event.Type, timeString(event.Timestamp), string(payload)); err != nil {
+	if _, err := db.ExecContext(ctx, query, string(event.EventID), missionID, keyResultID, event.Type, event.CreatedAt, string(payload)); err != nil {
 		return fmt.Errorf("append lifecycle event %s: %w", event.EventID, err)
 	}
 	return nil
@@ -118,8 +118,8 @@ func normalizeLifecycleEvent(event types.EventRecord) (types.EventRecord, string
 	if strings.TrimSpace(string(event.EventID)) == "" {
 		event.EventID = types.EventID("event-" + uuid.NewString())
 	}
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now().UTC()
+	if strings.TrimSpace(event.CreatedAt) == "" {
+		event.CreatedAt = timeString(time.Now().UTC())
 	}
 	if event.Data == nil {
 		event.Data = map[string]string{}

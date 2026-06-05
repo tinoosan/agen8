@@ -4,16 +4,12 @@ import { MissionNode } from './MissionNode'
 import { KRNode } from './KRNode'
 import { DecisionNode } from './DecisionNode'
 import { TaskNode } from './TaskNode'
-import { OANode } from './OANode'
-import { EscalationNode } from './EscalationNode'
 import { StatusEdge } from './StatusEdge'
 import { ContextEdge } from './ContextEdge'
 import { MissionPanel } from './MissionPanel'
 import { KRPanel } from './KRPanel'
 import { DecisionPanel } from './DecisionPanel'
 import { TaskPanel } from './TaskPanel'
-import { OAPanel } from './OAPanel'
-import { EscalationPanel } from './EscalationPanel'
 
 // ── Node type registry ────────────────────────────────────────────────────────
 //
@@ -44,16 +40,6 @@ export const nodeTypeRegistry: Record<string, NodeTypeDescriptor> = {
     component: TaskNode,
     radius: 70,
     Panel: TaskPanel,
-  },
-  operatorAction: {
-    component: OANode,
-    radius: 70,
-    Panel: OAPanel,
-  },
-  escalation: {
-    component: EscalationNode,
-    radius: 70,
-    Panel: EscalationPanel,
   },
 }
 

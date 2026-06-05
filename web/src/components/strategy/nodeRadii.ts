@@ -13,8 +13,6 @@ export const NODE_RADIUS: Record<string, number> = {
   plan: 90,
   decision: 70,
   task: 70,
-  operatorAction: 70,
-  escalation: 70,
 }
 
 export const DEFAULT_RADIUS = 12

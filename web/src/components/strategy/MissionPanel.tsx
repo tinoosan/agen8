@@ -13,9 +13,6 @@ import MissionLifecycleActions from '../mission/MissionLifecycleActions'
 import { RelatedSection } from './RelatedSection'
 import { useRecentDecisions } from '../../hooks/useDecisions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
-import { useProjectSpaces } from '../../hooks/useProjectSpaces'
-import { useStrategyMapOpActions } from '../../hooks/useOpActions'
-import { useAllEscalations } from '../../hooks/useEscalations'
 import type { MissionNodeData } from './MissionNode'
 import type { MissionStatus } from '../../lib/types'
 import type { NodePanelProps } from './types'
@@ -37,7 +34,6 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
   const d = data as MissionNodeData
   const { mission, avgProgress } = d
   const clusterColor = d.clusterColor ?? 'var(--accent)'
-  const spaceLabel = String((d as { spaceName?: string }).spaceName ?? '').trim()
   const krQuery = useKeyResults(mission.id)
   const krs = krQuery.data ?? []
   const [, navigate] = useLocation()
@@ -49,15 +45,10 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
 
   // Fetch all related entities for the grouped Related section
   const krIds = new Set(krs.map(kr => kr.id))
-  const spacesQuery = useProjectSpaces(projectId, { refetchInterval: false })
-  const tasksQuery = useProjectTasks(spacesQuery.data ?? [])
+  const tasksQuery = useProjectTasks(projectId)
   const tasks = (tasksQuery.data ?? []).filter(t => t.keyResultRef && krIds.has(t.keyResultRef))
   const decisionsQuery = useRecentDecisions(projectId)
   const decisions = (decisionsQuery.data ?? []).filter(d => d.missionRef === mission.id || (d.keyResultRef && krIds.has(d.keyResultRef)))
-  const oasQuery = useStrategyMapOpActions(projectId)
-  const oas = (oasQuery.data ?? []).filter(oa => oa.keyResultRef && krIds.has(oa.keyResultRef))
-  const escalationsQuery = useAllEscalations(projectId)
-  const escalations = (escalationsQuery.data ?? []).filter(e => e.keyResultRef && krIds.has(e.keyResultRef))
 
   const relatedItems = [
     ...krs.map(kr => ({
@@ -79,18 +70,6 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
         badge: `${Math.round(dec.confidence * 100)}%`,
         badgeColor: dec.confidence >= 0.8 ? 'var(--green)' : dec.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
       } : {}),
-    })),
-    ...oas.map(oa => ({
-      nodeId: `oa:${oa.id}`,
-      type: 'Operator Action' as const,
-      title: oa.title,
-    })),
-    ...escalations.map(esc => ({
-      nodeId: `escalation:${esc.id}`,
-      type: 'Escalation' as const,
-      title: esc.title,
-      badge: esc.urgency,
-      badgeColor: esc.urgency === 'critical' ? 'var(--red)' : esc.urgency === 'high' ? 'var(--amber)' : 'var(--text-3)',
     })),
   ]
 
@@ -188,22 +167,6 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
             </span>
           )}
         </div>
-
-        {spaceLabel && (
-          <div className="flex flex-col" style={{ gap: '4px' }}>
-            <p
-              className="uppercase"
-              style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', margin: 0 }}
-            >
-              Space
-            </p>
-            <p
-              style={{ fontFamily: SF_TEXT, fontSize: '12px', fontWeight: 500, letterSpacing: '-0.12px', lineHeight: 1.33, color: 'var(--text-2)', margin: 0 }}
-            >
-              {spaceLabel}
-            </p>
-          </div>
-        )}
 
         {/* Description — full markdown, no cap; summary height controls visible area */}
         {mission.description && (

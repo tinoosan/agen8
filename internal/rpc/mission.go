@@ -7,7 +7,7 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	missionrpc "github.com/tinoosan/agen8-mcp-server/internal/services/mission/rpc"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 	MethodMissionKRDelete   = "mission.kr.delete"
 	MethodMissionKRReopen   = "mission.kr.reopen"
 	MethodMissionKRProgress = "mission.kr.progress"
-	MethodMissionKRAssign   = "mission.kr.assignSpace"
+	MethodMissionKRAssign   = "mission.kr.assignProject"
 	MethodMissionKRHistory  = "mission.kr.progressHistory"
 )
 
@@ -70,7 +70,7 @@ func RegisterMission(reg *Registry, missionSvc *missionapp.Service) error {
 			return AddBoundHandler(reg, MethodMissionKRUpdate, false, withMissionCaller(handler.UpdateKeyResult))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodMissionKRAssign, false, withMissionCaller(handler.AssignKeyResultSpace))
+			return AddBoundHandler(reg, MethodMissionKRAssign, false, withMissionCaller(handler.AssignKeyResultProject))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodMissionKRDelete, false, withMissionCaller(handler.DeleteKeyResult))

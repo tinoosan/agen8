@@ -1,11 +1,10 @@
 import { lazy, Suspense } from 'react'
-import { isSpreadsheetFile, isMarkdownFile, isDocxFile } from './filePreviewUtils'
+import { isSpreadsheetFile, isMarkdownFile } from './filePreviewUtils'
 import ArtifactPreviewPane from './ArtifactPreviewPane'
 import DocumentViewer from './DocumentViewer'
 import type { ArtifactNode, ArtifactGetResult } from '../../lib/types'
 
 const SpreadsheetViewer = lazy(() => import('./SpreadsheetViewer'))
-const DocxViewer = lazy(() => import('./DocxViewer'))
 
 type Variant = 'page' | 'slideover'
 
@@ -39,14 +38,6 @@ export default function ArtifactViewer(props: ArtifactViewerProps) {
         error={props.error}
         variant={props.variant}
       />
-    )
-  }
-
-  if (isDocxFile(path)) {
-    return (
-      <Suspense fallback={<div className="flex items-center justify-center h-full opacity-60">Loading viewer...</div>}>
-        <DocxViewer file={props.file} preview={props.preview} isLoading={props.isLoading} error={props.error} />
-      </Suspense>
     )
   }
 

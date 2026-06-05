@@ -3,7 +3,7 @@ package infra
 import (
 	"fmt"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/cluster"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
@@ -25,18 +25,19 @@ func NewRepository(handle *storagedb.Handle) (project.Repository, error) {
 	}
 }
 
-// NewClusterRepository is the storage-strategy entry point for project cluster
-// topology. It selects the implementation from the configured DB driver.
-func NewClusterRepository(handle *storagedb.Handle) (cluster.Repository, error) {
+// NewMemberRepository is the storage-strategy entry point for the project
+// member roster. Projects own their roster directly, so the member store is
+// selected from the same configured DB driver.
+func NewMemberRepository(handle *storagedb.Handle) (member.Repository, error) {
 	if handle == nil {
-		return nil, fmt.Errorf("project cluster repository: db handle is required")
+		return nil, fmt.Errorf("project member repository: db handle is required")
 	}
 	switch handle.Driver() {
 	case storagedb.DriverSQLite:
-		return NewSQLiteClusterRepository(handle.DB())
+		return NewMemberSQLiteRepository(handle.DB())
 	case storagedb.DriverPostgres:
-		return NewPostgresClusterRepository(handle)
+		return NewMemberPostgresRepository(handle)
 	default:
-		return nil, fmt.Errorf("project cluster repository: unsupported storage driver %q", handle.Driver())
+		return nil, fmt.Errorf("project member repository: unsupported storage driver %q", handle.Driver())
 	}
 }

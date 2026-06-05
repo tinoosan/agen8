@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/tinoosan/agen8-mcp-server/pkg/protocol"
 )
 
 const (
@@ -78,14 +76,6 @@ func errorFrom(err error) *Error {
 			message = err.Error()
 		}
 		return &Error{Code: protocolErr.Code, Message: message, Data: protocolErr.Data}
-	}
-	var wireProtocolErr *protocol.ProtocolError
-	if errors.As(err, &wireProtocolErr) {
-		message := strings.TrimSpace(wireProtocolErr.Message)
-		if message == "" {
-			message = err.Error()
-		}
-		return &Error{Code: wireProtocolErr.Code, Message: message, Data: wireProtocolErr.Data}
 	}
 	var coded codedError
 	if errors.As(err, &coded) {

@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 var infraTestNow = time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
@@ -180,10 +180,9 @@ func TestSQLiteRepositoryPersistsLifecycleEvents(t *testing.T) {
 	first := types.EventRecord{
 		EventID:   "event-1",
 		RunID:     types.RunID(mission.ID),
-		Timestamp: infraTestNow,
+		CreatedAt: timeString(infraTestNow),
 		Type:      string(missionapp.MissionEventActivated),
 		Message:   string(missionapp.MissionEventActivated),
-		Origin:    "mission",
 		Data: map[string]string{
 			"missionId": string(mission.ID),
 			"status":    "active",
@@ -196,10 +195,9 @@ func TestSQLiteRepositoryPersistsLifecycleEvents(t *testing.T) {
 	second := types.EventRecord{
 		EventID:   "event-2",
 		RunID:     types.RunID(mission.ID),
-		Timestamp: infraTestNow.Add(time.Minute),
+		CreatedAt: timeString(infraTestNow.Add(time.Minute)),
 		Type:      string(missionapp.KREventDropped),
 		Message:   string(missionapp.KREventDropped),
-		Origin:    "mission",
 		Data: map[string]string{
 			"missionId":   string(mission.ID),
 			"keyResultId": "kr-1",

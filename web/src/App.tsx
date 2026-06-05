@@ -1,7 +1,7 @@
 import React, { Suspense, useEffect, useRef } from 'react'
-import { Redirect, Route, Switch, useLocation, useSearch } from 'wouter'
+import { Redirect, Route, Switch, useLocation } from 'wouter'
 import { useStore } from './lib/store'
-import { actionsPanelLink, missionsPanelLink, useNavigation } from './lib/routing'
+import { missionsPanelLink, useNavigation } from './lib/routing'
 import { useAuth } from './hooks/useAuth'
 import { lazyWithRetry } from './lib/lazyWithRetry'
 import Sidebar from './components/Sidebar'
@@ -14,46 +14,15 @@ const Project = lazyWithRetry(() => import('./pages/Project'), 'pages/Project')
 const Login = lazyWithRetry(() => import('./pages/Login'), 'pages/Login')
 const Account = lazyWithRetry(() => import('./pages/Account'), 'pages/Account')
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'), 'pages/Dashboard')
-const SpaceFocus = lazyWithRetry(() => import('./pages/SpaceFocus'), 'pages/SpaceFocus')
-const Notifications = lazyWithRetry(() => import('./pages/Notifications'), 'pages/Notifications')
-const Locations = lazyWithRetry(() => import('./pages/Locations'), 'pages/Locations')
 const MissionDetail = lazyWithRetry(() => import('./pages/MissionDetail'), 'pages/MissionDetail')
 const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/StrategyMap')
 const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisions')
-const ActionDetail = lazyWithRetry(() => import('./pages/ActionDetail'), 'pages/ActionDetail')
 
 const CommandPalette = lazyWithRetry(() => import('./components/CommandPalette'), 'components/CommandPalette')
-
-function SpaceRoute({ params }: { params: { spaceId: string } }) {
-  return <SpaceFocus spaceId={params.spaceId} />
-}
-
-function ActionDetailRoute({ params }: { params: { projectId: string; actionId: string } }) {
-  return <ActionDetail params={params} />
-}
 
 function MissionsRouteRedirect({ params }: { params: { projectId: string } }) {
   return <Redirect to={missionsPanelLink(params.projectId)} />
 }
-
-function ActionsRouteRedirect({ params }: { params: { projectId: string } }) {
-  const search = useSearch()
-  const type = new URLSearchParams(search).get('type')
-  const filter = type === 'oa' || type === 'escalation' ? type : 'all'
-  return <Redirect to={actionsPanelLink(params.projectId, filter)} />
-}
-
-function HeartbeatsRouteRedirect({ params }: { params: { projectId: string } }) {
-  const focusedSpaceId = useStore((s) => s.focusedSpaceId)
-  if (!focusedSpaceId) return <Redirect to={`/project/${encodeURIComponent(params.projectId)}/dashboard`} />
-
-  return (
-    <Redirect
-      to={`/project/${encodeURIComponent(params.projectId)}/space/${encodeURIComponent(focusedSpaceId)}`}
-    />
-  )
-}
-
 
 const Spinner = () => (
   <div className="flex items-center justify-center h-full">
@@ -87,22 +56,15 @@ const AppShell = () => (
 )
 
 export default function App() {
-  const { paletteOpen, theme, resetEphemeral, setFocusedSpaceId } = useStore()
-  const { focusedSpaceId } = useNavigation()
+  const { paletteOpen, theme, resetEphemeral } = useStore()
+  const { projectId } = useNavigation()
   const auth = useAuth()
   const [location, navigate] = useLocation()
   const isAuthRoute = location === '/login'
-  const isSpaceRoute = /^\/project\/[^/]+\/space\//.test(location)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
-
-  useEffect(() => {
-    if (isSpaceRoute && focusedSpaceId) {
-      setFocusedSpaceId(focusedSpaceId)
-    }
-  }, [focusedSpaceId, isSpaceRoute, setFocusedSpaceId])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -125,14 +87,14 @@ export default function App() {
   }, [])
 
   /* Reset ephemeral UI (panels, pickers) when the focused workspace changes */
-  const prevFocusKey = useRef(`${focusedSpaceId}`)
+  const prevFocusKey = useRef(`${projectId}`)
   useEffect(() => {
-    const key = `${focusedSpaceId}`
+    const key = `${projectId}`
     if (key !== prevFocusKey.current) {
       prevFocusKey.current = key
       resetEphemeral()
     }
-  }, [focusedSpaceId, resetEphemeral])
+  }, [projectId, resetEphemeral])
 
   useEffect(() => {
     if (auth.isLoading) return
@@ -185,24 +147,17 @@ export default function App() {
             <Suspense fallback={<Spinner />}>
               <PageErrorBoundary>
                 <Switch>
-                  <Route path="/project/:projectId/space/:spaceId" component={SpaceRoute} />
-                  <Route path="/project/:projectId/messages">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/missions/:missionId" component={MissionDetail} />
                   <Route path="/project/:projectId/missions" component={MissionsRouteRedirect} />
                   <Route path="/project/:projectId/strategy">{(params) => <StrategyMap projectId={params.projectId} />}</Route>
-                  <Route path="/project/:projectId/actions/:actionId" component={ActionDetailRoute} />
-                  <Route path="/project/:projectId/actions" component={ActionsRouteRedirect} />
                   <Route path="/project/:projectId/decisions" component={Decisions} />
-                  <Route path="/project/:projectId/heartbeats" component={HeartbeatsRouteRedirect} />
                   <Route path="/project/:projectId/builder">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/roles">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/dashboard" component={Dashboard} />
                   <Route path="/project/:projectId/metrics">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
-                  <Route path="/project/:projectId/notifications" component={Notifications} />
                   <Route path="/project/:projectId" component={Dashboard} />
                   <Route path="/account" component={Account} />
                   <Route path="/login" component={Login} />
-                  <Route path="/locations" component={Locations} />
                   <Route path="/" component={Project} />
                 </Switch>
               </PageErrorBoundary>

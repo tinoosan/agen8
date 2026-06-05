@@ -4,10 +4,7 @@ import { ChevronDown, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useProgressHistory } from '../../hooks/useMissions'
-import { useNavigation } from '../../lib/routing'
 import type { KeyResultView } from '../../lib/types'
-import { resolveUpdatedByActor } from './krActorLabels'
-import { useStrategySpaceLabel } from './useStrategySpaceLabel'
 
 const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
 
@@ -51,19 +48,13 @@ interface KRDetailBodyProps {
  *   - `KRPanel` (the standalone slide-over for KR nodes on the strategy map)
  *
  * Renders only the inner sections (description, current/target with direction
- * arrow, baseline, space, last update, collapsible scrollable progress history).
+ * arrow, baseline, last update, collapsible scrollable progress history).
  * The parent owns the wrapping container chrome (background, padding, radius).
  */
 export default function KRDetailBody({ kr }: KRDetailBodyProps) {
   const [showHistory, setShowHistory] = useState(false)
 
-  const { projectId } = useNavigation()
-  const { resolveSpaceLabel } = useStrategySpaceLabel(projectId)
-  const explicitSpaceLabel = typeof (kr as { spaceLabel?: string }).spaceLabel === 'string'
-    ? (kr as { spaceLabel?: string }).spaceLabel
-    : ''
-  const spaceName = resolveSpaceLabel({ spaceLabel: explicitSpaceLabel, spaceId: kr.spaceId })
-  const updatedBy = resolveUpdatedByActor(kr.lastUpdatedBy, resolveSpaceLabel)
+  const updatedBy = kr.lastUpdatedBy?.trim() ?? ''
 
   // Lazy fetch: history only loads when the user opens the section.
   const historyQuery = useProgressHistory(showHistory ? kr.id : null)
@@ -141,14 +132,6 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
           >
             {kr.baseline}{kr.unit ? ` ${kr.unit}` : ''}
           </p>
-        </div>
-      )}
-
-      {/* Space (if assigned) */}
-      {spaceName && (
-        <div className="flex flex-col" style={{ gap: '4px' }}>
-          <p className="uppercase" style={LABEL_STYLE}>Space</p>
-          <p style={SECONDARY_STYLE}>{spaceName}</p>
         </div>
       )}
 
@@ -237,7 +220,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
               </p>
             )}
             {historyEntries.map((entry) => {
-              const entryUpdatedBy = resolveUpdatedByActor(entry.updatedBy, resolveSpaceLabel)
+              const entryUpdatedBy = entry.updatedBy?.trim() ?? ''
               return (
                 <div key={entry.id} className="flex flex-col" style={{ gap: '2px' }}>
                 <div className="flex justify-between items-baseline">

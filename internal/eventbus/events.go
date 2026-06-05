@@ -3,22 +3,16 @@ package eventbus
 
 import (
 	"time"
-
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 // Topic constants for domain events.
 const (
-	TopicMessagePublished     = "message.published"
 	TopicSpaceMemberLifecycle = "space.member.lifecycle"
 	TopicTaskLifecycle        = "task.lifecycle"
-	TopicOALifecycle          = "oa.lifecycle"
-	TopicEscalationLifecycle  = "escalation.lifecycle"
 	TopicKRProgress           = "kr.progress"
 	TopicDecisionLogged       = "decision.logged"
 	TopicMissionLifecycle     = "mission.lifecycle"
 	TopicPlanLifecycle        = "plan.lifecycle"
-	TopicHumanInputLifecycle  = "human_input.lifecycle"
 )
 
 const (
@@ -65,19 +59,7 @@ const (
 	PlanEventAmendmentVetoed   = "plan.amendment_vetoed"
 )
 
-// MessagePublishedEvent is emitted when a communication message is published.
-// Handlers persist the message, route it to the destination space/member, and
-// inject it for mid-turn steering.
-type MessagePublishedEvent struct {
-	Message     types.Message       `json:"message"`
-	Envelope    types.MemberMessage `json:"envelope"`
-	Source      string              `json:"source"`
-	PublishedAt time.Time           `json:"publishedAt"`
-}
-
-// TaskLifecycleEvent is emitted on task state transitions (creation, completion,
-// failure, cancellation). Subscribers such as the policy escalation engine use
-// these events to trigger automated operator actions.
+// TaskLifecycleEvent is emitted on task state transitions.
 type TaskLifecycleEvent struct {
 	ProjectID string            `json:"projectId"`
 	SpaceID   string            `json:"spaceId"`
@@ -87,48 +69,6 @@ type TaskLifecycleEvent struct {
 	Status    string            `json:"status"`
 	Values    map[string]string `json:"values,omitempty"` // Metrics/attributes for policy condition evaluation
 	Timestamp time.Time         `json:"timestamp"`
-}
-
-// OALifecycleEvent is emitted on operator action status transitions.
-// Subscribers can use these events for notifications, space projections,
-// and cross-surface state invalidation.
-type OALifecycleEvent struct {
-	ProjectID     string    `json:"projectId"`
-	SpaceID       string    `json:"spaceId"`
-	ActionID      string    `json:"actionId"`
-	TaskRef       string    `json:"taskRef,omitempty"`
-	EventType     string    `json:"eventType"` // "oa.created", "oa.acknowledged", "oa.started", "oa.completed", "oa.blocked", "oa.unblocked", "oa.canceled", "oa.verified"
-	OldStatus     string    `json:"oldStatus"`
-	NewStatus     string    `json:"newStatus"`
-	Title         string    `json:"title,omitempty"`
-	Urgency       string    `json:"urgency,omitempty"`
-	Category      string    `json:"category,omitempty"`
-	OutcomeStatus string    `json:"outcomeStatus,omitempty"` // Only on completion
-	Author        string    `json:"author,omitempty"`
-	Text          string    `json:"text,omitempty"`
-	Blocking      bool      `json:"blocking"`
-	Timestamp     time.Time `json:"timestamp"`
-}
-
-// EscalationLifecycleEvent is emitted on escalation status transitions
-// (created, escalated, resolved, canceled). Used by notification evaluator (F4)
-// and space projection integration.
-type EscalationLifecycleEvent struct {
-	ProjectID       string    `json:"projectId"`
-	SpaceID         string    `json:"spaceId"`
-	EscalationID    string    `json:"escalationId"`
-	TaskRef         string    `json:"taskRef,omitempty"`
-	EventType       string    `json:"eventType"` // "escalation.created", "escalation.escalated", "escalation.resolved", "escalation.canceled"
-	OldStatus       string    `json:"oldStatus"`
-	NewStatus       string    `json:"newStatus"`
-	Resolution      string    `json:"resolution,omitempty"`      // Only on resolved
-	ResolvedBy      string    `json:"resolvedBy,omitempty"`      // Only on resolved
-	Title           string    `json:"title,omitempty"`           // For notification evaluator (F4)
-	Urgency         string    `json:"urgency,omitempty"`         // For notification evaluator (F4)
-	PreviousUrgency string    `json:"previousUrgency,omitempty"` // Only on auto-escalation
-	NewUrgency      string    `json:"newUrgency,omitempty"`      // Only on auto-escalation
-	Category        string    `json:"category,omitempty"`        // For notification evaluator (F4)
-	Timestamp       time.Time `json:"timestamp"`
 }
 
 // KRProgressEvent is emitted when key result progress is updated.
@@ -148,9 +88,7 @@ type KRProgressEvent struct {
 }
 
 // MissionLifecycleEvent is emitted when a mission changes status
-// (activated, paused, completed, archived). Subscribers use these events
-// for coordinator activation, heartbeat lifecycle management, and
-// operator notifications.
+// (activated, paused, completed, archived).
 type MissionLifecycleEvent struct {
 	EventID        string    `json:"eventId,omitempty"`
 	ProjectID      string    `json:"projectId"`
@@ -205,48 +143,6 @@ type PlanLifecycleEvent struct {
 	TodoID      string `json:"todoId,omitempty"`
 	AmendmentID string `json:"amendmentId,omitempty"`
 	CommentID   string `json:"commentId,omitempty"`
-	AuthorType  string `json:"authorType,omitempty"` // "coordinator" | "operator" — for plan.commented
+	AuthorType  string `json:"authorType,omitempty"`
 	Text        string `json:"text,omitempty"`       // comment/rejection/veto text (truncated to 500 chars)
-}
-
-// HumanInputLifecycleEvent is emitted when a pending human-input row is
-// inserted (Kind="pending") or removed (Kind="resolved") by the runtime
-// supervisor. Subscribers turn pending events into operator notifications
-// so the operator sees the question even when not viewing the channel.
-//
-// MemberID is the asker's stable id. MemberName is the resolved display
-// name at publish time — UI surfaces should prefer MemberName.
-//
-// DeclarationKind distinguishes question sets ("questions") from
-// approve-reject prompts ("approve_reject"). Blocking is true when the
-// underlying question set has at least one blocking question, used to
-// pick critical-vs-warning severity in the inbox.
-//
-// Resolution is "" for Kind="pending", "answered" / "cancelled" for
-// Kind="resolved". The (Kind, Resolution) pair lets the notification
-// service auto-dismiss the matching pending notification by Subject
-// when the question is answered or cancelled.
-type HumanInputLifecycleEvent struct {
-	Kind string `json:"kind"` // "pending" | "resolved"
-	// UserID is the routing identity for inbox notifications. The
-	// supervisor stamps this at publish time so downstream subscribers
-	// don't have to infer it from other fields. In single-user-local
-	// mode UserID == ProjectID; hosted multi-user mode will populate
-	// it from the authenticated session. Always populated — empty
-	// means the supervisor failed to resolve a routing user and the
-	// event should be dropped rather than guess.
-	UserID          string    `json:"userId"`
-	ProjectID       string    `json:"projectId"`
-	SpaceID         string    `json:"spaceId"`
-	ChannelID       string    `json:"channelId"`
-	MemberID        string    `json:"memberId,omitempty"`
-	MemberName      string    `json:"memberName,omitempty"`
-	ToolCallID      string    `json:"toolCallId"`
-	ToolName        string    `json:"toolName,omitempty"`
-	DeclarationKind string    `json:"declarationKind,omitempty"` // "questions" | "approve_reject"
-	Title           string    `json:"title,omitempty"`
-	QuestionCount   int       `json:"questionCount,omitempty"`
-	Blocking        bool      `json:"blocking,omitempty"`
-	Resolution      string    `json:"resolution,omitempty"` // "" | "answered" | "cancelled"
-	Timestamp       time.Time `json:"timestamp"`
 }

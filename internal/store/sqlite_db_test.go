@@ -51,7 +51,7 @@ func TestEventTypeIndexCreated(t *testing.T) {
 	}
 }
 
-func TestSpaceMemberSchemaCreated(t *testing.T) {
+func TestProjectMemberSchemaCreated(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
 	db, err := GetDB(cfg)
@@ -61,7 +61,7 @@ func TestSpaceMemberSchemaCreated(t *testing.T) {
 
 	for _, name := range []string{
 		"members",
-		"idx_members_space_state",
+		"idx_members_project_state",
 		"idx_members_one_active_coordinator",
 	} {
 		var got string

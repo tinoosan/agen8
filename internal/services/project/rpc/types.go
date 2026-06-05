@@ -3,8 +3,7 @@ package rpc
 import (
 	"time"
 
-	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/cluster"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 )
 
@@ -83,123 +82,100 @@ type ProjectListResult struct {
 	Projects []ProjectView `json:"projects"`
 }
 
-type ProjectSpaceListParams struct {
-	ProjectID string `json:"projectId"`
+type MemberView struct {
+	ID             string     `json:"id"`
+	UserID         string     `json:"userId,omitempty"`
+	ProjectID      string     `json:"projectId"`
+	ChannelID      string     `json:"channelId,omitempty"`
+	DisplayName    string     `json:"displayName,omitempty"`
+	MemberType     string     `json:"memberType"`
+	LifecycleState string     `json:"lifecycleState"`
+	HarnessKind    string     `json:"harnessKind,omitempty"`
+	Model          string     `json:"model,omitempty"`
+	Effort         string     `json:"effort,omitempty"`
+	PermissionMode string     `json:"harnessPermissionMode,omitempty"`
+	ConfigRef      string     `json:"harnessConfigRef,omitempty"`
+	RegisteredAt   time.Time  `json:"registeredAt,omitempty"`
+	UpdatedAt      time.Time  `json:"updatedAt,omitempty"`
+	LastSeenAt     *time.Time `json:"lastSeenAt,omitempty"`
 }
 
-type ProjectSpaceView struct {
-	ProjectID string            `json:"projectId"`
-	SpaceID   string            `json:"spaceId"`
-	Status    string            `json:"status"`
-	SortOrder int               `json:"sortOrder"`
-	Pinned    bool              `json:"pinned"`
-	Title     string            `json:"title,omitempty"`
-	SpaceOpen bool              `json:"spaceOpen"`
-	Members   []SpaceMemberView `json:"members,omitempty"`
+func NewMemberView(m member.Record) MemberView {
+	return MemberView{
+		ID:             string(m.ID),
+		UserID:         m.UserID,
+		ProjectID:      string(m.ProjectID),
+		ChannelID:      string(m.ChannelID),
+		DisplayName:    m.DisplayName,
+		MemberType:     m.MemberType,
+		LifecycleState: m.LifecycleState,
+		HarnessKind:    m.HarnessKind,
+		Model:          m.Model,
+		Effort:         m.Effort,
+		PermissionMode: m.PermissionMode,
+		ConfigRef:      m.ConfigRef,
+		RegisteredAt:   m.RegisteredAt,
+		UpdatedAt:      m.UpdatedAt,
+		LastSeenAt:     m.LastSeenAt,
+	}
 }
 
-type SpaceMemberView struct {
+type MemberRegisterParams struct {
+	ProjectID           string `json:"projectId"`
+	DisplayName         string `json:"displayName,omitempty"`
+	RequestedMemberType string `json:"requestedMemberType,omitempty"`
+	HarnessKind         string `json:"harnessKind,omitempty"`
+	Model               string `json:"model,omitempty"`
+	Effort              string `json:"effort,omitempty"`
+	PermissionMode      string `json:"harnessPermissionMode,omitempty"`
+	ConfigRef           string `json:"harnessConfigRef,omitempty"`
+}
+
+type MemberRegisterResult struct {
+	Member            MemberView `json:"member"`
+	GrantedMemberType string     `json:"grantedMemberType"`
+}
+
+type MemberGetParams struct {
 	MemberID string `json:"memberId"`
-	Label    string `json:"label,omitempty"`
 }
 
-func NewProjectSpaceView(space projectapp.ProjectSpaceView) ProjectSpaceView {
-	members := make([]SpaceMemberView, 0, len(space.Members))
-	for _, member := range space.Members {
-		members = append(members, SpaceMemberView{
-			MemberID: string(member.MemberID),
-			Label:    member.Label,
-		})
-	}
-	return ProjectSpaceView{
-		ProjectID: string(space.ProjectID),
-		SpaceID:   string(space.SpaceID),
-		Status:    space.Status,
-		SortOrder: space.SortOrder,
-		Pinned:    space.Pinned,
-		Title:     space.Title,
-		SpaceOpen: space.SpaceOpen,
-		Members:   members,
-	}
+type MemberGetResult struct {
+	Member MemberView `json:"member"`
 }
 
-type ProjectSpaceListResult struct {
-	Spaces []ProjectSpaceView `json:"spaces"`
+type MemberListParams struct {
+	ProjectID      string `json:"projectId,omitempty"`
+	UserID         string `json:"userId,omitempty"`
+	MemberType     string `json:"memberType,omitempty"`
+	LifecycleState string `json:"lifecycleState,omitempty"`
+	Limit          int    `json:"limit,omitempty"`
+	Offset         int    `json:"offset,omitempty"`
 }
 
-type ClusterListParams struct {
-	ProjectID string `json:"projectId"`
+type MemberListResult struct {
+	Members []MemberView `json:"members"`
 }
 
-type ClusterSaveParams struct {
-	ClusterID string `json:"clusterId"`
-	ProjectID string `json:"projectId"`
-	Name      string `json:"name"`
-	Status    string `json:"status,omitempty"`
+type MemberUpdateConfigParams struct {
+	MemberID       string `json:"memberId"`
+	Model          string `json:"model"`
+	Effort         string `json:"effort"`
+	HarnessKind    string `json:"harnessKind"`
+	PermissionMode string `json:"harnessPermissionMode,omitempty"`
+	ConfigRef      string `json:"harnessConfigRef,omitempty"`
 }
 
-type ClusterSaveResult struct {
-	Cluster ClusterView `json:"cluster"`
+type MemberUpdateConfigResult struct {
+	Member MemberView `json:"member"`
 }
 
-type ClusterView struct {
-	ID        string             `json:"id"`
-	ProjectID string             `json:"projectId"`
-	Name      string             `json:"name"`
-	Status    string             `json:"status"`
-	Spaces    []ClusterSpaceView `json:"spaces"`
+type MemberRemoveParams struct {
+	MemberID string `json:"memberId"`
 }
 
-type ClusterSpaceView struct {
-	ClusterID string `json:"clusterId"`
-	SpaceID   string `json:"spaceId"`
-	SortOrder int    `json:"sortOrder"`
-	Pinned    bool   `json:"pinned"`
-}
-
-func NewClusterView(view projectapp.ClusterView) ClusterView {
-	spaces := make([]ClusterSpaceView, 0, len(view.Spaces))
-	for _, ref := range view.Spaces {
-		spaces = append(spaces, NewClusterSpaceView(ref))
-	}
-	return ClusterView{
-		ID:        string(view.ID),
-		ProjectID: string(view.ProjectID),
-		Name:      view.Name,
-		Status:    string(view.Status),
-		Spaces:    spaces,
-	}
-}
-
-func NewClusterSpaceView(ref cluster.SpaceRefRecord) ClusterSpaceView {
-	return ClusterSpaceView{
-		ClusterID: string(ref.ClusterID),
-		SpaceID:   string(ref.SpaceID),
-		SortOrder: ref.SortOrder,
-		Pinned:    ref.Pinned,
-	}
-}
-
-type ClusterListResult struct {
-	Clusters []ClusterView `json:"clusters"`
-}
-
-type ClusterSpaceSaveParams struct {
-	ClusterID string `json:"clusterId"`
-	ProjectID string `json:"projectId"`
-	SpaceID   string `json:"spaceId"`
-	SortOrder int    `json:"sortOrder"`
-	Pinned    bool   `json:"pinned"`
-}
-
-type ClusterSpaceSaveResult struct {
-	Space ClusterSpaceView `json:"space"`
-}
-
-type ClusterSpaceRemoveParams struct {
-	ClusterID string `json:"clusterId"`
-	ProjectID string `json:"projectId"`
-	SpaceID   string `json:"spaceId"`
+type MemberRemoveResult struct {
+	Member MemberView `json:"member"`
 }
 
 func cloneTime(t time.Time) *time.Time {

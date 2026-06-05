@@ -431,11 +431,14 @@ export interface SpaceDetailResult {
 
 export interface Task {
   id: string;
-  spaceId: string;
+  projectId?: string;
+  spaceId?: string;
   assignedTo?: string;
   assignedToLabel?: string;
   claimedByMemberId?: string;
+  claimedByMemberLabel?: string;
   createdBy?: string;
+  createdByLabel?: string;
   taskKind?: string;
   title?: string;
   description: string;
@@ -719,7 +722,7 @@ export interface LogEntry {
   message: string;
   origin?: string;
   severity: 'info' | 'warning' | 'error' | string;
-  category: 'task' | 'agent' | 'operator' | 'llm' | 'system' | 'tools' | string;
+  category: 'task' | 'agent' | 'llm' | 'system' | 'tools' | string;
   actor?: string;
   scope?: string;
   summary: string;
@@ -1053,18 +1056,18 @@ export interface HeartbeatHistoryEntry {
   triggerReason?: string;
   skipped: boolean;
   skipReason?: string; // "backpressure" | "maxOccurrences" | "expired"
-  source?: string; // "config" | "agent" | "operator"
-  scheduleEntryId?: string; // for agent/operator entries
+  source?: string; // "config" | "agent"
+  scheduleEntryId?: string; // for agent entries
   entryStatus?: string; // "active" | "pending_approval" — for agent-created entries (F31)
   guardrailReason?: string; // why the entry is pending approval (which guardrail was exceeded)
 }
 
-// Agent/operator-created schedule entry (F29)
+// Agent-created schedule entry (F29)
 export interface ScheduleEntry {
   entryId: string;
   spaceId: string;
   memberId: string;
-  createdBy: string; // member label, operator, or system
+  createdBy: string; // member label or system
   name: string;
   goal: string;
   context?: ScheduleEntryContext;
@@ -1177,24 +1180,6 @@ export interface KeyResultView {
   completedAt?: string;
 }
 
-// ── Shared operator types ─────────────────────────────
-
-export type OperatorUrgency = "low" | "medium" | "high" | "critical";
-export type OperatorCategory =
-  | "financial"
-  | "legal"
-  | "content"
-  | "code"
-  | "general"
-  | "physical"
-  | "communication"
-  | "administrative";
-
-// Legacy aliases (used by existing components — remove after full migration)
-export type OAUrgency = OperatorUrgency;
-export type OACategory = OperatorCategory;
-export type OAResolution = EscalationResolution;
-
 // ── Context Link types (graph links API) ────────────
 
 export type ContextLinkEdgeType =
@@ -1221,117 +1206,9 @@ export interface ContextLink {
   createdBy?: string;
 }
 
-// ── Escalation types (escalation.* API) ──────────────
-
-export type EscalationStatus = "pending" | "resolved" | "expired" | "canceled";
-export type EscalationResolution =
-  | "approve"
-  | "reject"
-  | "redirect"
-  | "defer"
-  | "delegate";
-
-export interface EscalationView {
-  id: string;
-  projectId: string;
-  spaceId?: string;
-  taskRef?: string;
-  keyResultRef?: string;
-  runId?: string;
-  source: string;
-  sourceMemberLabel?: string;
-  category: OperatorCategory;
-  urgency: OperatorUrgency;
-  title: string;
-  description: string;
-  recommendation?: string;
-  confidence?: number;
-  status: EscalationStatus;
-  resolution?: EscalationResolution;
-  resolutionNote?: string;
-  delegatedTo?: string;
-  deadline?: string;
-  escalatedAt?: string;
-  originalUrgency?: string;
-  metadata?: Record<string, string>;
-  createdAt: string;
-  resolvedAt?: string;
-  resolvedBy?: string;
-}
-
-// ── Operator Action types (opAction.* lifecycle API) ──
-
-export type OpActionStatus =
-  | "pending"
-  | "acknowledged"
-  | "in_progress"
-  | "pending_verification"
-  | "completed"
-  | "blocked"
-  | "canceled";
-export type OpActionOutcomeStatus = "completed" | "partial" | "failed";
-
-export interface OpActionAttachment {
-  id: string;
-  kind: string;
-  filename?: string;
-  contentType?: string;
-  sizeBytes?: number;
-  url?: string;
-  label?: string;
-  createdAt: string;
-}
-
-export interface OpActionNote {
-  text: string;
-  createdAt: string;
-}
-
-export interface OpActionComment {
-  author: string;
-  text: string;
-  createdAt: string;
-}
-
-export interface OpActionView {
-  id: string;
-  projectId: string;
-  spaceId?: string;
-  taskRef?: string;
-  keyResultRef?: string;
-  runId?: string;
-  blocking: boolean;
-  source: string;
-  sourceMemberLabel?: string;
-  escalationRef?: string;
-  category: string;
-  urgency: string;
-  title: string;
-  description: string;
-  requiresVerification: boolean;
-  status: OpActionStatus;
-  outcomeStatus?: OpActionOutcomeStatus;
-  outcomeSummary?: string;
-  outcomePairs?: Record<string, string>;
-  attachments?: OpActionAttachment[];
-  progressNotes?: OpActionNote[];
-  comments?: OpActionComment[];
-  deadline?: string;
-  metadata?: Record<string, string>;
-  createdAt: string;
-  acknowledgedAt?: string;
-  startedAt?: string;
-  completedAt?: string;
-  verifiedAt?: string;
-}
-
-// Legacy alias for components still importing the old name
-export type OAStatus = EscalationStatus;
-export type OperatorActionView = EscalationView;
-
 // ── Decision types ─────────────────────────────────────
 
-export type DecisionSource = "agent" | "operator" | "policy";
+export type DecisionSource = "agent";
 
 export interface DecisionView {
   id: string;
@@ -1373,8 +1250,6 @@ export interface DecisionView {
   keyResultRef?: string;
   missionRef?: string;
   planRef?: string;
-  operatorActionRef?: string;
-  escalationRef?: string;
   correlationRef?: string;
   informedByRef?: string;
   tags?: string[];

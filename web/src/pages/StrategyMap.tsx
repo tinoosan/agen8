@@ -8,7 +8,7 @@ import {
   useReactFlow,
   ReactFlowProvider,
 } from '@xyflow/react'
-import { Network, GitBranch, CircleCheck, Diamond, UserCog, AlertTriangle } from 'lucide-react'
+import { Network, GitBranch, CircleCheck, Diamond } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { missionsPanelLink } from '../lib/routing'
 import { Button } from '@/components/ui/button'
@@ -545,7 +545,7 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [effectiveFocusNodeId, displayNodes, nodeById, missionsSorted, setCenter, getZoom, markInteraction, fitView, zoomIn, zoomOut, helpOpen, searchOpen])
+  }, [effectiveFocusNodeId, displayNodes, nodeById, missionsSorted, setCenter, getZoom, markInteraction, fitView, zoomIn, zoomOut, helpOpen, searchOpen, filterResult, selectedNodeId])
 
   const handleEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
     // Navigate to the other end of the edge relative to the focused node.
@@ -868,14 +868,6 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
             <div className="flex items-center gap-3">
               <Diamond size={13} className="text-[#0071e3]" strokeWidth={2.2} />
               <span className="text-[11.5px] font-medium text-foreground tracking-tight">Decision</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <UserCog size={13} className="text-foreground/70" strokeWidth={2.2} />
-              <span className="text-[11.5px] font-medium text-foreground tracking-tight">Operator Action</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <AlertTriangle size={13} className="text-[var(--amber)]" strokeWidth={2.2} />
-              <span className="text-[11.5px] font-medium text-foreground tracking-tight">Escalation</span>
             </div>
           </div>
         </div>

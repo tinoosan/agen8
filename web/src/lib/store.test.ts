@@ -37,14 +37,6 @@ describe('useStore', () => {
     expect(useStore.getState().paletteOpen).toBe(false)
   })
 
-  it('focusedSpaceId starts null and can be set and cleared', () => {
-    expect(useStore.getState().focusedSpaceId).toBeNull()
-    useStore.getState().setFocusedSpaceId('space-abc123')
-    expect(useStore.getState().focusedSpaceId).toBe('space-abc123')
-    useStore.getState().setFocusedSpaceId(null)
-    expect(useStore.getState().focusedSpaceId).toBeNull()
-  })
-
   it('resetEphemeral clears all panel states', () => {
     useStore.getState().setArtifactsOpen(true)
 

@@ -4,12 +4,8 @@ import { Button } from '@/components/ui/button'
 import { useRecentDecisions } from '../../hooks/useDecisions'
 import { useMissions } from '../../hooks/useMissions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
-import { useProjectSpaces } from '../../hooks/useProjectSpaces'
-import { useStrategyMapOpActions } from '../../hooks/useOpActions'
-import { useAllEscalations } from '../../hooks/useEscalations'
 import { missionDetailLink } from '../../lib/routing'
 import { RelatedSection } from './RelatedSection'
-import { useStrategySpaceLabel } from './useStrategySpaceLabel'
 import KRDetailBody from './KRDetailBody'
 import type { KRNodeData } from './KRNode'
 import type { KeyResultStatus } from '../../lib/types'
@@ -29,9 +25,6 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
   const d = data as KRNodeData
   const { kr } = d
   const clusterColor = d.clusterColor ?? 'var(--accent)'
-  const krSpaceLabel = (kr as { spaceLabel?: string }).spaceLabel
-  const { resolveSpaceLabel } = useStrategySpaceLabel(projectId)
-  const spaceLabel = resolveSpaceLabel({ spaceLabel: krSpaceLabel, spaceId: kr.spaceId })
   const [, navigate] = useLocation()
 
   const missionsQuery = useMissions(projectId)
@@ -41,15 +34,8 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
   const decisionsQuery = useRecentDecisions(projectId)
   const linkedDecisions = (decisionsQuery.data ?? []).filter(d => d.keyResultRef === kr.id)
 
-  const spacesQuery = useProjectSpaces(projectId, { refetchInterval: false })
-  const tasksQuery = useProjectTasks(spacesQuery.data ?? [])
+  const tasksQuery = useProjectTasks(projectId)
   const linkedTasks = (tasksQuery.data ?? []).filter(t => t.keyResultRef === kr.id)
-
-  const oasQuery = useStrategyMapOpActions(projectId)
-  const linkedOAs = (oasQuery.data ?? []).filter(oa => oa.keyResultRef === kr.id)
-
-  const escalationsQuery = useAllEscalations(projectId)
-  const linkedEscalations = (escalationsQuery.data ?? []).filter(e => e.keyResultRef === kr.id)
 
   const relatedItems = [
     { nodeId: kr.missionId, type: 'Mission' as const, title: missionTitle ?? kr.missionId.slice(0, 12) },
@@ -66,18 +52,6 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
         badge: `${Math.round(dec.confidence * 100)}%`,
         badgeColor: dec.confidence >= 0.8 ? 'var(--green)' : dec.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
       } : {}),
-    })),
-    ...linkedOAs.map(oa => ({
-      nodeId: `oa:${oa.id}`,
-      type: 'Operator Action' as const,
-      title: oa.title,
-    })),
-    ...linkedEscalations.map(esc => ({
-      nodeId: `escalation:${esc.id}`,
-      type: 'Escalation' as const,
-      title: esc.title,
-      badge: esc.urgency,
-      badgeColor: esc.urgency === 'critical' ? 'var(--red)' : esc.urgency === 'high' ? 'var(--amber)' : 'var(--text-3)',
     })),
   ]
 
@@ -193,37 +167,6 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
             }}
           />
         </div>
-
-        {spaceLabel && (
-          <div className="flex flex-col" style={{ gap: '6px' }}>
-            <p
-              className="uppercase"
-              style={{
-                fontSize: '10px',
-                fontWeight: 500,
-                letterSpacing: '0.08em',
-                lineHeight: 1.33,
-                color: 'var(--text-3)',
-                margin: 0,
-              }}
-            >
-              Space
-            </p>
-            <p
-              style={{
-                fontFamily: SF_TEXT,
-                fontSize: '12px',
-                fontWeight: 500,
-                letterSpacing: '-0.12px',
-                lineHeight: 1.33,
-                color: 'var(--text-2)',
-                margin: 0,
-              }}
-            >
-              {spaceLabel}
-            </p>
-          </div>
-        )}
 
         {/* Shared KR detail content */}
         <KRDetailBody kr={kr} />

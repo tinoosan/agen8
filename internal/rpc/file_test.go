@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	fileapp "github.com/tinoosan/agen8-mcp-server/internal/services/file/app"
 	fileinfra "github.com/tinoosan/agen8-mcp-server/internal/services/file/infra"
 	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 func TestRegisterFileDispatchesListDirAndGet(t *testing.T) {

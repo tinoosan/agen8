@@ -82,11 +82,7 @@ export function decodeBase64(base64: string): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
 }
 
-export function isDocxFile(path: string): boolean {
-  return getFileExt(path).toLowerCase() === '.docx'
-}
-
-const SPREADSHEET_EXTS = new Set(['.csv', '.tsv', '.xlsx', '.xls'])
+const SPREADSHEET_EXTS = new Set(['.csv', '.tsv'])
 
 export function isSpreadsheetFile(path: string): boolean {
   return SPREADSHEET_EXTS.has(getFileExt(path).toLowerCase())

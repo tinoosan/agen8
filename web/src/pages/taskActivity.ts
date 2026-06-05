@@ -1,4 +1,5 @@
 import type { Task, TaskActivity } from "../lib/types";
+import { memberDisplayName } from "../lib/memberDisplay";
 import { getAttempts } from "./boardHelpers";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -33,7 +34,7 @@ function legacyAttemptActivities(task: Task): TaskActivity[] {
       out.push({
         timestamp: attempt.completedAt,
         kind: "state_change",
-        actor: attempt.workerRole || task.assignedToLabel || task.assignedTo || "agent",
+        actor: attempt.workerRole || memberDisplayName(task.assignedToLabel, task.assignedTo) || "agent",
         summary: attempt.summary,
         details: {
           attempt: attempt.attempt,
@@ -69,7 +70,7 @@ function legacyAttemptActivities(task: Task): TaskActivity[] {
     out.push({
       timestamp: task.completedAt,
       kind: "state_change",
-      actor: task.assignedToLabel || task.assignedTo || "agent",
+      actor: memberDisplayName(task.assignedToLabel, task.assignedTo) || "agent",
       summary: task.summary,
     });
   }

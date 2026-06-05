@@ -13,8 +13,6 @@ export interface DecisionNodeData {
 
 const SOURCE_COLOR: Record<DecisionSource, string> = {
   agent: 'var(--blue)',
-  operator: 'var(--green)',
-  policy: 'var(--border-strong)',
 }
 
 type DecisionNodeMeta = {
@@ -46,8 +44,6 @@ function relationCount(decision: DecisionView): number {
     decision.keyResultRef,
     decision.missionRef,
     decision.planRef,
-    decision.operatorActionRef,
-    decision.escalationRef,
     decision.correlationRef,
     decision.informedByRef,
   ].filter(Boolean).length

@@ -1,13 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import type { ProjectSpaceSummary, Task } from '../lib/types'
+import type { Task } from '../lib/types'
 import {
   isSystemTask,
   effectiveStatus,
-  taskMatchesSpaceFilter,
-  resolveBoardSpaceQueryParam,
-  lookupSpaceForTask,
   getTaskBlockers,
-  getOperatorActionBlocker,
   getLatestReview,
   getAcceptanceCriteria,
   taskDuration,
@@ -40,51 +36,6 @@ describe('effectiveStatus', () => {
   it('returns original status when task is NOT in the review set', () => {
     const t = makeTask({ id: 'task-2', status: 'active' })
     expect(effectiveStatus(t)).toBe('active')
-  })
-})
-
-const sampleSpaces: ProjectSpaceSummary[] = [
-  { spaceId: 'space-a', spaceName: 'Alpha' },
-  { spaceId: 'space-b', spaceName: 'Beta' },
-]
-
-describe('resolveBoardSpaceQueryParam', () => {
-  it('accepts canonical space id', () => {
-    expect(resolveBoardSpaceQueryParam('space-b', sampleSpaces)).toBe('space-b')
-  })
-
-  it('resolves space name case-insensitively', () => {
-    expect(resolveBoardSpaceQueryParam('beta', sampleSpaces)).toBe('space-b')
-  })
-
-  it('returns null when unknown', () => {
-    expect(resolveBoardSpaceQueryParam('nope', sampleSpaces)).toBeNull()
-  })
-})
-
-describe('taskMatchesSpaceFilter', () => {
-  it('matches direct space id', () => {
-    const t = makeTask({ id: '1', spaceId: 'space-b', assignedRole: 'r' })
-    expect(taskMatchesSpaceFilter(t, 'space-b')).toBe(true)
-  })
-
-  it('does not use legacy destination scope id for board filtering', () => {
-    const t = makeTask({ id: '2', destinationSpaceId: 'space-b', assignedRole: 'r' })
-    expect(taskMatchesSpaceFilter(t, 'space-b')).toBe(false)
-  })
-
-  it('matches stored runtime scope id when that is the only available key', () => {
-    const t = makeTask({ id: '3', spaceId: 'space-b', assignedRole: 'r' })
-    expect(taskMatchesSpaceFilter(t, 'space-b')).toBe(true)
-  })
-})
-
-describe('lookupSpaceForTask', () => {
-  const map = new Map(sampleSpaces.flatMap(row => [[row.spaceId, row], [row.spaceId ?? row.spaceId, row]]))
-
-  it('ignores legacy destination scope id when looking up spaces', () => {
-    const t = makeTask({ id: '1', destinationSpaceId: 'space-b', assignedRole: 'r' })
-    expect(lookupSpaceForTask(t, map)).toBeNull()
   })
 })
 
@@ -131,14 +82,14 @@ describe('getTaskBlockers', () => {
       status: 'blocked',
       metadata: {
         blockedBy: [
-          { kind: 'operator_action', id: 'oa-1', reason: 'Need contract review' },
+          { kind: 'task', id: 'task-contract-review', reason: 'Need contract review' },
           { kind: 'task', id: 'task-prereq' },
         ],
       },
     })
 
     expect(getTaskBlockers(t)).toEqual([
-      { kind: 'operator_action', id: 'oa-1', reason: 'Need contract review', createdAt: undefined },
+      { kind: 'task', id: 'task-contract-review', reason: 'Need contract review', createdAt: undefined },
       { kind: 'task', id: 'task-prereq', reason: undefined, createdAt: undefined },
     ])
   })
@@ -146,40 +97,10 @@ describe('getTaskBlockers', () => {
   it('ignores malformed blocker rows', () => {
     const t = makeTask({
       id: 'bad-blockers',
-      metadata: { blockedBy: [{ kind: 'operator_action' }, null, 'oa-1'] },
+      metadata: { blockedBy: [{ kind: 'task' }, null, 'task-prereq'] },
     })
 
     expect(getTaskBlockers(t)).toEqual([])
-  })
-})
-
-describe('getOperatorActionBlocker', () => {
-  it('returns the operator action blocker when present', () => {
-    const t = makeTask({
-      id: 'awaiting-oa',
-      metadata: {
-        blockedBy: [
-          { kind: 'task', id: 'task-1' },
-          { kind: 'operator_action', id: 'oa-77', reason: 'Waiting on operator' },
-        ],
-      },
-    })
-
-    expect(getOperatorActionBlocker(t)).toEqual({
-      kind: 'operator_action',
-      id: 'oa-77',
-      reason: 'Waiting on operator',
-      createdAt: undefined,
-    })
-  })
-
-  it('returns null for dependency-only blockers', () => {
-    const t = makeTask({
-      id: 'dependency-only',
-      metadata: { blockedBy: [{ kind: 'task', id: 'task-1' }] },
-    })
-
-    expect(getOperatorActionBlocker(t)).toBeNull()
   })
 })
 

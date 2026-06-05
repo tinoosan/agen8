@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 const Name = "graph_query"
@@ -21,8 +21,6 @@ var searchableNodeTypes = []string{
 	domain.NodeTypeDecision,
 	domain.NodeTypeKeyResult,
 	domain.NodeTypeMission,
-	domain.NodeTypeOperatorAction,
-	domain.NodeTypeEscalation,
 	domain.NodeTypeAll,
 }
 var linkableNodeTypes = []string{
@@ -30,8 +28,6 @@ var linkableNodeTypes = []string{
 	domain.NodeTypeDecision,
 	domain.NodeTypeKeyResult,
 	domain.NodeTypeMission,
-	domain.NodeTypeOperatorAction,
-	domain.NodeTypeEscalation,
 }
 var edgeTypes = []string{
 	"blocked_by",
@@ -58,7 +54,6 @@ type CallContext struct {
 	Graph         Service
 	Members       MemberDirectory
 	ProjectID     string
-	SpaceID       string
 	ActorMemberID string
 }
 
@@ -165,16 +160,16 @@ func (h Handler) contextWithActor(ctx context.Context, call CallContext) (contex
 	if memberID == "" {
 		return nil, fmt.Errorf("graph_query: caller member is required")
 	}
-	spaceID := strings.TrimSpace(call.SpaceID)
-	if spaceID == "" {
-		return nil, fmt.Errorf("graph_query: space id is required")
+	projectID := strings.TrimSpace(call.ProjectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("graph_query: project id is required")
 	}
 	if call.Members == nil {
 		return nil, fmt.Errorf("graph_query: member service is not configured")
 	}
 	ctx = caller.ContextWithCaller(ctx, caller.Caller{
-		MemberID: member.ID(memberID),
-		SpaceID:  spacedomain.SpaceID(spaceID),
+		MemberID:  member.ID(memberID),
+		ProjectID: types.ProjectID(projectID),
 	})
 	actor, err := call.Members.GetMember(ctx, member.ID(memberID))
 	if err != nil {
@@ -184,9 +179,9 @@ func (h Handler) contextWithActor(ctx context.Context, call CallContext) (contex
 		return nil, fmt.Errorf("graph_query: caller member %q is not active", memberID)
 	}
 	return caller.ContextWithCaller(ctx, caller.Caller{
-		UserID:   strings.TrimSpace(actor.UserID),
-		MemberID: actor.ID,
-		SpaceID:  spacedomain.SpaceID(spaceID),
+		UserID:    strings.TrimSpace(actor.UserID),
+		MemberID:  actor.ID,
+		ProjectID: types.ProjectID(projectID),
 	}), nil
 }
 

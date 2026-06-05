@@ -10,12 +10,10 @@ import (
 
 	"github.com/tinoosan/agen8-mcp-server/internal/config"
 	"github.com/tinoosan/agen8-mcp-server/internal/logging"
-	"github.com/tinoosan/agen8-mcp-server/pkg/protocol"
 )
 
 const (
-	ListenerLocal = "local"
-	ListenerHTTP  = "http"
+	ListenerHTTP = "http"
 
 	EnvListener  = "AGEN8_DAEMON_LISTENER"
 	EnvEndpoint  = "AGEN8_RPC_ENDPOINT"
@@ -29,7 +27,6 @@ type Config struct {
 	AppConfig  config.Config
 	Logging    logging.Config
 	Listener   string
-	Endpoint   string
 	HTTPAddr   string
 	SetupToken string
 	Out        io.Writer
@@ -39,8 +36,7 @@ func (c Config) withDefaults() (Config, error) {
 	if c.Out == nil {
 		c.Out = io.Discard
 	}
-	c.Listener = firstNonEmpty(c.Listener, os.Getenv(EnvListener), ListenerLocal)
-	c.Endpoint = firstNonEmpty(c.Endpoint, os.Getenv(EnvEndpoint), protocol.DefaultRPCEndpoint())
+	c.Listener = firstNonEmpty(c.Listener, os.Getenv(EnvListener), ListenerHTTP)
 	c.HTTPAddr = firstNonEmpty(c.HTTPAddr, os.Getenv(EnvHTTPAddr), DefaultHTTPAddr)
 	c.Listener = strings.TrimSpace(strings.ToLower(c.Listener))
 	if c.AppConfig.DataDir == "" {
@@ -50,10 +46,6 @@ func (c Config) withDefaults() (Config, error) {
 		return c, err
 	}
 	switch c.Listener {
-	case ListenerLocal:
-		if strings.TrimSpace(c.Endpoint) == "" {
-			return c, fmt.Errorf("daemon endpoint is required")
-		}
 	case ListenerHTTP:
 		if strings.TrimSpace(c.HTTPAddr) == "" {
 			return c, fmt.Errorf("daemon http address is required")

@@ -1,21 +1,14 @@
 import { useMemo, useState } from 'react'
-import { useMissions, useProjectKRs } from '../../hooks/useMissions'
-import { useProjectSpaces } from '../../hooks/useProjectSpaces'
+import { Link } from 'wouter'
+import { useMissions } from '../../hooks/useMissions'
 import { usePinnedMissions } from '../../hooks/usePinnedMissions'
-import MissionEditor from '../mission/MissionEditor'
 import CreateMissionDialog from '../mission/CreateMissionDialog'
 import type { MissionStatus } from '../../lib/types'
-import { spaceSummaryLabel } from '../../lib/spaceOwnerLabels'
+import { missionDetailLink } from '../../lib/routing'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { Target, Plus, AlertCircle, Search, ChevronsUpDown, Users, ChevronDown } from 'lucide-react'
+import { Target, Plus, AlertCircle, Search, Pin, ExternalLink } from 'lucide-react'
 
 type StatusFilter = 'all' | MissionStatus
 
@@ -55,23 +48,10 @@ export default function DashboardMissionsPanel({
 }: DashboardMissionsPanelProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
-  const [spaceFilter, setSpaceFilter] = useState<string>('')
-  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({})
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   const { data: allMissions, isLoading, isError, error } = useMissions(projectId)
-  const { data: allKRs } = useProjectKRs(projectId)
-  const { data: availableSpaces = [] } = useProjectSpaces(projectId, { includeDeleted: true })
   const { isPinned, togglePin } = usePinnedMissions(projectId)
-
-  const spacesWithKRs = useMemo(() => {
-    if (!allKRs || !availableSpaces.length) return []
-    const withKRs = new Set<string>()
-    for (const [, kr] of allKRs) {
-      if (kr.spaceId) withKRs.add(kr.spaceId)
-    }
-    return availableSpaces.filter(space => withKRs.has(space.spaceId))
-  }, [allKRs, availableSpaces])
 
   const statusCounts = useMemo(
     () =>
@@ -98,36 +78,12 @@ export default function DashboardMissionsPanel({
       )
     }
 
-    if (spaceFilter) {
-      const missionsWithSpace = new Set<string>()
-      if (allKRs) {
-        for (const [, kr] of allKRs) {
-          if (kr.spaceId === spaceFilter) missionsWithSpace.add(kr.missionId)
-        }
-      }
-      list = list.filter(mission => missionsWithSpace.has(mission.id))
-    }
-
     return [...list].sort((a, b) => {
       const ap = isPinned(a.id) ? 0 : 1
       const bp = isPinned(b.id) ? 0 : 1
       return ap - bp
     })
-  }, [allMissions, statusFilter, searchQuery, spaceFilter, allKRs, isPinned])
-
-  const allExpanded = visibleMissions.length > 0 && visibleMissions.every(mission => !!expandedIds[mission.id])
-
-  function toggleAll() {
-    const nextExpanded = !allExpanded
-    setExpandedIds(prev => {
-      const next = { ...prev }
-      for (const mission of visibleMissions) next[mission.id] = nextExpanded
-      return next
-    })
-  }
-
-  const selectedSpace = spaceFilter ? spacesWithKRs.find(space => space.spaceId === spaceFilter) : undefined
-  const selectedSpaceLabel = spaceFilter ? (selectedSpace ? spaceSummaryLabel(selectedSpace) : spaceFilter) : null
+  }, [allMissions, statusFilter, searchQuery, isPinned])
 
   if (!projectId) {
     return (
@@ -225,53 +181,6 @@ export default function DashboardMissionsPanel({
                 style={{ fontSize: '12px', letterSpacing: '-0.08px' }}
               />
             </div>
-
-            {spacesWithKRs.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    className={cn(
-                      'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--r-md)] border cursor-pointer transition-colors',
-                      'border-[color-mix(in_srgb,var(--border)_54%,transparent)] bg-[var(--dashboard-subsurface-bg)]',
-                      spaceFilter ? 'text-[var(--text-1)]' : 'text-[var(--text-3)] hover:text-[var(--text-2)]',
-                    )}
-                    style={{ fontSize: '12px', letterSpacing: '-0.08px' }}
-                  >
-                    <Users size={11} />
-                    {selectedSpaceLabel ?? 'Space'}
-                    <ChevronDown size={10} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-[140px]">
-                  <DropdownMenuItem
-                    className={cn('text-[12px]', !spaceFilter && 'text-[var(--accent)] font-medium')}
-                    onClick={() => setSpaceFilter('')}
-                  >
-                    All spaces
-                  </DropdownMenuItem>
-                  {spacesWithKRs.map(space => (
-                    <DropdownMenuItem
-                      key={space.spaceId}
-                      className={cn('text-[12px]', spaceFilter === space.spaceId && 'text-[var(--accent)] font-medium')}
-                      onClick={() => setSpaceFilter(space.spaceId)}
-                    >
-                      {spaceSummaryLabel(space)}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-
-            {visibleMissions.length > 0 && (
-              <button
-                onClick={toggleAll}
-                className="ml-auto inline-flex items-center gap-1 text-[var(--text-3)] hover:text-[var(--text-2)] transition-colors bg-transparent border-none cursor-pointer p-0 shrink-0"
-                style={{ fontSize: '11px', letterSpacing: '-0.06px' }}
-              >
-                <ChevronsUpDown size={11} />
-                {allExpanded ? 'Collapse all' : 'Expand all'}
-              </button>
-            )}
           </div>
         )}
       </div>
@@ -314,7 +223,7 @@ export default function DashboardMissionsPanel({
                 <p className="text-[var(--text-3)] mb-5" style={{ fontSize: '14px', letterSpacing: '-0.224px', lineHeight: 1.47 }}>
                   Try a different filter or search term.
                 </p>
-                <Button variant="secondary" onClick={() => { setStatusFilter('all'); setSearchQuery(''); setSpaceFilter('') }} style={{ letterSpacing: '-0.12px' }}>
+                <Button variant="secondary" onClick={() => { setStatusFilter('all'); setSearchQuery('') }} style={{ letterSpacing: '-0.12px' }}>
                   Clear filters
                 </Button>
               </>
@@ -324,16 +233,36 @@ export default function DashboardMissionsPanel({
 
         {!isLoading && !isError && visibleMissions.length > 0 && (
           <div className="flex flex-col gap-0.5">
-            {visibleMissions.map((mission) => (
-              <MissionEditor
-                key={mission.id}
-                mission={mission}
-                expanded={!!expandedIds[mission.id]}
-                onExpandedChange={(value) => setExpandedIds(prev => ({ ...prev, [mission.id]: value }))}
-                isPinned={isPinned(mission.id)}
-                onTogglePin={() => togglePin(mission.id)}
-              />
-            ))}
+            {visibleMissions.map((mission) => {
+              const pinned = isPinned(mission.id)
+              return (
+                <div
+                  key={mission.id}
+                  className="dashboard-queue-row flex items-center gap-2 px-3 py-2.5 rounded-[var(--r-md)] hover:bg-[var(--bg-hover)] transition-colors"
+                >
+                  <button
+                    onClick={() => togglePin(mission.id)}
+                    className={cn(
+                      'shrink-0 p-0.5 rounded-[var(--r-sm)] transition-colors bg-transparent border-none cursor-pointer',
+                      pinned ? 'text-[var(--accent)]' : 'text-[var(--text-3)] hover:text-[var(--text-2)]',
+                    )}
+                    title={pinned ? 'Unpin mission' : 'Pin mission'}
+                    aria-pressed={pinned}
+                  >
+                    <Pin size={12} className={pinned ? 'fill-current' : ''} />
+                  </button>
+                  <Link
+                    to={missionDetailLink(projectId, mission.id)}
+                    className="flex items-center gap-2 flex-1 min-w-0 no-underline"
+                  >
+                    <span className="text-[13px] font-semibold text-[var(--text-1)] tracking-[-0.02em] truncate flex-1">
+                      {mission.title}
+                    </span>
+                    <ExternalLink size={11} className="shrink-0 text-[var(--text-3)]" />
+                  </Link>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

@@ -13,8 +13,6 @@ function toNodeId(entityType: string, entityId: string): string {
     case 'key_result':      return entityId
     case 'task':            return `task:${entityId}`
     case 'decision':        return `decision:${entityId}`
-    case 'operator_action': return `oa:${entityId}`
-    case 'escalation':      return `escalation:${entityId}`
     default:                return entityId
   }
 }
@@ -29,12 +27,6 @@ function graphNodeIdToEntity(nodeId: string): ContextLinkEntity | null {
   }
   if (nodeId.startsWith('decision:')) {
     return { entityType: 'decision', entityId: nodeId.slice('decision:'.length) }
-  }
-  if (nodeId.startsWith('oa:')) {
-    return { entityType: 'operator_action', entityId: nodeId.slice('oa:'.length) }
-  }
-  if (nodeId.startsWith('escalation:')) {
-    return { entityType: 'escalation', entityId: nodeId.slice('escalation:'.length) }
   }
   switch (nodeId) {
     default:               return null

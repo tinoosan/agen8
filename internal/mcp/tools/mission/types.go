@@ -6,7 +6,7 @@ import (
 	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 type MissionLifecycleService interface {
@@ -23,7 +23,7 @@ type KeyResultService interface {
 	GetKeyResult(context.Context, krdomain.KeyResultID) (krdomain.KeyResult, error)
 	ListKeyResults(context.Context, missiondomain.MissionID) ([]krdomain.KeyResult, error)
 	UpdateKeyResult(context.Context, missionapp.UpdateKeyResultParams) (krdomain.KeyResult, error)
-	AssignKeyResultSpace(context.Context, krdomain.KeyResultID, string) (krdomain.KeyResult, error)
+	AssignKeyResultProject(context.Context, krdomain.KeyResultID, string) (krdomain.KeyResult, error)
 	DeleteKeyResult(context.Context, missionapp.DeleteKeyResultParams) (krdomain.KeyResult, error)
 	ReopenKeyResult(context.Context, missionapp.ReopenKeyResultParams) (krdomain.KeyResult, error)
 }
@@ -44,7 +44,6 @@ type CallContext struct {
 	Progress      ProgressService
 	Members       MemberDirectory
 	ProjectID     string
-	SpaceID       string
 	ActorMemberID string
 }
 
@@ -70,7 +69,6 @@ type rawRequest struct {
 	Unit            *string  `json:"unit"`
 	Baseline        *float64 `json:"baseline"`
 	TargetValue     *float64 `json:"target_value"`
-	SpaceID         *string  `json:"space_id"`
 	Value           *float64 `json:"value"`
 	Note            *string  `json:"note"`
 	ExpectedVersion *int64   `json:"expected_version"`
@@ -93,7 +91,6 @@ type requestInput struct {
 	Unit            string
 	Baseline        *float64
 	TargetValue     *float64
-	SpaceID         string
 	Value           *float64
 	Note            string
 	ExpectedVersion int64

@@ -4,17 +4,17 @@ import (
 	"context"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
+	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
 )
 
 type Caller = caller.Caller
 
-type SpaceLoader interface {
-	Get(ctx context.Context, spaceID spacedomain.SpaceID) (spacedomain.SpaceRecord, error)
+type ProjectLoader interface {
+	Get(ctx context.Context, projectID types.ProjectID) (projectdomain.Project, error)
 }
 
 type TaskLoader interface {

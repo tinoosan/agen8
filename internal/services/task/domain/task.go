@@ -7,11 +7,9 @@ import (
 	"strings"
 	"time"
 
-	spacedomain "github.com/tinoosan/agen8-mcp-server/internal/services/space/domain"
-
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/space/domain/member"
-	"github.com/tinoosan/agen8-mcp-server/pkg/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
 
 type TaskID string
@@ -73,7 +71,7 @@ func (s TaskStatus) IsTerminal() bool {
 
 type Task struct {
 	ID                 TaskID                `json:"id"`
-	SpaceID            spacedomain.SpaceID   `json:"spaceId,omitempty"`
+	ProjectID          types.ProjectID       `json:"projectId,omitempty"`
 	AssignedTo         member.ID             `json:"assignedTo,omitempty"`
 	ClaimedByMemberID  member.ID             `json:"claimedByMemberId,omitempty"`
 	TaskKind           string                `json:"taskKind,omitempty"`
@@ -137,7 +135,7 @@ func (t *Task) NormalizeSpaceFields() {
 	if t == nil {
 		return
 	}
-	t.SpaceID = spacedomain.SpaceID(strings.TrimSpace(string(t.SpaceID)))
+	t.ProjectID = types.ProjectID(strings.TrimSpace(string(t.ProjectID)))
 }
 
 var ErrUnsafeTaskID = fmt.Errorf("task ID contains path-unsafe characters")

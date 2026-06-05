@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import ExcelJS from 'exceljs'
 import Papa from 'papaparse'
 import { AlertTriangle, Download, Search, TableIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -7,9 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { basename, downloadBlob, formatBytes, isTextSpreadsheet } from './filePreviewUtils'
+import { basename, downloadBlob, formatBytes } from './filePreviewUtils'
 import SpreadsheetTable from './SpreadsheetTable'
-import { parseCSV, parseXLSX } from './spreadsheetParser'
+import { parseCSV } from './spreadsheetParser'
 import type { ParseResult, SpreadsheetViewerProps } from './spreadsheetTypes'
 
 function Placeholder({ title, detail }: { title: string; detail: string }) {
@@ -68,14 +67,9 @@ export default function SpreadsheetViewer({ file, preview, isLoading, error }: S
 
     async function parse() {
       try {
-        let result: ParseResult
-        if (isTextSpreadsheet(filePath)) {
-          result = !currentPreview.content && !currentPreview.bytesB64 ? { sheets: [], error: null } : parseCSV(currentPreview.content ?? '')
-        } else if (!currentPreview.bytesB64) {
-          result = { sheets: [], error: 'No binary data available for this file.' }
-        } else {
-          result = await parseXLSX(currentPreview.bytesB64)
-        }
+        const result: ParseResult = !currentPreview.content
+          ? { sheets: [], error: null }
+          : parseCSV(currentPreview.content)
         if (!cancelled) setParsed(result)
       } catch (err) {
         if (!cancelled) setParsed({ sheets: [], error: `Failed to parse spreadsheet: ${err instanceof Error ? err.message : String(err)}` })
@@ -99,17 +93,6 @@ export default function SpreadsheetViewer({ file, preview, isLoading, error }: S
     const exportData = currentSheet.rows.map((row) => Object.fromEntries(currentSheet.headers.map((header, index) => [header, row[index]?.raw])))
     const csv = Papa.unparse(exportData)
     downloadBlob(fileName.replace(/\.\w+$/, '.csv'), new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-  }
-
-  async function handleExportXLSX() {
-    const workbook = new ExcelJS.Workbook()
-    const worksheet = workbook.addWorksheet(currentSheet.name)
-    worksheet.addRow(currentSheet.headers)
-    for (const row of currentSheet.rows) {
-      worksheet.addRow(row.map((cell) => cell.raw))
-    }
-    const buffer = await workbook.xlsx.writeBuffer()
-    downloadBlob(fileName.replace(/\.\w+$/, '.xlsx'), new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
   }
 
   return (
@@ -136,9 +119,6 @@ export default function SpreadsheetViewer({ file, preview, isLoading, error }: S
         <div className="w-px h-3.5 shrink-0" style={{ background: 'var(--border)' }} />
         <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px] gap-1 shrink-0" onClick={handleExportCSV}>
           <Download className="h-2.5 w-2.5" /> CSV
-        </Button>
-        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px] gap-1 shrink-0" onClick={() => { void handleExportXLSX() }}>
-          <Download className="h-2.5 w-2.5" /> XLSX
         </Button>
       </div>
 

@@ -19,11 +19,10 @@ import {
 } from '../../pages/boardHelpers'
 import { getTaskActivities } from '../../pages/taskActivity'
 import { useRecentDecisions } from '../../hooks/useDecisions'
-import { useAllEscalations } from '../../hooks/useEscalations'
-import { useProjectKRs, useMissions } from '../../hooks/useMissions'
+import { useKeyResult, useProjectKRs, useMissions } from '../../hooks/useMissions'
 import { calendarLink } from '../../lib/routing'
+import { memberDisplayName } from '../../lib/memberDisplay'
 import type { TaskActivity } from '../../lib/types'
-import { useStrategySpaceLabel } from './useStrategySpaceLabel'
 import type { TaskNodeData } from './TaskNode'
 import type { NodePanelProps } from './types'
 
@@ -35,11 +34,7 @@ const SUMMARY_DEFAULT = 200
 function activityKindLabel(kind: string): string {
   switch (kind) {
     case 'tool_call': return 'Tool'
-    case 'oa_created': return 'OA'
-    case 'oa_completed': return 'OA Done'
     case 'decision_logged': return 'Decision'
-    case 'escalation_created': return 'Escalation'
-    case 'escalation_resolved': return 'Resolved'
     case 'message_sent': return 'Message'
     case 'sub_task_created': return 'Sub-task'
     default: return 'State'
@@ -49,10 +44,6 @@ function activityKindLabel(kind: string): string {
 function activityKindColor(kind: string): string {
   switch (kind) {
     case 'decision_logged': return 'var(--green)'
-    case 'escalation_created': return 'var(--red)'
-    case 'escalation_resolved': return 'var(--green)'
-    case 'oa_created': return 'var(--amber)'
-    case 'oa_completed': return 'var(--green)'
     case 'tool_call': return 'var(--accent)'
     case 'message_sent': return 'var(--text-2)'
     case 'sub_task_created': return 'var(--accent)'
@@ -101,7 +92,6 @@ function ActivityEntry({ activity }: { activity: TaskActivity }) {
 export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   const d = data as TaskNodeData
   const { task } = d
-  const { resolveSpaceLabel } = useStrategySpaceLabel(projectId)
   const { height: summaryHeight, onResizeStart: handleResizeStart } = useResizableSummary(
     'task-panel-summary-height',
     { min: SUMMARY_MIN, max: SUMMARY_MAX, defaultHeight: SUMMARY_DEFAULT },
@@ -115,6 +105,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   const displayTitle = retry.isRetry ? retry.originalGoal : (task.title || task.description)
   const acceptanceCriteria = getAcceptanceCriteria(task)
   const duration = taskDuration(task)
+  const assigneeLabel = memberDisplayName(task.assignedToLabel, task.assignedTo)
 
   const acDone = acceptanceCriteria.filter((criterion) => criterion.satisfied).length
   const acTotal = acceptanceCriteria.length
@@ -128,23 +119,14 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   const decisionsQuery = useRecentDecisions(projectId)
   const taskDecisions = (decisionsQuery.data ?? []).filter(d => d.taskRef === task.id)
 
-  const escalationsQuery = useAllEscalations(projectId)
-  const taskEscalations = (escalationsQuery.data ?? []).filter(e => e.taskRef === task.id)
-
   const krsQuery = useProjectKRs(projectId)
-  const kr = task.keyResultRef ? krsQuery.data?.get(task.keyResultRef) : undefined
+  const directKrQuery = useKeyResult(task.keyResultRef ?? null)
+  const kr = task.keyResultRef
+    ? directKrQuery.data ?? krsQuery.data?.get(task.keyResultRef)
+    : undefined
 
   const missionsQuery = useMissions(projectId)
   const mission = kr ? (missionsQuery.data ?? []).find(m => m.id === kr.missionId) : undefined
-
-  const metadataSpaceLabel = typeof task.metadata?.spaceLabel === 'string'
-    ? task.metadata.spaceLabel
-    : ''
-  const krSpaceLabel = kr ? (kr as { spaceLabel?: string }).spaceLabel : ''
-  const inferredSpaceLabel = resolveSpaceLabel({
-    spaceLabel: metadataSpaceLabel || krSpaceLabel,
-    spaceId: task.spaceId ?? kr?.spaceId,
-  })
 
   // Activity
   const activities = getTaskActivities(task)
@@ -221,22 +203,6 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
             {label}
           </Badge>
         </div>
-
-        {inferredSpaceLabel && (
-          <div className="flex flex-col" style={{ gap: '4px' }}>
-            <p
-              className="uppercase"
-              style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', margin: 0 }}
-            >
-              Space
-            </p>
-            <p
-              style={{ fontFamily: SF_TEXT, fontSize: '12px', fontWeight: 500, letterSpacing: '-0.12px', lineHeight: 1.33, color: 'var(--text-2)', margin: 0 }}
-            >
-              {inferredSpaceLabel}
-            </p>
-          </div>
-        )}
 
         {/* Retry feedback banner */}
         {retry.isRetry && retry.feedback && (
@@ -322,11 +288,11 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
         className="shrink-0 flex flex-col"
         style={{ background: 'var(--bg-panel)', padding: '10px 16px', gap: '6px' }}
       >
-        {(task.assignedToLabel || task.assignedTo) && (
+        {assigneeLabel && (
           <div className="flex justify-between items-baseline">
-            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Role</span>
-            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.05em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'uppercase' }}>
-              {task.assignedToLabel || task.assignedTo}
+            <span style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Assignee</span>
+            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.33, color: 'var(--text-2)', textTransform: 'none' }}>
+              {assigneeLabel}
             </span>
           </div>
         )}
@@ -480,13 +446,6 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
               badgeColor: dec.confidence >= 0.8 ? 'var(--green)' : dec.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
             } : {}),
           })),
-          ...taskEscalations.map(esc => ({
-            nodeId: `escalation:${esc.id}`,
-            type: 'Escalation',
-            title: esc.title,
-            badge: esc.urgency,
-            badgeColor: esc.urgency === 'critical' ? 'var(--red)' : esc.urgency === 'high' ? 'var(--amber)' : 'var(--text-3)',
-          })),
         ]} />
 
         {/* 6. Heartbeat */}
@@ -527,7 +486,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
               })()}
               <div style={{ paddingTop: 8 }}>
                 <a
-                  href={calendarLink(projectId, task.id, task.completedAt ?? task.createdAt)}
+                  href={calendarLink(projectId, task.id)}
                   style={{ fontSize: '11px', color: 'var(--accent)' }}
                   className="hover:underline"
                 >
