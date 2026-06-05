@@ -163,7 +163,7 @@ agen8-mcp version</code></pre>
     <tbody>
       <tr><td>Local IPC</td><td>Local process/user resolution</td><td>The daemon ignores client-supplied identity headers or params.</td></tr>
       <tr><td>HTTP</td><td>User service session validation</td><td><code>/rpc</code> rejects missing, invalid, or expired bearer tokens once setup is complete.</td></tr>
-      <tr><td>Setup</td><td>One-time setup token held by daemon and omitted from startup logs</td><td>Setup routes fail closed after the first user exists.</td></tr>
+      <tr><td>Setup</td><td>One-time setup token printed by the daemon for first-run setup</td><td>Setup routes fail closed after the first user exists.</td></tr>
     </tbody>
   </table>
 
@@ -171,7 +171,7 @@ agen8-mcp version</code></pre>
 
   <h2 id="setup">5. First-run setup</h2>
 
-  <p>When the user service reports zero users, the HTTP daemon exposes first-run setup and prints a setup entrypoint without the one-time setup token. The setup token stays out of process logs while the setup routes continue to validate it before creating the first account user as <code>admin</code> and returning a real browser session token. Setup does not create a project, project, member, task, agent, or API key.</p>
+  <p>When the user service reports zero users, the HTTP daemon exposes first-run setup and prints a setup entrypoint with the one-time setup token. The setup route validates that token before creating the first account user as <code>admin</code>, returning a real browser session token, and creating the initial daemon API key. Persisted API keys are accepted as MCP tokens after daemon restart. Setup does not create a project, member, task, or agent.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 900 340" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">

@@ -239,14 +239,20 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) registerBootstrapMCPToken() error {
 	const token = "agen8-local"
-	d.mcpTokens.Register(token, mcp.Session{
-		Token:       token,
+	d.mcpTokens.Register(token, d.mcpSession(token, "local", "codex"))
+	return nil
+}
+
+func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
+	return mcp.Session{
+		Token:       strings.TrimSpace(token),
 		Bootstrap:   false,
-		UserID:      "local",
-		HarnessKind: "codex",
+		UserID:      strings.TrimSpace(userID),
+		HarnessKind: strings.TrimSpace(harnessKind),
 		ContextRegistrar: projectMCPContextRegistrar{
 			projects: d.app.ProjectSvc,
 			users:    d.app.UserSvc,
+			auth:     d.app.AuthSvc,
 			baseURL:  "http://" + d.cfg.HTTPAddr,
 		},
 		MemberDirectory: d.app.ProjectSvc,
@@ -261,14 +267,17 @@ func (d *Daemon) registerBootstrapMCPToken() error {
 		MissionService:  d.app.MissionSvc,
 		MissionKRs:      d.app.MissionSvc,
 		MissionProgress: d.app.MissionSvc,
-	})
-	return nil
+	}
 }
 
 func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header http.Header, body []byte) (mcp.Session, error) {
 	session, err := d.mcpTokens.Resolve(token)
 	if err != nil {
-		return mcp.Session{}, err
+		account, authErr := d.app.AuthSvc.ValidateAPIKey(ctx, token)
+		if authErr != nil {
+			return mcp.Session{}, err
+		}
+		session = d.mcpSession(token, account.ID.String(), "")
 	}
 	sessionID, threadID := mcp.SessionRefsFromHTTPHeader(header)
 	if sessionID == "" && threadID == "" {
@@ -305,6 +314,7 @@ func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header htt
 type projectMCPContextRegistrar struct {
 	projects *projectapp.Service
 	users    *userapp.Service
+	auth     *authapp.Service
 	baseURL  string
 }
 
@@ -314,7 +324,7 @@ func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req 
 	}
 	result, err := r.projects.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
 		Token:            req.Token,
-		UserID:           mcpUserID(ctx, r.users, req.Token),
+		UserID:           mcpUserID(ctx, r.users, r.auth, req.Token),
 		ProjectID:        req.ProjectID,
 		ProjectRoot:      req.ProjectRoot,
 		LocationID:       req.LocationID,
@@ -353,10 +363,16 @@ func (d *Daemon) mcpUserID(ctx context.Context, token string) string {
 	if d == nil || d.app == nil {
 		return "local"
 	}
-	return mcpUserID(ctx, d.app.UserSvc, token)
+	return mcpUserID(ctx, d.app.UserSvc, d.app.AuthSvc, token)
 }
 
-func mcpUserID(ctx context.Context, users *userapp.Service, token string) string {
+func mcpUserID(ctx context.Context, users *userapp.Service, auth *authapp.Service, token string) string {
+	if auth != nil {
+		record, err := auth.ValidateAPIKey(ctx, token)
+		if err == nil && strings.TrimSpace(record.ID.String()) != "" {
+			return strings.TrimSpace(record.ID.String())
+		}
+	}
 	if strings.TrimSpace(token) == "agen8-local" && users != nil {
 		record, err := users.FirstActive(ctx)
 		if err == nil && strings.TrimSpace(record.ID.String()) != "" {

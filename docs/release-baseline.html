@@ -46,7 +46,7 @@
       <tr><td>Binary</td><td><code>agen8-mcp</code></td></tr>
       <tr><td>Daemon command</td><td><code>agen8-mcp daemon start --listener http --http-addr 127.0.0.1:7777</code></td></tr>
       <tr><td>Web UI</td><td>Served by the daemon. In development, the daemon proxies Vite.</td></tr>
-      <tr><td>MCP endpoint</td><td><code>http://127.0.0.1:7777/mcp?token=&lt;token&gt;</code></td></tr>
+      <tr><td>MCP endpoint</td><td><code>http://127.0.0.1:7777/mcp?token=&lt;initial-api-key&gt;</code></td></tr>
       <tr><td>Retained MCP tools</td><td><code>project</code>, <code>mission</code>, <code>task</code>, <code>decision</code>, <code>graph_query</code>, <code>http</code></td></tr>
     </tbody>
   </table>
@@ -70,7 +70,7 @@ curl http://127.0.0.1:7777/healthz</code></pre>
   <p><code>/healthz</code> returns <code>ok</code>, <code>version</code>, <code>commit</code>, and <code>buildDate</code> when the build date is set. The MCP server implementation advertises the same version.</p>
 
   <h2 id="setup">4. First local setup</h2>
-  <p>When the user repository is empty, the daemon exposes first-run setup. The daemon prints a setup URL with a one-time token. Setup creates the first local account and a browser session. It does not create missions, KRs, tasks, decisions, or MCP members.</p>
+  <p>When the user repository is empty, the daemon exposes first-run setup. The daemon prints a setup URL with a one-time token. Setup creates the first local account, a browser session, and the initial daemon API key. That API key is also accepted as the MCP token after daemon restart. Setup does not create missions, KRs, tasks, decisions, or MCP members.</p>
 
 <pre><code class="lang-shell">make dev remote
 # Open the printed setup URL.
@@ -83,7 +83,7 @@ curl http://127.0.0.1:7777/healthz</code></pre>
 <pre><code class="lang-json">{
   "mcpServers": {
     "agen8": {
-      "url": "http://127.0.0.1:7777/mcp?token=&lt;token&gt;"
+      "url": "http://127.0.0.1:7777/mcp?token=&lt;initial-api-key&gt;"
     }
   }
 }</code></pre>
