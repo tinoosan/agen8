@@ -228,7 +228,7 @@ internal/mcp/tools/graph/
   </table>
 
   <h3>Allowed node types</h3>
-  <p><code>task</code>, <code>decision</code>, <code>key_result</code>, <code>mission</code>, and <code>plan</code> are first-class graph nodes. <code>all</code> is accepted only by search requests.</p>
+  <p><code>task</code>, <code>decision</code>, <code>key_result</code>, and <code>mission</code> are first-class graph nodes. <code>all</code> is accepted only by search requests.</p>
 
   <table>
     <thead><tr><th>Node type</th><th>Hydrator source</th><th>Scope rule</th></tr></thead>
@@ -237,7 +237,6 @@ internal/mcp/tools/graph/
       <tr><td><code>decision</code></td><td>Decision service read port</td><td>Decision <code>ProjectID</code> equals the requested project.</td></tr>
       <tr><td><code>key_result</code></td><td>Mission service key-result read port</td><td>Parent mission belongs to the requested project.</td></tr>
       <tr><td><code>mission</code></td><td>Mission service read port</td><td>Mission <code>ProjectID</code> equals the requested project.</td></tr>
-      <tr><td><code>plan</code></td><td>Plan service read port</td><td>Plan belongs to a visible same-project node.</td></tr>
     </tbody>
   </table>
 
@@ -252,7 +251,7 @@ internal/mcp/tools/graph/
       <tr><td><code>completed_by</code></td><td>The source was completed by the target decision.</td><td>Task to decision.</td></tr>
       <tr><td><code>serves</code></td><td>The source contributes toward the target objective.</td><td>Task to key result, decision to mission.</td></tr>
       <tr><td><code>informed_by</code></td><td>The source used the target as supporting context.</td><td>Decision to decision, task, key result, or mission.</td></tr>
-      <tr><td><code>produced</code></td><td>The source produced the target work object.</td><td>Decision to task or plan.</td></tr>
+      <tr><td><code>produced</code></td><td>The source produced the target work object.</td><td>Decision to task.</td></tr>
       <tr><td><code>made_during</code></td><td>The source was created during the target work context.</td><td>Decision to task.</td></tr>
       <tr><td><code>spawned</code></td><td>The source created the target follow-up object.</td><td>Decision to task.</td></tr>
       <tr><td><code>child_of</code></td><td>The source is a child of the target in a work hierarchy.</td><td>Task to task.</td></tr>
@@ -445,7 +444,6 @@ internal/mcp/tools/graph/
       <tr><td>Task</td><td><code>task --serves--&gt; key_result</code>, <code>task --child_of--&gt; task</code></td><td><code>task --relates_to--&gt; mission</code> when direct mission recall is useful.</td><td>Deletes edges for the task node when the task is deleted.</td></tr>
       <tr><td>Decision</td><td><code>decision --made_during--&gt; task</code>, <code>decision --produced--&gt; task</code></td><td><code>decision --informed_by--&gt; mission</code> or <code>decision --serves--&gt; key_result</code> when the decision should appear directly around those nodes.</td><td>Deletes edges for the decision node when the decision is deleted.</td></tr>
       <tr><td>Mission / key result</td><td><code>key_result --serves--&gt; mission</code></td><td>Mission-level shortcut edges created from mission workflows when the relationship is durable agent context.</td><td>Deletes edges for mission or key-result nodes when those records are deleted.</td></tr>
-      <tr><td>Plan</td><td><code>plan --serves--&gt; mission</code> or <code>plan --serves--&gt; key_result</code></td><td><code>decision --produced--&gt; plan</code> when planning output is produced by a recorded decision.</td><td>Deletes edges for the plan node when the plan is deleted.</td></tr>
     </tbody>
   </table>
 

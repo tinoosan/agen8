@@ -39,16 +39,16 @@
 
   <h2 id="responsibility">1. Responsibility</h2>
 
-  <p><code>internal/daemon</code> owns process orchestration. It is the only layer that knows whether the process is serving local IPC or HTTP. It never changes RPC method semantics based on the listener strategy.</p>
+  <p><code>internal/daemon</code> owns process orchestration. It builds the application once, mounts HTTP routes, serves the web UI, exposes the MCP endpoint, and stamps authenticated request identity before calling service-backed RPC methods.</p>
 
   <div class="layers">
     <div class="layer handler">
       <div class="label">CLI</div>
-      <div class="role"><code>agen8 daemon start</code> chooses listener strategy, endpoint, and HTTP address from flags and environment.</div>
+      <div class="role"><code>agen8-mcp daemon start</code> starts the HTTP daemon. <code>agen8-mcp version</code> prints the build metadata.</div>
     </div>
     <div class="layer service">
       <div class="label">internal/daemon</div>
-      <div class="role">Builds <code>Application</code>, registers RPC methods, runs listener strategy, serves setup, and stamps identity.</div>
+      <div class="role">Builds <code>Application</code>, registers RPC methods, runs HTTP serving, serves setup, mounts MCP, and stamps identity.</div>
     </div>
     <div class="layer domain">
       <div class="label">internal/rpc</div>
@@ -56,24 +56,23 @@
     </div>
     <div class="layer repo">
       <div class="label">Services</div>
-      <div class="role">Own business rules. They do not know whether the caller arrived through HTTP or local IPC.</div>
+      <div class="role">Own business rules. They do not know whether the caller arrived through browser RPC or MCP.</div>
     </div>
   </div>
 
   <table>
     <thead><tr><th>The daemon owns</th><th>The daemon does not own</th></tr></thead>
     <tbody>
-      <tr><td>Listener strategy selection</td><td>Task, message, member, or project domain rules</td></tr>
+      <tr><td>HTTP listener startup and routing</td><td>Task, member, or project domain rules</td></tr>
       <tr><td>HTTP routes <code>/healthz</code>, <code>/rpc</code>, <code>/events</code>, first-run setup routes, and web UI serving/proxying</td><td>RPC method DTOs or service command structs</td></tr>
       <tr><td>Bearer-token validation for HTTP requests</td><td>Agent-facing MCP tool actions</td></tr>
-      <tr><td>Local user resolution for local IPC requests</td><td>Repository construction outside <code>app.NewApplication</code></td></tr>
       <tr><td>Context identity stamping</td><td>Application methods; <code>Application</code> remains a field-only struct</td></tr>
     </tbody>
   </table>
 
-  <h2 id="strategies">2. Listener strategies</h2>
+  <h2 id="strategies">2. HTTP listener</h2>
 
-  <p>Local IPC and HTTP are first-class daemon modes. Local is the default for native workflows. HTTP is explicit for Docker and hosted-shaped workflows.</p>
+  <p>HTTP is the current daemon listener for the MCP-first baseline. The daemon serves browser RPC, first-run setup, web UI assets, health checks, events, and the MCP endpoint from one local process.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 940 500" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
@@ -84,21 +83,21 @@
     </defs>
 
     <rect x="32" y="34" width="876" height="414" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
-    <text x="470" y="70" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Daemon listener strategy</text>
-    <text x="470" y="91" text-anchor="middle" fill="var(--text-muted)">Strategy changes transport and authentication only; both paths call the same RPC server.</text>
+    <text x="470" y="70" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Daemon HTTP surface</text>
+    <text x="470" y="91" text-anchor="middle" fill="var(--text-muted)">Browser RPC and MCP calls share the same service-backed application graph.</text>
 
     <rect x="70" y="132" width="170" height="86" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
-    <text x="155" y="158" text-anchor="middle" font-weight="700" fill="var(--text)">agen8 daemon start</text>
-    <text x="155" y="178" text-anchor="middle" fill="var(--text-muted)">--listener local|http</text>
+    <text x="155" y="158" text-anchor="middle" font-weight="700" fill="var(--text)">agen8-mcp daemon start</text>
+    <text x="155" y="178" text-anchor="middle" fill="var(--text-muted)">--listener http</text>
     <text x="155" y="196" text-anchor="middle" fill="var(--text-faint)">env mirrors flags</text>
 
     <rect x="314" y="112" width="172" height="86" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
-    <text x="400" y="138" text-anchor="middle" font-weight="700" fill="var(--text)">LocalStrategy</text>
-    <text x="400" y="158" text-anchor="middle" fill="var(--text-muted)">Unix socket / pipe</text>
-    <text x="400" y="176" text-anchor="middle" fill="var(--text-faint)">local resolved identity</text>
+    <text x="400" y="138" text-anchor="middle" font-weight="700" fill="var(--text)">MCP endpoint</text>
+    <text x="400" y="158" text-anchor="middle" fill="var(--text-muted)">GET/POST /mcp</text>
+    <text x="400" y="176" text-anchor="middle" fill="var(--text-faint)">token plus session metadata</text>
 
     <rect x="314" y="242" width="172" height="86" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
-    <text x="400" y="268" text-anchor="middle" font-weight="700" fill="var(--text)">HTTPStrategy</text>
+    <text x="400" y="268" text-anchor="middle" font-weight="700" fill="var(--text)">Browser HTTP</text>
     <text x="400" y="288" text-anchor="middle" fill="var(--text-muted)">GET /healthz · POST /rpc</text>
     <text x="400" y="306" text-anchor="middle" fill="var(--text-faint)">serves or proxies web UI</text>
     <text x="400" y="324" text-anchor="middle" fill="var(--text-faint)">bearer token identity</text>
@@ -129,22 +128,20 @@
   <table>
     <thead><tr><th>Strategy</th><th>Endpoint</th><th>Authentication</th><th>Use case</th></tr></thead>
     <tbody>
-      <tr><td><code>local</code></td><td><code>--endpoint</code> / <code>AGEN8_RPC_ENDPOINT</code></td><td>Resolved local user identity; no spoofable identity headers</td><td>Native desktop and local development</td></tr>
-      <tr><td><code>http</code></td><td><code>--http-addr</code> / <code>AGEN8_HTTP_ADDR</code></td><td><code>Authorization: Bearer &lt;session-token&gt;</code> for browser requests after setup</td><td>Docker and hosted-shaped operation</td></tr>
+      <tr><td><code>http</code></td><td><code>--http-addr</code> / <code>AGEN8_HTTP_ADDR</code></td><td><code>Authorization: Bearer &lt;session-token&gt;</code> for browser RPC after setup; MCP token for <code>/mcp</code></td><td>Local daemon and hosted-shaped operation</td></tr>
     </tbody>
   </table>
 
   <h2 id="cli">3. CLI surface</h2>
 
-<pre><code class="lang-shell">agen8 daemon start
-agen8 daemon start --listener local --endpoint unix:///tmp/agen8.sock
-agen8 daemon start --listener http --http-addr 127.0.0.1:7777</code></pre>
+<pre><code class="lang-shell">agen8-mcp daemon start
+agen8-mcp daemon start --listener http --http-addr 127.0.0.1:7777
+agen8-mcp version</code></pre>
 
   <table>
     <thead><tr><th>Flag</th><th>Environment</th><th>Default</th></tr></thead>
     <tbody>
-      <tr><td><code>--listener local|http</code></td><td><code>AGEN8_DAEMON_LISTENER</code></td><td><code>local</code></td></tr>
-      <tr><td><code>--endpoint</code></td><td><code>AGEN8_RPC_ENDPOINT</code></td><td>Existing local RPC endpoint</td></tr>
+      <tr><td><code>--listener http</code></td><td><code>AGEN8_DAEMON_LISTENER</code></td><td><code>http</code></td></tr>
       <tr><td><code>--http-addr</code></td><td><code>AGEN8_HTTP_ADDR</code></td><td><code>127.0.0.1:7777</code></td></tr>
     </tbody>
   </table>
@@ -282,9 +279,7 @@ make dev remote
 internal/
   daemon/
     config.go              # listener config, env defaults, validation
-    daemon.go              # Application + RPC registry + strategy selection
-    local.go               # local IPC listener strategy
-    http.go                # HTTP listener strategy, /healthz, /rpc, /events, setup, web UI/proxy
+    daemon.go              # Application, RPC registry, /healthz, /rpc, /mcp, /events, setup, web UI/proxy
     daemon_test.go         # listener and setup tests
 
   web/

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Release Baseline - agen8</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="./">docs</a> / release baseline</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Release Readiness</span>
+  <h1>Release baseline setup and verification</h1>
+  <p class="lede">
+    This page describes the current releasable local baseline for agen8 MCP. It is a practical setup and verification checklist for the daemon, web UI, retained MCP tools, local data directory, and schema archive behavior.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#state">Current baseline</a></li>
+      <li><a href="#data">Data directory</a></li>
+      <li><a href="#build">Build and version checks</a></li>
+      <li><a href="#setup">First local setup</a></li>
+      <li><a href="#mcp">MCP connection</a></li>
+      <li><a href="#uat">Retained tool UAT</a></li>
+      <li><a href="#schema">Schema archive behavior</a></li>
+      <li><a href="#release">Before tagging</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="state">1. Current baseline</h2>
+  <p>Agen8 is an MCP-first work-context layer. The active harness remains the work surface. Agen8 records durable project context through retained concepts: projects, members, missions, key results, tasks, decisions, graph links, credentials, files, locations, and bounded HTTP actions.</p>
+
+  <table>
+    <thead><tr><th>Surface</th><th>Current release baseline</th></tr></thead>
+    <tbody>
+      <tr><td>Binary</td><td><code>agen8-mcp</code></td></tr>
+      <tr><td>Daemon command</td><td><code>agen8-mcp daemon start --listener http --http-addr 127.0.0.1:7777</code></td></tr>
+      <tr><td>Web UI</td><td>Served by the daemon. In development, the daemon proxies Vite.</td></tr>
+      <tr><td>MCP endpoint</td><td><code>http://127.0.0.1:7777/mcp?token=&lt;token&gt;</code></td></tr>
+      <tr><td>Retained MCP tools</td><td><code>project</code>, <code>mission</code>, <code>task</code>, <code>decision</code>, <code>graph_query</code>, <code>http</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="data">2. Data directory</h2>
+  <p>Runtime state lives outside the repository. On macOS the default is <code>~/.agen8</code>. The daemon accepts <code>--data-dir</code> and the Makefile accepts <code>DATA_DIR=...</code> when a test run needs an isolated state directory.</p>
+
+<pre><code class="lang-shell">make dev remote
+make dev remote DATA_DIR=/tmp/agen8-release-check
+agen8-mcp daemon start --data-dir /tmp/agen8-release-check --listener http --http-addr 127.0.0.1:7777</code></pre>
+
+  <p>The repository should not contain a live <code>agen8.db</code>. Local SQLite files belong in the resolved data directory.</p>
+
+  <h2 id="build">3. Build and version checks</h2>
+  <p>The release version source is <code>pkg/buildinfo</code>. Builds set <code>Version</code>, <code>Commit</code>, and <code>BuildDate</code> with Go ldflags. Local development defaults to <code>dev</code> and <code>none</code>.</p>
+
+<pre><code class="lang-shell">make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+./bin/agen8-mcp version
+curl http://127.0.0.1:7777/healthz</code></pre>
+
+  <p><code>/healthz</code> returns <code>ok</code>, <code>version</code>, <code>commit</code>, and <code>buildDate</code> when the build date is set. The MCP server implementation advertises the same version.</p>
+
+  <h2 id="setup">4. First local setup</h2>
+  <p>When the user repository is empty, the daemon exposes first-run setup. The daemon prints a setup URL with a one-time token. Setup creates the first local account and a browser session. It does not create missions, KRs, tasks, decisions, or MCP members.</p>
+
+<pre><code class="lang-shell">make dev remote
+# Open the printed setup URL.
+# Create the first local account.
+# Create or open a project in the UI.</code></pre>
+
+  <h2 id="mcp">5. MCP connection</h2>
+  <p>The daemon exposes the MCP server over HTTP. The token maps to the local user. A harness registers into a project with <code>project.register</code>. Use a readable <code>display_name</code> such as <code>backend engineer</code>, <code>frontend reviewer</code>, or <code>research analyst</code> so graph records are understandable later.</p>
+
+<pre><code class="lang-json">{
+  "mcpServers": {
+    "agen8": {
+      "url": "http://127.0.0.1:7777/mcp?token=&lt;token&gt;"
+    }
+  }
+}</code></pre>
+
+  <p>After registration, the response includes <code>projectId</code>, <code>memberId</code>, <code>memberType</code>, <code>channelId</code>, <code>url</code>, and <code>token</code>. Agents should use those values rather than inventing ids.</p>
+
+  <h2 id="uat">6. Retained tool UAT</h2>
+  <p>Before tagging a baseline, verify the retained tools through the actual MCP connection:</p>
+
+  <table>
+    <thead><tr><th>Tool</th><th>Release check</th></tr></thead>
+    <tbody>
+      <tr><td><code>project</code></td><td><code>register</code>, <code>member_get</code>, and <code>member_list</code> return readable member labels.</td></tr>
+      <tr><td><code>mission</code></td><td>Create or read the release mission and KRs; update progress.</td></tr>
+      <tr><td><code>task</code></td><td>Create, claim, submit, and review one small task linked to a mission and KR.</td></tr>
+      <tr><td><code>decision</code></td><td>Log a decision linked to the active task, mission, or KR.</td></tr>
+      <tr><td><code>graph_query</code></td><td>Read the task node and confirm links to decision, KR, and mission.</td></tr>
+      <tr><td><code>http</code></td><td>Call <code>GET http://127.0.0.1:7777/healthz</code> and confirm <code>200 OK</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="schema">7. Schema archive behavior</h2>
+  <p>The local SQLite schema uses a hard-cutover baseline. If the daemon sees an incompatible old schema, it archives the old database under the data directory using an <code>agen8.db.incompatible-*.bak</code> filename and starts with a fresh schema. This is intentional for the current local baseline.</p>
+
+  <p>Schema validation rejects removed tables and legacy columns from removed concepts. The current task schema keeps mission and key-result references and rejects legacy task plan columns.</p>
+
+  <h2 id="release">8. Before tagging</h2>
+  <p>Run these checks before creating a release tag:</p>
+
+<pre><code class="lang-shell">go test ./... -count=1
+make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+./bin/agen8-mcp version
+make dev remote
+# Run retained MCP tool UAT from a real harness connection.</code></pre>
+
+  <p>The release workflow builds <code>agen8-mcp</code> archives for Linux and macOS on version tags matching <code>v*</code>.</p>
+
+</div>
+
+</body>
+</html>
