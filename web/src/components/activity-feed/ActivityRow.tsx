@@ -93,11 +93,10 @@ function parseSpaceRows(data: Record<string, string> | undefined): Array<{ displ
 export const EventRow = memo(function EventRow({ event }: { event: AgentEvent }) {
   const [expanded, setExpanded] = useState(false)
   const eventRole = event.data?.role || ''
-  const showRole = (event.kind ?? '').trim().toLowerCase() !== 'user_message'
   const message = event.title || event.outputPreview || event.textPreview || ''
 
   const summary = message || event.kind || ''
-  const role = showRole ? eventRole : ''
+  const role = eventRole
   const statusClass = getStatusClass(event)
   const isError = event.status === 'error' || event.kind === 'error'
   const isPending = statusClass === 'pending'

@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agen8 — Board redesign mockups</title>
+<style>
+  :root {
+    --bg-app:#1a1a1c; --bg-panel:#1f1f22; --bg-surface:#26262a; --bg-elevated:#2e2e33;
+    --bg-hover:rgba(255,255,255,0.05);
+    --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.16);
+    --text-1:#f0f0f4; --text-2:#9898a8; --text-3:#636378; --text-4:rgba(255,255,255,0.32);
+    --accent:#3B82F6; --accent-dim:rgba(59,130,246,0.14);
+    --green:#22c55e; --green-dim:rgba(34,197,94,0.14);
+    --amber:#f59e0b; --amber-dim:rgba(245,158,11,0.14);
+    --red:#ef4444;   --red-dim:rgba(239,68,68,0.14);
+    --blue:#60a5fa;  --blue-dim:rgba(96,165,250,0.14);
+    --violet:#a78bfa;--violet-dim:rgba(167,139,250,0.14);
+    --mono:'SF Mono',Monaco,'Fira Code',monospace;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:var(--bg-app); color:var(--text-1);
+    font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+    -webkit-font-smoothing:antialiased; }
+  body { padding:32px 40px 80px; }
+
+  /* ── page chrome ── */
+  .page-head { max-width:1440px; margin:0 auto 8px; }
+  .page-head h1 { font-size:20px; font-weight:650; letter-spacing:-0.01em; }
+  .page-head p  { font-size:13px; color:var(--text-2); margin-top:6px; max-width:760px; line-height:1.5; }
+
+  .direction { max-width:1440px; margin:40px auto 0; }
+  .direction-head { display:flex; align-items:baseline; gap:12px; margin-bottom:4px; }
+  .direction-tag { font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--accent); background:var(--accent-dim); padding:3px 8px; border-radius:6px; }
+  .direction-head h2 { font-size:16px; font-weight:600; }
+  .direction-desc { font-size:12.5px; color:var(--text-2); margin:4px 0 16px; line-height:1.5; max-width:880px; }
+  .direction-desc b { color:var(--text-1); font-weight:600; }
+
+  .surface { background:var(--bg-app); border:1px solid var(--border); border-radius:14px;
+    padding:16px 18px; box-shadow:0 1px 0 rgba(255,255,255,0.02) inset; }
+
+  /* ── shared toolbar ── */
+  .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+  .search { display:flex; align-items:center; gap:7px; background:var(--bg-panel);
+    border:1px solid var(--border); border-radius:9px; padding:6px 10px; min-width:220px; color:var(--text-3); }
+  .search svg { width:13px; height:13px; }
+  .search span { font-size:12.5px; }
+  .filter-chips { display:flex; gap:4px; background:var(--bg-panel); border:1px solid var(--border);
+    border-radius:9px; padding:3px; }
+  .chip-filter { font-size:11.5px; font-weight:550; color:var(--text-2); padding:4px 10px; border-radius:7px; cursor:pointer; }
+  .chip-filter.active { background:var(--bg-elevated); color:var(--text-1); }
+  .chip-filter .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  .toolbar-spacer { flex:1; }
+  .stat-strip { display:flex; align-items:center; gap:14px; font-size:11.5px; color:var(--text-2); }
+  .stat-strip b { color:var(--text-1); font-weight:600; font-variant-numeric:tabular-nums; }
+  .pill-btn { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:550; color:var(--text-2);
+    background:var(--bg-panel); border:1px solid var(--border); border-radius:9px; padding:6px 10px; cursor:pointer; }
+
+  /* ── status colors ── */
+  .s-waiting { --s:var(--text-3); --sd:rgba(99,99,120,0.16); }
+  .s-active  { --s:var(--blue);   --sd:var(--blue-dim); }
+  .s-done    { --s:var(--green);  --sd:var(--green-dim); }
+  .s-failed  { --s:var(--red);    --sd:var(--red-dim); }
+
+  .mono { font-family:var(--mono); }
+  .chip-kind { font-size:9.5px; font-weight:650; letter-spacing:0.03em; text-transform:uppercase;
+    color:var(--text-2); background:var(--bg-elevated); border:1px solid var(--border); padding:1px 6px; border-radius:5px; }
+  .badge { font-size:9px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
+    padding:1px 6px; border-radius:999px; display:inline-flex; align-items:center; gap:3px; }
+  .badge.retry  { background:var(--amber-dim); color:var(--amber); }
+  .badge.review { background:var(--green-dim); color:var(--green); }
+  .badge.blocked{ background:var(--amber-dim); color:var(--amber); }
+
+  /* avatar monogram */
+  .av { width:24px; height:24px; border-radius:50%; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; font-size:9.5px; font-weight:700; letter-spacing:0.02em; }
+  .av-cl { background:var(--blue-dim);   color:var(--blue); }
+  .av-cx { background:var(--violet-dim); color:var(--violet); }
+  .av-co { background:var(--amber-dim);  color:var(--amber); }
+  .av-un { background:rgba(99,99,120,0.18); color:var(--text-3); }
+  .av-sm { width:18px; height:18px; font-size:8px; }
+
+  /* ════════════════ DIRECTION A — refined swimlanes ════════════════ */
+  .swimA { display:flex; flex-direction:column; }
+  .swimA-head { display:grid; grid-template-columns:200px repeat(4,minmax(0,1fr)); gap:10px;
+    padding-bottom:10px; border-bottom:1px solid var(--border); }
+  .swimA-h { font-size:10px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-2); }
+  .swimA-h.col { display:flex; align-items:center; gap:6px; }
+  .swimA-h .dot { width:6px; height:6px; border-radius:50%; background:var(--s); }
+  .swimA-h .cnt { margin-left:auto; color:var(--text-3); font-variant-numeric:tabular-nums; }
+  .swimA-lane { display:grid; grid-template-columns:200px repeat(4,minmax(0,1fr)); gap:10px;
+    padding:14px 0; border-bottom:1px solid var(--border); align-items:start; }
+  .swimA-lane:last-child { border-bottom:none; }
+
+  .laneA-member { display:flex; gap:9px; align-items:flex-start; }
+  .laneA-meta { min-width:0; display:flex; flex-direction:column; gap:4px; flex:1; }
+  .laneA-name { font-size:13px; font-weight:600; color:var(--text-1); line-height:1.2; }
+  .laneA-role { font-size:9.5px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-3); }
+  .laneA-prog { display:flex; height:4px; border-radius:3px; overflow:hidden; background:var(--bg-elevated); margin-top:3px; }
+  .laneA-prog i { height:100%; }
+  .laneA-count { font-size:10.5px; color:var(--text-3); margin-top:2px; }
+
+  .cellA { display:flex; flex-direction:column; gap:6px; min-height:30px; }
+  .cardA { border:1px solid var(--border); border-left:2px solid var(--s);
+    background:var(--bg-panel); border-radius:8px; padding:8px 10px; display:flex; flex-direction:column; gap:5px;
+    cursor:pointer; transition:border-color .15s, background .15s; }
+  .cardA:hover { background:var(--bg-surface); border-color:var(--border-strong); }
+  .cardA.done { opacity:0.62; }
+  .cardA-head { display:flex; align-items:center; gap:6px; }
+  .cardA-id { font-size:9.5px; color:var(--text-4); }
+  .cardA-time { margin-left:auto; font-size:9.5px; color:var(--text-4); font-variant-numeric:tabular-nums; }
+  .cardA-title { font-size:11.5px; font-weight:500; color:var(--text-1); line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .cardA-foot { display:flex; align-items:center; gap:5px; }
+  .more-ghost { font-size:10.5px; color:var(--text-3); text-align:center; padding:5px; border:1px dashed var(--border);
+    border-radius:8px; cursor:pointer; }
+  .more-ghost:hover { color:var(--text-2); border-color:var(--border-strong); }
+
+  /* ════════════════ DIRECTION B — classic kanban ════════════════ */
+  .kanban { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; align-items:start; }
+  .kcol { background:var(--bg-panel); border:1px solid var(--border); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:9px; }
+  .kcol-head { display:flex; align-items:center; gap:7px; padding:2px 2px 8px; border-bottom:1px solid var(--border); }
+  .kcol-head .dot { width:7px; height:7px; border-radius:50%; background:var(--s); }
+  .kcol-head .lbl { font-size:11px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-1); }
+  .kcol-head .cnt { margin-left:auto; font-size:11px; font-weight:600; color:var(--text-3);
+    background:var(--bg-elevated); border-radius:999px; padding:1px 8px; font-variant-numeric:tabular-nums; }
+  .kcard { background:var(--bg-surface); border:1px solid var(--border); border-radius:9px; padding:9px 10px;
+    display:flex; flex-direction:column; gap:7px; cursor:pointer; transition:border-color .15s, background .15s; }
+  .kcard:hover { border-color:var(--border-strong); }
+  .kcard.failed { background:color-mix(in oklab, var(--red) 6%, var(--bg-surface)); border-color:color-mix(in oklab,var(--red) 22%,var(--border)); }
+  .kcard.done { opacity:0.64; }
+  .kcard-head { display:flex; align-items:center; gap:6px; }
+  .kcard-id { font-size:9.5px; color:var(--text-4); }
+  .kcard-time { margin-left:auto; font-size:9.5px; color:var(--text-4); }
+  .kcard-title { font-size:12px; font-weight:500; color:var(--text-1); line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .kcard-foot { display:flex; align-items:center; gap:6px; }
+  .assignee { display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--text-2); }
+
+  /* ════════════════ DIRECTION C — activity table ════════════════ */
+  .tbl { width:100%; border-collapse:collapse; }
+  .tbl th { text-align:left; font-size:10px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase;
+    color:var(--text-3); padding:0 12px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .tbl th .sort { color:var(--accent); margin-left:4px; }
+  .tbl td { padding:11px 12px; border-bottom:1px solid var(--border); font-size:12.5px; color:var(--text-2); vertical-align:middle; }
+  .tbl tr:hover td { background:var(--bg-panel); }
+  .tbl .t-task { color:var(--text-1); font-weight:500; max-width:420px; }
+  .tbl .t-id { font-size:10px; color:var(--text-4); margin-right:8px; }
+  .status-pill { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600;
+    color:var(--s); background:var(--sd); padding:3px 9px; border-radius:999px; }
+  .status-pill .dot { width:6px; height:6px; border-radius:50%; background:var(--s); }
+  .t-member { display:inline-flex; align-items:center; gap:7px; color:var(--text-1); }
+  .t-dur { font-variant-numeric:tabular-nums; }
+  .pulse { width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 0 3px var(--green-dim); display:inline-block; }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>Board redesign — three directions</h1>
+  <p>Same data, three layouts. The board today renders <b>members as rows × status as columns</b>, which leaves most lanes empty and lets the Done column grow without bound or counts. Each direction below tackles that differently. Realistic data; live theme tokens.</p>
+</div>
+
+<!-- ══════════ DIRECTION A ══════════ -->
+<div class="direction">
+  <div class="direction-head"><span class="direction-tag">Direction A</span><h2>Refined swimlanes</h2></div>
+  <p class="direction-desc">Keeps the familiar member×status matrix but fixes the gaps: <b>per-column counts</b>, a <b>search + status filter bar</b>, a <b>per-member progress bar</b>, <b>richer cards</b> (kind chip, retry/review badges, status accent stripe), and a <b>collapsible Done</b> column so history stops dominating.</p>
+  <div class="surface">
+    <div class="toolbar">
+      <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>Search tasks…</span></div>
+      <div class="filter-chips">
+        <span class="chip-filter active">All</span>
+        <span class="chip-filter"><span class="dot" style="background:var(--blue)"></span>Active</span>
+        <span class="chip-filter"><span class="dot" style="background:var(--text-3)"></span>Waiting</span>
+        <span class="chip-filter"><span class="dot" style="background:var(--green)"></span>Done</span>
+        <span class="chip-filter"><span class="dot" style="background:var(--red)"></span>Failed</span>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <div class="stat-strip"><span><b>2</b> active</span><span><b>13</b> done</span><span><b>8</b> failed</span><span><b>23</b> total</span></div>
+    </div>
+
+    <div class="swimA">
+      <div class="swimA-head">
+        <div class="swimA-h">Member</div>
+        <div class="swimA-h col s-waiting"><span class="dot"></span>Waiting<span class="cnt">0</span></div>
+        <div class="swimA-h col s-active"><span class="dot"></span>Active<span class="cnt">2</span></div>
+        <div class="swimA-h col s-done"><span class="dot"></span>Done<span class="cnt">13</span></div>
+        <div class="swimA-h col s-failed"><span class="dot"></span>Failed<span class="cnt">8</span></div>
+      </div>
+
+      <!-- claude-cli -->
+      <div class="swimA-lane">
+        <div class="laneA-member">
+          <div class="av av-cl">CL</div>
+          <div class="laneA-meta">
+            <span class="laneA-name">claude-cli</span>
+            <span class="laneA-role">Worker</span>
+            <span class="laneA-prog"><i style="flex:1;background:var(--blue)"></i><i style="flex:4;background:var(--green)"></i><i style="flex:2;background:var(--red)"></i></span>
+            <span class="laneA-count">7 tasks</span>
+          </div>
+        </div>
+        <div class="cellA s-waiting"></div>
+        <div class="cellA s-active">
+          <div class="cardA active">
+            <div class="cardA-head"><span class="chip-kind">smoke</span><span class="cardA-id mono">65e8ee</span><span class="cardA-time">1h</span></div>
+            <div class="cardA-title">Dogfood and test MCP system-message delivery lifecycle</div>
+            <div class="cardA-foot"><span class="badge retry">↻ 2</span></div>
+          </div>
+        </div>
+        <div class="cellA s-done">
+          <div class="cardA done"><div class="cardA-head"><span class="chip-kind">fix</span><span class="cardA-id mono">8c615d</span><span class="cardA-time">1h · 6m</span></div><div class="cardA-title">Fix MCP tool calls drifting to the wrong member identity</div><div class="cardA-foot"><span class="badge review">✓ approved</span></div></div>
+          <div class="cardA done"><div class="cardA-head"><span class="chip-kind">verify</span><span class="cardA-id mono">15d76f</span><span class="cardA-time">1h · 3m</span></div><div class="cardA-title">Verify delivery and external sync startup after register</div></div>
+          <div class="more-ghost">+3 more done</div>
+        </div>
+        <div class="cellA s-failed">
+          <div class="cardA failed"><div class="cardA-head"><span class="chip-kind">design</span><span class="cardA-id mono">fd688e</span><span class="cardA-time">1h</span></div><div class="cardA-title">Design agent inbox handoff semantics for app-server</div><div class="cardA-foot"><span class="badge retry">↻ 3</span></div></div>
+        </div>
+      </div>
+
+      <!-- codex -->
+      <div class="swimA-lane">
+        <div class="laneA-member">
+          <div class="av av-cx">CX</div>
+          <div class="laneA-meta">
+            <span class="laneA-name">codex</span>
+            <span class="laneA-role">Worker</span>
+            <span class="laneA-prog"><i style="flex:1;background:var(--blue)"></i><i style="flex:5;background:var(--green)"></i><i style="flex:1;background:var(--red)"></i></span>
+            <span class="laneA-count">8 tasks</span>
+          </div>
+        </div>
+        <div class="cellA s-waiting"></div>
+        <div class="cellA s-active">
+          <div class="cardA active"><div class="cardA-head"><span class="chip-kind">fix</span><span class="cardA-id mono">80540c</span><span class="cardA-time">1h</span></div><div class="cardA-title">Fix system-message delivery lifecycle for MCP register</div></div>
+        </div>
+        <div class="cellA s-done">
+          <div class="cardA done"><div class="cardA-head"><span class="chip-kind">refactor</span><span class="cardA-id mono">132259</span><span class="cardA-time">1h · 12m</span></div><div class="cardA-title">Refactor MCP registration through harness session</div></div>
+          <div class="cardA done"><div class="cardA-head"><span class="chip-kind">map</span><span class="cardA-id mono">fbc15c</span><span class="cardA-time">1h · 4m</span></div><div class="cardA-title">Map MCP space.register to harness activation inputs</div></div>
+          <div class="more-ghost">+3 more done</div>
+        </div>
+        <div class="cellA s-failed">
+          <div class="cardA failed"><div class="cardA-head"><span class="chip-kind">smoke</span><span class="cardA-id mono">708607</span><span class="cardA-time">2h</span></div><div class="cardA-title">Live smoke: fresh task assignment after retry</div></div>
+        </div>
+      </div>
+
+      <!-- Unassigned -->
+      <div class="swimA-lane">
+        <div class="laneA-member">
+          <div class="av av-un">∅</div>
+          <div class="laneA-meta">
+            <span class="laneA-name">Unassigned</span>
+            <span class="laneA-role">Backlog</span>
+            <span class="laneA-prog"><i style="flex:5;background:var(--green)"></i><i style="flex:5;background:var(--red)"></i></span>
+            <span class="laneA-count">8 tasks</span>
+          </div>
+        </div>
+        <div class="cellA s-waiting"></div>
+        <div class="cellA s-active"></div>
+        <div class="cellA s-done">
+          <div class="cardA done"><div class="cardA-head"><span class="chip-kind">smoke</span><span class="cardA-id mono">1b2b67</span><span class="cardA-time">2h</span></div><div class="cardA-title">Dogfood self-task MCP lifecycle smoke</div></div>
+          <div class="more-ghost">+3 more done</div>
+        </div>
+        <div class="cellA s-failed">
+          <div class="cardA failed"><div class="cardA-head"><span class="chip-kind">chore</span><span class="cardA-id mono">ca88e6</span><span class="cardA-time">1h</span></div><div class="cardA-title">Remove bootstrap token as a runtime identity</div></div>
+          <div class="cardA failed"><div class="cardA-head"><span class="chip-kind">smoke</span><span class="cardA-id mono">4e3bb8</span><span class="cardA-time">3h</span></div><div class="cardA-title">MCP clean-start smoke task</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ DIRECTION B ══════════ -->
+<div class="direction">
+  <div class="direction-head"><span class="direction-tag">Direction B</span><h2>Classic Kanban</h2></div>
+  <p class="direction-desc">Drops swimlanes for four <b>status columns</b> with prominent counts. The member moves onto the card as an <b>assignee chip</b> — better when most work is unassigned (it flows as one stream instead of empty rows). <b>Failed cards get a red tint</b> so they read at a glance; Done dims and collapses.</p>
+  <div class="surface">
+    <div class="toolbar">
+      <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>Search tasks…</span></div>
+      <div class="pill-btn">Group: Status ▾</div>
+      <div class="pill-btn">All members ▾</div>
+      <div class="toolbar-spacer"></div>
+      <div class="stat-strip"><span><b>2</b> active</span><span><b>13</b> done</span><span><b>8</b> failed</span></div>
+    </div>
+
+    <div class="kanban">
+      <!-- waiting -->
+      <div class="kcol s-waiting">
+        <div class="kcol-head"><span class="dot"></span><span class="lbl">Waiting</span><span class="cnt">0</span></div>
+        <div style="font-size:11px;color:var(--text-3);text-align:center;padding:14px 0;">Nothing queued</div>
+      </div>
+      <!-- active -->
+      <div class="kcol s-active">
+        <div class="kcol-head"><span class="dot"></span><span class="lbl">Active</span><span class="cnt">2</span></div>
+        <div class="kcard">
+          <div class="kcard-head"><span class="chip-kind">smoke</span><span class="kcard-id mono">65e8ee</span><span class="kcard-time">1h</span></div>
+          <div class="kcard-title">Dogfood and test MCP system-message delivery lifecycle</div>
+          <div class="kcard-foot"><span class="assignee"><span class="av av-cl av-sm">CL</span>claude-cli</span><span class="badge retry" style="margin-left:auto">↻ 2</span></div>
+        </div>
+        <div class="kcard">
+          <div class="kcard-head"><span class="chip-kind">fix</span><span class="kcard-id mono">80540c</span><span class="kcard-time">1h</span></div>
+          <div class="kcard-title">Fix system-message delivery lifecycle for MCP register</div>
+          <div class="kcard-foot"><span class="assignee"><span class="av av-cx av-sm">CX</span>codex</span></div>
+        </div>
+      </div>
+      <!-- done -->
+      <div class="kcol s-done">
+        <div class="kcol-head"><span class="dot"></span><span class="lbl">Done</span><span class="cnt">13</span></div>
+        <div class="kcard done">
+          <div class="kcard-head"><span class="chip-kind">fix</span><span class="kcard-id mono">8c615d</span><span class="kcard-time">1h</span></div>
+          <div class="kcard-title">Fix MCP tool calls drifting to the wrong member identity</div>
+          <div class="kcard-foot"><span class="assignee"><span class="av av-cl av-sm">CL</span>claude-cli</span><span class="badge review" style="margin-left:auto">✓</span></div>
+        </div>
+        <div class="kcard done">
+          <div class="kcard-head"><span class="chip-kind">refactor</span><span class="kcard-id mono">132259</span><span class="kcard-time">1h</span></div>
+          <div class="kcard-title">Refactor MCP registration through harness session</div>
+          <div class="kcard-foot"><span class="assignee"><span class="av av-cx av-sm">CX</span>codex</span></div>
+        </div>
+        <div class="kcard done">
+          <div class="kcard-head"><span class="chip-kind">smoke</span><span class="kcard-id mono">c958bd</span><span class="kcard-time">2h</span></div>
+          <div class="kcard-title">Current-thread task receive smoke</div>
+          <div class="kcard-foot"><span class="assignee"><span class="av av-un av-sm">∅</span>Unassigned</span></div>
+        </div>
+        <div class="more-ghost">+10 more done</div>
+      </div>
+      <!-- failed -->
+      <div class="kcol s-failed">
+        <div class="kcol-head"><span class="dot"></span><span class="lbl">Failed</span><span class="cnt">8</span></div>
+        <div class="kcard failed">
+          <div class="kcard-head"><span class="chip-kind">design</span><span class="kcard-id mono">fd688e</span><span class="kcard-time">1h</span></div>
+          <div class="kcard-title">Design agent inbox handoff semantics for app-server</div>
+          <div class="kcard-foot"><span class="assignee"><span class="av av-cl av-sm">CL</span>claude-cli</span><span class="badge retry" style="margin-left:auto">↻ 3</span></div>
+        </div>
+        <div class="kcard failed">
+          <div class="kcard-head"><span class="chip-kind">chore</span><span class="kcard-id mono">ca88e6</span><span class="kcard-time">1h</span></div>
+          <div class="kcard-title">Remove bootstrap token as a runtime identity</div>
+          <div class="kcard-foot"><span class="assignee"><span class="av av-un av-sm">∅</span>Unassigned</span></div>
+        </div>
+        <div class="kcard failed">
+          <div class="kcard-head"><span class="chip-kind">smoke</span><span class="kcard-id mono">708607</span><span class="kcard-time">2h</span></div>
+          <div class="kcard-title">Live smoke: fresh task assignment after retry</div>
+          <div class="kcard-foot"><span class="assignee"><span class="av av-cx av-sm">CX</span>codex</span></div>
+        </div>
+        <div class="more-ghost">+5 more failed</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ DIRECTION C ══════════ -->
+<div class="direction">
+  <div class="direction-head"><span class="direction-tag">Direction C</span><h2>Activity table</h2></div>
+  <p class="direction-desc">For scale (200 tasks): a <b>dense, sortable, filterable list</b> instead of a spatial board. Every row shows status, assignee, kind, last-update and duration in aligned columns you can <b>sort by any field</b>. Best for "what's happening right now and let me drill in," at the cost of the at-a-glance spatial grouping.</p>
+  <div class="surface">
+    <div class="toolbar">
+      <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>Search tasks…</span></div>
+      <div class="filter-chips">
+        <span class="chip-filter active">All</span>
+        <span class="chip-filter"><span class="dot" style="background:var(--blue)"></span>Active</span>
+        <span class="chip-filter"><span class="dot" style="background:var(--green)"></span>Done</span>
+        <span class="chip-filter"><span class="dot" style="background:var(--red)"></span>Failed</span>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <div class="stat-strip"><span><span class="pulse"></span> 2 running</span><span><b>23</b> total</span></div>
+    </div>
+
+    <table class="tbl">
+      <thead><tr>
+        <th>Task</th><th>Status</th><th>Member</th><th>Kind</th><th>Updated <span class="sort">▼</span></th><th>Duration</th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="t-task"><span class="t-id mono">65e8ee</span>Dogfood and test MCP system-message delivery</td>
+          <td><span class="status-pill s-active"><span class="dot"></span>Active</span></td>
+          <td><span class="t-member"><span class="av av-cl av-sm">CL</span>claude-cli</span></td>
+          <td><span class="chip-kind">smoke</span></td><td>1h ago</td><td class="t-dur">—</td></tr>
+        <tr><td class="t-task"><span class="t-id mono">80540c</span>Fix system-message delivery lifecycle for MCP</td>
+          <td><span class="status-pill s-active"><span class="dot"></span>Active</span></td>
+          <td><span class="t-member"><span class="av av-cx av-sm">CX</span>codex</span></td>
+          <td><span class="chip-kind">fix</span></td><td>1h ago</td><td class="t-dur">—</td></tr>
+        <tr><td class="t-task"><span class="t-id mono">fd688e</span>Design agent inbox handoff semantics for app-server</td>
+          <td><span class="status-pill s-failed"><span class="dot"></span>Failed</span></td>
+          <td><span class="t-member"><span class="av av-cl av-sm">CL</span>claude-cli</span></td>
+          <td><span class="chip-kind">design</span></td><td>1h ago</td><td class="t-dur">8m</td></tr>
+        <tr><td class="t-task"><span class="t-id mono">8c615d</span>Fix MCP tool calls drifting to the wrong member identity</td>
+          <td><span class="status-pill s-done"><span class="dot"></span>Done</span></td>
+          <td><span class="t-member"><span class="av av-cl av-sm">CL</span>claude-cli</span></td>
+          <td><span class="chip-kind">fix</span></td><td>1h ago</td><td class="t-dur">6m</td></tr>
+        <tr><td class="t-task"><span class="t-id mono">132259</span>Refactor MCP registration through harness session</td>
+          <td><span class="status-pill s-done"><span class="dot"></span>Done</span></td>
+          <td><span class="t-member"><span class="av av-cx av-sm">CX</span>codex</span></td>
+          <td><span class="chip-kind">refactor</span></td><td>1h ago</td><td class="t-dur">12m</td></tr>
+        <tr><td class="t-task"><span class="t-id mono">ca88e6</span>Remove bootstrap token as a runtime identity</td>
+          <td><span class="status-pill s-failed"><span class="dot"></span>Failed</span></td>
+          <td><span class="t-member"><span class="av av-un av-sm">∅</span>Unassigned</span></td>
+          <td><span class="chip-kind">chore</span></td><td>1h ago</td><td class="t-dur">2m</td></tr>
+        <tr><td class="t-task"><span class="t-id mono">c958bd</span>Current-thread task receive smoke</td>
+          <td><span class="status-pill s-done"><span class="dot"></span>Done</span></td>
+          <td><span class="t-member"><span class="av av-un av-sm">∅</span>Unassigned</span></td>
+          <td><span class="chip-kind">smoke</span></td><td>2h ago</td><td class="t-dur">3m</td></tr>
+        <tr><td class="t-task"><span class="t-id mono">4e3bb8</span>MCP clean-start smoke task</td>
+          <td><span class="status-pill s-failed"><span class="dot"></span>Failed</span></td>
+          <td><span class="t-member"><span class="av av-un av-sm">∅</span>Unassigned</span></td>
+          <td><span class="chip-kind">smoke</span></td><td>3h ago</td><td class="t-dur">1m</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>

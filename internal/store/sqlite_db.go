@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,12 +19,10 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// currentSchemaVersion is bumped on hard cutover. Version 4 introduces the
-// typed identity model on notifications/notification_rules: profile_id was
-// dropped (it was a misnomer that conflated user identity, project scope,
-// and agent persona) and replaced with user_id + project_id + subject_*.
-// Existing v3 DBs are incompatible and must be wiped.
-const currentSchemaVersion = 4
+// currentSchemaVersion is bumped on hard cutover. Version 5 removes legacy
+// channel/message-delivery and plan tables from the fresh MCP-first core.
+// Existing v4 DBs are incompatible and must be wiped.
+const currentSchemaVersion = 5
 
 // loadMigrationSQL reads all .sql files from the embedded migrations directory,
 // sorts them by filename, and returns a slice of SQL strings ready to execute.
@@ -100,7 +99,7 @@ func getDBHandle(ctx context.Context, cfg config.Config) (*storagedb.Handle, err
 	if driver == "" {
 		driver = storagedb.DriverSQLite
 	}
-	return storagedb.Open(ctx, storagedb.Config{
+	openCfg := storagedb.Config{
 		Driver:       driver,
 		DataDir:      cfg.DataDir,
 		DatabaseURL:  cfg.DatabaseURL,
@@ -115,7 +114,59 @@ func getDBHandle(ctx context.Context, cfg config.Config) (*storagedb.Handle, err
 				return fmt.Errorf("unsupported db driver %q", driver)
 			}
 		},
-	})
+	}
+	handle, err := storagedb.Open(ctx, openCfg)
+	if err == nil {
+		return handle, nil
+	}
+	if driver != storagedb.DriverSQLite || !isHardCutoverSchemaError(err) {
+		return nil, err
+	}
+	backup, archiveErr := archiveSQLiteDB(cfg.DataDir)
+	if archiveErr != nil {
+		return nil, fmt.Errorf("%w; also failed to archive incompatible sqlite db: %v", err, archiveErr)
+	}
+	handle, retryErr := storagedb.Open(ctx, openCfg)
+	if retryErr != nil {
+		return nil, fmt.Errorf("open fresh sqlite db after archiving incompatible db to %s: %w", backup, retryErr)
+	}
+	return handle, nil
+}
+
+func isHardCutoverSchemaError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "incompatible schema version") ||
+		strings.Contains(message, "incompatible schema:")
+}
+
+func archiveSQLiteDB(dataDir string) (string, error) {
+	path := storagedb.SQLitePath(dataDir)
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("sqlite path is empty")
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", err
+	}
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	backup := fmt.Sprintf("%s.incompatible-%s.bak", path, stamp)
+	if err := os.Rename(path, backup); err != nil {
+		return "", fmt.Errorf("archive sqlite db: %w", err)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		sidecar := path + suffix
+		if _, err := os.Stat(sidecar); err == nil {
+			sidecarBackup := filepath.Base(backup) + suffix
+			if err := os.Rename(sidecar, filepath.Join(filepath.Dir(path), sidecarBackup)); err != nil {
+				return backup, fmt.Errorf("archive sqlite sidecar %s: %w", sidecar, err)
+			}
+		} else if !os.IsNotExist(err) {
+			return backup, fmt.Errorf("stat sqlite sidecar %s: %w", sidecar, err)
+		}
+	}
+	return backup, nil
 }
 
 func getSQLiteDB(cfg config.Config) (*sql.DB, error) {
@@ -249,7 +300,7 @@ func migrateSQLite(db *sql.DB) error {
 		}
 	}
 
-	if err := ensureChannelSchema(tx); err != nil {
+	if err := repairDecisionMemberNameColumn(tx); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -261,129 +312,6 @@ func migrateSQLite(db *sql.DB) error {
 		return fmt.Errorf("sqlite: commit migration: %w", err)
 	}
 
-	return nil
-}
-
-func ensureChannelSchema(tx *sql.Tx) error {
-	if tx == nil {
-		return fmt.Errorf("sqlite: ensure channel schema: transaction is nil")
-	}
-	rows, err := tx.Query(`PRAGMA table_info(channels)`)
-	if err != nil {
-		return fmt.Errorf("sqlite: pragma channels: %w", err)
-	}
-	hasLastMessageAt := false
-	hasSpaceID := false
-	hasMemberLabel := false
-	for rows.Next() {
-		var (
-			cid     int
-			name    string
-			ctype   string
-			notNull int
-			dflt    sql.NullString
-			pk      int
-		)
-		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
-			rows.Close()
-			return fmt.Errorf("sqlite: scan channels pragma: %w", err)
-		}
-		if name == "last_message_at" {
-			hasLastMessageAt = true
-		}
-		if name == "space_id" {
-			hasSpaceID = true
-		}
-		if name == "member_label" {
-			hasMemberLabel = true
-		}
-	}
-	rows.Close()
-	if hasSpaceID || !hasMemberLabel {
-		memberLabelSelect := `member_label`
-		if !hasMemberLabel {
-			memberLabelSelect = `title`
-		}
-		if err := rebuildChannelsCanonical(tx, hasLastMessageAt, memberLabelSelect); err != nil {
-			return err
-		}
-		hasLastMessageAt = true
-	}
-	if !hasLastMessageAt {
-		if _, err := tx.Exec(`ALTER TABLE channels ADD COLUMN last_message_at TEXT`); err != nil {
-			return fmt.Errorf("sqlite: add channels.last_message_at: %w", err)
-		}
-	}
-	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_space_member_run
-		ON channels(space_id, member_label, run_id, member_id)`); err != nil {
-		return fmt.Errorf("sqlite: ensure idx_channels_space_member_run: %w", err)
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_channels_space_id
-		ON channels(space_id, updated_at DESC)`); err != nil {
-		return fmt.Errorf("sqlite: ensure idx_channels_space_id: %w", err)
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_channels_member_id
-		ON channels(member_id, updated_at DESC)`); err != nil {
-		return fmt.Errorf("sqlite: ensure idx_channels_member_id: %w", err)
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_channels_run_id
-		ON channels(run_id) WHERE run_id != ''`); err != nil {
-		return fmt.Errorf("sqlite: ensure idx_channels_run_id: %w", err)
-	}
-	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS channel_reads (
-		user_id      TEXT NOT NULL,
-		channel_id   TEXT NOT NULL,
-		last_seen_at TEXT NOT NULL,
-		PRIMARY KEY (user_id, channel_id)
-	)`); err != nil {
-		return fmt.Errorf("sqlite: ensure channel_reads: %w", err)
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_channel_reads_user
-		ON channel_reads(user_id)`); err != nil {
-		return fmt.Errorf("sqlite: ensure idx_channel_reads_user: %w", err)
-	}
-	return nil
-}
-
-func rebuildChannelsCanonical(tx *sql.Tx, hasLastMessageAt bool, memberLabelSelect string) error {
-	lastMessageSelect := `last_message_at`
-	if !hasLastMessageAt {
-		lastMessageSelect = `NULL`
-	}
-	statements := []string{
-		`DROP INDEX IF EXISTS idx_channels_space_kind_member_run`,
-		`DROP INDEX IF EXISTS idx_channels_space_member_run`,
-		`DROP INDEX IF EXISTS idx_channels_space_id`,
-		`DROP INDEX IF EXISTS idx_channels_member_id`,
-		`DROP INDEX IF EXISTS idx_channels_run_id`,
-		`CREATE TABLE channels_next (
-			channel_id TEXT PRIMARY KEY,
-			space_id TEXT NOT NULL,
-			project_id TEXT DEFAULT '',
-			run_id TEXT DEFAULT '',
-			member_id TEXT DEFAULT '',
-			member_label TEXT DEFAULT '',
-			title TEXT DEFAULT '',
-			status TEXT NOT NULL,
-			channel_json TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
-			last_message_at TEXT
-		)`,
-		`INSERT INTO channels_next (
-			channel_id, space_id, project_id, run_id, member_id, member_label, title, status, channel_json, created_at, updated_at, last_message_at
-		)
-		SELECT
-			channel_id, space_id, project_id, run_id, member_id, ` + memberLabelSelect + `, title, status, channel_json, created_at, updated_at, ` + lastMessageSelect + `
-		FROM channels`,
-		`DROP TABLE channels`,
-		`ALTER TABLE channels_next RENAME TO channels`,
-	}
-	for _, stmt := range statements {
-		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("sqlite: rebuild channels: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -401,16 +329,14 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 		{name: "space_runtimes", columns: []string{"space_id", "space_runtime_json"}, forbid: []string{"session_id", "session_json"}},
 		{name: "runs", columns: []string{"space_id", "run_id", "run_json"}, forbid: []string{"session_id"}},
 		{name: "history", columns: []string{"space_id"}, forbid: []string{"session_id"}},
-		{name: "spaces", columns: []string{"space_id", "user_id", "project_id", "plan_mode"}, forbid: []string{"session_id", "run_id"}},
-		{name: "channels", columns: []string{"channel_id", "space_id", "member_id", "member_label", "status", "channel_json"}, forbid: []string{"kind"}},
+		{name: "spaces", columns: []string{"space_id", "user_id", "project_id"}, forbid: []string{"session_id", "run_id", "plan_mode"}},
 		{name: "user_profiles", columns: []string{"user_id", "profile_json"}, forbid: nil},
 		{name: "project_spaces", columns: []string{"user_id", "space_id"}, forbid: []string{"primary_session_id"}},
 		{name: "project_registry", columns: []string{"user_id", "project_root", "project_id"}, forbid: nil},
 		{name: "integration_credentials", columns: []string{"user_id", "project_id", "owner_type", "owner_id"}, forbid: nil},
-		{name: "decisions", columns: []string{"id", "project_id", "invalidation_conditions_json"}, forbid: nil},
+		{name: "decisions", columns: []string{"id", "project_id", "source_identity", "member_name", "invalidation_conditions_json"}, forbid: nil},
 		{name: "agent_space_entries", columns: []string{"entry_id", "event_id", "run_id", "kind", "surface", "created_at"}, forbid: nil},
 		{name: "members", columns: []string{"member_id", "project_id", "member_type", "lifecycle_state", "harness_kind", "member_json"}, forbid: []string{"space_id", "role_id", "session_token_hash", "session_token_prefix", "provisioning_mode", "external_session_id"}},
-		{name: "plans", columns: []string{"id", "space_id", "mission_id", "kr_refs_json"}, forbid: nil},
 	}
 
 	for _, tbl := range required {
@@ -450,6 +376,77 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 				return fmt.Errorf("sqlite: incompatible schema: table %q has legacy column %q (hard cutover). Delete agen8.db and retry", tbl.name, bad)
 			}
 		}
+	}
+	for _, table := range []string{
+		"channels",
+		"channel_reads",
+		"plans",
+		"plan_phases",
+		"plan_todos",
+		"plan_comments",
+		"plan_comment_reads",
+		"plan_amendments",
+		"plan_reviews",
+	} {
+		var exists int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&exists); err != nil {
+			return fmt.Errorf("sqlite: validate schema: check removed table %s: %w", table, err)
+		}
+		if exists > 0 {
+			return fmt.Errorf("sqlite: incompatible schema: removed table %q exists (hard cutover). Delete agen8.db and retry", table)
+		}
+	}
+	return nil
+}
+
+func repairDecisionMemberNameColumn(tx *sql.Tx) error {
+	var exists int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = 'decisions'`).Scan(&exists); err != nil {
+		return fmt.Errorf("sqlite: repair decisions member_name: check table: %w", err)
+	}
+	if exists == 0 {
+		return nil
+	}
+	rows, err := tx.Query(`PRAGMA table_info(decisions)`)
+	if err != nil {
+		return fmt.Errorf("sqlite: repair decisions member_name: table info: %w", err)
+	}
+	hasMemberName := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("sqlite: repair decisions member_name: scan table info: %w", err)
+		}
+		if strings.TrimSpace(name) == "member_name" {
+			hasMemberName = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("sqlite: repair decisions member_name: iterate table info: %w", err)
+	}
+	rows.Close()
+	if !hasMemberName {
+		if _, err := tx.Exec(`ALTER TABLE decisions ADD COLUMN member_name TEXT DEFAULT ''`); err != nil {
+			return fmt.Errorf("sqlite: repair decisions member_name: add column: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`
+		UPDATE decisions
+		SET member_name = COALESCE((
+			SELECT json_extract(members.member_json, '$.displayName')
+			FROM members
+			WHERE members.member_id = decisions.source_identity
+		), '')
+		WHERE TRIM(COALESCE(member_name, '')) = ''
+		  AND TRIM(COALESCE(source_identity, '')) <> ''
+	`); err != nil {
+		return fmt.Errorf("sqlite: repair decisions member_name: backfill from members: %w", err)
 	}
 	return nil
 }

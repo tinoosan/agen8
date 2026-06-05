@@ -13,14 +13,11 @@ import {
   taskDuration,
   parseRetryTask,
   getAcceptanceCriteria,
-  isHeartbeatTask,
-  getHeartbeatOutcome,
   getLatestReview,
 } from '../../pages/boardHelpers'
 import { getTaskActivities } from '../../pages/taskActivity'
 import { useRecentDecisions } from '../../hooks/useDecisions'
 import { useKeyResult, useProjectKRs, useMissions } from '../../hooks/useMissions'
-import { calendarLink } from '../../lib/routing'
 import { memberDisplayName } from '../../lib/memberDisplay'
 import type { TaskActivity } from '../../lib/types'
 import type { TaskNodeData } from './TaskNode'
@@ -35,7 +32,6 @@ function activityKindLabel(kind: string): string {
   switch (kind) {
     case 'tool_call': return 'Tool'
     case 'decision_logged': return 'Decision'
-    case 'message_sent': return 'Message'
     case 'sub_task_created': return 'Sub-task'
     default: return 'State'
   }
@@ -45,7 +41,6 @@ function activityKindColor(kind: string): string {
   switch (kind) {
     case 'decision_logged': return 'var(--green)'
     case 'tool_call': return 'var(--accent)'
-    case 'message_sent': return 'var(--text-2)'
     case 'sub_task_created': return 'var(--accent)'
     default: return 'var(--text-3)'
   }
@@ -112,8 +107,6 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   const acColor = acDone === acTotal && acTotal > 0 ? 'var(--green)' : acDone > 0 ? 'var(--amber)' : 'var(--text-3)'
 
   const latestReview = getLatestReview(task)
-  const heartbeat = isHeartbeatTask(task)
-  const heartbeatOutcome = heartbeat ? getHeartbeatOutcome(task) : null
 
   // Data fetching
   const decisionsQuery = useRecentDecisions(projectId)
@@ -142,8 +135,8 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   const reviewTone: Record<string, { fg: string; bg: string; label: string }> = {
     approved: { fg: 'var(--green)', bg: 'color-mix(in srgb, var(--green) 12%, transparent)', label: 'Approved' },
     retry: { fg: 'var(--amber)', bg: 'color-mix(in srgb, var(--amber) 12%, transparent)', label: 'Retry Requested' },
-    escalated: { fg: 'var(--red)', bg: 'color-mix(in srgb, var(--red) 10%, transparent)', label: 'Escalated' },
-    escalate: { fg: 'var(--red)', bg: 'color-mix(in srgb, var(--red) 10%, transparent)', label: 'Escalated' },
+    failed: { fg: 'var(--red)', bg: 'color-mix(in srgb, var(--red) 10%, transparent)', label: 'Failed' },
+    fail: { fg: 'var(--red)', bg: 'color-mix(in srgb, var(--red) 10%, transparent)', label: 'Failed' },
   }
 
   return (
@@ -448,56 +441,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           })),
         ]} />
 
-        {/* 6. Heartbeat */}
-        {heartbeat && (
-          <CollapsibleSection storageKey="task-panel-heartbeat" defaultOpen={true} label="Heartbeat">
-            <div style={{ borderTop: '1px solid var(--border)' }}>
-              {Boolean(task.metadata?.jobName) && (
-                <div className="flex justify-between items-baseline" style={{ paddingTop: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>Job</span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-1)', fontFamily: 'monospace' }}>{String(task.metadata!.jobName)}</span>
-                </div>
-              )}
-              {Boolean(task.metadata?.occurrenceNumber) && (
-                <div className="flex justify-between items-baseline" style={{ paddingTop: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>Occurrence</span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-1)' }}>
-                    #{String(task.metadata!.occurrenceNumber)}
-                    {Boolean(task.metadata!.maxOccurrences) && String(task.metadata!.maxOccurrences) !== '0' && ` of ${String(task.metadata!.maxOccurrences)}`}
-                  </span>
-                </div>
-              )}
-              {Boolean(task.metadata?.scheduleExpression) && (
-                <div className="flex justify-between items-baseline" style={{ paddingTop: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>Schedule</span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-1)' }}>{String(task.metadata!.scheduleExpression)}</span>
-                </div>
-              )}
-              {heartbeatOutcome && (() => {
-                const outcomeColors: Record<string, string> = { ok: 'var(--green)', warning: 'var(--amber)', critical: 'var(--red)', error: '#991b1b' }
-                return (
-                  <div className="flex justify-between items-baseline" style={{ paddingTop: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>Outcome</span>
-                    <span style={{ fontSize: '11px', color: outcomeColors[heartbeatOutcome.status] ?? 'var(--text-2)' }}>
-                      {heartbeatOutcome.status} — &ldquo;{heartbeatOutcome.summary}&rdquo;
-                    </span>
-                  </div>
-                )
-              })()}
-              <div style={{ paddingTop: 8 }}>
-                <a
-                  href={calendarLink(projectId, task.id)}
-                  style={{ fontSize: '11px', color: 'var(--accent)' }}
-                  className="hover:underline"
-                >
-                  View in calendar →
-                </a>
-              </div>
-            </div>
-          </CollapsibleSection>
-        )}
-
-        {/* 7. Artifacts */}
+        {/* 6. Artifacts */}
         {task.artifacts && task.artifacts.length > 0 && (
           <CollapsibleSection
             storageKey="task-panel-artifacts"

@@ -5,6 +5,7 @@ import { Search, Target, Diamond } from 'lucide-react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { memberDisplayName } from '../../lib/memberDisplay'
+import { decisionActorDisplay } from '../../lib/decisionDisplay'
 
 interface StrategyMapSearchProps {
   open: boolean
@@ -74,8 +75,6 @@ function getNodeTitle(node: Node): string {
   if (mission?.title) return mission.title
   const kr = data.kr as { title?: string } | undefined
   if (kr?.title) return kr.title
-  const plan = data.plan as { title?: string } | undefined
-  if (plan?.title) return plan.title
   const decision = data.decision as { title?: string } | undefined
   if (decision?.title) return decision.title
   const task = data.task as { title?: string; description?: string } | undefined
@@ -150,22 +149,11 @@ function getNodeMeta(node: Node): ResultMeta {
     }
   }
 
-  const plan = data.plan as { status?: string; mode?: string } | undefined
-  if (plan) {
-    return {
-      status: plan.status,
-      statusTone: STATUS_TONE[plan.status ?? ''],
-      phaseCount: data.phaseCount as number | undefined,
-      todosDone: data.todosDone as number | undefined,
-      todosTotal: data.todosTotal as number | undefined,
-    }
-  }
-
-  const decision = data.decision as { confidence?: number; source?: string; sourceIdentity?: string; memberName?: string } | undefined
+  const decision = data.decision as { confidence?: number; source?: 'agent'; sourceIdentity?: string; memberId?: string; memberName?: string } | undefined
   if (decision) {
     const conf = decision.confidence ?? 0
     return {
-      owner: decision.memberName?.trim() || decision.sourceIdentity?.trim() || undefined,
+      owner: decisionActorDisplay(decision).label,
       confidence: conf > 0 ? conf : undefined,
       confidenceTone: conf > 0 ? confidenceColor(conf) : undefined,
     }

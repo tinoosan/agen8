@@ -30,7 +30,7 @@
 <p><code>project</code> is an MCP tool, not a service API. It exposes one product-facing coordination contract to member harnesses and maps each action to typed application service calls. The handler owns request decoding, role-aware tool policy, cross-service orchestration, and deterministic result shaping.</p>
 
 <div class="callout">
-<strong>Boundary.</strong> Project tool behavior lives in <code>internal/mcp/tools/project</code>. The tool exposes the member roster through composite actions. Message sending belongs to the separate <code>message</code> MCP tool. The project service owns project records, lifecycle, and the member roster subdomain. No service accepts raw <code>project(...)</code> tool JSON, and no service package defines a project-tool-specific service or port.
+<strong>Boundary.</strong> Project tool behavior lives in <code>internal/mcp/tools/project</code>. The tool exposes project records and the member roster through composite actions. Work coordination happens through the retained mission, task, decision, graph, and HTTP tools. The project service owns project records, lifecycle, and the member roster subdomain. No service accepts raw <code>project(...)</code> tool JSON, and no service package defines a project-tool-specific service or port.
 </div>
 
 <h2>Actions</h2>
@@ -39,8 +39,8 @@
   <tr><th>Action</th><th>Handler responsibility</th><th>Service calls</th><th>Result</th></tr>
   <tr>
     <td><code>register</code></td>
-    <td>Resolve or create the local project, bind the MCP caller to an Agen8 member, activate the harness session, register the session token, and start durable message delivery for that member when the harness exposes a routable session reference.</td>
-    <td><code>ProjectSvc</code>, <code>HarnessSvc</code>, <code>MessageSvc.StartAgentDelivery</code>.</td>
+    <td>Resolve or create the local project, bind the MCP caller to an Agen8 member, and register the session token for this user-owned daemon.</td>
+    <td><code>ProjectSvc</code>.</td>
     <td>Project id, project root, location id, member id, member type, channel id, MCP token, and MCP URL.</td>
   </tr>
   <tr>

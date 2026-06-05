@@ -1,4 +1,4 @@
-import type { AcceptanceCriterion, Task, TaskAttempt, AttemptReview, HeartbeatOutcome } from '../lib/types'
+import type { AcceptanceCriterion, Task, TaskAttempt, AttemptReview } from '../lib/types'
 
 export interface TaskBlockerInfo {
   kind: string
@@ -15,31 +15,8 @@ export function isSystemTask(t: Task): boolean {
     'coordinator.continuation', 'coordinator.stalled',
   ]
   if (systemSources.includes(source)) return true
-  // Heartbeat tasks are now shown on the board with badges (F26) — only hide coordinator tasks
   if (t.taskKind === 'coordinator') return true
   return false
-}
-
-// Heartbeat task detection and outcome extraction (F26)
-
-/** Returns true if the task is a heartbeat task. Checks taskKind and ID pattern. */
-export function isHeartbeatTask(task: Task): boolean {
-  if (task.taskKind === 'heartbeat') return true
-  if (task.id?.startsWith('heartbeat-')) return true
-  return false
-}
-
-/** Extract HeartbeatOutcome from task metadata, or null if not present. */
-export function getHeartbeatOutcome(task: Task): HeartbeatOutcome | null {
-  const outcome = task.metadata?.heartbeatOutcome
-  if (!outcome || typeof outcome !== 'object') return null
-  const o = outcome as Record<string, unknown>
-  if (typeof o.status !== 'string') return null
-  return {
-    status: o.status,
-    summary: String(o.summary ?? ''),
-    actions: Array.isArray(o.actions) ? o.actions.map(String) : undefined,
-  }
 }
 
 /** Returns the effective status for board column placement. */
@@ -72,7 +49,6 @@ export function getLatestReview(task: Task): AttemptReview | null {
   let decision = typeof meta.reviewDecision === 'string' ? meta.reviewDecision.trim() : ''
   if (!decision) return null
   if (decision === 'approve') decision = 'approved'
-  if (decision === 'escalate') decision = 'escalated'
   const feedback = typeof meta.reviewFeedback === 'string' ? meta.reviewFeedback.trim() : ''
   const reviewedBy = typeof meta.reviewedBy === 'string' ? meta.reviewedBy.trim() : ''
   const reviewedAt = typeof meta.reviewedAt === 'string' ? meta.reviewedAt.trim() : ''

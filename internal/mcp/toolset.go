@@ -50,7 +50,7 @@ func buildToolDefs() ([]toolDef, error) {
 	sort.Strings(names)
 	out := make([]toolDef, 0, len(names))
 	for _, name := range names {
-			if native, ok := nativeByName[name]; ok {
+		if native, ok := nativeByName[name]; ok {
 			schema, err := normalizeToolSchema(native.name, native.schema)
 			if err != nil {
 				return nil, err
@@ -61,7 +61,6 @@ func buildToolDefs() ([]toolDef, error) {
 	}
 	return out, nil
 }
-
 
 func buildToolDiscoveryCatalog(defs []toolDef) types.ToolDiscoveryCatalog {
 	if len(defs) == 0 {

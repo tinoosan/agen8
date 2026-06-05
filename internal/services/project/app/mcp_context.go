@@ -148,6 +148,17 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		}
 		existing = s.withResolvedPermissionMode(existing)
 	}
+	if existing.ID != "" && strings.TrimSpace(existing.UserID) != userID {
+		if strings.TrimSpace(existing.UserID) != "local" || userID == "local" {
+			return RegisterMCPContextResult{}, fmt.Errorf("registered member %s belongs to a different user", existing.ID)
+		}
+		existing.UserID = userID
+		existing.UpdatedAt = s.clock.Now().UTC()
+		if err := s.members.Update(ctx, existing); err != nil {
+			return RegisterMCPContextResult{}, fmt.Errorf("rehome registered member to mcp token user: %w", err)
+		}
+		existing = s.withResolvedPermissionMode(existing)
+	}
 	return RegisterMCPContextResult{
 		ProjectID:        string(projectID),
 		ProjectRoot:      root,

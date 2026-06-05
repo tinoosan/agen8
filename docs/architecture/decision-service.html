@@ -36,14 +36,14 @@
   <span class="eyebrow">Architecture · Decision Service</span>
   <h1>Decision Service</h1>
   <p class="lede">
-    The decision service is the durable work-memory boundary for consequential choices. It records what was decided, who made or requested the decision, what context made it necessary, what human answer resolved it when human judgment was required, and how that record connects to tasks, key results, missions, and plans.
+    The decision service is the durable work-memory boundary for consequential choices. It records what was decided, who made the decision, what context made it necessary, and how that record connects to tasks, key results, and missions.
   </p>
 
   <nav class="toc" aria-label="On this page">
     <div class="toc-label">On this page</div>
     <ol>
       <li><a href="#purpose">Purpose and ownership</a></li>
-      <li><a href="#human-input">Human input model</a></li>
+      <li><a href="#decision-log">Decision log model</a></li>
       <li><a href="#service">Service boundary</a></li>
       <li><a href="#domain">Domain model</a></li>
       <li><a href="#persistence">Persistence and queries</a></li>
@@ -63,7 +63,7 @@
     <tbody>
       <tr><td>Canonical <code>Decision</code> records and payload validation.</td><td>Prompt instructions or model behavior.</td></tr>
       <tr><td>The resolved audit entry for <code>log</code> decisions.</td><td>Blocking human waits or external approval flows.</td></tr>
-      <tr><td>Context links from decisions to tasks, key results, missions, and plans.</td><td>Task lifecycle, mission lifecycle, or plan review state.</td></tr>
+      <tr><td>Context links from decisions to tasks, key results, and missions.</td><td>Task lifecycle or mission lifecycle state.</td></tr>
       <tr><td>Project-scoped decision queries, counts, exports, and graph hydration.</td><td>Transcript card rendering or activity-feed formatting.</td></tr>
       <tr><td><code>decision.logged</code> publication after persistence.</td><td>Notification storage, delivery, or inbox read state.</td></tr>
     </tbody>
@@ -74,7 +74,7 @@
   <div class="layers">
     <div class="layer handler">
       <div class="label">MCP and RPC adapters</div>
-      <div class="role">Translate tool or JSON-RPC payloads into typed service calls. The MCP decision tool owns <code>action="log"</code> and <code>action="ask_user"</code> semantics.</div>
+      <div class="role">Translate tool or JSON-RPC payloads into typed service calls. The MCP decision tool owns <code>action="log"</code> semantics.</div>
     </div>
     <div class="layer service">
       <div class="label">Application service</div>
@@ -82,7 +82,7 @@
     </div>
     <div class="layer domain">
       <div class="label">Domain</div>
-      <div class="role">Owns <code>Decision</code>, <code>DecisionKind</code>, <code>DecisionSource</code>, <code>LogPayload</code>, <code>AskUserPayload</code>, constructors, filters, and validation.</div>
+      <div class="role">Owns <code>Decision</code>, <code>DecisionKind</code>, <code>DecisionSource</code>, <code>LogPayload</code>, constructors, filters, and validation.</div>
     </div>
     <div class="layer repo">
       <div class="label">Repository</div>
@@ -90,13 +90,13 @@
     </div>
   </div>
 
-  <h2 id="human-input">2. Human input model</h2>
+  <h2 id="decision-log">2. Decision log model</h2>
 
   <p>The retained decision surface is <code>log</code>. Agents record the rationale, rejected alternatives, confidence, invalidation conditions, and graph references directly in the decision row.</p>
 
-  <svg class="flow-svg" viewBox="0 0 980 250" role="img" aria-labelledby="ask-flow-title ask-flow-desc">
-    <title id="ask-flow-title">Human input flow</title>
-    <desc id="ask-flow-desc">The MCP decision tool validates an agent decision and persists it as durable work memory.</desc>
+  <svg class="flow-svg" viewBox="0 0 980 250" role="img" aria-labelledby="decision-log-flow-title decision-log-flow-desc">
+    <title id="decision-log-flow-title">Decision log flow</title>
+    <desc id="decision-log-flow-desc">The MCP decision tool validates an agent decision and persists it as durable work memory.</desc>
     <defs>
       <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
         <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
@@ -112,7 +112,7 @@
       <rect class="flow-box" x="24" y="58" width="116" height="108" rx="8"></rect>
       <text x="82" y="94" text-anchor="middle">Agent calls</text>
       <text x="82" y="120" text-anchor="middle">decision</text>
-      <text x="82" y="146" text-anchor="middle">ask_user</text>
+      <text x="82" y="146" text-anchor="middle">log</text>
 
       <rect class="flow-box" x="240" y="58" width="110" height="108" rx="8"></rect>
       <text x="295" y="94" text-anchor="middle">MCP tool</text>
@@ -126,8 +126,8 @@
 
       <rect class="flow-box" x="660" y="58" width="110" height="108" rx="8"></rect>
       <text x="715" y="94" text-anchor="middle">Tool calls</text>
-      <text x="715" y="120" text-anchor="middle">Complete</text>
-      <text x="715" y="146" text-anchor="middle">AskUser</text>
+      <text x="715" y="120" text-anchor="middle">Log</text>
+      <text x="715" y="146" text-anchor="middle">Decision</text>
 
       <rect class="flow-box" x="870" y="58" width="86" height="108" rx="8"></rect>
       <text x="913" y="94" text-anchor="middle">Decision</text>
@@ -159,12 +159,7 @@
       <tr>
         <td><code>log</code></td>
         <td><code>action</code>, <code>title</code>, <code>rationale</code></td>
-        <td><code>alternatives_rejected</code>, <code>invalidation_conditions</code>, <code>confidence</code>, <code>task_ref</code>, <code>key_result_ref</code>, <code>mission_ref</code>, <code>plan_ref</code></td>
-      </tr>
-      <tr>
-        <td><code>ask_user</code></td>
-        <td><code>action</code>, <code>title</code>, <code>questions</code></td>
-        <td><code>context</code>, <code>task_ref</code>, <code>key_result_ref</code>, <code>mission_ref</code>, <code>plan_ref</code>, <code>answers</code>, <code>cancelled</code></td>
+        <td><code>alternatives_rejected</code>, <code>invalidation_conditions</code>, <code>confidence</code>, <code>task_ref</code>, <code>key_result_ref</code>, <code>mission_ref</code></td>
       </tr>
     </tbody>
   </table>
@@ -201,10 +196,8 @@
     <span class="tok-field">TaskRef</span>        <span class="tok-type">string</span>
     <span class="tok-field">KeyResultRef</span>   <span class="tok-type">string</span>
     <span class="tok-field">MissionRef</span>     <span class="tok-type">string</span>
-    <span class="tok-field">PlanRef</span>        <span class="tok-type">string</span>
     <span class="tok-field">CreatedAt</span>      time.<span class="tok-type">Time</span>
     <span class="tok-field">Log</span>            *<span class="tok-type">LogPayload</span>
-    <span class="tok-field">AskUser</span>        *<span class="tok-type">AskUserPayload</span>
 }</code></pre>
 
   <table>

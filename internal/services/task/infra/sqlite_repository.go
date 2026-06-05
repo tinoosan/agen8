@@ -144,9 +144,9 @@ func (r *SQLiteRepository) saveTask(ctx context.Context, task domain.Task) error
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO tasks (
 			task_id, project_id, assigned_to, claimed_by_member_id, task_kind, status,
-			key_result_ref, plan_phase_id, plan_todo_id, created_at, updated_at,
+			key_result_ref, created_at, updated_at,
 			completed_at, task_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
 			project_id = excluded.project_id,
 			assigned_to = excluded.assigned_to,
@@ -154,8 +154,6 @@ func (r *SQLiteRepository) saveTask(ctx context.Context, task domain.Task) error
 			task_kind = excluded.task_kind,
 			status = excluded.status,
 			key_result_ref = excluded.key_result_ref,
-			plan_phase_id = excluded.plan_phase_id,
-			plan_todo_id = excluded.plan_todo_id,
 			created_at = excluded.created_at,
 			updated_at = excluded.updated_at,
 			completed_at = excluded.completed_at,
@@ -168,8 +166,6 @@ func (r *SQLiteRepository) saveTask(ctx context.Context, task domain.Task) error
 		task.TaskKind,
 		string(task.Status),
 		strings.TrimSpace(task.KeyResultRef),
-		uuidString(task.PlanPhaseID),
-		uuidString(task.PlanTodoID),
 		timeString(task.CreatedAt),
 		timeString(task.UpdatedAt),
 		timeString(task.CompletedAt),
@@ -191,8 +187,6 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 			task_kind TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT '',
 			key_result_ref TEXT NOT NULL DEFAULT '',
-			plan_phase_id TEXT,
-			plan_todo_id TEXT,
 			created_at TEXT,
 			updated_at TEXT,
 			completed_at TEXT,
@@ -206,8 +200,6 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 		`ALTER TABLE tasks ADD COLUMN claimed_by_member_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN task_kind TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN key_result_ref TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE tasks ADD COLUMN plan_phase_id TEXT`,
-		`ALTER TABLE tasks ADD COLUMN plan_todo_id TEXT`,
 		`ALTER TABLE tasks ADD COLUMN task_json TEXT`,
 	} {
 		if _, err := r.db.ExecContext(ctx, stmt); err != nil && !isDuplicateColumnError(err) {

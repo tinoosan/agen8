@@ -53,9 +53,11 @@ func runDaemonStart(args []string) error {
 	}
 
 	hostConfig := config.Default()
-	if strings.TrimSpace(dataDir) != "" {
-		hostConfig.DataDir = strings.TrimSpace(dataDir)
+	resolvedDataDir, err := config.ResolveDataDir(dataDir, strings.TrimSpace(dataDir) != "")
+	if err != nil {
+		return err
 	}
+	hostConfig.DataDir = resolvedDataDir
 	d, err := daemon.New(daemon.Config{
 		AppConfig: hostConfig,
 		Listener:  listener,

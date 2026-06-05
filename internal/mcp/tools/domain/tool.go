@@ -15,7 +15,7 @@ type Tool interface {
 	Execute(ctx context.Context, args json.RawMessage) (ToolResult, error)
 }
 
-// ToolMetadata is the product-facing identity used to present a tool to operators.
+// ToolMetadata is the product-facing identity used to present a tool to users and agents.
 type ToolMetadata struct {
 	DisplayName string       `json:"displayName"`
 	Category    ToolCategory `json:"category"`

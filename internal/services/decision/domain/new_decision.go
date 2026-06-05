@@ -8,6 +8,7 @@ import (
 type NewLogInput struct {
 	ProjectID              string
 	MemberID               string
+	MemberName             string
 	Title                  string
 	Rationale              string
 	Context                string
@@ -25,6 +26,7 @@ func NewLog(input NewLogInput, now time.Time) (Decision, error) {
 		ProjectID:      strings.TrimSpace(input.ProjectID),
 		Source:         DecisionSourceAgent,
 		SourceIdentity: strings.TrimSpace(input.MemberID),
+		MemberName:     strings.TrimSpace(input.MemberName),
 		Title:          strings.TrimSpace(input.Title),
 		Confidence:     input.Confidence,
 		TaskRef:        strings.TrimSpace(input.TaskRef),

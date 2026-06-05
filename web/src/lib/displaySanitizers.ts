@@ -6,7 +6,7 @@ export function looksLikeOpaqueId(value: string | null | undefined): boolean {
   const text = (value ?? '').trim()
   if (!text) return false
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)) return true
-  if (/^(space|run|task|kr|oa|mission|plan|ch)-[a-z0-9-]{4,}$/i.test(text)) return true
+  if (/^(space|run|task|kr|mission)-[a-z0-9-]{4,}$/i.test(text)) return true
   return false
 }
 
@@ -23,8 +23,8 @@ export function sanitizeDecisionTitle(title: string | null | undefined): string 
 
   const stripped = normalizeWhitespace(
     text
-      .replace(/\b(?:Mission|Plan|KR|Task|OA):\s+[^\s]+/gi, ' ')
-      .replace(/\b(?:mission|plan|kr|task|oa)-[a-z0-9-]+\b/gi, ' ')
+      .replace(/\b(?:Mission|KR|Task):\s+[^\s]+/gi, ' ')
+      .replace(/\b(?:mission|kr|task)-[a-z0-9-]+\b/gi, ' ')
       .replace(/\s+[|·>-]\s+/g, ' '),
   )
 

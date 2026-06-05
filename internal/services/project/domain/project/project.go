@@ -52,7 +52,6 @@ type Project struct {
 	userID        string
 	title         string
 	status        Status
-	planMode      string
 	customization *Customization
 	createdAt     time.Time
 	updatedAt     time.Time
@@ -65,7 +64,6 @@ type NewInput struct {
 	UserID        string
 	Title         string
 	Status        Status
-	PlanMode      string
 	Customization *Customization
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -106,7 +104,6 @@ func New(input NewInput) (Project, error) {
 		userID:        strings.TrimSpace(input.UserID),
 		title:         strings.TrimSpace(input.Title),
 		status:        status,
-		planMode:      strings.TrimSpace(input.PlanMode),
 		customization: input.Customization,
 		createdAt:     createdAt.UTC(),
 		updatedAt:     updatedAt.UTC(),
@@ -121,7 +118,6 @@ func Wrap(record Record) (Project, error) {
 		UserID:        record.UserID,
 		Title:         record.Title,
 		Status:        record.Status,
-		PlanMode:      record.PlanMode,
 		Customization: record.Customization,
 		CreatedAt:     record.CreatedAt,
 		UpdatedAt:     record.UpdatedAt,
@@ -134,7 +130,6 @@ func (p Project) Root() string                  { return p.root }
 func (p Project) UserID() string                { return p.userID }
 func (p Project) Title() string                 { return p.title }
 func (p Project) Status() Status                { return p.status }
-func (p Project) PlanMode() string              { return p.planMode }
 func (p Project) Customization() *Customization { return p.customization }
 func (p Project) CreatedAt() time.Time          { return p.createdAt }
 func (p Project) UpdatedAt() time.Time          { return p.updatedAt }
@@ -190,7 +185,6 @@ func (p Project) Record() Record {
 		UserID:        p.userID,
 		Title:         p.title,
 		Status:        p.status,
-		PlanMode:      p.planMode,
 		Customization: p.customization,
 		CreatedAt:     p.createdAt,
 		UpdatedAt:     p.updatedAt,

@@ -8,6 +8,7 @@ import type { DecisionSource } from '../../lib/types'
 import { useKeyResult, useProjectKRs, useMissions } from '../../hooks/useMissions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import type { NodePanelProps } from './types'
+import { decisionActorDisplay } from '../../lib/decisionDisplay'
 
 const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
 
@@ -40,31 +41,9 @@ function formatTimestamp(iso: string): string {
   return iso.slice(0, 16).replace('T', ' ')
 }
 
-function answerText(answer: { selectedOption?: string; selectedOptions?: string[]; freeFormText?: string } | undefined): string {
-  if (!answer) return 'No answer recorded'
-  const multi = (answer.selectedOptions ?? []).map((v) => v.trim()).filter((v) => v !== '')
-  const selected = answer.selectedOption?.trim() ?? ''
-  const freeForm = answer.freeFormText?.trim() ?? ''
-  // multi_select takes precedence — if SelectedOptions is populated
-  // the answer is fundamentally a list, even when a free-form
-  // fallback was also provided.
-  if (multi.length > 0) {
-    return freeForm && !multi.includes(freeForm)
-      ? `${multi.join(', ')}\n${freeForm}`
-      : multi.join(', ')
-  }
-  if (selected && freeForm && freeForm !== selected) {
-    return `${selected}\n${freeForm}`
-  }
-  if (selected) return selected
-  if (freeForm) return freeForm
-  return 'No answer recorded'
-}
-
 export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
   const d = data as DecisionNodeData
   const { decision } = d
-  const isAskUser = (decision.kind ?? '').trim().toLowerCase() === 'ask_user'
 
   // Fetch titles for related entities
   const tasksQuery = useProjectTasks(projectId)
@@ -86,6 +65,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
 
   const confidencePercent = Math.round((decision.confidence ?? 0) * 100)
   const hasConfidence = decision.confidence > 0
+  const actor = decisionActorDisplay(decision)
 
   return (
     <div className="flex flex-col h-full">
@@ -166,10 +146,10 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
             />
             <span className="truncate">
               {decision.source}
-              {(decision.memberName?.trim() || decision.sourceIdentity) && (
+              {actor.label && actor.label !== decision.source && (
                 <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>
                   {' · '}
-                  {decision.memberName?.trim() || decision.sourceIdentity}
+                  {actor.label}
                 </span>
               )}
             </span>
@@ -192,88 +172,8 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           )}
         </div>
 
-        {isAskUser && decision.context && (
-          <div className="flex flex-col" style={{ gap: '6px' }}>
-            <p className="uppercase" style={LABEL_STYLE}>Context</p>
-            <div className="md-prose" style={PROSE_STYLE}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {decision.context}
-              </ReactMarkdown>
-            </div>
-          </div>
-        )}
-
-        {isAskUser && decision.questions && decision.questions.length > 0 && (
-          <div className="flex flex-col" style={{ gap: '6px' }}>
-            <p className="uppercase" style={LABEL_STYLE}>Questions</p>
-            <div className="flex flex-col" style={{ gap: '12px' }}>
-              {decision.questions.map((question, index) => {
-                const answer = decision.answers?.find((entry) => entry.questionId === question.id)
-                return (
-                  <div key={question.id || `${index}-${question.text}`} className="flex flex-col" style={{ gap: '4px' }}>
-                    <p
-                      style={{
-                        fontFamily: SF_TEXT,
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        letterSpacing: '-0.18px',
-                        lineHeight: 1.38,
-                        color: 'var(--text-1)',
-                        margin: 0,
-                      }}
-                    >
-                      {question.text}
-                      {question.blocking && (
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            marginLeft: 8,
-                            padding: '1px 7px',
-                            borderRadius: 999,
-                            background: 'color-mix(in srgb, var(--amber) 16%, transparent)',
-                            color: 'var(--amber)',
-                            fontSize: 9,
-                            fontWeight: 700,
-                            letterSpacing: '0.04em',
-                            textTransform: 'uppercase',
-                          }}
-                        >
-                          Blocking
-                        </span>
-                      )}
-                    </p>
-                    <p style={{ ...PROSE_STYLE, whiteSpace: 'pre-wrap' }}>{answerText(answer)}</p>
-                    {question.recommendation && (
-                      <p
-                        style={{
-                          fontFamily: SF_TEXT,
-                          fontSize: '11px',
-                          fontWeight: 500,
-                          letterSpacing: '-0.08px',
-                          lineHeight: 1.4,
-                          color: 'var(--text-3)',
-                          margin: 0,
-                        }}
-                      >
-                        Recommendation: {question.recommendation}
-                      </p>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {isAskUser && decision.cancelled && (
-          <div className="flex flex-col" style={{ gap: '6px' }}>
-            <p className="uppercase" style={LABEL_STYLE}>Status</p>
-            <p style={PROSE_STYLE}>Cancelled.</p>
-          </div>
-        )}
-
         {/* Rationale */}
-        {!isAskUser && decision.rationale && (
+        {decision.rationale && (
           <div className="flex flex-col" style={{ gap: '6px' }}>
             <p className="uppercase" style={LABEL_STYLE}>Rationale</p>
             <div className="md-prose" style={PROSE_STYLE}>
@@ -285,7 +185,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
         )}
 
         {/* Alternatives rejected */}
-        {!isAskUser && decision.alternativesRejected && (
+        {decision.alternativesRejected && (
           <div className="flex flex-col" style={{ gap: '6px' }}>
             <p className="uppercase" style={LABEL_STYLE}>Alternatives rejected</p>
             <div className="md-prose" style={PROSE_STYLE}>
@@ -296,7 +196,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           </div>
         )}
 
-        {!isAskUser && decision.invalidationConditions && decision.invalidationConditions.length > 0 && (
+        {decision.invalidationConditions && decision.invalidationConditions.length > 0 && (
           <div className="flex flex-col" style={{ gap: '6px' }}>
             <p className="uppercase" style={LABEL_STYLE}>Invalidation conditions</p>
             <ul style={{ ...PROSE_STYLE, paddingLeft: 18 }}>
@@ -308,7 +208,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
         )}
 
         {/* Outcome */}
-        {!isAskUser && decision.outcome && (
+        {decision.outcome && (
           <div className="flex flex-col" style={{ gap: '6px' }}>
             <p className="uppercase" style={LABEL_STYLE}>Outcome</p>
             <div className="md-prose" style={PROSE_STYLE}>

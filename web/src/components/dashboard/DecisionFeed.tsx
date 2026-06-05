@@ -13,6 +13,7 @@ import { safeReferenceLabel, sanitizeDecisionTitle } from '../../lib/displaySani
 import DecisionDetails from '../decision/DecisionDetails'
 import { sourceToClusterColor } from '../../lib/clusterColors'
 import { decisionsLink } from '../../lib/routing'
+import { decisionActorDisplay } from '../../lib/decisionDisplay'
 import { Link } from 'wouter'
 
 /* -- Time-ago helper ------------------------------------------------------ */
@@ -191,18 +192,13 @@ function groupByTimeBucket(decisions: DecisionView[]): { bucket: TimeBucket; ite
 
 function DecisionRow({ decision, catalogs }: { decision: DecisionView; catalogs: DecisionRefCatalogs }) {
   const [open, setOpen] = useState(false)
-  // Cluster color and identity label both prefer the resolved member
-  // name; fall back to the raw id only when the registry lookup
-  // couldn't resolve it. The bare sourceIdentity uuid is no longer
-  // surfaced as a label.
-  const memberKey = decision.memberId?.trim() || decision.sourceIdentity?.trim() || ''
-  const memberLabel = decision.memberName?.trim() || memberKey
-  const baseClusterColor = memberKey
-    ? sourceToClusterColor(memberKey)
+  const actor = decisionActorDisplay(decision)
+  const baseClusterColor = actor.clusterKey
+    ? sourceToClusterColor(actor.clusterKey)
     : 'var(--text-3)'
   const clusterColor = `color-mix(in srgb, ${baseClusterColor} 58%, var(--text-2) 42%)`
   const recencyClass = getRecencyClass(decision.createdAt)
-  const identity = memberLabel || 'agent'
+  const identity = actor.label
   const avatarStyle = {
     color: clusterColor,
     background: `color-mix(in srgb, ${baseClusterColor} 9%, var(--bg-panel) 91%)`,

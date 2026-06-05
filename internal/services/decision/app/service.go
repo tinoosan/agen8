@@ -186,6 +186,9 @@ func (s *Service) Create(ctx context.Context, d domain.Decision) (domain.Decisio
 	if d.CreatedAt.IsZero() {
 		d.CreatedAt = s.clock.Now().UTC()
 	}
+	if strings.TrimSpace(d.MemberName) == "" {
+		d.MemberName = s.resolveMemberDisplay(ctx, d.SourceIdentity)
+	}
 
 	if err := d.Validate(); err != nil {
 		return domain.Decision{}, fmt.Errorf("validate decision: %w", err)
@@ -217,11 +220,6 @@ func (s *Service) Create(ctx context.Context, d domain.Decision) (domain.Decisio
 		return domain.Decision{}, err
 	}
 
-	// Resolve the member's display name once at publish time so the
-	// event carries it. Failures here are logged but non-fatal because
-	// member display is optional presentation metadata.
-	memberName := s.resolveMemberDisplay(ctx, d.SourceIdentity)
-
 	// Publish decision.logged so subscribers (notification evaluator,
 	// future projections) see the new decision. Publish failure is part
 	// of the create operation because missing wake/notification events
@@ -231,7 +229,7 @@ func (s *Service) Create(ctx context.Context, d domain.Decision) (domain.Decisio
 		DecisionID:   string(d.ID),
 		Source:       string(d.Source),
 		MemberID:     d.SourceIdentity,
-		MemberName:   memberName,
+		MemberName:   d.MemberName,
 		Title:        d.Title,
 		Confidence:   d.Confidence,
 		KeyResultRef: d.KeyResultRef,
@@ -310,6 +308,7 @@ func (s *Service) Log(ctx context.Context, req LogRequest) (Result, error) {
 	d, err := domain.NewLog(domain.NewLogInput{
 		ProjectID:              req.ProjectID,
 		MemberID:               req.MemberID,
+		MemberName:             s.resolveMemberDisplay(ctx, req.MemberID),
 		Title:                  req.Title,
 		Rationale:              req.Rationale,
 		Context:                "",
@@ -328,7 +327,10 @@ func (s *Service) Log(ctx context.Context, req LogRequest) (Result, error) {
 		return Result{}, err
 	}
 	out := buildResult(created)
-	out.MemberName = s.resolveMemberDisplay(ctx, created.SourceIdentity)
+	out.MemberName = created.MemberName
+	if strings.TrimSpace(out.MemberName) == "" {
+		out.MemberName = s.resolveMemberDisplay(ctx, created.SourceIdentity)
+	}
 	if created.Log != nil {
 		out.InvalidationConditions = append([]string(nil), created.Log.InvalidationConditions...)
 	}

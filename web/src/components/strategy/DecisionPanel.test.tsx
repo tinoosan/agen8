@@ -51,7 +51,7 @@ describe('DecisionPanel', () => {
     })
   })
 
-  it('renders ask_user context and answers', () => {
+  it('renders logged decision rationale and alternatives', () => {
     renderWithQueryClient(
       <DecisionPanel
         onClose={vi.fn()}
@@ -62,76 +62,24 @@ describe('DecisionPanel', () => {
             projectId: 'proj-1',
             source: 'agent',
             sourceIdentity: 'cfo',
-            kind: 'ask_user',
+            kind: 'log',
             title: 'Next iteration pricing packaging priority',
-            rationale: '',
-            context: 'Choosing between pricing-packaging options determines what we test next.',
-            questions: [
-              {
-                id: 'pricing',
-                text: 'Which pricing packaging should we prioritize?',
-                type: 'multiple_choice',
-                options: ['Flat subscription', 'Usage overage'],
-                recommendation: 'Flat subscription',
-              },
-            ],
-            answers: [
-              {
-                questionId: 'pricing',
-                selectedOption: 'Usage overage',
-                freeFormText: 'Lean toward usage overage because it validates metering.',
-              },
-            ],
-            confidence: 0,
+            rationale: 'Usage overage validates metering before a broader rollout.',
+            alternativesRejected: 'Flat subscription does not test usage-based willingness to pay.',
+            confidence: 0.74,
             createdAt: '2026-04-18T14:02:00Z',
           },
         }}
       />,
     )
 
-    expect(screen.getByText('Context')).toBeInTheDocument()
-    expect(screen.getByText('Choosing between pricing-packaging options determines what we test next.')).toBeInTheDocument()
-    expect(screen.getByText('Questions')).toBeInTheDocument()
-    expect(screen.getByText('Which pricing packaging should we prioritize?')).toBeInTheDocument()
-    expect(screen.getByText(/Usage overage/)).toBeInTheDocument()
-    expect(screen.getByText(/Lean toward usage overage because it validates metering/)).toBeInTheDocument()
-    expect(screen.getByText('Recommendation: Flat subscription')).toBeInTheDocument()
+    expect(screen.getByText('Rationale')).toBeInTheDocument()
+    expect(screen.getByText('Usage overage validates metering before a broader rollout.')).toBeInTheDocument()
+    expect(screen.getByText('Alternatives rejected')).toBeInTheDocument()
+    expect(screen.getByText('Flat subscription does not test usage-based willingness to pay.')).toBeInTheDocument()
   })
 
-  it('renders invalidation conditions and blocking question markers', () => {
-    renderWithQueryClient(
-      <DecisionPanel
-        onClose={vi.fn()}
-        projectId="proj-1"
-        data={{
-          decision: {
-            id: 'dec-2',
-            projectId: 'proj-1',
-            source: 'agent',
-            sourceIdentity: 'cfo',
-            kind: 'ask_user',
-            title: 'Execution gate',
-            rationale: '',
-            context: 'Dependent work is waiting.',
-            questions: [
-              {
-                id: 'start',
-                text: 'Can dependent workstreams start?',
-                type: 'multiple_choice',
-                options: ['Yes', 'No'],
-                blocking: true,
-              },
-            ],
-            answers: [{ questionId: 'start', selectedOption: 'Yes' }],
-            confidence: 0,
-            createdAt: '2026-04-18T14:02:00Z',
-          },
-        }}
-      />,
-    )
-
-    expect(screen.getByText('Blocking')).toBeInTheDocument()
-
+  it('renders invalidation conditions', () => {
     renderWithQueryClient(
       <DecisionPanel
         onClose={vi.fn()}
@@ -155,6 +103,33 @@ describe('DecisionPanel', () => {
 
     expect(screen.getByText('Invalidation conditions')).toBeInTheDocument()
     expect(screen.getByText('Conversion drops below baseline')).toBeInTheDocument()
+  })
+
+  it('renders stamped member names instead of raw member ids', () => {
+    renderWithQueryClient(
+      <DecisionPanel
+        onClose={vi.fn()}
+        projectId="proj-1"
+        data={{
+          decision: {
+            id: 'dec-member-name',
+            projectId: 'proj-1',
+            source: 'agent',
+            sourceIdentity: 'member-95fed2e1ebce6ce6',
+            memberId: 'member-95fed2e1ebce6ce6',
+            memberName: 'Codex backend engineer',
+            kind: 'log',
+            title: 'Retain immutable actor labels',
+            rationale: 'Decision cards should preserve the member name seen at write time.',
+            confidence: 0.85,
+            createdAt: '2026-06-05T12:00:00Z',
+          },
+        }}
+      />,
+    )
+
+    expect(screen.getByText(/Codex backend engineer/)).toBeInTheDocument()
+    expect(screen.queryByText(/member-95fed2e1ebce6ce6/)).not.toBeInTheDocument()
   })
 
   it('resolves related key result titles instead of showing raw ids', async () => {

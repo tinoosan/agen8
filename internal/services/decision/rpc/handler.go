@@ -54,6 +54,7 @@ func (h *Handler) Create(ctx context.Context, p DecisionCreateParams) (DecisionC
 		ProjectID:      p.ProjectID,
 		Source:         domain.DecisionSource(firstNonEmpty(p.Source, string(domain.DecisionSourceAgent))),
 		SourceIdentity: p.SourceIdentity,
+		MemberName:     h.resolveMemberDisplay(ctx, p.SourceIdentity),
 		Title:          p.Title,
 		Confidence:     p.Confidence,
 		TaskRef:        p.TaskRef,
@@ -226,6 +227,9 @@ func (h *Handler) decisionToView(ctx context.Context, d domain.Decision) Decisio
 }
 
 func (h *Handler) resolveActorDisplay(ctx context.Context, d domain.Decision) string {
+	if name := strings.TrimSpace(d.MemberName); name != "" {
+		return name
+	}
 	return h.resolveMemberDisplay(ctx, d.SourceIdentity)
 }
 

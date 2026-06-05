@@ -194,7 +194,6 @@ CREATE TABLE IF NOT EXISTS spaces (
     space_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT 'local',
     project_id TEXT DEFAULT '',
-    plan_mode TEXT DEFAULT '',
     status TEXT NOT NULL,
     title TEXT DEFAULT '',
     space_json TEXT NOT NULL,
@@ -211,50 +210,6 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-
---------------------------------------------------------------------------------
--- channels
---------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS channels (
-    channel_id TEXT PRIMARY KEY,
-    space_id TEXT NOT NULL,
-    project_id TEXT DEFAULT '',
-    run_id TEXT DEFAULT '',
-    member_id TEXT DEFAULT '',
-    member_label TEXT DEFAULT '',
-    title TEXT DEFAULT '',
-    status TEXT NOT NULL,
-    channel_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    -- last_message_at: timestamp of the most recent message published
-    -- into this member address. Bumped by the message publish hook;
-    -- used (with channel_reads.last_seen_at) to compute per-user
-    -- unread state on channel.list. Nullable for member addresses
-    -- that have never received a message.
-    last_message_at TEXT
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_space_member_run
-    ON channels(space_id, member_label, run_id, member_id);
-CREATE INDEX IF NOT EXISTS idx_channels_space_id ON channels(space_id, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_channels_member_id ON channels(member_id, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_channels_run_id ON channels(run_id) WHERE run_id != '';
-
--- Per-user "I have read this channel up to here" markers. Replaces the
--- prior client-side localStorage approach that lost state on refresh
--- and over-fired due to noisy ch.updated_at touches.
---
--- One row per (user, channel). Missing row = user has never read the
--- channel; combined with channels.last_message_at this gives the
--- canonical "is this channel unread for me right now" answer.
-CREATE TABLE IF NOT EXISTS channel_reads (
-    user_id      TEXT NOT NULL,
-    channel_id   TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL,
-    PRIMARY KEY (user_id, channel_id)
-);
-CREATE INDEX IF NOT EXISTS idx_channel_reads_user ON channel_reads(user_id);
 
 --------------------------------------------------------------------------------
 -- memories / memory_instructions
@@ -279,121 +234,6 @@ CREATE TABLE IF NOT EXISTS memory_instructions (
     content TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-
---------------------------------------------------------------------------------
--- plans v2
---------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS plans (
-    id TEXT PRIMARY KEY,
-    space_id TEXT NOT NULL DEFAULT '',
-    mission_id TEXT NOT NULL,
-    kr_refs_json TEXT NOT NULL DEFAULT '[]',
-    title TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    mode TEXT NOT NULL,
-    status TEXT NOT NULL,
-    created_by TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    abandoned_reason TEXT NOT NULL DEFAULT '',
-    version INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE INDEX IF NOT EXISTS idx_plans_space_status_updated ON plans(space_id, status, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_plans_mission ON plans(mission_id, updated_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_space_nonterminal
-    ON plans(space_id)
-    WHERE status NOT IN ('completed', 'abandoned', 'deleted');
-
-CREATE TABLE IF NOT EXISTS plan_phases (
-    id TEXT PRIMARY KEY,
-    plan_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    phase_order INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    completed_at TEXT,
-    version INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY(plan_id) REFERENCES plans(id) ON DELETE CASCADE
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_phases_plan_order ON plan_phases(plan_id, phase_order);
-CREATE INDEX IF NOT EXISTS idx_plan_phases_plan_status_order ON plan_phases(plan_id, status, phase_order);
-
-CREATE TABLE IF NOT EXISTS plan_todos (
-    id TEXT PRIMARY KEY,
-    phase_id TEXT NOT NULL,
-    plan_id TEXT NOT NULL,
-    text TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0,
-    todo_order INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    completed_at TEXT,
-    version INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY(plan_id) REFERENCES plans(id) ON DELETE CASCADE,
-    FOREIGN KEY(phase_id) REFERENCES plan_phases(id) ON DELETE CASCADE
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_todos_phase_order ON plan_todos(phase_id, todo_order);
-CREATE INDEX IF NOT EXISTS idx_plan_todos_plan_phase ON plan_todos(plan_id, phase_id);
-
-CREATE TABLE IF NOT EXISTS plan_comments (
-    id TEXT PRIMARY KEY,
-    plan_id TEXT NOT NULL,
-    phase_id TEXT,
-    todo_id TEXT,
-    author_type TEXT NOT NULL,
-    author_id TEXT NOT NULL,
-    text TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(plan_id) REFERENCES plans(id) ON DELETE CASCADE,
-    FOREIGN KEY(phase_id) REFERENCES plan_phases(id) ON DELETE SET NULL,
-    FOREIGN KEY(todo_id) REFERENCES plan_todos(id) ON DELETE SET NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_plan_comments_plan_created ON plan_comments(plan_id, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_plan_comments_plan_phase ON plan_comments(plan_id, phase_id, created_at);
-
-CREATE TABLE IF NOT EXISTS plan_comment_reads (
-    comment_id TEXT NOT NULL,
-    reader_id TEXT NOT NULL,
-    read_at TEXT NOT NULL,
-    PRIMARY KEY(comment_id, reader_id),
-    FOREIGN KEY(comment_id) REFERENCES plan_comments(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_plan_comment_reads_reader ON plan_comment_reads(reader_id, read_at DESC);
-
-CREATE TABLE IF NOT EXISTS plan_amendments (
-    id TEXT PRIMARY KEY,
-    plan_id TEXT NOT NULL,
-    proposed_by TEXT NOT NULL,
-    rationale TEXT NOT NULL,
-    diff_json TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL,
-    veto_deadline TEXT NOT NULL,
-    vetoed_by TEXT NOT NULL DEFAULT '',
-    veto_reason TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    resolved_at TEXT,
-    version INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY(plan_id) REFERENCES plans(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_plan_amendments_plan_status_deadline ON plan_amendments(plan_id, status, veto_deadline);
-CREATE INDEX IF NOT EXISTS idx_plan_amendments_pending_deadline ON plan_amendments(status, veto_deadline);
-
-CREATE TABLE IF NOT EXISTS plan_reviews (
-    id TEXT PRIMARY KEY,
-    plan_id TEXT NOT NULL,
-    decision TEXT NOT NULL,
-    note TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(plan_id) REFERENCES plans(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_plan_reviews_plan_created
-    ON plan_reviews(plan_id, created_at DESC);
 
 -- notifications / notification_rules
 --------------------------------------------------------------------------------
@@ -549,53 +389,6 @@ CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider);
 CREATE INDEX IF NOT EXISTS idx_models_source ON models(source);
 
 --------------------------------------------------------------------------------
--- pending_human_inputs
---
--- Identity (space_id, member_id) is the asker; channel_id is the panel
--- delivery target. The two are decoupled so the same member can own
--- multiple in-flight questions across different channels, and so a
--- channel can render a panel for any member that asks within it.
---
--- Liveness: daemon_instance_id is set by the awaiter goroutine to the
--- daemon process's instance id. awaiter_heartbeat is refreshed every
--- ~30s while the awaiter is alive. On startup the daemon sweeps any row
--- whose daemon_instance_id != current or whose heartbeat is stale —
--- those are orphans from a previous process or a crashed awaiter, and
--- the panel they correspond to has no consumer.
---------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS pending_human_inputs (
-    id                  TEXT PRIMARY KEY,
-    space_id            TEXT NOT NULL,
-    member_id           TEXT NOT NULL,
-    channel_id          TEXT NOT NULL,
-    tool_call_id        TEXT NOT NULL,
-    tool_name           TEXT NOT NULL,
-    primitive           TEXT NOT NULL,
-    payload_json        TEXT NOT NULL,
-    project_id          TEXT NOT NULL,
-    daemon_instance_id  TEXT NOT NULL,
-    awaiter_heartbeat   TEXT NOT NULL,
-    expires_at          TEXT,
-    created_at          TEXT NOT NULL
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_human_inputs_member_call
-    ON pending_human_inputs(space_id, member_id, tool_call_id);
-CREATE INDEX IF NOT EXISTS idx_pending_human_inputs_channel
-    ON pending_human_inputs(channel_id);
-CREATE INDEX IF NOT EXISTS idx_pending_human_inputs_instance
-    ON pending_human_inputs(daemon_instance_id);
-
-CREATE TABLE IF NOT EXISTS pending_human_input_submissions (
-    space_id     TEXT NOT NULL,
-    member_id    TEXT NOT NULL,
-    tool_call_id TEXT NOT NULL,
-    result_json  TEXT NOT NULL,
-    submitted_at TEXT NOT NULL,
-    PRIMARY KEY (space_id, member_id, tool_call_id)
-);
-
---------------------------------------------------------------------------------
 -- tool_call_results
 --------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS tool_call_results (
@@ -718,6 +511,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     source TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT '',
     source_identity TEXT DEFAULT '',
+    member_name TEXT DEFAULT '',
     title TEXT NOT NULL,
     rationale TEXT NOT NULL,
     context TEXT DEFAULT '',

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
@@ -44,18 +43,6 @@ type KeyResultMissionReader interface {
 	KeyResultMission(ctx context.Context, keyResultID string) (string, error)
 }
 
-type TaskMessageKind string
-
-const (
-	TaskMessageAssigned        TaskMessageKind = "assigned"
-	TaskMessageReviewRequested TaskMessageKind = "review_requested"
-	TaskMessageRetryRequested  TaskMessageKind = "retry_requested"
-	TaskMessageReleased        TaskMessageKind = "released"
-	TaskMessageBlocked         TaskMessageKind = "blocked"
-	TaskMessageUnblocked       TaskMessageKind = "unblocked"
-	TaskMessageCanceled        TaskMessageKind = "canceled"
-)
-
 type CreateTaskParams struct {
 	ProjectID          types.ProjectID
 	AssignedTo         member.ID
@@ -64,8 +51,6 @@ type CreateTaskParams struct {
 	Title              string
 	KeyResultRef       string
 	MissionRef         string
-	PlanPhaseID        *uuid.UUID
-	PlanTodoID         *uuid.UUID
 	Metadata           map[string]any
 	TaskKind           string
 }
@@ -94,8 +79,6 @@ type UpdateTaskParams struct {
 	AcceptanceCriteria *[]domain.AcceptanceCriterion
 	TaskKind           *string
 	KeyResultRef       *string
-	PlanPhaseID        *uuid.UUID
-	PlanTodoID         *uuid.UUID
 	Metadata           map[string]any
 }
 
@@ -170,8 +153,6 @@ func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.T
 		AcceptanceCriteria: params.AcceptanceCriteria,
 		Title:              params.Title,
 		KeyResultRef:       params.KeyResultRef,
-		PlanPhaseID:        params.PlanPhaseID,
-		PlanTodoID:         params.PlanTodoID,
 		Metadata:           metadata,
 		TaskKind:           params.TaskKind,
 	}, s.clock.Now())
@@ -186,9 +167,6 @@ func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.T
 		return domain.Task{}, err
 	}
 	s.logTaskTransition("create", next, caller)
-	if err := s.publishTaskMessage(ctx, TaskMessageAssigned, next, caller.MemberID, assigned.ID); err != nil {
-		return next, fmt.Errorf("publish task assignment: %w", err)
-	}
 	return next, nil
 }
 
@@ -398,12 +376,6 @@ func (s *Service) Update(ctx context.Context, params UpdateTaskParams) (domain.T
 	if params.KeyResultRef != nil {
 		loaded.KeyResultRef = strings.TrimSpace(*params.KeyResultRef)
 	}
-	if params.PlanPhaseID != nil {
-		loaded.PlanPhaseID = params.PlanPhaseID
-	}
-	if params.PlanTodoID != nil {
-		loaded.PlanTodoID = params.PlanTodoID
-	}
 	if params.Metadata != nil {
 		loaded.Metadata = cloneMap(params.Metadata)
 	}
@@ -466,9 +438,6 @@ func (s *Service) Assign(ctx context.Context, params AssignTaskParams) (domain.T
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	s.logTaskTransition("assign", next, caller)
-	if err := s.publishTaskMessage(ctx, TaskMessageAssigned, next, caller.MemberID, assigned.ID); err != nil {
-		return next, fmt.Errorf("publish task assignment: %w", err)
-	}
 	return next, nil
 }
 
@@ -495,11 +464,6 @@ func (s *Service) Complete(ctx context.Context, params CompleteTaskParams) (doma
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	s.logTaskTransition("complete", next, caller)
-	if creator, ok := s.reviewRecipient(ctx, next); ok {
-		if err := s.publishTaskMessage(ctx, TaskMessageReviewRequested, next, caller.MemberID, creator); err != nil {
-			return next, fmt.Errorf("publish task review request: %w", err)
-		}
-	}
 	return next, nil
 }
 
@@ -546,11 +510,6 @@ func (s *Service) RetryReview(ctx context.Context, params ReviewTaskParams) (dom
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	s.logTaskTransition("retry_review", next, caller)
-	if assigned := next.AssignedTo; assigned != "" {
-		if err := s.publishTaskMessage(ctx, TaskMessageRetryRequested, next, caller.MemberID, assigned); err != nil {
-			return next, fmt.Errorf("publish task review result: %w", err)
-		}
-	}
 	return next, nil
 }
 
@@ -600,11 +559,6 @@ func (s *Service) Block(ctx context.Context, taskID domain.TaskID, reason string
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	s.logTaskTransition("block", next, caller)
-	if creator := member.ID(strings.TrimSpace(next.CreatedBy)); creator != "" {
-		if err := s.publishTaskMessage(ctx, TaskMessageBlocked, next, caller.MemberID, creator); err != nil {
-			return next, fmt.Errorf("publish task blocker: %w", err)
-		}
-	}
 	return next, nil
 }
 
@@ -631,11 +585,6 @@ func (s *Service) Unblock(ctx context.Context, taskID domain.TaskID, note string
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	s.logTaskTransition("unblock", next, caller)
-	if assigned := next.AssignedTo; assigned != "" {
-		if err := s.publishTaskMessage(ctx, TaskMessageUnblocked, next, caller.MemberID, assigned); err != nil {
-			return next, fmt.Errorf("publish task unblock: %w", err)
-		}
-	}
 	return next, nil
 }
 
@@ -662,11 +611,6 @@ func (s *Service) Release(ctx context.Context, taskID domain.TaskID) (domain.Tas
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	s.logTaskTransition("release", next, caller)
-	if creator := member.ID(strings.TrimSpace(next.CreatedBy)); creator != "" {
-		if err := s.publishTaskMessage(ctx, TaskMessageReleased, next, caller.MemberID, creator); err != nil {
-			return next, fmt.Errorf("publish task release: %w", err)
-		}
-	}
 	return next, nil
 }
 
@@ -690,15 +634,6 @@ func (s *Service) Cancel(ctx context.Context, taskID domain.TaskID, reason strin
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	s.logTaskTransition("cancel", next, caller)
-	target := loaded.ClaimedByMemberID
-	if target == "" {
-		target = loaded.AssignedTo
-	}
-	if target != "" {
-		if err := s.publishTaskMessage(ctx, TaskMessageCanceled, next, caller.MemberID, target); err != nil {
-			return next, fmt.Errorf("publish task cancel: %w", err)
-		}
-	}
 	return next, nil
 }
 
@@ -737,21 +672,6 @@ func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Call
 		return fmt.Errorf("user %s does not own project %s", userID, projectID)
 	}
 	return nil
-}
-
-func (s *Service) reviewRecipient(ctx context.Context, task domain.Task) (member.ID, bool) {
-	createdBy := member.ID(strings.TrimSpace(task.CreatedBy))
-	if createdBy == "" {
-		return "", false
-	}
-	member, err := s.memberInProject(ctx, createdBy, task.ProjectID)
-	if err != nil {
-		return "", false
-	}
-	if !isCoordinatorType(member.MemberType) {
-		return "", false
-	}
-	return member.ID, true
 }
 
 func (s *Service) requireCoordinator(ctx context.Context, memberID member.ID, projectID types.ProjectID) error {
@@ -820,54 +740,6 @@ func (s *Service) requireUnblockCaller(ctx context.Context, task domain.Task, me
 	return s.requireCoordinator(ctx, memberID, task.ProjectID)
 }
 
-func (s *Service) publishTaskMessage(ctx context.Context, kind TaskMessageKind, task domain.Task, actor, target member.ID) error {
-	spec, err := taskMessageSpec(kind)
-	if err != nil {
-		return err
-	}
-	actor = member.ID(strings.TrimSpace(string(actor)))
-	target = member.ID(strings.TrimSpace(string(target)))
-	if task.ID == "" {
-		return fmt.Errorf("task id is required")
-	}
-	if task.ProjectID == "" {
-		return fmt.Errorf("task project id is required")
-	}
-	if target == "" {
-		return fmt.Errorf("target member id is required")
-	}
-	if actor != "" && actor == target && taskMessageKindUsesInlineResponse(kind) {
-		s.logger.Debug("self task message suppressed",
-			"message_kind", string(kind),
-			"task_id", string(task.ID),
-			"project_id", string(task.ProjectID),
-			"actor_member_id", string(actor),
-			"target_member_id", string(target),
-			"next_action", spec.NextAction,
-		)
-		return nil
-	}
-	s.logger.Debug("task lifecycle notification skipped",
-		"message_kind", string(kind),
-		"subject", spec.Subject,
-		"task_id", string(task.ID),
-		"project_id", string(task.ProjectID),
-		"actor_member_id", string(actor),
-		"target_member_id", string(target),
-		"next_action", spec.NextAction,
-	)
-	return nil
-}
-
-func taskMessageKindUsesInlineResponse(kind TaskMessageKind) bool {
-	switch kind {
-	case TaskMessageAssigned, TaskMessageReviewRequested:
-		return true
-	default:
-		return false
-	}
-}
-
 func (s *Service) logTaskTransition(action string, task domain.Task, caller Caller) {
 	s.logger.Info("task transition",
 		"action", action,
@@ -878,71 +750,6 @@ func (s *Service) logTaskTransition(action string, task domain.Task, caller Call
 		"claimed_by_member_id", string(task.ClaimedByMemberID),
 		"caller_user_id", caller.UserID,
 		"caller_member_id", string(caller.MemberID),
-	)
-}
-
-type taskMessageTemplate struct {
-	Subject    string
-	NextAction string
-	Guidance   string
-}
-
-func taskMessageSpec(kind TaskMessageKind) (taskMessageTemplate, error) {
-	switch kind {
-	case TaskMessageAssigned:
-		return taskMessageTemplate{
-			Subject:    "Task assigned",
-			NextAction: "claim",
-			Guidance:   "Claim the task before starting work. Fetch the task when you need the full description and acceptance criteria.",
-		}, nil
-	case TaskMessageReviewRequested:
-		return taskMessageTemplate{
-			Subject:    "Task ready for review",
-			NextAction: "review",
-			Guidance:   "Fetch the task, inspect the submitted work against the acceptance criteria, then approve, retry, or fail the review.",
-		}, nil
-	case TaskMessageRetryRequested:
-		return taskMessageTemplate{
-			Subject:    "Task needs changes",
-			NextAction: "submit",
-			Guidance:   "Fetch the task, address the review feedback and unsatisfied acceptance criteria, then submit again when complete.",
-		}, nil
-	case TaskMessageReleased:
-		return taskMessageTemplate{
-			Subject:    "Task released",
-			NextAction: "assign",
-			Guidance:   "The worker returned the task without completing it. Fetch the task, then assign it again, update its direction, or cancel it.",
-		}, nil
-	case TaskMessageBlocked:
-		return taskMessageTemplate{
-			Subject:    "Task blocked",
-			NextAction: "unblock",
-			Guidance:   "The worker cannot continue without intervention. Fetch the task, resolve or escalate the blocker, then unblock it when work can resume.",
-		}, nil
-	case TaskMessageUnblocked:
-		return taskMessageTemplate{
-			Subject:    "Task unblocked",
-			NextAction: "submit",
-			Guidance:   "The blocker has been cleared. Fetch the task if you need context, continue the work, then submit when complete.",
-		}, nil
-	case TaskMessageCanceled:
-		return taskMessageTemplate{
-			Subject:    "Task canceled",
-			NextAction: "stop",
-			Guidance:   "Stop working on this task. Do not claim, continue, or submit it unless a coordinator creates or assigns a new task.",
-		}, nil
-	default:
-		return taskMessageTemplate{}, fmt.Errorf("unknown task message kind %q", kind)
-	}
-}
-
-func taskMessageBody(task domain.Task, spec taskMessageTemplate) string {
-	return fmt.Sprintf("%s\n\nThis task notification is addressed to you as the assigned Agen8 member. Treat it as work for this runtime identity; do not ask the human for permission unless you are genuinely blocked.\n\nTask %s in project %s.\n\nNext action: %s.\n\n%s",
-		spec.Subject,
-		task.ID,
-		task.ProjectID,
-		spec.NextAction,
-		spec.Guidance,
 	)
 }
 

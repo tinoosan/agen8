@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
@@ -31,14 +30,6 @@ func taskWhere(filter domain.TaskFilter) (string, []any, error) {
 	if filter.TaskKind != "" {
 		clauses = append(clauses, "task_kind = ?")
 		args = append(args, strings.TrimSpace(filter.TaskKind))
-	}
-	if filter.PlanPhaseID != nil {
-		clauses = append(clauses, "plan_phase_id = ?")
-		args = append(args, filter.PlanPhaseID.String())
-	}
-	if filter.PlanTodoID != nil {
-		clauses = append(clauses, "plan_todo_id = ?")
-		args = append(args, filter.PlanTodoID.String())
 	}
 	if len(filter.Status) > 0 {
 		placeholders := make([]string, 0, len(filter.Status))
@@ -105,13 +96,6 @@ func timeString(t *time.Time) any {
 		return nil
 	}
 	return t.UTC().Format(time.RFC3339Nano)
-}
-
-func uuidString(id *uuid.UUID) any {
-	if id == nil {
-		return nil
-	}
-	return id.String()
 }
 
 func isDuplicateColumnError(err error) bool {

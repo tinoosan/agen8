@@ -94,16 +94,15 @@ taskSvc, err := <span class="tok-pkg">taskapp</span>.<span class="tok-fn">NewSer
     caller,
     members,
     projects,
-    messages,
     root.<span class="tok-fn">With</span>(<span class="tok-string">"service"</span>, <span class="tok-string">"task"</span>),
 )</code></pre>
 
   <p>Text output includes stable service context:</p>
 
-<pre><code>time=2026-05-17T15:42:10.124+01:00 level=WARN msg="task message publish failed" service=task task_id=task_123 event=assigned error="message service is not wired"</code></pre>
+<pre><code>time=2026-06-05T15:42:10.124+01:00 level=INFO msg="task transition" service=task action=create task_id=task_123 project_id=project_1 status=pending assigned_to=member_worker claimed_by_member_id="" caller_user_id=user_1 caller_member_id=member_coordinator</code></pre>
 
   <p>
-    The task service writes an <code>INFO</code> log after each successful lifecycle transition. Successful task message publication is logged at <code>DEBUG</code>. Returned validation and persistence errors are not logged by the task service; the boundary that handles the returned error owns that log line. Mission, plan, and other rebuilt services should follow the same rule: log successful domain-significant transitions with stable ids, and let protocol/process boundaries log returned errors.
+    The task service writes an <code>INFO</code> log after each successful lifecycle transition. Returned validation and persistence errors are not logged by the task service; the boundary that handles the returned error owns that log line. Mission and other rebuilt services should follow the same rule: log successful domain-significant transitions with stable ids, and let protocol/process boundaries log returned errors.
   </p>
 
 <pre><code>time=2026-05-17T15:42:10.124+01:00 level=INFO msg="task transition" service=task action=create task_id=task_123 project_id=project_1 status=pending assigned_to=member_worker claimed_by_member_id="" caller_user_id=user_1 caller_member_id=member_coordinator</code></pre>

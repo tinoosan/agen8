@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { Diamond } from 'lucide-react'
 import type { DecisionView, DecisionSource } from '../../lib/types'
 import { useStrategyMapStore } from './strategyMapStore'
+import { decisionActorDisplay } from '../../lib/decisionDisplay'
 
 export interface DecisionNodeData {
   decision: DecisionView
@@ -22,7 +23,6 @@ type DecisionNodeMeta = {
   confidenceLabel: string | null
   confidenceColor: string | null
   linkLabel: string | null
-  needsInput: boolean
 }
 
 function confidenceToColor(value: number): string {
@@ -31,75 +31,34 @@ function confidenceToColor(value: number): string {
   return 'var(--red)'
 }
 
-function hasAnswer(decision: DecisionView, questionId: string): boolean {
-  return (decision.answers ?? []).some((answer) => {
-    if (answer.questionId !== questionId) return false
-    return Boolean(answer.selectedOption?.trim() || answer.freeFormText?.trim())
-  })
-}
-
 function relationCount(decision: DecisionView): number {
   return [
     decision.taskRef,
     decision.keyResultRef,
     decision.missionRef,
-    decision.planRef,
     decision.correlationRef,
     decision.informedByRef,
   ].filter(Boolean).length
 }
 
 function decisionMeta(decision: DecisionView): DecisionNodeMeta {
-  const kind = (decision.kind ?? '').trim().toLowerCase()
-  const blockingQuestion = (decision.questions ?? []).some((question) =>
-    question.blocking && !hasAnswer(decision, question.id),
-  )
-  const unansweredQuestion = (decision.questions ?? []).some((question) => !hasAnswer(decision, question.id))
-  const needsInput = kind === 'ask_user' && (blockingQuestion || unansweredQuestion)
   const links = relationCount(decision)
   const confidence = decision.confidence > 0 ? `${Math.round(decision.confidence * 100)}%` : null
 
   const confColor = decision.confidence > 0 ? confidenceToColor(decision.confidence) : null
 
-  if (decision.cancelled) {
-    return {
-      label: 'Cancelled',
-      tone: 'var(--text-3)',
-      sourceLabel: sourceLabel(decision),
-      confidenceLabel: confidence,
-      confidenceColor: confColor,
-      linkLabel: links > 0 ? `${links} link${links === 1 ? '' : 's'}` : null,
-      needsInput: false,
-    }
-  }
-  if (needsInput) {
-    return {
-      label: blockingQuestion ? 'Input needed' : 'Question',
-      tone: 'var(--amber)',
-      sourceLabel: sourceLabel(decision),
-      confidenceLabel: confidence,
-      confidenceColor: confColor,
-      linkLabel: links > 0 ? `${links} link${links === 1 ? '' : 's'}` : null,
-      needsInput: true,
-    }
-  }
   return {
-    label: kind === 'ask_user' ? 'Answered' : 'Decision',
+    label: 'Decision',
     tone: SOURCE_COLOR[decision.source] ?? 'var(--border-strong)',
     sourceLabel: sourceLabel(decision),
     confidenceLabel: confidence,
     confidenceColor: confColor,
     linkLabel: links > 0 ? `${links} link${links === 1 ? '' : 's'}` : null,
-    needsInput: false,
   }
 }
 
 function sourceLabel(decision: DecisionView): string {
-  const name = decision.memberName?.trim()
-  if (name) return name
-  const actor = decision.sourceIdentity?.trim()
-  if (actor) return actor
-  return decision.source ? decision.source.replaceAll('_', ' ') : 'decision'
+  return decisionActorDisplay(decision).label || 'decision'
 }
 
 export const DecisionNode = memo(function DecisionNode({ data, selected, id }: NodeProps) {
@@ -133,7 +92,7 @@ export const DecisionNode = memo(function DecisionNode({ data, selected, id }: N
           style={{
             width: 9,
             height: 9,
-            background: meta.needsInput ? meta.tone : color,
+            background: color,
             opacity: 0.9,
             transform: 'rotate(45deg)',
           }}

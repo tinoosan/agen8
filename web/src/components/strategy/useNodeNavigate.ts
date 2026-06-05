@@ -10,7 +10,6 @@ import { useStrategyMapStore } from './strategyMapStore'
  *   Mission / KR  → raw UUID (no prefix)
  *   Task          → task:{id}
  *   Decision      → decision:{id}
- *   Plan          → plan:{id}
  */
 export function useNodeNavigate() {
   return useCallback((nodeId: string) => {

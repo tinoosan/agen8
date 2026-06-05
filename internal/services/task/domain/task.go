@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
@@ -89,8 +88,6 @@ type Task struct {
 	Summary            string                `json:"summary,omitempty"`
 	Artifacts          []string              `json:"artifacts,omitempty"`
 	KeyResultRef       string                `json:"keyResultRef,omitempty"`
-	PlanPhaseID        *uuid.UUID            `json:"planPhaseId,omitempty"`
-	PlanTodoID         *uuid.UUID            `json:"planTodoId,omitempty"`
 }
 
 type AcceptanceCriterion struct {

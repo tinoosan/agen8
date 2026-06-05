@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
@@ -17,8 +16,6 @@ func TestNewTaskViewMapsRebuiltTaskFields(t *testing.T) {
 	startedAt := createdAt.Add(1 * time.Minute)
 	completedAt := createdAt.Add(10 * time.Minute)
 	updatedAt := createdAt.Add(11 * time.Minute)
-	phaseID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
-	todoID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
 
 	task := taskdomain.Task{
 		ID:                taskdomain.TaskID("task-1"),
@@ -38,8 +35,6 @@ func TestNewTaskViewMapsRebuiltTaskFields(t *testing.T) {
 		Error:        "needs one more check",
 		Artifacts:    []string{"internal/services/task/rpc/types.go"},
 		KeyResultRef: "kr-1",
-		PlanPhaseID:  &phaseID,
-		PlanTodoID:   &todoID,
 		Metadata: map[string]any{
 			"history": []any{"created", "submitted"},
 		},
@@ -71,9 +66,6 @@ func TestNewTaskViewMapsRebuiltTaskFields(t *testing.T) {
 	}
 	if len(view.AcceptanceCriteria) != 2 || view.AcceptanceCriteria[0].ID != "criterion-1" || !view.AcceptanceCriteria[0].Satisfied {
 		t.Fatalf("acceptanceCriteria=%+v", view.AcceptanceCriteria)
-	}
-	if view.PlanPhaseID != phaseID.String() || view.PlanTodoID != todoID.String() {
-		t.Fatalf("plan refs = %q/%q", view.PlanPhaseID, view.PlanTodoID)
 	}
 	if view.Metadata["history"] == nil {
 		t.Fatalf("metadata history missing: %+v", view.Metadata)
@@ -128,8 +120,6 @@ func TestTaskViewDoesNotExposeRemovedTaskConcepts(t *testing.T) {
 
 func TestTaskViewJSONShape(t *testing.T) {
 	createdAt := time.Date(2026, time.May, 15, 9, 30, 0, 0, time.UTC)
-	phaseID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
-	todoID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
 
 	view := NewTaskView(taskdomain.Task{
 		ID:                taskdomain.TaskID("task-1"),
@@ -147,8 +137,6 @@ func TestTaskViewJSONShape(t *testing.T) {
 		Summary:      "Implemented the DTOs",
 		Artifacts:    []string{"internal/services/task/rpc/types.go"},
 		KeyResultRef: "kr-1",
-		PlanPhaseID:  &phaseID,
-		PlanTodoID:   &todoID,
 		Metadata:     map[string]any{"history": []any{"created"}, "missionRef": "mission-1"},
 		CreatedAt:    &createdAt,
 	})
@@ -178,8 +166,6 @@ func TestTaskViewJSONShape(t *testing.T) {
 		"artifacts",
 		"keyResultRef",
 		"missionRef",
-		"planPhaseId",
-		"planTodoId",
 		"metadata",
 		"createdAt",
 	} {
@@ -203,6 +189,8 @@ func TestTaskViewJSONShape(t *testing.T) {
 		"rootTaskId",
 		"sourceSpaceId",
 		"destinationSpaceId",
+		"planPhaseId",
+		"planTodoId",
 	} {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("json contains removed key %q in %s", key, raw)

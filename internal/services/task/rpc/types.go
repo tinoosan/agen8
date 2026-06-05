@@ -4,7 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	domain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
@@ -29,8 +28,6 @@ type TaskView struct {
 	Artifacts          []string                     `json:"artifacts,omitempty"`
 	KeyResultRef       string                       `json:"keyResultRef,omitempty"`
 	MissionRef         string                       `json:"missionRef,omitempty"`
-	PlanPhaseID        string                       `json:"planPhaseId,omitempty"`
-	PlanTodoID         string                       `json:"planTodoId,omitempty"`
 	Metadata           map[string]any               `json:"metadata,omitempty"`
 	CreatedAt          *time.Time                   `json:"createdAt,omitempty"`
 	StartedAt          *time.Time                   `json:"startedAt,omitempty"`
@@ -55,8 +52,6 @@ func NewTaskView(task domain.Task) TaskView {
 		Artifacts:          append([]string(nil), task.Artifacts...),
 		KeyResultRef:       task.KeyResultRef,
 		MissionRef:         missionRefFromMetadata(task.Metadata),
-		PlanPhaseID:        uuidString(task.PlanPhaseID),
-		PlanTodoID:         uuidString(task.PlanTodoID),
 		Metadata:           cloneMetadata(task.Metadata),
 		CreatedAt:          cloneTime(task.CreatedAt),
 		StartedAt:          cloneTime(task.StartedAt),
@@ -89,8 +84,6 @@ type TaskCreateParams struct {
 	TaskKind           string         `json:"taskKind,omitempty"`
 	KeyResultRef       string         `json:"keyResultRef,omitempty"`
 	MissionRef         string         `json:"missionRef,omitempty"`
-	PlanPhaseID        string         `json:"planPhaseId,omitempty"`
-	PlanTodoID         string         `json:"planTodoId,omitempty"`
 	Metadata           map[string]any `json:"metadata,omitempty"`
 }
 
@@ -107,17 +100,15 @@ type TaskGetResult struct {
 }
 
 type TaskListParams struct {
-	ProjectID   string   `json:"projectId,omitempty"`
-	AssignedTo  string   `json:"assignedTo,omitempty"`
-	ClaimedBy   string   `json:"claimedBy,omitempty"`
-	TaskKind    string   `json:"taskKind,omitempty"`
-	Status      []string `json:"status,omitempty"`
-	PlanPhaseID string   `json:"planPhaseId,omitempty"`
-	PlanTodoID  string   `json:"planTodoId,omitempty"`
-	Limit       int      `json:"limit,omitempty"`
-	Offset      int      `json:"offset,omitempty"`
-	SortBy      string   `json:"sortBy,omitempty"`
-	SortDesc    bool     `json:"sortDesc,omitempty"`
+	ProjectID  string   `json:"projectId,omitempty"`
+	AssignedTo string   `json:"assignedTo,omitempty"`
+	ClaimedBy  string   `json:"claimedBy,omitempty"`
+	TaskKind   string   `json:"taskKind,omitempty"`
+	Status     []string `json:"status,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
+	Offset     int      `json:"offset,omitempty"`
+	SortBy     string   `json:"sortBy,omitempty"`
+	SortDesc   bool     `json:"sortDesc,omitempty"`
 }
 
 type TaskListResult struct {
@@ -132,8 +123,6 @@ type TaskUpdateParams struct {
 	AcceptanceCriteria *[]domain.AcceptanceCriterion `json:"acceptanceCriteria,omitempty"`
 	TaskKind           *string                       `json:"taskKind,omitempty"`
 	KeyResultRef       *string                       `json:"keyResultRef,omitempty"`
-	PlanPhaseID        *string                       `json:"planPhaseId,omitempty"`
-	PlanTodoID         *string                       `json:"planTodoId,omitempty"`
 	Metadata           map[string]any                `json:"metadata,omitempty"`
 }
 
@@ -148,13 +137,6 @@ type TaskCancelParams struct {
 
 type TaskCancelResult struct {
 	Task TaskView `json:"task"`
-}
-
-func uuidString(id *uuid.UUID) string {
-	if id == nil {
-		return ""
-	}
-	return id.String()
 }
 
 func cloneTime(value *time.Time) *time.Time {

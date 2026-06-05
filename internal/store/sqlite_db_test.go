@@ -19,7 +19,6 @@ func TestSpaceIndexesCreated(t *testing.T) {
 	indexes := []string{
 		"idx_spaces_user_id",
 		"idx_spaces_project_updated",
-		"idx_channels_space_id",
 	}
 
 	for _, idx := range indexes {
@@ -75,7 +74,7 @@ func TestProjectMemberSchemaCreated(t *testing.T) {
 	}
 }
 
-func TestChannelSchemaIsCanonical(t *testing.T) {
+func TestRemovedTablesAreNotCreated(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
 	db, err := GetDB(cfg)
@@ -83,11 +82,65 @@ func TestChannelSchemaIsCanonical(t *testing.T) {
 		t.Fatalf("getSQLiteDB: %v", err)
 	}
 
-	columns := tableColumns(t, db, "channels")
-	for _, column := range []string{"channel_id", "space_id", "project_id", "run_id", "member_id", "member_label", "status", "channel_json", "last_message_at"} {
-		if !columns[column] {
-			t.Fatalf("channels.%s missing", column)
+	for _, table := range []string{
+		"channels",
+		"channel_reads",
+		"plans",
+		"plan_phases",
+		"plan_todos",
+		"plan_comments",
+		"plan_comment_reads",
+		"plan_amendments",
+		"plan_reviews",
+	} {
+		var count int
+		err := db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`,
+			table,
+		).Scan(&count)
+		if err != nil {
+			t.Fatalf("check removed table %s: %v", table, err)
 		}
+		if count != 0 {
+			t.Fatalf("removed table %s was created", table)
+		}
+	}
+}
+
+func TestDecisionMemberNameRepairBackfillsFromMemberRecord(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+
+	db, err := GetDB(cfg)
+	if err != nil {
+		t.Fatalf("getSQLiteDB: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO members (member_id, project_id, user_id, native_session_ref, member_type, lifecycle_state, harness_kind, member_json, registered_at, updated_at)
+		VALUES ('member-1', 'project-1', 'local', 'session-1', 'coordinator', 'active', 'codex', '{"displayName":"Codex backend engineer"}', '2026-06-05T15:00:00Z', '2026-06-05T15:00:00Z')`); err != nil {
+		t.Fatalf("insert member: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO decisions (id, project_id, source, kind, source_identity, member_name, title, rationale, confidence, created_at)
+		VALUES ('dec-1', 'project-1', 'agent', 'log', 'member-1', '', 'Readable actors', 'Keep decision actors readable.', 0.9, '2026-06-05T15:01:00Z')`); err != nil {
+		t.Fatalf("insert decision: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := repairDecisionMemberNameColumn(tx); err != nil {
+		tx.Rollback()
+		t.Fatalf("repairDecisionMemberNameColumn: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var got string
+	if err := db.QueryRow(`SELECT member_name FROM decisions WHERE id = 'dec-1'`).Scan(&got); err != nil {
+		t.Fatalf("select member_name: %v", err)
+	}
+	if got != "Codex backend engineer" {
+		t.Fatalf("member_name=%q want %q", got, "Codex backend engineer")
 	}
 }
 

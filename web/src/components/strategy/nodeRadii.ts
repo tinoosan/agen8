@@ -7,10 +7,6 @@
 export const NODE_RADIUS: Record<string, number> = {
   mission: 120,
   keyResult: 100,
-  // Plans describe how a mission will be executed — they sit closer to a
-  // KR in the hierarchy than to a task/decision leaf, so they get a
-  // slightly larger collision radius to keep them legible near missions.
-  plan: 90,
   decision: 70,
   task: 70,
 }

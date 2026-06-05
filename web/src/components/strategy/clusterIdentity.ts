@@ -48,13 +48,5 @@ export function deriveNodeClusterIdentity(node: Node): string {
     )
   }
 
-  if (node.type === 'plan') {
-    const plan = (data.plan ?? {}) as Record<string, unknown>
-    return firstNonEmpty(
-      typeof plan.createdBy === 'string' ? plan.createdBy : '',
-      node.id,
-    )
-  }
-
   return firstNonEmpty(node.id)
 }

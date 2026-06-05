@@ -17,7 +17,6 @@ export const kindColors: Record<string, { bg: string; fg: string }> = {
   task: { bg: 'var(--green-dim)', fg: 'var(--green)' },
   space: { bg: 'var(--accent-dim)', fg: 'var(--accent)' },
   review: { bg: 'var(--amber-dim)', fg: 'var(--amber)' },
-  heartbeat: { bg: 'var(--red-dim)', fg: 'var(--red)' },
   progress: { bg: 'var(--accent-dim)', fg: 'var(--accent)' },
   edit: { bg: 'var(--amber-dim)', fg: 'var(--amber)' },
   soul: { bg: 'var(--accent-dim)', fg: 'var(--accent)' },
@@ -26,7 +25,6 @@ export const kindColors: Record<string, { bg: string; fg: string }> = {
   bash: { bg: 'var(--bg-elevated)', fg: 'var(--text-3)' },
   http: { bg: 'var(--bg-elevated)', fg: 'var(--text-3)' },
   mission: { bg: 'var(--accent-dim)', fg: 'var(--accent)' },
-  plan: { bg: 'var(--accent-dim)', fg: 'var(--accent)' },
   graph: { bg: 'var(--accent-dim)', fg: 'var(--accent)' },
 }
 
@@ -71,11 +69,9 @@ export function humanizeKind(kind: string): string | null {
     'soul_update': 'Soul Updated',
     'note': 'Noted',
     'browser': 'Browsed',
-    'heartbeat': 'Heartbeat',
     'decision': 'Decision',
     'decision_log': 'Decision Logged',
     'mission': 'Mission',
-    'plan': 'Plan',
     'graph_query': 'Graph Query',
   }
   if (map[lower]) return map[lower]

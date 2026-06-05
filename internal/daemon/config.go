@@ -42,6 +42,13 @@ func (c Config) withDefaults() (Config, error) {
 	if c.AppConfig.DataDir == "" {
 		c.AppConfig = config.Default()
 	}
+	if strings.TrimSpace(c.AppConfig.DataDir) == "" || strings.TrimSpace(c.AppConfig.DataDir) == "db" {
+		dataDir, err := config.ResolveDataDir("", false)
+		if err != nil {
+			return c, err
+		}
+		c.AppConfig.DataDir = dataDir
+	}
 	if err := c.AppConfig.Validate(); err != nil {
 		return c, err
 	}

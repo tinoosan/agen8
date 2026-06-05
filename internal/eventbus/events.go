@@ -12,7 +12,6 @@ const (
 	TopicKRProgress           = "kr.progress"
 	TopicDecisionLogged       = "decision.logged"
 	TopicMissionLifecycle     = "mission.lifecycle"
-	TopicPlanLifecycle        = "plan.lifecycle"
 )
 
 const (
@@ -39,25 +38,6 @@ type SpaceMemberLifecycleEvent struct {
 	ConfigRef      string    `json:"harnessConfigRef,omitempty"`
 	Timestamp      time.Time `json:"timestamp"`
 }
-
-// Plan lifecycle event type constants.
-const (
-	PlanEventCreated           = "plan.created"
-	PlanEventActivated         = "plan.activated" // autonomous direct-activate (draft → active)
-	PlanEventSubmitted         = "plan.submitted"
-	PlanEventApproved          = "plan.approved"
-	PlanEventRejected          = "plan.rejected"
-	PlanEventPhaseStarted      = "plan.phase_started"
-	PlanEventTodoCompleted     = "plan.todo_completed"
-	PlanEventPhaseCompleted    = "plan.phase_completed"
-	PlanEventCompleted         = "plan.completed"
-	PlanEventAbandoned         = "plan.abandoned"
-	PlanEventCommented         = "plan.commented"
-	PlanEventEdited            = "plan.edited"
-	PlanEventAmendmentProposed = "plan.amendment_proposed"
-	PlanEventAmendmentApplied  = "plan.amendment_applied"
-	PlanEventAmendmentVetoed   = "plan.amendment_vetoed"
-)
 
 // TaskLifecycleEvent is emitted on task state transitions.
 type TaskLifecycleEvent struct {
@@ -121,28 +101,6 @@ type DecisionLoggedEvent struct {
 	Confidence   float64   `json:"confidence"`
 	KeyResultRef string    `json:"keyResultRef,omitempty"`
 	MissionRef   string    `json:"missionRef,omitempty"`
-	PlanRef      string    `json:"planRef,omitempty"`
 	TaskRef      string    `json:"taskRef,omitempty"`
 	Timestamp    time.Time `json:"timestamp"`
-}
-
-// PlanLifecycleEvent is emitted on every plan state transition and significant
-// action. Title and Text carry human-readable context so downstream handlers
-// never need to re-query the plan.
-type PlanLifecycleEvent struct {
-	ProjectID string    `json:"projectId,omitempty"`
-	SpaceID   string    `json:"spaceId"`
-	PlanID    string    `json:"planId"`
-	Title     string    `json:"title,omitempty"` // plan title
-	EventType string    `json:"eventType"`
-	Status    string    `json:"status"`
-	Mode      string    `json:"mode"`
-	Timestamp time.Time `json:"timestamp"`
-	// Contextual fields (zero-valued when not applicable):
-	PhaseID     string `json:"phaseId,omitempty"`
-	TodoID      string `json:"todoId,omitempty"`
-	AmendmentID string `json:"amendmentId,omitempty"`
-	CommentID   string `json:"commentId,omitempty"`
-	AuthorType  string `json:"authorType,omitempty"`
-	Text        string `json:"text,omitempty"`       // comment/rejection/veto text (truncated to 500 chars)
 }

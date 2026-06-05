@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
@@ -21,8 +20,6 @@ type NewTaskInput struct {
 
 	Title        string
 	KeyResultRef string
-	PlanPhaseID  *uuid.UUID
-	PlanTodoID   *uuid.UUID
 	Metadata     map[string]any
 	TaskKind     string
 }
@@ -62,8 +59,6 @@ func NewTask(input NewTaskInput, now time.Time) (Task, error) {
 		AcceptanceCriteria: newAcceptanceCriteria(input.AcceptanceCriteria),
 		Status:             TaskStatusPending,
 		KeyResultRef:       strings.TrimSpace(input.KeyResultRef),
-		PlanPhaseID:        input.PlanPhaseID,
-		PlanTodoID:         input.PlanTodoID,
 		Metadata:           input.Metadata,
 		TaskKind:           strings.TrimSpace(input.TaskKind),
 		CreatedAt:          &stamped,

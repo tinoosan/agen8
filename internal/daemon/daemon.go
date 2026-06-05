@@ -414,11 +414,12 @@ func (d *Daemon) handleSetupPage(w http.ResponseWriter, r *http.Request) {
 }
 
 type setupRequest struct {
-	Token    string `json:"token"`
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	Password string `json:"password"`
-	KeyName  string `json:"keyName"`
+	Token           string `json:"token"`
+	Email           string `json:"email"`
+	Name            string `json:"name"`
+	Password        string `json:"password"`
+	ConfirmPassword string `json:"confirmPassword"`
+	KeyName         string `json:"keyName"`
 }
 
 func (d *Daemon) handleSetupCreate(w http.ResponseWriter, r *http.Request) {
@@ -433,6 +434,10 @@ func (d *Daemon) handleSetupCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if !d.validSetupToken(req.Token) {
 		http.Error(w, "invalid setup token", http.StatusForbidden)
+		return
+	}
+	if req.Password != req.ConfirmPassword {
+		http.Error(w, "password confirmation does not match", http.StatusBadRequest)
 		return
 	}
 	if err := d.app.AuthSvc.ValidatePassword(req.Password); err != nil {
@@ -501,6 +506,7 @@ func decodeSetupRequest(r *http.Request) (setupRequest, error) {
 	req.Email = r.Form.Get("email")
 	req.Name = r.Form.Get("name")
 	req.Password = r.Form.Get("password")
+	req.ConfirmPassword = r.Form.Get("confirmPassword")
 	req.KeyName = r.Form.Get("keyName")
 	return req, nil
 }
@@ -517,31 +523,208 @@ func (d *Daemon) validSetupToken(token string) bool {
 const setupPageHTML = `<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>agen8 setup</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1a1a1c">
+  <title>Set up agen8</title>
   <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1115; color: #f4f5f7; }
-    main { width: min(420px, calc(100vw - 32px)); }
-    h1 { margin: 0 0 8px; font-size: 22px; }
-    p { margin: 0 0 20px; color: #a7adb8; line-height: 1.5; }
-    form { display: grid; gap: 12px; }
-    label { display: grid; gap: 6px; color: #c5c9d1; }
-    input { border: 1px solid #303641; border-radius: 8px; background: #171a21; color: #fff; padding: 11px 12px; font: inherit; }
-    button { border: 0; border-radius: 8px; background: #3b82f6; color: white; padding: 11px 12px; font: inherit; font-weight: 650; cursor: pointer; }
+    :root {
+      color-scheme: dark;
+      --bg-app: #1a1a1c;
+      --bg-panel: #1f1f22;
+      --bg-surface: #26262a;
+      --bg-elevated: #2e2e33;
+      --border: rgba(255, 255, 255, 0.10);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text-1: #f0f0f4;
+      --text-2: #9898a8;
+      --text-3: #636378;
+      --accent: #3b82f6;
+      --accent-dim: rgba(59, 130, 246, 0.14);
+      --green: #22c55e;
+      --r-md: 8px;
+      --r-lg: 12px;
+      --font-sans: 'Aptos', 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(59, 130, 246, 0.12), transparent 30%),
+        linear-gradient(180deg, #1f1f22 0%, var(--bg-app) 58%);
+      color: var(--text-1);
+      font-family: var(--font-sans);
+      letter-spacing: 0;
+    }
+    main {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+    }
+    .shell {
+      width: min(960px, 100%);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 420px;
+      gap: 28px;
+      align-items: stretch;
+    }
+    .intro, .panel {
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      border-radius: var(--r-lg);
+    }
+    .intro {
+      padding: 34px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 480px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-2);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 5px var(--accent-dim);
+    }
+    h1 {
+      margin: 70px 0 18px;
+      max-width: 620px;
+      font-size: clamp(42px, 7vw, 76px);
+      line-height: 0.92;
+      letter-spacing: 0;
+    }
+    .lead {
+      margin: 0;
+      max-width: 560px;
+      color: var(--text-2);
+      font-size: 17px;
+      line-height: 1.55;
+    }
+    .steps {
+      display: grid;
+      gap: 10px;
+      margin-top: 34px;
+    }
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-2);
+      font-size: 13px;
+    }
+    .badge {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: var(--bg-surface);
+      color: var(--text-1);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .panel {
+      padding: 28px;
+      align-self: stretch;
+    }
+    h2 {
+      margin: 0 0 8px;
+      font-size: 21px;
+      letter-spacing: 0;
+    }
+    .hint {
+      margin: 0 0 24px;
+      color: var(--text-3);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    form {
+      display: grid;
+      gap: 16px;
+    }
+    label {
+      display: grid;
+      gap: 7px;
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    input {
+      width: 100%;
+      height: 42px;
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      background: var(--bg-surface);
+      color: var(--text-1);
+      font: inherit;
+      font-size: 14px;
+      padding: 0 12px;
+      outline: none;
+    }
+    input:focus {
+      border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+    button {
+      height: 42px;
+      border: 1px solid var(--accent);
+      border-radius: var(--r-md);
+      background: var(--accent);
+      color: white;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    @media (max-width: 820px) {
+      main { padding: 18px; place-items: start center; }
+      .shell { grid-template-columns: 1fr; }
+      .intro { min-height: auto; padding: 26px; }
+      h1 { margin-top: 44px; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>Set up agen8</h1>
-    <p>Create the first local account for this daemon.</p>
-    <form method="post" action="/setup">
-      <input type="hidden" name="token" value="{{TOKEN}}" />
-      <label>Email <input name="email" type="email" required autocomplete="email" /></label>
-      <label>Name <input name="name" required autocomplete="name" /></label>
-      <label>Password <input name="password" type="password" required autocomplete="new-password" /></label>
-      <button type="submit">Create account</button>
-    </form>
+    <div class="shell">
+      <section class="intro" aria-labelledby="setup-title">
+        <div>
+          <div class="brand"><span class="dot"></span><span>Welcome to agen8</span></div>
+          <h1 id="setup-title">Bring your AI work into focus.</h1>
+          <p class="lead">agen8 gives AI harnesses a durable work-context layer for missions, key results, tasks, decisions, and graph-backed context. Create your account to open the workspace.</p>
+        </div>
+        <div class="steps" aria-label="Setup outcome">
+          <div class="step"><span class="badge">1</span><span>Create your local sign-in account.</span></div>
+          <div class="step"><span class="badge">2</span><span>Create your first project.</span></div>
+          <div class="step"><span class="badge">3</span><span>Connect agents through MCP when you need them.</span></div>
+        </div>
+      </section>
+      <section class="panel" aria-label="Create account">
+        <h2>Create your account</h2>
+        <p class="hint">Use these details to sign in to this agen8 daemon.</p>
+        <form method="post" action="/setup">
+          <input type="hidden" name="token" value="{{TOKEN}}">
+          <label>Email<input name="email" type="email" autocomplete="email" required></label>
+          <label>Name<input name="name" autocomplete="name" required></label>
+          <label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+          <label>Confirm password<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+          <button type="submit">Enter agen8</button>
+        </form>
+      </section>
+    </div>
   </main>
 </body>
 </html>`

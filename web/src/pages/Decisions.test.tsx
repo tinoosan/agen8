@@ -95,37 +95,21 @@ describe('Decisions page', () => {
     expect(screen.getByText('agent')).toBeInTheDocument()
   })
 
-  it('renders ask_user context, answers, and linked refs in the expanded row', async () => {
+  it('renders logged decision details and linked refs in the expanded row', async () => {
     const user = userEvent.setup()
     mockUseDecisionLog.mockReturnValue({
       data: {
         decisions: [
           {
-            id: 'dec-ask-1',
+            id: 'dec-log-1',
             projectId: 'proj-1',
             source: 'agent',
             sourceIdentity: 'cfo',
             spaceId: 'space-eng',
-            kind: 'ask_user',
+            kind: 'log',
             title: 'Next iteration pricing packaging priority',
-            rationale: '',
-            context: 'Choosing between pricing-packaging options determines what we test next.',
-            questions: [
-              {
-                id: 'pricing',
-                text: 'Which pricing packaging should we prioritize?',
-                type: 'multiple_choice',
-                options: ['Flat subscription', 'Usage overage'],
-                recommendation: 'Flat subscription',
-              },
-            ],
-            answers: [
-              {
-                questionId: 'pricing',
-                selectedOption: 'Usage overage',
-                freeFormText: 'Lean toward usage overage because it validates metering.',
-              },
-            ],
+            rationale: 'Usage overage validates metering before a broader rollout.',
+            alternativesRejected: 'Flat subscription does not test usage-based willingness to pay.',
             confidence: 0.8,
             createdAt: '2026-03-31T10:00:00Z',
             missionRef: 'mis-1234567890ab',
@@ -141,14 +125,11 @@ describe('Decisions page', () => {
 
     await user.click(screen.getByRole('button', { name: /^toggle details for decision next iteration pricing packaging priority$/i }))
 
-    expect(screen.getByText('Context')).toBeInTheDocument()
-    expect(screen.getByText('Choosing between pricing-packaging options determines what we test next.')).toBeInTheDocument()
-    expect(screen.getByText('Questions')).toBeInTheDocument()
-    expect(screen.getByText('Which pricing packaging should we prioritize?')).toBeInTheDocument()
-    expect(screen.getByText('Recommendation: Flat subscription')).toBeInTheDocument()
-    expect(screen.getByText(/Answer: Lean toward usage overage because it validates metering\./)).toBeInTheDocument()
+    expect(screen.getByText('Rationale')).toBeInTheDocument()
+    expect(screen.getByText('Usage overage validates metering before a broader rollout.')).toBeInTheDocument()
+    expect(screen.getByText('Alternatives')).toBeInTheDocument()
+    expect(screen.getByText('Flat subscription does not test usage-based willingness to pay.')).toBeInTheDocument()
     expect(screen.getByText('Mission: mis-1234567890ab')).toBeInTheDocument()
-    expect(screen.queryByText('Plan: plan-1234567890ab')).not.toBeInTheDocument()
   })
 
   it('shows pagination when there are multiple pages', () => {

@@ -26,7 +26,6 @@ type UpdateKeyResultInput = {
   baseline?: number
   progressPercent?: number
   status?: KeyResultStatus
-  operatorOverride?: boolean
 }
 
 /* ── Query hooks ─────────────────────────────────────── */

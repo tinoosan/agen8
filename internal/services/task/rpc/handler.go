@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8-mcp-server/internal/services/task/app"
@@ -41,14 +40,6 @@ func (h *Handler) Create(ctx context.Context, p TaskCreateParams) (TaskCreateRes
 	if description == "" {
 		return TaskCreateResult{}, invalidParams("description is required")
 	}
-	phaseID, err := parseOptionalUUID(p.PlanPhaseID, "planPhaseId")
-	if err != nil {
-		return TaskCreateResult{}, err
-	}
-	todoID, err := parseOptionalUUID(p.PlanTodoID, "planTodoId")
-	if err != nil {
-		return TaskCreateResult{}, err
-	}
 
 	task, err := h.svc.Create(ctx, taskapp.CreateTaskParams{
 		ProjectID:          types.ProjectID(projectID),
@@ -58,8 +49,6 @@ func (h *Handler) Create(ctx context.Context, p TaskCreateParams) (TaskCreateRes
 		Title:              strings.TrimSpace(p.Title),
 		KeyResultRef:       strings.TrimSpace(p.KeyResultRef),
 		MissionRef:         strings.TrimSpace(p.MissionRef),
-		PlanPhaseID:        phaseID,
-		PlanTodoID:         todoID,
 		Metadata:           cloneRequestMetadata(p.Metadata),
 		TaskKind:           strings.TrimSpace(p.TaskKind),
 	})
@@ -96,26 +85,16 @@ func (h *Handler) List(ctx context.Context, p TaskListParams) (TaskListResult, e
 		}
 		statuses = append(statuses, status)
 	}
-	phaseID, err := parseOptionalUUID(p.PlanPhaseID, "planPhaseId")
-	if err != nil {
-		return TaskListResult{}, err
-	}
-	todoID, err := parseOptionalUUID(p.PlanTodoID, "planTodoId")
-	if err != nil {
-		return TaskListResult{}, err
-	}
 	filter := domain.TaskFilter{
-		ProjectID:   types.ProjectID(strings.TrimSpace(p.ProjectID)),
-		AssignedTo:  member.ID(strings.TrimSpace(p.AssignedTo)),
-		ClaimedBy:   member.ID(strings.TrimSpace(p.ClaimedBy)),
-		TaskKind:    strings.TrimSpace(p.TaskKind),
-		Status:      statuses,
-		PlanPhaseID: phaseID,
-		PlanTodoID:  todoID,
-		Limit:       p.Limit,
-		Offset:      p.Offset,
-		SortBy:      strings.TrimSpace(p.SortBy),
-		SortDesc:    p.SortDesc,
+		ProjectID:  types.ProjectID(strings.TrimSpace(p.ProjectID)),
+		AssignedTo: member.ID(strings.TrimSpace(p.AssignedTo)),
+		ClaimedBy:  member.ID(strings.TrimSpace(p.ClaimedBy)),
+		TaskKind:   strings.TrimSpace(p.TaskKind),
+		Status:     statuses,
+		Limit:      p.Limit,
+		Offset:     p.Offset,
+		SortBy:     strings.TrimSpace(p.SortBy),
+		SortDesc:   p.SortDesc,
 	}
 
 	tasks, err := h.svc.List(ctx, filter)
@@ -138,14 +117,6 @@ func (h *Handler) Update(ctx context.Context, p TaskUpdateParams) (TaskUpdateRes
 	if taskID == "" {
 		return TaskUpdateResult{}, invalidParams("taskId is required")
 	}
-	phaseID, err := parseOptionalUUIDPointer(p.PlanPhaseID, "planPhaseId")
-	if err != nil {
-		return TaskUpdateResult{}, err
-	}
-	todoID, err := parseOptionalUUIDPointer(p.PlanTodoID, "planTodoId")
-	if err != nil {
-		return TaskUpdateResult{}, err
-	}
 	task, err := h.svc.Update(ctx, taskapp.UpdateTaskParams{
 		TaskID:             domain.TaskID(taskID),
 		Title:              p.Title,
@@ -153,8 +124,6 @@ func (h *Handler) Update(ctx context.Context, p TaskUpdateParams) (TaskUpdateRes
 		AcceptanceCriteria: p.AcceptanceCriteria,
 		TaskKind:           p.TaskKind,
 		KeyResultRef:       p.KeyResultRef,
-		PlanPhaseID:        phaseID,
-		PlanTodoID:         todoID,
 		Metadata:           cloneRequestMetadata(p.Metadata),
 	})
 	if err != nil {
@@ -221,25 +190,6 @@ func shortMemberID(id member.ID) string {
 		return raw
 	}
 	return "Member " + raw[len(raw)-6:]
-}
-
-func parseOptionalUUID(raw, field string) (*uuid.UUID, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	parsed, err := uuid.Parse(raw)
-	if err != nil {
-		return nil, invalidParams(field + " must be a valid UUID")
-	}
-	return &parsed, nil
-}
-
-func parseOptionalUUIDPointer(raw *string, field string) (*uuid.UUID, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	return parseOptionalUUID(*raw, field)
 }
 
 func cloneRequestMetadata(metadata map[string]any) map[string]any {

@@ -4,8 +4,8 @@ import "testing"
 
 func TestDefault_DataDir(t *testing.T) {
 	cfg := Default()
-	if cfg.DataDir != "db" {
-		t.Fatalf("DataDir=%q want db", cfg.DataDir)
+	if cfg.DataDir != "" {
+		t.Fatalf("DataDir=%q want empty unresolved default", cfg.DataDir)
 	}
 }
 

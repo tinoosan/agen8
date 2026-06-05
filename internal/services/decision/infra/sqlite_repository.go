@@ -20,7 +20,7 @@ var _ domain.Repository = (*SQLiteRepository)(nil)
 // Must match the scan order in scanFromScanner.
 const selectColumns = `
 	id, project_id, source, kind, source_identity,
-	title, rationale, context, alternatives_rejected, invalidation_conditions_json, confidence,
+	member_name, title, rationale, context, alternatives_rejected, invalidation_conditions_json, confidence,
 	outcome, task_ref, key_result_ref, mission_ref,
 	correlation_ref, informed_by_ref, tags_json, metadata_json, created_at`
 
@@ -92,12 +92,12 @@ func (r *SQLiteRepository) CreateDecision(ctx context.Context, decision domain.D
 	_, err = r.db.ExecContext(ctx, r.rebind(`
 		INSERT OR REPLACE INTO decisions (
 			id, project_id, source, kind, source_identity,
-			title, rationale, context, alternatives_rejected, invalidation_conditions_json, confidence,
+			member_name, title, rationale, context, alternatives_rejected, invalidation_conditions_json, confidence,
 			outcome, task_ref, key_result_ref, mission_ref,
 			correlation_ref, informed_by_ref, tags_json, metadata_json, created_at
 		) VALUES (
 			?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?, ?, ?
 		)`),
@@ -106,6 +106,7 @@ func (r *SQLiteRepository) CreateDecision(ctx context.Context, decision domain.D
 		string(decision.Source),
 		string(kind),
 		strings.TrimSpace(decision.SourceIdentity),
+		strings.TrimSpace(decision.MemberName),
 		strings.TrimSpace(decision.Title),
 		rationale,
 		contextValue,
@@ -335,6 +336,7 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 		source                     string
 		kindStr                    string
 		sourceIdentity             string
+		memberName                 string
 		title                      string
 		rationale                  string
 		contextValue               string
@@ -354,7 +356,7 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 
 	err := s.Scan(
 		&id, &projectID, &source, &kindStr, &sourceIdentity,
-		&title, &rationale, &contextValue, &alternativesRejected, &invalidationConditionsJSON, &confidence,
+		&memberName, &title, &rationale, &contextValue, &alternativesRejected, &invalidationConditionsJSON, &confidence,
 		&outcome, &taskRef, &keyResultRef, &missionRef, &correlationRef,
 		&informedByRef, &tagsJSON, &metadataJSON, &createdAt,
 	)
@@ -366,6 +368,7 @@ func scanFromScanner(s rowScanner) (domain.Decision, error) {
 	d.ProjectID = strings.TrimSpace(projectID)
 	d.Source = domain.DecisionSource(strings.TrimSpace(source))
 	d.SourceIdentity = strings.TrimSpace(sourceIdentity)
+	d.MemberName = strings.TrimSpace(memberName)
 	d.Title = strings.TrimSpace(title)
 	d.Confidence = confidence
 	d.TaskRef = strings.TrimSpace(taskRef)

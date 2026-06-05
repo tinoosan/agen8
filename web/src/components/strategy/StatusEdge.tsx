@@ -8,14 +8,12 @@ import { resolveEdgeStrokeColor } from './edgeColors'
 function edgeLabelForward(target: string): string {
   if (target.startsWith('task:')) return 'task'
   if (target.startsWith('decision:')) return 'decision'
-  if (target.startsWith('plan:')) return 'plan'
   return 'key result'  // KR IDs have no prefix
 }
 
 function edgeLabelReverse(source: string): string {
   if (source.startsWith('task:')) return 'spawned by'
   if (source.startsWith('decision:')) return 'decided by'
-  if (source.startsWith('plan:')) return 'planned by'
   return 'serves'
 }
 

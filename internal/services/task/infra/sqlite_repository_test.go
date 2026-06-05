@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
@@ -30,12 +29,6 @@ func TestSQLiteRepositoryCreateGetPreservesTaskDocument(t *testing.T) {
 
 	if got.ID != task.ID {
 		t.Fatalf("id=%q want %q", got.ID, task.ID)
-	}
-	if got.PlanPhaseID == nil || *got.PlanPhaseID != *task.PlanPhaseID {
-		t.Fatalf("planPhaseId=%v want %s", got.PlanPhaseID, *task.PlanPhaseID)
-	}
-	if got.PlanTodoID == nil || *got.PlanTodoID != *task.PlanTodoID {
-		t.Fatalf("planTodoId=%v want %s", got.PlanTodoID, *task.PlanTodoID)
 	}
 	if got.Metadata["history"].([]any)[0].(map[string]any)["event"] != "created" {
 		t.Fatalf("metadata history not preserved: %#v", got.Metadata)
@@ -150,8 +143,6 @@ func newSQLiteRepositoryForTest(t *testing.T) *SQLiteRepository {
 }
 
 func infraTask(id string, projectID string, status domain.TaskStatus) domain.Task {
-	phaseID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	todoID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	return domain.Task{
 		ID:                domain.TaskID(id),
 		ProjectID:         types.ProjectID(projectID),
@@ -169,7 +160,5 @@ func infraTask(id string, projectID string, status domain.TaskStatus) domain.Tas
 		UpdatedAt:    &infraTestNow,
 		Metadata:     map[string]any{"history": []any{map[string]any{"event": "created"}}},
 		KeyResultRef: "kr-1",
-		PlanPhaseID:  &phaseID,
-		PlanTodoID:   &todoID,
 	}
 }

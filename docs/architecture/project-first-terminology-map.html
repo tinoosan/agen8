@@ -171,7 +171,7 @@
     <tbody>
       <tr><td><code>space</code></td><td><code>project</code></td><td>The space boundary is removed. Members attach directly to a project.</td></tr>
       <tr><td><code>SpaceMember</code> / <code>space_id</code></td><td><code>Member</code> / <code>project_id</code></td><td>Member identity is project-scoped, not space-scoped.</td></tr>
-      <tr><td><code>CrossSpaceMessage</code></td><td>member-to-member message</td><td>Routing is project + coordinator-member identity, addressed by member channel.</td></tr>
+      <tr><td><code>CrossSpaceMessage</code></td><td>task or decision reference</td><td>Cross-space coordination is removed. Coordination is recorded as project-scoped work context.</td></tr>
       <tr><td><code>SpaceTemplate</code> / <code>space instance</code></td><td><code>ProjectTemplate</code> / project created from template</td><td>Templates set up a project roster, not a space.</td></tr>
       <tr><td><code>thread</code></td><td><code>project</code></td><td>Only external harness vocabulary may remain where the harness itself says thread.</td></tr>
       <tr><td><code>coordinator_run</code></td><td><code>coordinator_member</code></td><td>Replace as route authority.</td></tr>

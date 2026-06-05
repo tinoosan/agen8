@@ -185,28 +185,6 @@ export interface ProjectRecoveryDiagnosticNotification {
   tickAt?: string;
 }
 
-/** Mirrors Go types.Channel. A member address within a space workspace. */
-export interface Channel {
-  id: string;
-  spaceId: string;
-  projectId?: string;
-  runId?: string;
-  memberId?: string;
-  memberLabel?: string;
-  title?: string;
-  status?: string;
-  createdAt: string;
-  updatedAt?: string;
-  /** ISO timestamp of the most recent message published into this address. */
-  lastMessageAt?: string;
-  /**
-   * Computed per-user at list time. True iff the user has a message newer
-   * than their last seen marker, or has never read the address after it
-   * received a message. Cleared by calling channel.markRead.
-   */
-  unread?: boolean;
-}
-
 export interface SpaceMemberStatus {
   memberLabel: string;
   info: string;
@@ -255,7 +233,6 @@ export interface SpaceGetManifestResult {
   spaceId: string;
   spaceDescription?: string;
   spaceModel?: string;
-  planMode?: PlanMode;
   supervisedBlockedTools?: string[];
   modelChange?: SpaceManifestModelChange;
   coordinatorMember: string;
@@ -345,13 +322,6 @@ export interface Space {
   projectId?: string;
   status?: "open" | "closed" | string;
   title?: string;
-  /**
-   * Space-scoped execution mode. This is the effective planMode for this
-   * specific space — it may differ from the template definition's configured
-   * default mode. Always prefer this over manifest.planMode when displaying
-   * state to the user in the context of a specific conversation/space.
-   */
-  planMode?: PlanMode | string;
   createdAt?: string;
   updatedAt?: string;
   inputTokens?: number;
@@ -360,73 +330,6 @@ export interface Space {
   costUSD?: number;
   cacheReadInputTokens?: number;
   customization?: SpaceCustomization;
-}
-
-export interface SpaceMember {
-  id: string;
-  userId?: string;
-  projectId?: string;
-  spaceId: string;
-  channelId: string;
-  displayName: string;
-  memberType: string;
-  lifecycleState: string;
-  harnessKind: string;
-  model: string;
-  effort: string;
-  harnessPermissionMode?: string;
-  harnessConfigRef?: string;
-  currentRunId?: string;
-  registeredAt?: string;
-  updatedAt?: string;
-  lastSeenAt?: string;
-}
-
-export interface SpaceMemberListResult {
-  members: SpaceMember[];
-}
-
-export interface SpaceMemberRemoveResult {
-  member: SpaceMember;
-}
-
-export interface SpaceContextStatus {
-  usedTokens?: number;
-  maxTokens?: number;
-  remainingTokens?: number;
-  compactedAt?: string;
-}
-
-export type SpaceDetailEntryKind =
-  | "user_message"
-  | "agent_message"
-  | "thinking"
-  | "tool_call"
-  | "note"
-  | "error";
-
-export interface SpaceDetailEntry {
-  id: string;
-  kind: SpaceDetailEntryKind | string;
-  runId?: string;
-  turnId?: string;
-  messageId?: string;
-  toolCallId?: string;
-  sequence?: number;
-  member?: string;
-  title?: string;
-  text?: string;
-  status?: string;
-  createdAt: string;
-  completedAt?: string;
-  live?: boolean;
-  data?: Record<string, string>;
-}
-
-export interface SpaceDetailResult {
-  space: Space;
-  entries: SpaceDetailEntry[];
-  context?: SpaceContextStatus;
 }
 
 export interface Task {
@@ -449,8 +352,6 @@ export interface Task {
   artifacts?: string[];
   keyResultRef?: string;
   missionRef?: string;
-  planPhaseId?: string;
-  planTodoId?: string;
   metadata?: Record<string, unknown>;
   createdAt?: string;
   startedAt?: string;
@@ -490,95 +391,6 @@ export interface TaskAttempt {
   completedAt?: string;
   outcome?: string;
   review?: AttemptReview;
-}
-
-export interface MailMessage {
-  messageId: string;
-  correlationId?: string;
-  spaceId?: string;
-  runId?: string;
-  sourceSpaceId?: string;
-  destinationSpaceId?: string;
-  actorMemberId?: string;
-  targetMemberId?: string;
-  broadcast?: boolean;
-  channel: string;
-  kind: string;
-  senderType?: string;
-  senderName?: string;
-  senderSpace?: string;
-  status: string;
-  subject?: string;
-  summary?: string;
-  bodyPreview?: string;
-  error?: string;
-  taskId?: string;
-  taskStatus?: string;
-  readOnly?: boolean;
-  canClaim?: boolean;
-  canComplete?: boolean;
-  createdAt: string;
-  updatedAt: string;
-  processedAt?: string;
-  task?: Task;
-}
-
-// ---- Message domain types (matches pkg/types/message.go + agent_message.go) ----
-
-/** Canonical message kind constants. */
-export const MessageKind = {
-  Task: "task",
-  UserInput: "user_input",
-  Inform: "inform",
-  Query: "query",
-  Response: "response",
-  Timeout: "timeout",
-  System: "system",
-} as const;
-export type MessageKind = (typeof MessageKind)[keyof typeof MessageKind];
-
-/** Message channel (inbox / outbox). */
-export const MessageChannel = {
-  Inbox: "inbox",
-  Outbox: "outbox",
-} as const;
-export type MessageChannel =
-  (typeof MessageChannel)[keyof typeof MessageChannel];
-
-/** Message delivery status. */
-export const MessageStatus = {
-  Pending: "pending",
-  Claimed: "claimed",
-  Acked: "acked",
-  Nacked: "nacked",
-  Deadletter: "deadletter",
-} as const;
-export type MessageStatus = (typeof MessageStatus)[keyof typeof MessageStatus];
-
-/**
- * Domain-facing communication record.
- * First-class message entity with explicit sender identity.
- */
-export interface Message {
-  messageId: string;
-  correlationId?: string;
-  spaceId?: string;
-  sourceSpaceId?: string;
-  destinationSpaceId?: string;
-  sourceMemberId?: string;
-  destinationMemberId?: string;
-  senderType?: string;
-  senderName?: string;
-  senderSpace?: string;
-  assignedToType?: string;
-  assignedTo?: string;
-  kind: string;
-  subject?: string;
-  body?: string;
-  taskRef?: string;
-  metadata?: Record<string, unknown>;
-  createdAt?: string;
-  processedAt?: string;
 }
 
 // ---- Agent event types ----
@@ -664,44 +476,6 @@ export interface FilesListDirResult {
   rootKind?: string;
   rootLabel?: string;
   relativePath?: string;
-}
-
-export interface RuntimeRunState {
-  runId: string;
-  model: string;
-  runtimeKind?: string;
-  status: string;
-  effectiveStatus: string;
-  workerPresent: boolean;
-  runTotalTokens: number;
-  runTotalCostUSD: number;
-}
-
-export interface RuntimeGetSpaceStateResult {
-  spaceId: string;
-  runs: RuntimeRunState[];
-}
-
-// ---- Agent / Dashboard types ----
-
-export interface AgentInfo {
-  agentId: string;
-  runId: string;
-  member: string;
-  status: string;
-  profile?: string;
-  createdAt?: string;
-}
-
-export interface AgentListResult {
-  agents: AgentInfo[];
-}
-
-export interface SpaceTotals {
-  totalTokensIn: number;
-  totalTokensOut: number;
-  totalTokens: number;
-  totalCostUSD: number;
 }
 
 export interface EventRecord {
@@ -810,109 +584,6 @@ export interface NotificationsSourcesListResult {
   channels: string[];
 }
 
-// ---- Plan types ----
-
-export type PlanMode = "autonomous" | "supervised";
-export type PlanStatus =
-  | "draft"
-  | "pending_approval"
-  | "active"
-  | "completed"
-  | "abandoned";
-
-export interface PlanView {
-  id: string;
-  spaceId: string;
-  missionId: string;
-  krRefs?: string[];
-  title: string;
-  description?: string;
-  mode: PlanMode | string;
-  status: PlanStatus | string;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-  abandonedReason?: string;
-  version: number;
-}
-
-export interface PlanPhaseView {
-  id: string;
-  planId: string;
-  title: string;
-  order: number;
-  status: string;
-  createdAt: string;
-  completedAt?: string;
-  version: number;
-}
-
-export interface PlanTodoView {
-  id: string;
-  phaseId: string;
-  planId: string;
-  text: string;
-  done: boolean;
-  order: number;
-  createdAt: string;
-  completedAt?: string;
-  version: number;
-}
-
-export interface PlanCommentView {
-  id: string;
-  planId: string;
-  phaseId?: string;
-  todoId?: string;
-  authorType: string;
-  authorId: string;
-  text: string;
-  createdAt: string;
-}
-
-export interface PlanChangeView {
-  kind: string;
-  data?: Record<string, unknown>;
-  meta?: Record<string, string>;
-}
-
-export interface PlanAmendmentView {
-  id: string;
-  planId: string;
-  proposedBy: string;
-  rationale?: string;
-  diff?: PlanChangeView[];
-  status: string;
-  vetoDeadline: string;
-  vetoedBy?: string;
-  vetoReason?: string;
-  createdAt: string;
-  resolvedAt?: string;
-  version: number;
-}
-
-export interface PlanReviewView {
-  id: string;
-  planId: string;
-  decision: string;
-  note?: string;
-  createdAt: string;
-}
-
-export interface PlanGetV2Result {
-  plan: PlanView;
-  phases?: PlanPhaseView[];
-  todos?: PlanTodoView[];
-  comments?: PlanCommentView[];
-  unread: number;
-  amendments?: PlanAmendmentView[];
-  reviews?: PlanReviewView[];
-}
-
-export interface PlanListResult {
-  plans: PlanView[];
-}
-
 // ---- Model types ----
 
 export interface ModelEntry {
@@ -959,13 +630,8 @@ export interface ConfigLogging {
   maxSizeMB?: number;
 }
 
-export interface ConfigSpaceMessage {
-  queryTimeoutSec?: number;
-}
-
 export interface RuntimeConfig {
   logging: ConfigLogging;
-  spaceMessage?: ConfigSpaceMessage;
 }
 
 export interface ConfigUpdateResult {
@@ -1015,107 +681,6 @@ export interface PromptConfig {
   systemPrompt?: string;
   systemPromptPath?: string;
   systemFragments?: Array<{ path?: string; inline?: string }>;
-}
-
-export interface HeartbeatJob {
-  name: string;
-  interval: string;
-  schedule?: string; // cron expression (e.g. "0 9 * * 1-5"); takes precedence over interval
-  goal: string;
-  paused?: boolean; // per-job pause flag; paused jobs excluded from EffectiveHeartbeats()
-  maxOccurrences?: number; // max number of runs; 0 = unlimited
-  expiresAt?: string; // ISO 8601 timestamp; schedule expiry
-  errorBudget?: ErrorBudget; // circuit breaker config; nil = defaults (3 failures, 1h cooldown)
-}
-
-// Circuit breaker thresholds for heartbeat error budget
-export interface ErrorBudget {
-  maxConsecutiveFailures?: number; // consecutive failures before circuit opens
-  cooldownInterval?: string; // Go duration string (e.g. "1h") — cooldown before half-open probe
-}
-
-// Structured outcome from heartbeat execution
-export interface HeartbeatOutcome {
-  status: string; // "ok" | "warning" | "critical" | "error"
-  summary: string; // one-line finding from the heartbeat run
-  actions?: string[]; // actions taken (coordinator heartbeats only)
-}
-
-// Calendar API response entry — one per heartbeat execution or skip
-export interface HeartbeatHistoryEntry {
-  jobName: string;
-  member: string;
-  memberType: string; // "coordinator" | "worker"
-  taskId: string;
-  executedAt: string; // ISO 8601
-  duration: number; // milliseconds
-  outcome?: HeartbeatOutcome; // nil if task failed before setting outcome
-  reviewDecision?: string; // "approve" | "retry" | "escalate" | "" (no review)
-  reviewFeedback?: string;
-  triggerSource?: string; // "scheduled" | "agent" | "webhook"
-  triggerReason?: string;
-  skipped: boolean;
-  skipReason?: string; // "backpressure" | "maxOccurrences" | "expired"
-  source?: string; // "config" | "agent"
-  scheduleEntryId?: string; // for agent entries
-  entryStatus?: string; // "active" | "pending_approval" — for agent-created entries (F31)
-  guardrailReason?: string; // why the entry is pending approval (which guardrail was exceeded)
-}
-
-// Agent-created schedule entry (F29)
-export interface ScheduleEntry {
-  entryId: string;
-  spaceId: string;
-  memberId: string;
-  createdBy: string; // member label or system
-  name: string;
-  goal: string;
-  context?: ScheduleEntryContext;
-  priority: number;
-  scheduleType: string; // "one_off" | "recurring"
-  scheduleExpr: string; // cron expression or Go duration
-  status: string; // "active" | "pending_approval" | "triggered" | "expired" | "cancelled"
-  guardrailReason?: string;
-  dedupeKey?: string;
-  expiresAt?: string; // ISO 8601
-  nextRunAt?: string; // ISO 8601
-  createdAt: string; // ISO 8601
-  updatedAt: string; // ISO 8601
-  runs?: ScheduleRun[];
-}
-
-export interface ScheduleRun {
-  id: string;
-  dueAt: string;
-  startedAt: string;
-  finishedAt?: string;
-  status: string;
-  targetKind: string;
-  targetObjectId?: string;
-  error?: string;
-}
-
-// Structured context on agent-scheduled entries (F28)
-export interface ScheduleEntryContext {
-  relatedTaskId?: string;
-  checkCondition?: string;
-  successCriteria?: string;
-}
-
-// Operator-configured limits on agent self-scheduling (F30)
-export interface ScheduleGuardrails {
-  maxActiveHeartbeats?: number; // max concurrent agent-created entries
-  minInterval?: string; // minimum interval between runs (Go duration)
-  maxLookahead?: string; // max how far ahead an agent can schedule (Go duration)
-  dailyBudget?: number; // max runs per day
-  weeklyBudget?: number; // max runs per week
-  defaultTtl?: string; // default TTL for agent entries (Go duration, e.g. "24h")
-}
-
-export interface HeartbeatConfig {
-  enabled?: boolean;
-  jobs?: HeartbeatJob[];
-  guardrails?: ScheduleGuardrails; // per-member guardrails for agent self-scheduling
 }
 
 // ── Mission types ─────────────────────────────────────
@@ -1227,21 +792,6 @@ export interface DecisionView {
   title: string;
   rationale: string;
   context?: string;
-  questions?: Array<{
-    id: string;
-    text: string;
-    type: "multiple_choice" | "free_form";
-    options?: string[];
-    allowFreeForm?: boolean;
-    recommendation?: string;
-    blocking?: boolean;
-  }>;
-  answers?: Array<{
-    questionId: string;
-    selectedOption?: string;
-    freeFormText?: string;
-  }>;
-  cancelled?: boolean;
   alternativesRejected?: string;
   invalidationConditions?: string[];
   confidence: number;
@@ -1249,7 +799,6 @@ export interface DecisionView {
   taskRef?: string;
   keyResultRef?: string;
   missionRef?: string;
-  planRef?: string;
   correlationRef?: string;
   informedByRef?: string;
   tags?: string[];

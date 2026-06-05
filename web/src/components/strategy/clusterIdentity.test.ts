@@ -44,10 +44,10 @@ describe('deriveNodeClusterIdentity', () => {
 
   it('uses node id as a final fallback', () => {
     const node = makeNode({
-      id: 'plan:123',
-      type: 'plan',
-      data: { plan: {} },
+      id: 'unknown:123',
+      type: 'unknown',
+      data: {},
     })
-    expect(deriveNodeClusterIdentity(node)).toBe('plan:123')
+    expect(deriveNodeClusterIdentity(node)).toBe('unknown:123')
   })
 })

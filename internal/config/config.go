@@ -27,10 +27,12 @@ type Config struct {
 	DatabaseURL string
 }
 
-// Default returns the default host configuration.
+// Default returns the default host configuration. Runtime entrypoints resolve
+// DataDir through ResolveDataDir so state lives in the user's agen8 home unless
+// the caller explicitly overrides it.
 func Default() Config {
 	return Config{
-		DataDir: "db",
+		DataDir: "",
 	}
 }
 

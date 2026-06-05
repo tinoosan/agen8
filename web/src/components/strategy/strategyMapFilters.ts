@@ -34,7 +34,7 @@ function connectedEdges(nodeIds: Set<string>, edges: Edge[]): Set<string> {
 
 // ── Attention filter ────────────────────────────────────────────────────
 
-/** Nodes needing human action: blocked/review tasks and input-needed decisions. */
+/** Nodes needing attention: blocked/review tasks. */
 export function computeAttentionFilter(
   nodes: Node[],
   edges: Edge[],
@@ -52,33 +52,6 @@ export function computeAttentionFilter(
         }
         break
       }
-      case 'decision': {
-        const decision = d.decision as {
-          cancelled?: boolean
-          questions?: { id: string; blocking?: boolean }[]
-          answers?: { questionId: string; selectedOption?: string; selectedOptions?: string[]; freeFormText?: string }[]
-        } | undefined
-        if (!decision || decision.cancelled) break
-        const hasBlockingUnanswered = (decision.questions ?? []).some((q) => {
-          if (!q.blocking) return false
-          return !(decision.answers ?? []).some(
-            (a) =>
-              a.questionId === q.id &&
-              Boolean(
-                a.selectedOption?.trim() ||
-                  a.freeFormText?.trim() ||
-                  (a.selectedOptions ?? []).some((opt) => opt.trim() !== ''),
-              ),
-          )
-        })
-        if (hasBlockingUnanswered) matchedIds.add(node.id)
-        break
-      }
-      case 'plan': {
-        const plan = d.plan as { status?: string } | undefined
-        if (plan?.status === 'pending_approval') matchedIds.add(node.id)
-        break
-      }
     }
   }
 
@@ -89,7 +62,7 @@ export function computeAttentionFilter(
 
 // ── Failed & Cancelled filter ───────────────────────────────────────────
 
-/** Dead/failed work: failed tasks, cancelled decisions, and abandoned plans. */
+/** Dead/failed work: failed tasks. */
 export function computeFailedFilter(
   nodes: Node[],
   edges: Edge[],
@@ -105,16 +78,6 @@ export function computeFailedFilter(
         if (task?.status === 'failed' || task?.status === 'canceled') {
           matchedIds.add(node.id)
         }
-        break
-      }
-      case 'decision': {
-        const decision = d.decision as { cancelled?: boolean } | undefined
-        if (decision?.cancelled) matchedIds.add(node.id)
-        break
-      }
-      case 'plan': {
-        const plan = d.plan as { status?: string } | undefined
-        if (plan?.status === 'abandoned') matchedIds.add(node.id)
         break
       }
     }

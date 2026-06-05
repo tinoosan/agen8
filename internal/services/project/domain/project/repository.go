@@ -14,7 +14,6 @@ type Record struct {
 	UserID        string
 	Title         string
 	Status        Status
-	PlanMode      string
 	Customization *Customization
 	CreatedAt     time.Time
 	UpdatedAt     time.Time

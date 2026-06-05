@@ -38,7 +38,7 @@
   </nav>
 
   <h2 id="boundary">1. Service boundary</h2>
-  <p>Projects are durable workspace records. A project root is meaningful only inside a location, so the project stores <code>locationId</code> with <code>root</code>. A project does not run code; its location can run code. Member harness sessions execute inside the project location and root through the location and harness services. A member belongs to exactly one project through <code>Member.ProjectID</code>. The project service owns the member roster directly: member identity, labels, member type, and lifecycle state. It does not own location probing, filesystem browsing, credentials, harness runtime state, message channels, tasks, missions, or harness delivery.</p>
+  <p>Projects are durable workspace records. A project root is meaningful only inside a location, so the project stores <code>locationId</code> with <code>root</code>. A project does not run code; its location can run code. Members are project-scoped work-context identities registered by MCP callers. A member belongs to exactly one project through <code>Member.ProjectID</code>. The project service owns the member roster directly: member identity, labels, member type, and lifecycle state. It does not own location probing, filesystem browsing, credentials, tasks, missions, decisions, graph links, or HTTP tool execution.</p>
 
   <div class="grid">
     <div class="card">

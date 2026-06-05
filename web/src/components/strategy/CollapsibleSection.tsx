@@ -13,8 +13,8 @@ interface Props {
 
 /**
  * Collapsible section with persisted open/closed state.
- * Used in detail panels for grouping content (activity, reviews,
- * acceptance criteria, heartbeat, etc.).
+ * Used in detail panels for grouping content such as activity, reviews,
+ * acceptance criteria, and artifacts.
  */
 export function CollapsibleSection({
   storageKey,

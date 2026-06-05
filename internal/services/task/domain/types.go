@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 )
@@ -17,8 +16,6 @@ type TaskFilter struct {
 	ClaimedBy      member.ID
 	TaskKind       string
 	Status         []TaskStatus
-	PlanPhaseID    *uuid.UUID
-	PlanTodoID     *uuid.UUID
 	FromDate       *time.Time
 	ToDate         *time.Time
 	Limit          int

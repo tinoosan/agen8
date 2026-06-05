@@ -86,6 +86,59 @@ func TestRegisterMCPContextUpdatesExistingMemberDisplayName(t *testing.T) {
 	}
 }
 
+func TestRegisterMCPContextRehomesLegacyLocalMemberToTokenUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	root := filepath.Join(t.TempDir(), "repo")
+
+	legacy, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "local",
+		ProjectRoot: root,
+		DisplayName: "codex",
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("legacy register: %v", err)
+	}
+
+	registered, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "user-1",
+		ProjectRoot: root,
+		DisplayName: "Codex backend engineer",
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("real user register: %v", err)
+	}
+	if registered.MemberID != legacy.MemberID {
+		t.Fatalf("member id changed from %q to %q", legacy.MemberID, registered.MemberID)
+	}
+
+	resolved, err := service.ResolveMCPContext(ctx, ResolveMCPContextInput{
+		Token:       "agen8-local",
+		UserID:      "user-1",
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("resolve rehomed member: %v", err)
+	}
+	if string(resolved.ID) != registered.MemberID {
+		t.Fatalf("resolved member=%q want %q", resolved.ID, registered.MemberID)
+	}
+	if resolved.UserID != "user-1" {
+		t.Fatalf("resolved user=%q want user-1", resolved.UserID)
+	}
+	if resolved.DisplayName != "Codex backend engineer" {
+		t.Fatalf("resolved display=%q want Codex backend engineer", resolved.DisplayName)
+	}
+}
+
 func newProjectServiceForMCPContextTest(t *testing.T) *Service {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{

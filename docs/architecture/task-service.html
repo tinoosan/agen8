@@ -31,7 +31,7 @@
       <li><a href="#lifecycle">The task lifecycle</a></li>
       <li><a href="#routing">Routing model</a></li>
       <li><a href="#caller">Caller identity</a></li>
-      <li><a href="#publishing">Persistence &amp; message publishing</a></li>
+      <li><a href="#publishing">Persistence</a></li>
       <li><a href="#invariants">Invariants</a></li>
     </ol>
   </nav>
@@ -58,8 +58,8 @@
       <div class="role">Persistence only. Stores the next state the service hands it; does not evaluate rules.</div>
     </div>
     <div class="layer events">
-      <div class="label">Messages</div>
-      <div class="role">Agent notifications are created through the message service boundary after task persistence succeeds.</div>
+      <div class="label">Graph</div>
+      <div class="role">Task references create durable graph context after persistence succeeds.</div>
     </div>
   </div>
 
@@ -285,7 +285,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
     <div class="step"><div class="marker">2</div><div class="body">Service authorizes the caller. User-owned actions verify the user against the task's project; member-scoped actions verify the caller against the task's assigned or claimed member.</div></div>
     <div class="step"><div class="marker">3</div><div class="body">Service loads the current task with the typed id: <code>current, err := repo.GetTask(ctx, taskID)</code>.</div></div>
     <div class="step"><div class="marker">4</div><div class="body">Service calls the domain transition: <code>next, err := current.Cancel(reason, clock.Now())</code>. If validation or state rules fail the call returns an error before any side effect.</div></div>
-    <div class="step"><div class="marker">5</div><div class="body">Service persists the next state and, when another agent needs to act, publishes the corresponding agent message through one service-owned seam. The task service calls the message service boundary; it does not write the message repository directly.</div></div>
+    <div class="step"><div class="marker">5</div><div class="body">Service persists the next state and records graph references for missions, key results, and related decisions. Agent-facing next-action guidance is returned by the MCP task handler for the current tool call.</div></div>
   </div>
 
   <h2 id="routing">4. Routing model — tasks go to members</h2>

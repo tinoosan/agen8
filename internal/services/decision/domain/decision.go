@@ -46,6 +46,7 @@ type Decision struct {
 	ProjectID      string         `json:"projectId"`
 	Source         DecisionSource `json:"source"`
 	SourceIdentity string         `json:"sourceIdentity,omitempty"`
+	MemberName     string         `json:"memberName,omitempty"`
 	Title          string         `json:"title"`
 	Confidence     float64        `json:"confidence,omitempty"`
 
