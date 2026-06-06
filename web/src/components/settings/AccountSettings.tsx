@@ -16,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { formatDate } from '@/lib/format'
 import {
   Select,
   SelectContent,
@@ -79,13 +80,6 @@ const skillInstallCommands = [
     path: '~/.claude/skills/agen8/SKILL.md',
   },
 ]
-
-function formatDate(value?: string): string {
-  if (!value) return 'Unknown'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-}
 
 function displayName(user: { name?: string; email?: string } | null): string {
   const name = user?.name?.trim()
@@ -218,7 +212,7 @@ export function AccountProfileSection() {
               </div>
               <div>
                 <span className="block text-[var(--text-3)]">Joined</span>
-                <span>{formatDate(auth.user?.createdAt)}</span>
+                <span>{formatDate(auth.user?.createdAt, { fallback: 'Unknown' })}</span>
               </div>
             </div>
             <Button variant="ghost-danger" size="sm" onClick={() => void handleLogout()}>

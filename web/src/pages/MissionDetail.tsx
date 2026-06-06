@@ -30,6 +30,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { formatDate } from '@/lib/format'
 import {
   ChevronRight,
   ChevronDown,
@@ -653,9 +654,9 @@ export default function MissionDetail() {
               <span className="inline-flex items-center gap-1 text-[var(--text-3)]" style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}>
                 <Calendar size={11} />
                 {mission.startDate && mission.endDate
-                  ? `${new Date(mission.startDate).toLocaleDateString()} – ${new Date(mission.endDate).toLocaleDateString()}`
+                  ? `${formatDate(mission.startDate, { style: 'numeric' })} – ${formatDate(mission.endDate, { style: 'numeric' })}`
                   : mission.endDate
-                    ? `Due ${new Date(mission.endDate).toLocaleDateString()}`
+                    ? `Due ${formatDate(mission.endDate, { style: 'numeric' })}`
                     : 'No deadline'}
               </span>
             )}

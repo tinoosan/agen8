@@ -51,3 +51,20 @@ export function formatRelative(iso?: string, opts?: RelativeTimeOptions): string
   if (mo < 12) return `${mo}mo ago`
   return `${Math.round(mo / 12)}y ago`
 }
+
+export interface DateFormatOptions {
+  /** Text for missing/unparseable input. Defaults to ''. */
+  fallback?: string
+  /** 'medium' (default) -> "Jun 6, 2026"; 'numeric' -> locale-default "6/6/2026". */
+  style?: 'medium' | 'numeric'
+}
+
+export function formatDate(iso?: string, opts?: DateFormatOptions): string {
+  const fallback = opts?.fallback ?? ''
+  if (!iso) return fallback
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return fallback
+  return opts?.style === 'numeric'
+    ? date.toLocaleDateString()
+    : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}

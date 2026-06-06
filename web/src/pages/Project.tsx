@@ -5,7 +5,7 @@ import { useLocations } from '../hooks/useLocations'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
-import { formatRelative } from '@/lib/format'
+import { formatDate, formatRelative } from '@/lib/format'
 import {
   Archive, Check, ChevronLeft, ChevronRight, FolderOpen,
   HardDrive, Link as LinkIcon, MoreHorizontal, Plus, Search, Server, Trash2,
@@ -47,17 +47,6 @@ function projectName(project: Project): string {
   if (project.id) return project.id
   const segments = project.root.split('/')
   return segments[segments.length - 1] || project.root
-}
-
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return ''
-  try {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      month: 'short', day: 'numeric', year: 'numeric',
-    })
-  } catch {
-    return dateStr
-  }
 }
 
 function shortenPath(path: string): string {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatRelative } from './format'
+import { formatDate, formatRelative } from './format'
 
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
 const SEC = 1000
@@ -40,5 +40,32 @@ describe('formatRelative', () => {
   it('rolls old timestamps into months and years', () => {
     expect(formatRelative(ago(90 * DAY))).toBe('3mo ago')
     expect(formatRelative(ago(400 * DAY))).toBe('1y ago')
+  })
+})
+
+describe('formatDate', () => {
+  const iso = '2026-06-06T12:00:00.000Z'
+  const date = new Date(iso)
+
+  it('returns the fallback for missing or unparseable input', () => {
+    expect(formatDate(undefined)).toBe('')
+    expect(formatDate('not-a-date')).toBe('')
+    expect(formatDate(undefined, { fallback: 'Unknown' })).toBe('Unknown')
+    expect(formatDate('not-a-date', { fallback: 'Unknown' })).toBe('Unknown')
+  })
+
+  it('never leaks "Invalid Date" or the raw input', () => {
+    expect(formatDate('Invalid Date')).toBe('')
+    expect(formatDate('2026-13-99')).toBe('')
+  })
+
+  it('defaults to the medium long-form style', () => {
+    expect(formatDate(iso)).toBe(
+      date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+    )
+  })
+
+  it('supports the numeric (locale-default) style', () => {
+    expect(formatDate(iso, { style: 'numeric' })).toBe(date.toLocaleDateString())
   })
 })
