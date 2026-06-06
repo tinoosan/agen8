@@ -3,7 +3,7 @@ import { Link } from 'wouter'
 import { toast } from 'sonner'
 import { useMissions, useKeyResults, useUpdateKRProgress } from '../../hooks/useMissions'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AlertCircle, BarChart2, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { AlertCircle, BarChart2, ChevronDown, ChevronRight, ExternalLink, Target } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { missionDetailLink } from '../../lib/routing'
 import type { MissionView, KeyResultView, KeyResultStatus } from '../../lib/types'
@@ -282,9 +282,12 @@ export default function MissionSummary({ projectId, mode = 'inMotion' }: { proje
     <section className="dashboard-section">
       <div className="dashboard-section-heading mb-2">
         <div className="dashboard-section-heading-main">
-          <span className="dashboard-section-title">
-            {title}
-          </span>
+          <div className="flex items-center gap-2">
+            <Target size={14} className="text-[var(--accent)]" />
+            <span className="dashboard-section-title">
+              {title}
+            </span>
+          </div>
           <p className="dashboard-section-caption">{caption}</p>
         </div>
         <div className="dashboard-section-meta">

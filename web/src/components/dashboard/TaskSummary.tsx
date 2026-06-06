@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, ListChecks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useProjectTasks, useProjectTasksSSE } from '../../hooks/useProjectTasks'
 import type { Task } from '../../lib/types'
@@ -98,7 +98,10 @@ export default function TaskSummary({ projectId }: { projectId: string | null })
     <section className="dashboard-section">
       <div className="dashboard-section-heading mb-2">
         <div className="dashboard-section-heading-main">
-          <span className="dashboard-section-title">Tasks</span>
+          <div className="flex items-center gap-2">
+            <ListChecks size={14} className="text-[var(--accent)]" />
+            <span className="dashboard-section-title">Tasks</span>
+          </div>
           <p className="dashboard-section-caption">The work in flight, grouped by where it stands.</p>
         </div>
         <div className="dashboard-section-meta">

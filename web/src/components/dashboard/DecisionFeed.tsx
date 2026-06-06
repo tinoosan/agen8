@@ -199,25 +199,12 @@ function DecisionRow({ decision, catalogs }: { decision: DecisionView; catalogs:
   const clusterColor = `color-mix(in srgb, ${baseClusterColor} 58%, var(--text-2) 42%)`
   const recencyClass = getRecencyClass(decision.createdAt)
   const identity = actor.label
-  const avatarStyle = {
-    color: clusterColor,
-    background: `color-mix(in srgb, ${baseClusterColor} 9%, var(--bg-panel) 91%)`,
-    borderColor: `color-mix(in srgb, ${baseClusterColor} 16%, transparent)`,
-  }
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div className={cn('decision-card', recencyClass)}>
         <CollapsibleTrigger asChild>
           <button className="flex items-center gap-3 w-full text-left bg-transparent border-none cursor-pointer p-0 font-[inherit] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:outline-none rounded-[var(--r-sm)]">
-            {/* Role avatar — cluster-coloured, acts as visual anchor */}
-            <span
-              className="decision-identity-badge w-6 h-6 rounded-[10px] flex items-center justify-center text-[0.5625rem] font-semibold uppercase shrink-0 tracking-[0.02em]"
-              style={avatarStyle}
-            >
-              {identity.slice(0, 2)}
-            </span>
-
             {/* Content column */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
@@ -286,7 +273,6 @@ function DecisionFeedSkeleton() {
       <div className="flex flex-col gap-1">
         {[1, 2, 3].map(i => (
           <div key={i} className="flex items-center gap-3 py-2 px-2.5">
-            <Skeleton className="h-7 w-7 rounded-[var(--r-md)]" />
             <div className="flex-1">
               <Skeleton className="h-3 w-20 mb-1.5" />
               <Skeleton className="h-3.5 w-48" />
