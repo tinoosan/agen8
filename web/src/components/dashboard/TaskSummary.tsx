@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AlertCircle, ListChecks } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { AlertCircle, ListChecks, CircleDashed, CircleDot, Ban, Eye, CircleCheck } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useProjectTasks, useProjectTasksSSE } from '../../hooks/useProjectTasks'
 import type { Task } from '../../lib/types'
 
@@ -9,22 +9,25 @@ import type { Task } from '../../lib/types'
  * Mirrors the canonical task lifecycle (pending → active →
  * in_review → succeeded/failed; active ↔ blocked). Terminal
  * `failed`/`canceled` are intentionally omitted — the strip
- * surfaces live work plus recently-completed, not the graveyard. */
+ * surfaces live work plus recently-completed, not the graveyard.
+ *
+ * `color` doubles as the tile tint source. `succeeded` uses a muted
+ * tone so settled work recedes and live counts dominate. */
 
 type Bucket = {
   key: string
   label: string
   match: (status: string) => boolean
   color: string
-  alert?: boolean
+  Icon: LucideIcon
 }
 
 const BUCKETS: Bucket[] = [
-  { key: 'pending', label: 'Queued', match: (s) => s === 'pending', color: 'var(--text-2)' },
-  { key: 'active', label: 'In progress', match: (s) => s === 'active', color: 'var(--green)' },
-  { key: 'blocked', label: 'Blocked', match: (s) => s === 'blocked', color: 'var(--red)', alert: true },
-  { key: 'in_review', label: 'In review', match: (s) => s === 'in_review', color: 'var(--amber)' },
-  { key: 'succeeded', label: 'Done', match: (s) => s === 'succeeded', color: 'var(--text-3)' },
+  { key: 'pending', label: 'Queued', match: (s) => s === 'pending', color: 'var(--text-2)', Icon: CircleDashed },
+  { key: 'active', label: 'Active', match: (s) => s === 'active', color: 'var(--green)', Icon: CircleDot },
+  { key: 'blocked', label: 'Blocked', match: (s) => s === 'blocked', color: 'var(--red)', Icon: Ban },
+  { key: 'in_review', label: 'Review', match: (s) => s === 'in_review', color: 'var(--amber)', Icon: Eye },
+  { key: 'succeeded', label: 'Done', match: (s) => s === 'succeeded', color: 'var(--text-3)', Icon: CircleCheck },
 ]
 
 function countByBucket(tasks: Task[]): Record<string, number> {
@@ -41,21 +44,28 @@ function countByBucket(tasks: Task[]): Record<string, number> {
 /* ── Stat cell ────────────────────────────────────────── */
 
 function StatCell({ bucket, count }: { bucket: Bucket; count: number }) {
-  const active = bucket.alert && count > 0
+  const hasCount = count > 0
+  const accent = hasCount ? bucket.color : 'var(--text-3)'
+  // Borderless: the tile is a soft tint of its status colour (calm grey
+  // when empty), so colour — not chrome — carries the meaning.
+  const tint = hasCount
+    ? `color-mix(in srgb, ${bucket.color} 13%, var(--bg-app))`
+    : `color-mix(in srgb, var(--text-3) 6%, var(--bg-app))`
+  const Icon = bucket.Icon
   return (
     <div
-      className={cn(
-        'dashboard-list-surface flex flex-col gap-0.5 px-3 py-2.5',
-        active && 'ring-1 ring-[var(--red)]/40',
-      )}
+      className="flex flex-col gap-1.5 rounded-[var(--r-lg)] px-3 py-2.5"
+      style={{ background: tint }}
     >
+      {/* rem sizing keeps the glyph in step with the user's font scale */}
+      <Icon size="1.1rem" style={{ color: accent }} aria-hidden />
       <span
         className="text-[1.375rem] font-semibold leading-none tabular-nums"
-        style={{ color: count > 0 ? bucket.color : 'var(--text-3)' }}
+        style={{ color: accent }}
       >
         {count}
       </span>
-      <span className="text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-[var(--text-3)]">
+      <span className="text-[0.75rem] font-medium text-[var(--text-3)]">
         {bucket.label}
       </span>
     </div>
@@ -76,7 +86,7 @@ export default function TaskSummary({ projectId }: { projectId: string | null })
     return (
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-w-[560px]">
         {BUCKETS.map((b) => (
-          <Skeleton key={b.key} className="h-[58px] rounded-[var(--r-lg)]" />
+          <Skeleton key={b.key} className="h-[5.25rem] rounded-[var(--r-lg)]" />
         ))}
       </div>
     )
