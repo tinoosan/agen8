@@ -11,7 +11,7 @@ Use Agen8 as the durable work-context layer behind the harness. Codex, Claude Co
 
 1. Call `project.register` early for the current project.
    - Prefer `project_root` when working from a local project directory.
-   - Set `display_name` when the human gives a working identity or when a clearer graph label helps, for example `Research analyst`, `Backend engineer`, or `Reviewer`.
+   - Set `display_name` as `Name (Role)` — a self-chosen name plus the working role — when the human gives a role or one is inferable from the request, for example `Atlas (Backend Engineer)` or `Iris (Frontend Reviewer)`. Use a bare `Name` only when the role is too ambiguous to infer. The name keeps the member recognizable in the graph; the role keeps the roster scannable.
    - Use the returned `projectId`, `memberId`, `channelId`, `url`, and `token` for later calls. Treat `memberType` as compatibility metadata, not as a permission model.
    - Do not invent a thread id. If the harness exposes native session metadata through MCP, Agen8 can bind it. If not, use explicit user-provided ids only.
 2. After context compaction, thread resume, handoff, or a user says to continue, inspect Agen8 before continuing.
