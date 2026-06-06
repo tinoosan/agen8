@@ -91,6 +91,8 @@ curl http://127.0.0.1:7777/healthz</code></pre>
   }
 }</code></pre>
 
+  <p>Use the repository <code>.mcp.example.json</code> as the public template. Copy it to a local <code>.mcp.json</code> or to the harness-specific MCP configuration location, then replace the placeholder token with the user's API key. The real <code>.mcp.json</code> is ignored and should stay out of git because it is machine-specific and may contain local tokens.</p>
+
   <p>After registration, the response includes <code>projectId</code>, <code>memberId</code>, <code>channelId</code>, <code>url</code>, and <code>token</code>. It may also include <code>memberType</code> as compatibility metadata. Agents should use returned ids rather than inventing them.</p>
 
   <h2 id="uat">6. Retained tool UAT</h2>

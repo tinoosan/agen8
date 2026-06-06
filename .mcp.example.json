@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agen8": {
+      "type": "http",
+      "url": "http://127.0.0.1:7777/mcp?token=<your-agen8-api-key>"
+    }
+  }
+}

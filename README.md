@@ -51,6 +51,10 @@ Connect a harness to:
 http://127.0.0.1:7777/mcp?token=<api-key>
 ```
 
+Use `.mcp.example.json` as the checked-in template. Keep the real `.mcp.json`
+local; it is ignored because it contains machine-specific MCP server entries
+and the user's local Agen8 API key.
+
 Then call `project.register` with the project root and a readable
 `display_name`, such as `backend engineer` or `frontend reviewer`, so tasks,
 decisions, and graph records remain understandable.
