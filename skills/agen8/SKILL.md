@@ -65,6 +65,19 @@ Call Agen8 MCP tools directly. If a wrapper or parallel call mangles the namespa
 - Graph/context inspection is not optional after compaction or when joining ongoing work; it prevents stale chat memory from overriding durable project state.
 - Keep the graph readable for the human. Prefer member display names and clear task/KR titles over raw ids in user-facing surfaces.
 
+## Write Notes Plainly
+
+Notes are for people. Decisions, task summaries, review notes, and KR/task titles get read later by a human who has to act on them. Write so the point lands on the first read.
+
+- Lead with the point. Say what you did or decided, then why.
+- Use plain words. If a shorter, common word works, use it. No one should need a thesaurus.
+- Cut filler. Drop words like "leverage", "utilize", "robust", "holistic", and "delve" when a simpler word fits.
+- Keep a technical term only when it carries real meaning, and define it once if it is not obvious.
+- Short sentences. One idea each.
+- Test it: could a teammate skim the note and know what happened and what to do next? If not, rewrite it.
+
+Plain notes keep the work manageable. The human can review and steer without decoding the language.
+
 ## Workflow Defaults
 
 - For a new objective, create or choose one mission and one KR first.

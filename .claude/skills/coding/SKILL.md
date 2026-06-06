@@ -119,6 +119,16 @@ function process(data) {
 - [ ] Does this follow the project's conventions?
 - [ ] Are commits atomic and well-described?
 
+### Reflective review
+
+Reviewing your own work is not a rubber stamp — it is the moment to think about what you actually did. A review that merely restates the change adds nothing; a useful one independently confirms the change and records what was learned.
+
+1. **Re-verify independently.** Do not trust the change summary — including your own. Re-read the actual diff line by line, and re-run the build and the narrowest relevant tests. The summary describes intent; the diff is what shipped, and the two can differ.
+2. **State what it proves — and what it doesn't.** A green test proves a specific claim for specific inputs, not general correctness. Name the residual risk explicitly: the input classes left uncovered, the layers not exercised, the invariants now resting on fewer guarantees.
+3. **Leave a durable note.** Record the reflection somewhere persistent (commit message, review comment, or a decision/work log) so the reasoning outlives the moment. Capture four things: what was done, why it is safe, what it does not cover, and the conditions that would later invalidate the conclusion.
+
+**Prove-then-delete for dead code.** Before removing code you believe is unreachable, add a test that exercises the suspect path and passes *while the code still exists* — demonstrating the code never fires. Only then delete it. Keep the test as a pin against silent regression, since removing redundant code often leaves a single remaining guarantee that nothing else is asserting.
+
 ## Templates
 
 ### Bug fix commit message
