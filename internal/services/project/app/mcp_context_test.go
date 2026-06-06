@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,6 +181,239 @@ func TestRegisterMCPContextRehomesLegacyLocalMemberToTokenUser(t *testing.T) {
 	if rehomedProject.UserID() != "user-1" {
 		t.Fatalf("project user=%q want user-1", rehomedProject.UserID())
 	}
+}
+
+// TestRegisterMCPContextHarnessLabelDriftDoesNotForkMember pins the register-side
+// half of the multibinding fix (task-74b59b64). Harness kind seeds a member's id
+// (deterministicMemberID), so when one session re-registers under a drifted harness
+// label - "claude" one call, "claude-cli" the next - the old code created a SECOND
+// member for the same human session. The harness-agnostic resolve then matched both
+// and failed with "mcp context resolves to multiple members", blocking even reads.
+// Re-registration must reuse the existing member instead of forking a new one.
+func TestRegisterMCPContextHarnessLabelDriftDoesNotForkMember(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	root := filepath.Join(t.TempDir(), "repo")
+
+	first, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: root,
+		DisplayName: "Atlas",
+		HarnessKind: "claude",
+		SessionID:   "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+
+	second, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: root,
+		DisplayName: "Atlas",
+		HarnessKind: "claude-cli",
+		SessionID:   "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("second register (drifted harness label): %v", err)
+	}
+	if second.MemberID != first.MemberID {
+		t.Fatalf("harness label drift forked the member: first=%q second=%q", first.MemberID, second.MemberID)
+	}
+
+	members, err := service.members.List(ctx, member.Filter{
+		ProjectID:        first.ProjectID,
+		NativeSessionRef: "sess-1",
+		LifecycleState:   member.LifecycleActive,
+	})
+	if err != nil {
+		t.Fatalf("list members: %v", err)
+	}
+	if len(members) != 1 {
+		t.Fatalf("active members for session=%d want 1 (harness label drift must not fork)", len(members))
+	}
+
+	// The daemon resolves harness-agnostically (HarnessKind:""). After the drift it
+	// must return the one member, not the multi-member error.
+	resolved, err := service.ResolveMCPContext(ctx, ResolveMCPContextInput{
+		Token:     "ak_test_token",
+		UserID:    "user-1",
+		ProjectID: first.ProjectID,
+		SessionID: "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("harness-agnostic resolve after label drift: %v", err)
+	}
+	if string(resolved.ID) != first.MemberID {
+		t.Fatalf("resolved member=%q want %q", resolved.ID, first.MemberID)
+	}
+}
+
+// TestResolveMCPContextCollapsesHarnessLabelForkSameProject pins the resolve-side
+// half of the fix: data already forked by the old code (two active members for the
+// same user+project+native ref, differing only by harness label) must heal on read.
+// Resolution collapses them to one member of that session instead of erroring.
+func TestResolveMCPContextCollapsesHarnessLabelForkSameProject(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	root := filepath.Join(t.TempDir(), "repo")
+
+	first, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: root,
+		DisplayName: "Atlas",
+		HarnessKind: "claude",
+		SessionID:   "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// Fabricate the fork the old code left behind. The register path no longer creates
+	// it, so write the second member directly: same user, project, and native ref, a
+	// drifted harness label, and a distinct id.
+	authCtx := caller.ContextWithCaller(ctx, caller.Caller{UserID: "user-1"})
+	forked, err := service.UpsertExternalHarnessMember(authCtx, UpsertExternalHarnessMemberParams{
+		ID:               member.ID("member-forked-clic"),
+		UserID:           "user-1",
+		ProjectID:        first.ProjectID,
+		NativeSessionRef: first.NativeSessionRef,
+		DisplayName:      "Atlas",
+		HarnessKind:      "claude-cli",
+	})
+	if err != nil {
+		t.Fatalf("fabricate fork: %v", err)
+	}
+
+	resolved, err := service.ResolveMCPContext(ctx, ResolveMCPContextInput{
+		Token:     "ak_test_token",
+		UserID:    "user-1",
+		ProjectID: first.ProjectID,
+		SessionID: "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("resolve over forked members must not error: %v", err)
+	}
+	if string(resolved.ID) != first.MemberID && resolved.ID != forked.ID {
+		t.Fatalf("resolved member=%q is neither fork member (%q / %q)", resolved.ID, first.MemberID, forked.ID)
+	}
+	if resolved.ProjectID != first.ProjectID {
+		t.Fatalf("resolved project=%q want %q", resolved.ProjectID, first.ProjectID)
+	}
+	if resolved.NativeSessionRef != first.NativeSessionRef {
+		t.Fatalf("resolved native ref=%q want %q", resolved.NativeSessionRef, first.NativeSessionRef)
+	}
+}
+
+// TestResolveMCPContextKeepsLoudErrorOnCrossProjectAmbiguity pins the limit of the
+// collapse: it must NOT paper over genuine ambiguity. When one native ref maps to
+// members in two different projects (reachable because an api-key session carries no
+// bound project, so the lookup is not project-scoped), resolution still cannot know
+// which project the caller means and must fail loudly rather than guess an actor
+// across a project boundary.
+func TestResolveMCPContextKeepsLoudErrorOnCrossProjectAmbiguity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	rootA := filepath.Join(t.TempDir(), "repo-a")
+	rootB := filepath.Join(t.TempDir(), "repo-b")
+
+	a, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: rootA,
+		DisplayName: "Atlas",
+		HarnessKind: "claude",
+		SessionID:   "shared-ref",
+	})
+	if err != nil {
+		t.Fatalf("register project A: %v", err)
+	}
+	b, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: rootB,
+		DisplayName: "Atlas",
+		HarnessKind: "claude",
+		SessionID:   "shared-ref",
+	})
+	if err != nil {
+		t.Fatalf("register project B: %v", err)
+	}
+	if a.ProjectID == b.ProjectID {
+		t.Fatalf("expected distinct projects, both=%q", a.ProjectID)
+	}
+
+	// Resolve WITHOUT a project id - the api-key daemon path - must still fail loudly.
+	_, err = service.ResolveMCPContext(ctx, ResolveMCPContextInput{
+		Token:     "ak_test_token",
+		UserID:    "user-1",
+		SessionID: "shared-ref",
+	})
+	if err == nil {
+		t.Fatal("expected cross-project ambiguity to fail loudly")
+	}
+	if !strings.Contains(err.Error(), "resolves to multiple members") {
+		t.Fatalf("error=%q want it to mention resolving to multiple members", err)
+	}
+}
+
+// TestCollapseSessionMembersPrefersEarliestAndGuardsCrossProject pins the collapse
+// policy directly, with explicit timestamps so it does not lean on the fixed test
+// clock or member-id hash coincidence: the earliest-registered member of a same-session
+// fork wins (the original identity that holds pre-fork work), ties break deterministically
+// by member id, and a cross-project candidate set still fails loudly.
+func TestCollapseSessionMembersPrefersEarliestAndGuardsCrossProject(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+
+	t.Run("empty input is not found", func(t *testing.T) {
+		if _, err := collapseSessionMembers(nil); !errors.Is(err, member.ErrNotFound) {
+			t.Fatalf("empty input err=%v want member.ErrNotFound", err)
+		}
+	})
+
+	t.Run("earliest registered wins regardless of input order", func(t *testing.T) {
+		oldest := member.Record{ID: "member-old", ProjectID: "proj-1", RegisteredAt: base}
+		newer := member.Record{ID: "member-new", ProjectID: "proj-1", RegisteredAt: base.Add(time.Hour)}
+		// Newest-first input order proves the choice is by timestamp, not slice position.
+		got, err := collapseSessionMembers([]member.Record{newer, oldest})
+		if err != nil {
+			t.Fatalf("collapse same-project fork: %v", err)
+		}
+		if got.ID != oldest.ID {
+			t.Fatalf("winner=%q want earliest %q", got.ID, oldest.ID)
+		}
+	})
+
+	t.Run("equal timestamps break by member id deterministically", func(t *testing.T) {
+		a := member.Record{ID: "member-aaa", ProjectID: "proj-1", RegisteredAt: base}
+		b := member.Record{ID: "member-bbb", ProjectID: "proj-1", RegisteredAt: base}
+		got1, err := collapseSessionMembers([]member.Record{a, b})
+		if err != nil {
+			t.Fatalf("collapse tie ab: %v", err)
+		}
+		got2, err := collapseSessionMembers([]member.Record{b, a})
+		if err != nil {
+			t.Fatalf("collapse tie ba: %v", err)
+		}
+		if got1.ID != got2.ID || got1.ID != a.ID {
+			t.Fatalf("tie not deterministic: ab=%q ba=%q want %q", got1.ID, got2.ID, a.ID)
+		}
+	})
+
+	t.Run("different projects fail loudly", func(t *testing.T) {
+		p1 := member.Record{ID: "member-1", ProjectID: "proj-1", RegisteredAt: base}
+		p2 := member.Record{ID: "member-2", ProjectID: "proj-2", RegisteredAt: base.Add(time.Hour)}
+		_, err := collapseSessionMembers([]member.Record{p1, p2})
+		if err == nil || !strings.Contains(err.Error(), "resolves to multiple members") {
+			t.Fatalf("cross-project err=%v want it to mention resolving to multiple members", err)
+		}
+	})
 }
 
 func TestRegisterMCPContextRecordsWorkspace(t *testing.T) {

@@ -137,7 +137,7 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	if nativeRef == "" {
 		nativeRef = "token:" + token
 	}
-	existing, err := s.findActiveMemberByNativeRef(ctx, string(projectID), harnessKind, nativeRef)
+	existing, err := s.findActiveMemberByNativeRef(ctx, string(projectID), nativeRef)
 	if err != nil {
 		return RegisterMCPContextResult{}, err
 	}
@@ -245,7 +245,12 @@ func (s *Service) ResolveMCPContext(ctx context.Context, input ResolveMCPContext
 		HarnessKind:      harnessKind,
 		NativeSessionRef: nativeRef,
 		LifecycleState:   member.LifecycleActive,
-		Limit:            2,
+		// No Limit on purpose. We must see every candidate to tell a same-session
+		// harness-label fork (collapsible) apart from a genuine cross-project match
+		// (must fail loudly). A bound limit could hide a second project's member
+		// behind the first project's rows and turn a loud ambiguity into a silent,
+		// possibly wrong, pick. The match is already scoped to one user and one exact
+		// native ref, so the candidate set is inherently small.
 	}
 	if projectID := strings.TrimSpace(input.ProjectID); projectID != "" {
 		filter.ProjectID = projectID
@@ -254,22 +259,26 @@ func (s *Service) ResolveMCPContext(ctx context.Context, input ResolveMCPContext
 	if err != nil {
 		return member.Record{}, fmt.Errorf("resolve mcp context member: %w", err)
 	}
-	if len(members) == 0 {
-		return member.Record{}, member.ErrNotFound
+	resolved, err := collapseSessionMembers(members)
+	if err != nil {
+		return member.Record{}, err
 	}
-	if len(members) > 1 {
-		return member.Record{}, fmt.Errorf("mcp context resolves to multiple members")
-	}
-	return s.withResolvedPermissionMode(members[0]), nil
+	return s.withResolvedPermissionMode(resolved), nil
 }
 
-func (s *Service) findActiveMemberByNativeRef(ctx context.Context, projectID, harnessKind, nativeRef string) (member.Record, error) {
+// findActiveMemberByNativeRef finds the active member that owns a native session
+// ref within one project, ignoring harness label. Harness kind seeds a member's id
+// (deterministicMemberID) but does not change which session a ref belongs to, so a
+// label that drifted between registrations - "claude" then "claude-cli" - must still
+// resolve back to the same member instead of forking a new one. The lookup is already
+// scoped to one project, so any duplicates are a same-session fork and collapse to the
+// original (earliest-registered) member. A zero-id record means no match: the caller
+// then creates a fresh member.
+func (s *Service) findActiveMemberByNativeRef(ctx context.Context, projectID, nativeRef string) (member.Record, error) {
 	members, err := s.members.List(ctx, member.Filter{
 		ProjectID:        strings.TrimSpace(projectID),
-		HarnessKind:      strings.TrimSpace(harnessKind),
 		NativeSessionRef: strings.TrimSpace(nativeRef),
 		LifecycleState:   member.LifecycleActive,
-		Limit:            2,
 	})
 	if err != nil {
 		return member.Record{}, fmt.Errorf("find registered member: %w", err)
@@ -277,10 +286,61 @@ func (s *Service) findActiveMemberByNativeRef(ctx context.Context, projectID, ha
 	if len(members) == 0 {
 		return member.Record{}, nil
 	}
-	if len(members) > 1 {
-		return member.Record{}, fmt.Errorf("multiple active members match native session")
+	resolved, err := collapseSessionMembers(members)
+	if err != nil {
+		return member.Record{}, err
 	}
-	return s.withResolvedPermissionMode(members[0]), nil
+	return s.withResolvedPermissionMode(resolved), nil
+}
+
+// collapseSessionMembers turns the active members that matched one
+// (user, native_session_ref) lookup into the single member that owns the session.
+//
+// A native session ref belongs to one session, and one session is one member. But
+// harness identity is part of a member's id (deterministicMemberID), so a session
+// whose harness label drifted between registrations forks into two member rows for
+// the same human session. Both rows carry the same project and native ref; only the
+// cosmetic label differs. Collapsing them to one member is correct - they are the
+// same actor, not a wrong one.
+//
+// The collapse is bounded to a single project on purpose. When candidates span two
+// projects we cannot know which the caller means - the lookup was not project-scoped
+// (an api-key session carries no bound project) and the native ref happens to be
+// shared - so we keep failing loudly rather than guess an actor across a project
+// boundary. An empty input is member.ErrNotFound so callers can treat it as "no
+// member yet", which the daemon maps to a member-less (pre-registration) session.
+func collapseSessionMembers(members []member.Record) (member.Record, error) {
+	if len(members) == 0 {
+		return member.Record{}, member.ErrNotFound
+	}
+	winner := members[0]
+	for _, candidate := range members[1:] {
+		if strings.TrimSpace(candidate.ProjectID) != strings.TrimSpace(winner.ProjectID) {
+			return member.Record{}, fmt.Errorf("mcp context resolves to multiple members")
+		}
+		if preferRegisteredMember(candidate, winner) {
+			winner = candidate
+		}
+	}
+	return winner, nil
+}
+
+// preferRegisteredMember reports whether candidate should win over current when both
+// describe the same session. The EARLIEST-registered member wins, because it is the
+// original identity the session created and any work attributed before a harness-label
+// fork lives on it: until this fix a fork blocked every actor call, so the later member
+// never claimed a task. Collapsing to the original lets the session resume as the
+// claimant of its own work rather than orphaning it under an id it can no longer act as.
+// The member id breaks ties so the choice stays deterministic when timestamps match (as
+// they do under a fixed test clock, or for two registrations in the same instant).
+func preferRegisteredMember(candidate, current member.Record) bool {
+	if candidate.RegisteredAt.Before(current.RegisteredAt) {
+		return true
+	}
+	if candidate.RegisteredAt.Equal(current.RegisteredAt) {
+		return string(candidate.ID) < string(current.ID)
+	}
+	return false
 }
 
 func (s *Service) nextRegisteredMemberType(ctx context.Context, projectID string) (string, error) {
