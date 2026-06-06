@@ -128,7 +128,7 @@
 
   <h2 id="identity">3. Identity boundaries</h2>
 
-  <p>A user is an account. A project is the first durable workspace object the user creates after setup. A workspace is a linked folder for that project. A member is an actor inside a project. Setup creates only the account and browser session.</p>
+  <p>A user is an account. A project is the first durable workspace object the user creates after setup. A workspace is a linked folder for that project. A member is an actor inside a project. Setup creates the account; daemon orchestration asks auth to create the browser session and initial daemon API key.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 940 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
@@ -175,7 +175,7 @@
 
   <h2 id="setup">4. First-user setup</h2>
 
-  <p>First-run setup is the only open registration path. It is available only while the user repository is empty. It creates the first user as the account owner/admin. Auth creates the browser session for that new user. Setup does not create a project, project, member, API key, or agent.</p>
+  <p>First-run setup is the only open registration path. It is available only while the user repository is empty. It creates the first user as the account owner/admin. Auth creates the browser session and initial daemon API key for that new user. Setup does not create a project, member, task, or agent.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 940 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
@@ -186,8 +186,8 @@
     </defs>
 
     <rect x="38" y="38" width="864" height="270" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
-    <text x="470" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">First user setup creates an account, then auth creates a session</text>
-    <text x="470" y="93" text-anchor="middle" fill="var(--text-muted)">The user service owns the account record. Auth owns the browser session and later API-key flows.</text>
+    <text x="470" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">First user setup creates an account, then auth creates access</text>
+    <text x="470" y="93" text-anchor="middle" fill="var(--text-muted)">The user service owns the account record. Auth owns the browser session and API-key flows.</text>
 
     <rect x="78" y="144" width="142" height="64" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
     <text x="149" y="168" text-anchor="middle" font-weight="700" fill="var(--text)">Daemon</text>
@@ -234,16 +234,17 @@
     <div class="step"><div class="marker">2</div><div class="body">User service checks the user repository count. If any user exists, setup fails with registration closed.</div></div>
     <div class="step"><div class="marker">3</div><div class="body">Auth validates password policy before user creation. The password hash is stored only in auth credential persistence.</div></div>
     <div class="step"><div class="marker">4</div><div class="body">User service normalizes email, validates account fields, creates <code>user.User</code> with role <code>admin</code>, and persists it.</div></div>
-    <div class="step"><div class="marker">5</div><div class="body">Auth creates a browser session for the new user and returns the session token to the daemon response.</div></div>
+    <div class="step"><div class="marker">5</div><div class="body">Auth creates a browser session and initial daemon API key for the new user, then returns those raw tokens to the daemon response once.</div></div>
   </div>
 
   <table>
     <thead><tr><th>Setup creates</th><th>Setup does not create</th></tr></thead>
     <tbody>
       <tr><td>One <code>User</code> account</td><td>A project</td></tr>
-      <tr><td>One <code>User</code> lifecycle state</td><td>A project</td></tr>
+      <tr><td>One <code>User</code> lifecycle state</td><td>A workspace</td></tr>
       <tr><td>Account role <code>admin</code></td><td>A project member role</td></tr>
-      <tr><td>Account lifecycle <code>active</code></td><td>An API key or agent credential</td></tr>
+      <tr><td>Account lifecycle <code>active</code></td><td>A task or decision</td></tr>
+      <tr><td>One initial daemon API key through auth</td><td>An agent credential inside a project</td></tr>
     </tbody>
   </table>
 
@@ -366,8 +367,8 @@ level=INFO msg="user closed" service=user user_id=user_... actor_user_id=user_..
     <tbody>
       <tr><td>First-run setup is open only when no users exist.</td><td>User service counts users before creating the first account.</td></tr>
       <tr><td>The first user is the account owner/admin.</td><td><code>SetupFirstUser</code> assigns the initial account role.</td></tr>
-      <tr><td>Setup creates no project, project, member, task, or agent.</td><td>Daemon setup route calls only the user service setup method.</td></tr>
-      <tr><td>Browser setup stores a session token, not an API key.</td><td>Daemon setup asks auth to create a browser session after user creation.</td></tr>
+      <tr><td>Setup creates no project, workspace, member, task, or agent.</td><td>Daemon setup route calls user setup and auth credential methods only.</td></tr>
+      <tr><td>Browser setup returns a session token and initial daemon API key.</td><td>Daemon setup asks auth to create both credentials after user creation.</td></tr>
       <tr><td>A user id is never treated as a member id.</td><td>Caller identity keeps <code>UserID</code> and <code>MemberID</code> separate.</td></tr>
       <tr><td>User service does not create API keys.</td><td>API-key methods and repositories live under auth.</td></tr>
       <tr><td>User service does not validate bearer tokens.</td><td>Daemon validates credentials through auth before stamping identity.</td></tr>

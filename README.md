@@ -57,9 +57,13 @@ Use `.mcp.example.json` as the checked-in template. Keep the real `.mcp.json`
 local; it is ignored because it contains machine-specific MCP server entries
 and the user's local Agen8 API key.
 
+First-run setup returns an initial daemon API key for MCP clients. Use that API
+key as the token in the harness MCP server URL.
+
 Then call `project.register` with the project root and a readable
-`display_name`, such as `backend engineer` or `frontend reviewer`, so tasks,
-decisions, and graph records remain understandable.
+`display_name`, such as `Atlas (Backend Engineer)` or
+`Iris (Frontend Reviewer)`, so tasks, decisions, and graph records remain
+understandable.
 
 ## Pre-Push Check
 

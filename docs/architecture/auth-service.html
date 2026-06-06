@@ -163,7 +163,7 @@
 
   <h2 id="api-keys">5. API keys</h2>
 
-  <p>API keys are programmatic credentials for CLI, MCP clients, automation, and hosted-style integrations. They are not issued by first-run setup unless a product flow explicitly asks for one after setup.</p>
+  <p>API keys are programmatic credentials for CLI, MCP clients, automation, and hosted-style integrations. First-run daemon setup creates one initial daemon API key after the first user account is created so local MCP clients can connect immediately. Later API keys are explicit auth flows.</p>
 
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">CreateAPIKeyParams</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">UserID</span>    <span class="tok-pkg">user</span>.<span class="tok-type">ID</span>
@@ -182,7 +182,7 @@
 
   <h2 id="setup">6. First-run setup</h2>
 
-  <p>Setup is daemon orchestration across user and auth. The user service creates the first account. Auth creates the password credential and browser session for that account. The setup token belongs to the daemon and is never persisted by auth.</p>
+  <p>Setup is daemon orchestration across user and auth. The user service creates the first account. Auth creates the password credential, browser session, and initial daemon API key for that account. The setup token belongs to the daemon and is never persisted by auth.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 940 380" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
@@ -192,7 +192,7 @@
       </marker>
     </defs>
     <rect x="40" y="38" width="860" height="284" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
-    <text x="470" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Setup creates an account, credential, and browser session</text>
+    <text x="470" y="72" text-anchor="middle" font-size="16" font-weight="700" fill="var(--text)">Setup creates an account, credential, session, and API key</text>
     <text x="470" y="94" text-anchor="middle" fill="var(--text-muted)">Daemon coordinates the flow; user and auth keep separate records.</text>
 
     <rect x="74" y="145" width="138" height="70" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
@@ -344,7 +344,7 @@ level=WARN msg="credential rejected" service=auth reason=invalid_password email_
       <tr><td>Auth never creates user accounts.</td><td>Daemon and RPC create users through the user service only.</td></tr>
       <tr><td>Raw bearer tokens are returned only once.</td><td>Auth service creation methods return raw tokens; repositories store hashes.</td></tr>
       <tr><td>Credential secrets and credential record identifiers never appear in RPC responses or logs.</td><td>Auth RPC DTOs and logging helpers omit raw tokens, hashes, prefixes, session ids, and API key ids.</td></tr>
-      <tr><td>Setup creates a browser session, not an API key.</td><td>Daemon setup calls <code>CreateSession</code> after user setup.</td></tr>
+      <tr><td>Setup creates a browser session and one initial daemon API key.</td><td>Daemon setup calls <code>CreateSession</code> and <code>CreateAPIKey</code> after user setup.</td></tr>
       <tr><td>Bearer validation returns a user account projection.</td><td>Auth validates the token, then loads the user through <code>UserLoader</code>.</td></tr>
       <tr><td>Closed or suspended accounts cannot authenticate.</td><td>Auth rejects credentials when the loaded user is not active.</td></tr>
       <tr><td>Application does not hard-code auth repository implementations.</td><td><code>authinfra.NewRepositories</code> selects concrete credential repositories from the configured storage handle.</td></tr>
