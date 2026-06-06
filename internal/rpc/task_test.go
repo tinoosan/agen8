@@ -103,6 +103,75 @@ func TestRegisterTaskListResolvesLegacyLabelsAfterMCPRehome(t *testing.T) {
 	}
 }
 
+func TestApproveReviewRecordsReviewerNote(t *testing.T) {
+	projectSvc, _, taskSvc := newRPCTaskStack(t)
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "repo")
+
+	registered, err := projectSvc.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: root,
+		DisplayName: "Atlas (Reviewer)",
+		HarnessKind: "codex",
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("register member: %v", err)
+	}
+
+	callerCtx := caller.ContextWithCaller(ctx, caller.Caller{
+		UserID:    "user-1",
+		MemberID:  member.ID(registered.MemberID),
+		ProjectID: types.ProjectID(registered.ProjectID),
+	})
+
+	created, err := taskSvc.Create(callerCtx, taskapp.CreateTaskParams{
+		ProjectID:   types.ProjectID(registered.ProjectID),
+		AssignedTo:  member.ID(registered.MemberID),
+		Title:       "Wire the reviewer note",
+		Description: "Persist the approve verdict on the task record",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := taskSvc.Claim(callerCtx, created.ID); err != nil {
+		t.Fatalf("claim task: %v", err)
+	}
+	if _, err := taskSvc.Complete(callerCtx, taskapp.CompleteTaskParams{
+		TaskID:  created.ID,
+		Summary: "Implemented and self-checked the metadata write",
+	}); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	const reviewNote = "Verified the Latest Review surface renders the verdict; residual risk: none observed."
+	approved, err := taskSvc.ApproveReview(callerCtx, taskapp.ReviewTaskParams{
+		TaskID: created.ID,
+		Reason: reviewNote,
+	})
+	if err != nil {
+		t.Fatalf("approve review: %v", err)
+	}
+
+	if approved.Status != taskdomain.TaskStatusSucceeded {
+		t.Fatalf("approved status=%q want %q", approved.Status, taskdomain.TaskStatusSucceeded)
+	}
+	wantMeta := map[string]string{
+		"reviewDecision": "approve",
+		"reviewFeedback": reviewNote,
+		"reviewedBy":     registered.MemberID,
+		"reviewerRole":   "Atlas (Reviewer)",
+		"reviewedAt":     "2026-06-05T12:00:00Z",
+	}
+	for key, want := range wantMeta {
+		got, _ := approved.Metadata[key].(string)
+		if got != want {
+			t.Fatalf("metadata[%q]=%q want %q (full metadata=%+v)", key, got, want, approved.Metadata)
+		}
+	}
+}
+
 func newRPCTaskStack(t *testing.T) (*projectapp.Service, *taskinfra.SQLiteRepository, *taskapp.Service) {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{

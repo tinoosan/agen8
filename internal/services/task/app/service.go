@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
@@ -512,11 +513,32 @@ func (s *Service) ApproveReview(ctx context.Context, params ReviewTaskParams) (d
 	if err != nil {
 		return domain.Task{}, err
 	}
+	next.Metadata = mergeTaskMetadata(next.Metadata, s.reviewMetadata(ctx, caller, loaded.ProjectID, "approve", params.Reason))
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
 	s.logTaskTransition("approve_review", next, caller)
 	return next, nil
+}
+
+// reviewMetadata captures the reviewer's verdict on the task record so the
+// review surface renders it. Approve is the only outcome that needs this: retry
+// and fail already persist their reason in Task.Error.
+func (s *Service) reviewMetadata(ctx context.Context, caller Caller, projectID types.ProjectID, decision, note string) map[string]any {
+	meta := map[string]any{
+		"reviewDecision": decision,
+		"reviewedAt":     s.clock.Now().UTC().Format(time.RFC3339),
+	}
+	if memberID := strings.TrimSpace(string(caller.MemberID)); memberID != "" {
+		meta["reviewedBy"] = memberID
+	}
+	if role := s.callerMemberLabel(ctx, caller, projectID); role != "" {
+		meta["reviewerRole"] = role
+	}
+	if note = strings.TrimSpace(note); note != "" {
+		meta["reviewFeedback"] = note
+	}
+	return meta
 }
 
 func (s *Service) RetryReview(ctx context.Context, params ReviewTaskParams) (domain.Task, error) {

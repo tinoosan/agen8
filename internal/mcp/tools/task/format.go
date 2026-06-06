@@ -84,7 +84,7 @@ func taskResponseGuidance(action string, task taskdomain.Task, actorID member.ID
 		}
 	case "submit":
 		if task.Status == taskdomain.TaskStatusInReview && member.ID(strings.TrimSpace(task.CreatedBy)) == actorID {
-			return "review", "Fetch the task, inspect the submitted work against the acceptance criteria, then approve, retry, or fail the review."
+			return "review", "Fetch the task, inspect the submitted work against the acceptance criteria, then approve, retry, or fail the review. Include a note with your reasoning — what you verified, residual risk, anything notable — it is recorded on the task even when you approve."
 		}
 	}
 	return "", ""
