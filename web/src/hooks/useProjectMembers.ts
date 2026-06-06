@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
 import type { ProjectMember } from '../lib/types'
 
@@ -15,5 +15,20 @@ export function useProjectMembers(projectId: string | null) {
     },
     enabled: !!projectId,
     refetchInterval: 30_000,
+  })
+}
+
+// Soft-removes a member (lifecycleState active → removed). The server keeps the
+// record and everything it authored (decisions, tasks, graph history); it just
+// drops off the active roster. There is no UI to restore, so callers confirm
+// first. Invalidates every cached roster so the active/removed split refreshes.
+export function useRemoveMember() {
+  const queryClient = useQueryClient()
+  return useMutation<{ member: ProjectMember }, Error, { memberId: string }>({
+    mutationFn: (params) =>
+      rpcCall<{ member: ProjectMember }>('project.member.remove', params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project.member.list'] })
+    },
   })
 }

@@ -1,7 +1,10 @@
-import { useMemo } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useNavigation } from '../lib/routing'
-import { useProjectMembers } from '../hooks/useProjectMembers'
+import { useProjectMembers, useRemoveMember } from '../hooks/useProjectMembers'
 import { memberDisplayName } from '../lib/memberDisplay'
+import { cn } from '@/lib/utils'
 import type { ProjectMember } from '../lib/types'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -13,8 +16,19 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogTrigger,
+  AlertDialogCancel,
+} from '@/components/ui/alert-dialog'
 
 /* ── Helpers ─────────────────────────────────────────── */
 
@@ -81,7 +95,7 @@ function findDuplicateIds(members: ProjectMember[]): Set<string> {
 export default function Members() {
   const { projectId } = useNavigation()
   const { data, isLoading, isError } = useProjectMembers(projectId)
-  const members = data ?? []
+  const members = useMemo(() => data ?? [], [data])
 
   const active = useMemo(
     () => members.filter((m) => m.lifecycleState === 'active'),
@@ -92,15 +106,19 @@ export default function Members() {
     [members],
   )
   const dupeIds = useMemo(() => findDuplicateIds(active), [active])
+  const handTypedCount = useMemo(
+    () => active.filter((m) => isHandTypedRef(m.nativeSessionRef)).length,
+    [active],
+  )
 
   return (
     <div className="h-full overflow-y-auto p-[clamp(16px,4vw,32px)_clamp(16px,5vw,40px)]">
-      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-8">
+      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6">
         <div className="flex flex-col gap-1">
           <h1 className="m-0 hidden text-2xl font-bold text-[var(--text-1)] md:block">
             Members
           </h1>
-          <p className="m-0 text-[0.8125rem] text-[var(--text-3)]">
+          <p className="m-0 max-w-prose text-[0.8125rem] leading-relaxed text-[var(--text-3)]">
             Agent sessions registered to this project. A member is one harness
             session — the same name registered from a different session is a
             separate member.
@@ -123,13 +141,30 @@ export default function Members() {
                 Removed <CountPill n={removed.length} />
               </TabsTrigger>
             </TabsList>
+
             <TabsContent value="active">
               {active.length === 0 ? (
                 <EmptyState text="No active members." />
               ) : (
-                <MemberTable members={active} dupeIds={dupeIds} />
+                <div className="flex flex-col gap-4">
+                  <div className="grid grid-cols-3 gap-2 sm:max-w-lg">
+                    <StatTile label="Active" value={active.length} />
+                    <StatTile
+                      label="Possible dupes"
+                      value={dupeIds.size}
+                      tone="danger"
+                    />
+                    <StatTile
+                      label="Hand-typed"
+                      value={handTypedCount}
+                      tone="warning"
+                    />
+                  </div>
+                  <MemberTable members={active} dupeIds={dupeIds} />
+                </div>
               )}
             </TabsContent>
+
             <TabsContent value="removed">
               {removed.length === 0 ? (
                 <EmptyState text="No removed members." />
@@ -158,17 +193,22 @@ function MemberTable({
   removed?: boolean
 }) {
   return (
-    <div className="overflow-hidden rounded-[10px] border border-[var(--border)]">
+    <div className="overflow-hidden rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)]">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>Member</TableHead>
-            <TableHead>Harness</TableHead>
-            <TableHead>Model</TableHead>
-            <TableHead>Effort</TableHead>
-            <TableHead>Permission</TableHead>
-            <TableHead>Session ref</TableHead>
-            <TableHead>Registered</TableHead>
+          <TableRow className="border-[var(--border)] hover:bg-transparent">
+            <Th>Member</Th>
+            <Th>Harness</Th>
+            <Th>Model</Th>
+            <Th>Effort</Th>
+            <Th>Permission</Th>
+            <Th>Session ref</Th>
+            <Th>Registered</Th>
+            {!removed && (
+              <TableHead className="w-[1%] px-4">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -186,6 +226,18 @@ function MemberTable({
   )
 }
 
+function Th({ children }: { children: ReactNode }) {
+  return (
+    <TableHead className="h-auto px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.04em] text-[var(--text-3)]">
+      {children}
+    </TableHead>
+  )
+}
+
+function Td({ children }: { children: ReactNode }) {
+  return <TableCell className="px-4 py-3 text-[var(--text-2)]">{children}</TableCell>
+}
+
 function MemberRow({
   m,
   isDupe,
@@ -199,8 +251,13 @@ function MemberRow({
   const handTyped = isHandTypedRef(m.nativeSessionRef)
 
   return (
-    <TableRow className={removed ? 'opacity-60' : undefined}>
-      <TableCell>
+    <TableRow
+      className={cn(
+        'group border-[var(--border)] hover:bg-[var(--bg-hover)]',
+        removed && 'opacity-60',
+      )}
+    >
+      <TableCell className="px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="font-medium text-[var(--text-1)]">{name}</span>
           {isDupe && (
@@ -220,15 +277,11 @@ function MemberRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="text-[var(--text-2)]">
-        {m.harnessKind || '—'}
-      </TableCell>
-      <TableCell className="text-[var(--text-2)]">{m.model || '—'}</TableCell>
-      <TableCell className="text-[var(--text-2)]">{m.effort || '—'}</TableCell>
-      <TableCell className="text-[var(--text-2)]">
-        {m.harnessPermissionMode || '—'}
-      </TableCell>
-      <TableCell>
+      <Td>{m.harnessKind || '—'}</Td>
+      <Td>{m.model || '—'}</Td>
+      <Td>{m.effort || '—'}</Td>
+      <Td>{m.harnessPermissionMode || '—'}</Td>
+      <TableCell className="px-4 py-3">
         <div className="flex items-center gap-1.5">
           <code className="break-all text-[0.75rem] text-[var(--text-3)]">
             {m.nativeSessionRef || '—'}
@@ -254,7 +307,7 @@ function MemberRow({
           )}
         </div>
       </TableCell>
-      <TableCell>
+      <TableCell className="px-4 py-3">
         <span
           className="whitespace-nowrap text-[0.8125rem] text-[var(--text-3)]"
           title={absTime(m.registeredAt)}
@@ -262,11 +315,111 @@ function MemberRow({
           {timeAgo(m.registeredAt)}
         </span>
       </TableCell>
+      {!removed && (
+        <TableCell className="px-4 py-3 text-right">
+          <RemoveMemberButton member={m} name={name} />
+        </TableCell>
+      )}
     </TableRow>
   )
 }
 
+/* ── Remove action ───────────────────────────────────── */
+
+function RemoveMemberButton({
+  member,
+  name,
+}: {
+  member: ProjectMember
+  name: string
+}) {
+  const [open, setOpen] = useState(false)
+  const removeMember = useRemoveMember()
+
+  const onConfirm = async () => {
+    try {
+      await removeMember.mutateAsync({ memberId: member.id })
+      toast.success(`Removed ${name}`)
+      setOpen(false)
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to remove member',
+      )
+    }
+  }
+
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        // Don't let an outside-click / Esc dismiss mid-removal.
+        if (!removeMember.isPending) setOpen(next)
+      }}
+    >
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="ghost-danger"
+          size="icon"
+          aria-label={`Remove ${name}`}
+          className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <Trash2 size={14} />
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove {name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This marks the member as removed and drops it from the active
+            roster. Anything it created — decisions, tasks, graph history — is
+            preserved. This can't be undone from here.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={removeMember.isPending}>
+            Cancel
+          </AlertDialogCancel>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={removeMember.isPending}
+          >
+            {removeMember.isPending ? 'Removing…' : 'Remove member'}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 /* ── Small bits ──────────────────────────────────────── */
+
+function StatTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: number
+  tone?: 'danger' | 'warning'
+}) {
+  const valueColor =
+    value > 0 && tone === 'danger'
+      ? 'text-[var(--red)]'
+      : value > 0 && tone === 'warning'
+        ? 'text-[var(--amber)]'
+        : 'text-[var(--text-1)]'
+  return (
+    <div className="rounded-[var(--r-md)] bg-[var(--bg-elevated)] px-3 py-2.5">
+      <div className="text-[0.625rem] font-medium uppercase tracking-[0.04em] text-[var(--text-3)]">
+        {label}
+      </div>
+      <div className={cn('mt-1 text-xl font-semibold tabular-nums', valueColor)}>
+        {value}
+      </div>
+    </div>
+  )
+}
 
 function CountPill({ n }: { n: number }) {
   return (
@@ -278,7 +431,7 @@ function CountPill({ n }: { n: number }) {
 
 function EmptyState({ text }: { text: string }) {
   return (
-    <div className="rounded-[10px] border border-dashed border-[var(--border)] p-8 text-center text-[0.8125rem] text-[var(--text-3)]">
+    <div className="rounded-[var(--r-lg)] border border-dashed border-[var(--border)] p-8 text-center text-[0.8125rem] text-[var(--text-3)]">
       {text}
     </div>
   )
@@ -288,7 +441,7 @@ function MembersSkeleton() {
   return (
     <div className="flex flex-col gap-2">
       {Array.from({ length: 5 }).map((_, i) => (
-        <Skeleton key={i} className="h-12 w-full rounded-[8px]" />
+        <Skeleton key={i} className="h-12 w-full rounded-[var(--r-md)]" />
       ))}
     </div>
   )
