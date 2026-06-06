@@ -3,7 +3,7 @@ import { useProjects } from '../hooks/useProjects'
 import { useStore, type DefaultProjectView } from './store'
 import type { Project } from './types'
 
-export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy'
+export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy' | 'members'
 export type DashboardPanel = 'missions' | 'decisions' | 'tasks'
 
 /* ── Route constants ──────────────────────────────── */
@@ -17,6 +17,7 @@ export const ROUTES = {
   TASK_DETAIL: '/project/:projectId/tasks/:taskId',
   DECISION_DETAIL: '/project/:projectId/decisions/:decisionId',
   STRATEGY_MAP: '/project/:projectId/strategy',
+  MEMBERS: '/project/:projectId/members',
 } as const
 
 /* ── Link helpers for cross-surface navigation (F26) ── */
@@ -76,6 +77,10 @@ export function decisionsLink(projectId: string): string {
   return `/project/${encodeURIComponent(projectId)}/decisions`
 }
 
+export function membersLink(projectId: string): string {
+  return `/project/${encodeURIComponent(projectId)}/members`
+}
+
 // Build a link to the strategy map, optionally focusing a specific node
 export function strategyMapLink(projectId: string, focusNodeId?: string): string {
   const base = `/project/${encodeURIComponent(projectId)}/strategy`
@@ -123,6 +128,8 @@ function parseLocation(pathname: string): ParsedRoute {
     activeView = 'decisions'
   } else if (segments[2] === 'strategy') {
     activeView = 'strategy'
+  } else if (segments[2] === 'members') {
+    activeView = 'members'
   }
 
   return { projectId, activeView }
