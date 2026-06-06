@@ -201,7 +201,6 @@ function MemberTable({
             <Th>Harness</Th>
             <Th>Model</Th>
             <Th>Effort</Th>
-            <Th>Permission</Th>
             <Th>Session ref</Th>
             <Th>Registered</Th>
             {!removed && (
@@ -280,7 +279,6 @@ function MemberRow({
       <Td>{m.harnessKind || '—'}</Td>
       <Td>{m.model || '—'}</Td>
       <Td>{m.effort || '—'}</Td>
-      <Td>{m.harnessPermissionMode || '—'}</Td>
       <TableCell className="px-4 py-3">
         <div className="flex items-center gap-1.5">
           <code className="break-all text-[0.75rem] text-[var(--text-3)]">
