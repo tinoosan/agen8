@@ -74,6 +74,78 @@ func TestDecodeRejectsNullField(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsMalformedJSON(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"url":"https://example.com"`))
+	if err == nil || !strings.Contains(err.Error(), "invalid arguments") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+// TestDecodeRejectsUnknownField exercises the strict-decoder path
+// (DisallowUnknownFields) specifically — distinct from the malformed-JSON
+// path, which rejectNullFields catches first. A syntactically valid object
+// with an unexpected field passes rejectNullFields and is then rejected by
+// the strict decoder.
+func TestDecodeRejectsUnknownField(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"url":"https://example.com","method":"GET","bogus":1}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+// TestDecodeRejectsTrailingJSON documents that the dec.More() guard at
+// http.go:259-261 ("trailing JSON tokens are not allowed") is unreachable
+// dead code: rejectNullFields runs first and its json.Unmarshal already
+// rejects any trailing token, so trailing JSON surfaces as the generic
+// "invalid arguments" error rather than the dec.More() message. Verified
+// empirically — `{...} {}` and `{...} 5` both error in rejectNullFields,
+// while trailing whitespace passes both checks. Pinning the actual message
+// keeps the divergence visible (mirrors T3.2's graph wording pin).
+func TestDecodeRejectsTrailingJSON(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"url":"https://example.com","method":"GET"} {}`))
+	if err == nil || !strings.Contains(err.Error(), "invalid arguments") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+	if strings.Contains(err.Error(), "trailing JSON tokens are not allowed") {
+		t.Fatalf("dec.More() guard is expected to be unreachable, but its message surfaced: %v", err)
+	}
+}
+
+func TestDecodeRejectsMissingURL(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"method":"GET"}`))
+	if err == nil || !strings.Contains(err.Error(), "url is required") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsMissingMethod(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"url":"https://example.com"}`))
+	if err == nil || !strings.Contains(err.Error(), "method is required") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsUnsupportedMethod(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"url":"https://example.com","method":"TRACE"}`))
+	if err == nil || !strings.Contains(err.Error(), `unsupported method "TRACE"`) {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsNegativeMaxBytes(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"url":"https://example.com","method":"GET","maxBytes":-1}`))
+	if err == nil || !strings.Contains(err.Error(), "maxBytes must be >= 0") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsNegativeTimeout(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"url":"https://example.com","method":"GET","timeoutMs":-1}`))
+	if err == nil || !strings.Contains(err.Error(), "timeoutMs must be >= 0") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
 func TestHandleInjectsResolvedBearerCredential(t *testing.T) {
 	resolver := &testCredentialResolver{records: map[string]HTTPCredential{
 		"api.example.com": credential(credentialdomain.InjectionBearer, "", map[string]string{"value": "api-token"}),

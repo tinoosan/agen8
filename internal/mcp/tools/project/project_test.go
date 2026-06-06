@@ -124,6 +124,20 @@ func TestDecodeCreateMemberRequiresRuntimeFields(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsNonStringAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":123}`))
+	if err == nil || !strings.Contains(err.Error(), "action must be a string") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsMalformedJSON(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"member_list"`))
+	if err == nil || !strings.Contains(err.Error(), "invalid arguments") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
 func TestSchemaOmitsSpaceID(t *testing.T) {
 	schema := NewHandler().Schema()
 	var decoded struct {

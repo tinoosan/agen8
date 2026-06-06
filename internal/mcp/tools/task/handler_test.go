@@ -518,6 +518,27 @@ func TestDecodeRejectsFieldFromOtherAction(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsMissingAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"description":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "action is required") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsNonStringAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":123}`))
+	if err == nil || !strings.Contains(err.Error(), "action must be a string") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsMalformedJSON(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"list"`))
+	if err == nil || !strings.Contains(err.Error(), "invalid arguments") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
 func TestDecodeRejectsNonStringMetadata(t *testing.T) {
 	_, err := decode(json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1","metadata":{"smoke":true}}`))
 	if err == nil || !strings.Contains(err.Error(), "metadata must be an object with string values") {

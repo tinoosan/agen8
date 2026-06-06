@@ -213,6 +213,38 @@ func TestDecodeAllowsDepthForSearch(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsMissingAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"node_id":"task-1"}`))
+	if err == nil || !strings.Contains(err.Error(), "action is required") {
+		t.Fatalf("err=%v want action required", err)
+	}
+}
+
+func TestDecodeRejectsNonStringAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":123}`))
+	if err == nil || !strings.Contains(err.Error(), "action must be a string") {
+		t.Fatalf("err=%v want action must be a string", err)
+	}
+}
+
+func TestDecodeRejectsUnsupportedAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"approve"}`))
+	if err == nil || !strings.Contains(err.Error(), `unsupported action "approve"`) {
+		t.Fatalf("err=%v want unsupported action", err)
+	}
+}
+
+// TestDecodeRejectsMalformedJSON pins graph_query's malformed-JSON wording, which
+// diverges from the other action tools: graph says "decode arguments" where
+// mission/task/project/decision all say "invalid arguments". Locking the actual
+// string keeps the divergence visible rather than silently drifting.
+func TestDecodeRejectsMalformedJSON(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"search"`))
+	if err == nil || !strings.Contains(err.Error(), "decode arguments") {
+		t.Fatalf("err=%v want decode arguments", err)
+	}
+}
+
 func TestHandleRejectsUnknownNodeTypeBeforeServiceCall(t *testing.T) {
 	service := &stubGraphService{}
 	_, err := NewHandler().Handle(context.Background(), graphCallContext(service), json.RawMessage(`{"action":"search","node_type":"goal","query":"ship","limit":10}`))
