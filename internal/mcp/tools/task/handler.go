@@ -207,21 +207,21 @@ func contextWithSessionActor(ctx context.Context, actorMemberID, projectID strin
 func (h Handler) actor(ctx context.Context, call CallContext) (actor, error) {
 	memberID := strings.TrimSpace(call.ActorMemberID)
 	if memberID == "" {
-		return actor{}, fmt.Errorf("task: caller member is required")
+		return actor{}, fmt.Errorf("task: registered member_id is required")
 	}
 	rosterMember, err := call.Members.GetMember(ctx, member.ID(memberID))
 	if err != nil {
-		return actor{}, fmt.Errorf("task: load caller member: %w", err)
+		return actor{}, fmt.Errorf("task: load registered member: %w", err)
 	}
 	if strings.TrimSpace(rosterMember.LifecycleState) != "" && !strings.EqualFold(rosterMember.LifecycleState, member.LifecycleActive) {
-		return actor{}, fmt.Errorf("task: caller member %q is not active", memberID)
+		return actor{}, fmt.Errorf("task: registered member %q is not active", memberID)
 	}
 	projectID := strings.TrimSpace(call.ProjectID)
 	if projectID == "" {
 		projectID = strings.TrimSpace(rosterMember.ProjectID)
 	}
 	if projectID == "" {
-		return actor{}, fmt.Errorf("task: caller project is required")
+		return actor{}, fmt.Errorf("task: registered member project is required")
 	}
 	return actor{
 		MemberID:   member.ID(memberID),

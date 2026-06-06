@@ -673,14 +673,14 @@ func (s *Service) resolveCaller(ctx context.Context) (Caller, error) {
 	}
 	caller = caller.Normalize()
 	if caller.UserID == "" && caller.MemberID == "" {
-		return Caller{}, fmt.Errorf("task caller user id or member id is required")
+		return Caller{}, fmt.Errorf("task registered member_id or user id is required")
 	}
 	return caller, nil
 }
 
 func requireMemberCaller(caller Caller) error {
 	if caller.MemberID == "" {
-		return fmt.Errorf("task caller member id is required")
+		return fmt.Errorf("task registered member_id is required")
 	}
 	return nil
 }
@@ -691,7 +691,7 @@ func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Call
 	}
 	userID := strings.TrimSpace(caller.UserID)
 	if userID == "" {
-		return fmt.Errorf("task caller user id is required")
+		return fmt.Errorf("task registered member_id or user id is required")
 	}
 	proj, err := s.projects.Get(ctx, projectID)
 	if err != nil {
@@ -763,7 +763,7 @@ func memberRecordLabel(rosterMember member.Record) string {
 func (s *Service) requireAssignedCaller(task domain.Task, memberID member.ID) error {
 	memberID = member.ID(strings.TrimSpace(string(memberID)))
 	if memberID == "" {
-		return fmt.Errorf("caller member id is required")
+		return fmt.Errorf("registered member_id is required")
 	}
 	if task.AssignedTo != memberID {
 		return fmt.Errorf("task %s is assigned to %s, not %s", task.ID, task.AssignedTo, memberID)
@@ -774,7 +774,7 @@ func (s *Service) requireAssignedCaller(task domain.Task, memberID member.ID) er
 func (s *Service) requireClaimedCaller(task domain.Task, memberID member.ID) error {
 	memberID = member.ID(strings.TrimSpace(string(memberID)))
 	if memberID == "" {
-		return fmt.Errorf("caller member id is required")
+		return fmt.Errorf("registered member_id is required")
 	}
 	if task.ClaimedByMemberID != memberID {
 		return fmt.Errorf("task %s is claimed by %s, not %s", task.ID, task.ClaimedByMemberID, memberID)
@@ -785,7 +785,7 @@ func (s *Service) requireClaimedCaller(task domain.Task, memberID member.ID) err
 func (s *Service) requireUnblockCaller(ctx context.Context, task domain.Task, memberID member.ID) error {
 	memberID = member.ID(strings.TrimSpace(string(memberID)))
 	if memberID == "" {
-		return fmt.Errorf("caller member id is required")
+		return fmt.Errorf("registered member_id is required")
 	}
 	if task.ClaimedByMemberID == memberID {
 		return nil

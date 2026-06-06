@@ -243,6 +243,20 @@ func TestHandleWorkerListScopesToAssignedMember(t *testing.T) {
 	}
 }
 
+func TestHandleRequiresRegisteredMemberID(t *testing.T) {
+	svc := &stubService{}
+	_, err := NewHandler().Handle(context.Background(), callContext(svc, ""), json.RawMessage(`{"action":"list","limit":10}`))
+	if err == nil {
+		t.Fatal("expected missing registered member error")
+	}
+	if !strings.Contains(err.Error(), "registered member_id is required") {
+		t.Fatalf("error=%q", err)
+	}
+	if strings.Contains(err.Error(), "caller member") {
+		t.Fatalf("error leaked internal caller wording: %q", err)
+	}
+}
+
 func TestHandleSubmitSelfReviewReturnsReviewGuidance(t *testing.T) {
 	svc := &stubService{}
 	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"submit","task_id":"task-1","summary":"done"}`))
