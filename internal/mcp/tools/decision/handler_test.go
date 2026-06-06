@@ -106,3 +106,75 @@ func TestHandleLogRejectsMemberlessCaller(t *testing.T) {
 		t.Fatalf("decision service ran despite member-less caller: %+v", service.req)
 	}
 }
+
+// decode() + validateActionFields() are the decision tool's deterministic-input
+// gate: every other tool has a TestDecodeRejects* suite pinning its decode path;
+// the decision tool had none despite the richest validation. These white-box
+// tests lock each rejection branch so malformed input fails predictably instead
+// of panicking or silently no-opping.
+
+func TestDecodeRejectsMissingAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"title":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "action is required") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsNonStringAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":123}`))
+	if err == nil || !strings.Contains(err.Error(), "action must be a string") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsUnsupportedAction(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"approve"}`))
+	if err == nil || !strings.Contains(err.Error(), `unsupported action "approve"`) {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsUnknownField(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"log","bogus":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), `field "bogus" is not valid for action "log"`) {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsNullField(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"log","title":null}`))
+	if err == nil || !strings.Contains(err.Error(), `field "title" must be omitted instead of null`) {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsMalformedJSON(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"log"`))
+	if err == nil || !strings.Contains(err.Error(), "invalid arguments") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+// TestHandleLogRejectsProjectlessCaller completes the session-guard pair: the
+// daemon can hand decision.log a session with no project bound. project_id is
+// checked before member_id (handler.go:38 then :42), so a project-less caller
+// must fail loudly there, before the decision service runs.
+func TestHandleLogRejectsProjectlessCaller(t *testing.T) {
+	service := &recordingDecisionService{}
+	_, err := NewHandler().Handle(context.Background(), CallContext{
+		Decisions:     service,
+		ProjectID:     "",
+		ActorMemberID: "member-1",
+		UserID:        "user-1",
+	}, json.RawMessage(`{
+		"action":"log",
+		"title":"Choose API labels",
+		"rationale":"Users need readable labels."
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "decision: project_id is required") {
+		t.Fatalf("err=%v want decision project_id required", err)
+	}
+	if service.req.Title != "" {
+		t.Fatalf("decision service ran despite project-less caller: %+v", service.req)
+	}
+}
