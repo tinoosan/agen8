@@ -53,10 +53,12 @@ export function decisionDetailLink(projectId: string, decisionId: string): strin
   return `/project/${encodeURIComponent(projectId)}/decisions/${encodeURIComponent(decisionId)}`
 }
 
-export function dashboardLink(projectId: string, params?: { panel?: DashboardPanel }): string {
+export function dashboardLink(projectId: string, params?: { panel?: DashboardPanel; status?: string }): string {
   const base = `/project/${encodeURIComponent(projectId)}/dashboard`
   const search = new URLSearchParams()
   if (params?.panel) search.set('panel', params.panel)
+  // 'all' is the default view, so omit it to keep links clean and deep-linkable.
+  if (params?.status && params.status !== 'all') search.set('status', params.status)
   const qs = search.toString()
   return qs ? `${base}?${qs}` : base
 }
@@ -71,6 +73,11 @@ export function decisionsPanelLink(projectId: string): string {
 
 export function tasksPanelLink(projectId: string): string {
   return dashboardLink(projectId, { panel: 'tasks' })
+}
+
+// Open the Tasks panel pre-filtered to a status bucket (e.g. from a dashboard tile).
+export function filteredTasksLink(projectId: string, status: string): string {
+  return dashboardLink(projectId, { panel: 'tasks', status })
 }
 
 export function decisionsLink(projectId: string): string {

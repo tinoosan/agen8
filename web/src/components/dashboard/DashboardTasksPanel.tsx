@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'wouter'
+import { useCallback, useMemo, useState } from 'react'
+import { Link, useLocation, useSearch } from 'wouter'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import CreateTaskDialog from '../task/CreateTaskDialog'
 import { taskDetailLink } from '../../lib/routing'
@@ -47,7 +47,26 @@ export default function DashboardTasksPanel({
   projectId,
   embedded = false,
 }: DashboardTasksPanelProps) {
-  const [statusFilter, setStatusFilter] = useState<string>('all')
+  // Status filter lives in the URL (?status=) so dashboard tiles can deep-link
+  // straight to a filtered list and the view is shareable. 'all' is the default,
+  // so it's encoded as the absence of the param.
+  const rawSearch = useSearch()
+  const [, navigate] = useLocation()
+  const searchParams = useMemo(() => new URLSearchParams(rawSearch), [rawSearch])
+  const rawStatus = searchParams.get('status') ?? 'all'
+  const statusFilter = STATUS_FILTERS.some((f) => f.value === rawStatus) ? rawStatus : 'all'
+  const setStatusFilter = useCallback(
+    (value: string) => {
+      if (!projectId) return
+      const params = new URLSearchParams(rawSearch)
+      params.set('panel', 'tasks')
+      if (value === 'all') params.delete('status')
+      else params.set('status', value)
+      const qs = params.toString()
+      navigate(`/project/${encodeURIComponent(projectId)}/dashboard${qs ? `?${qs}` : ''}`)
+    },
+    [navigate, projectId, rawSearch],
+  )
   const [searchQuery, setSearchQuery] = useState('')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
