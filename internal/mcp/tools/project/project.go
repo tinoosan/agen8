@@ -175,8 +175,8 @@ func (h Handler) resolveActor(ctx context.Context, call CallContext) (member.Rec
 }
 
 func requireCoordinatorActor(actor member.Record, action string) error {
-	if !member.IsCoordinatorType(strings.TrimSpace(actor.MemberType)) {
-		return fmt.Errorf("project: action %s requires a coordinator member", action)
+	if strings.TrimSpace(actor.ProjectID) == "" {
+		return fmt.Errorf("project: action %s requires an active project member", action)
 	}
 	return nil
 }
@@ -323,7 +323,7 @@ func (h Handler) createMember(ctx context.Context, call CallContext, projectID s
 	result, err := call.Registrar.RegisterMember(ctx, member.Record{
 		ProjectID:   projectID,
 		DisplayName: input.DisplayName,
-		MemberType:  member.TypeWorker,
+		MemberType:  member.TypeCoordinator,
 		HarnessKind: input.HarnessKind,
 		Model:       input.Model,
 		Effort:      input.Effort,

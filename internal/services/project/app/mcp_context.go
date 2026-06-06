@@ -284,18 +284,14 @@ func (s *Service) findActiveMemberByNativeRef(ctx context.Context, projectID, ha
 }
 
 func (s *Service) nextRegisteredMemberType(ctx context.Context, projectID string) (string, error) {
-	members, err := s.members.List(ctx, member.Filter{
+	if _, err := s.members.List(ctx, member.Filter{
 		ProjectID:      strings.TrimSpace(projectID),
 		LifecycleState: member.LifecycleActive,
 		Limit:          1,
-	})
-	if err != nil {
+	}); err != nil {
 		return "", fmt.Errorf("list project members: %w", err)
 	}
-	if len(members) == 0 {
-		return member.TypeCoordinator, nil
-	}
-	return member.TypeWorker, nil
+	return member.TypeCoordinator, nil
 }
 
 func nativeRefForRegister(input RegisterMCPContextInput) string {

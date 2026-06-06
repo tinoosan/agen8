@@ -704,14 +704,8 @@ func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Call
 }
 
 func (s *Service) requireCoordinator(ctx context.Context, memberID member.ID, projectID types.ProjectID) error {
-	member, err := s.memberInProject(ctx, memberID, projectID)
-	if err != nil {
-		return err
-	}
-	if !isCoordinatorType(member.MemberType) {
-		return fmt.Errorf("member %s is not a coordinator", memberID)
-	}
-	return nil
+	_, err := s.memberInProject(ctx, memberID, projectID)
+	return err
 }
 
 func (s *Service) memberInProject(ctx context.Context, memberID member.ID, projectID types.ProjectID) (member.Record, error) {
@@ -808,10 +802,6 @@ func (s *Service) logTaskTransition(action string, task domain.Task, caller Call
 
 func trimTaskID(taskID domain.TaskID) domain.TaskID {
 	return domain.TaskID(strings.TrimSpace(string(taskID)))
-}
-
-func isCoordinatorType(memberType string) bool {
-	return strings.TrimSpace(memberType) == member.TypeCoordinator
 }
 
 func cloneMap(src map[string]any) map[string]any {

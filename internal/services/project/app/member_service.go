@@ -50,7 +50,7 @@ func (s *Service) UpsertExternalHarnessMember(ctx context.Context, p UpsertExter
 	}
 	memberType := strings.TrimSpace(p.MemberType)
 	if memberType == "" {
-		memberType = member.TypeWorker
+		memberType = member.TypeCoordinator
 	}
 	if err := member.ValidateMemberType(memberType); err != nil {
 		return member.Record{}, err
@@ -127,15 +127,12 @@ func (s *Service) RegisterMember(ctx context.Context, rosterMember member.Record
 
 	requestedType := strings.TrimSpace(rosterMember.MemberType)
 	if requestedType == "" {
-		requestedType = member.TypeWorker
+		requestedType = member.TypeCoordinator
 	}
 	if err := member.ValidateMemberType(requestedType); err != nil {
 		return RegisterMemberResult{}, err
 	}
 
-	if err := s.ensureCoordinatorSlotAvailable(ctx, string(projectID), requestedType); err != nil {
-		return RegisterMemberResult{}, err
-	}
 	grantedType := requestedType
 
 	rosterMember.ID = member.ID("member-" + uuid.NewString())
@@ -340,26 +337,6 @@ func (s *Service) RemoveMember(ctx context.Context, id member.ID) (member.Record
 	return inner, nil
 }
 
-func (s *Service) ensureCoordinatorSlotAvailable(ctx context.Context, projectID string, requested string) error {
-	if !member.IsCoordinatorType(requested) {
-		return nil
-	}
-	existing, err := s.members.List(ctx, member.Filter{
-		ProjectID:      projectID,
-		LifecycleState: member.LifecycleActive,
-		Limit:          500,
-	})
-	if err != nil {
-		return fmt.Errorf("check existing project members: %w", err)
-	}
-	for _, rosterMember := range existing {
-		if member.IsCoordinatorType(rosterMember.MemberType) {
-			return fmt.Errorf("active coordinator already exists for project %s", projectID)
-		}
-	}
-	return nil
-}
-
 func (s *Service) requireRosterReadAccess(ctx context.Context, caller Caller, projectID types.ProjectID) error {
 	p, err := s.GetProject(ctx, projectID)
 	if err != nil {
@@ -388,9 +365,6 @@ func (s *Service) requireRosterWriteAccess(ctx context.Context, caller Caller, p
 	}
 	if actor.LifecycleState != member.LifecycleActive {
 		return fmt.Errorf("caller member %s is not active", actor.ID)
-	}
-	if !member.IsCoordinatorType(actor.MemberType) {
-		return fmt.Errorf("caller member %s is not a coordinator", actor.ID)
 	}
 	return nil
 }

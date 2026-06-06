@@ -61,7 +61,6 @@ func TestProjectMemberSchemaCreated(t *testing.T) {
 	for _, name := range []string{
 		"members",
 		"idx_members_project_state",
-		"idx_members_one_active_coordinator",
 	} {
 		var got string
 		err := db.QueryRow(

@@ -279,8 +279,8 @@ func TestHandleCreateMemberUsesSessionActorAndRegistrar(t *testing.T) {
 				if rosterMember.DisplayName != "Backend lead" {
 					t.Fatalf("display name=%q want Backend lead", rosterMember.DisplayName)
 				}
-				if rosterMember.MemberType != member.TypeWorker {
-					t.Fatalf("member type=%q want worker", rosterMember.MemberType)
+				if rosterMember.MemberType != member.TypeCoordinator {
+					t.Fatalf("member type=%q want coordinator", rosterMember.MemberType)
 				}
 				if rosterMember.HarnessKind != "codex" || rosterMember.Model != "gpt-5" || rosterMember.Effort != "medium" {
 					t.Fatalf("runtime config=%+v", rosterMember)
@@ -292,7 +292,7 @@ func TestHandleCreateMemberUsesSessionActorAndRegistrar(t *testing.T) {
 				created.ID = "member-worker"
 				created.ChannelID = "channel:project-1:member:member-worker"
 				created.LifecycleState = member.LifecycleActive
-				return projectapp.RegisterMemberResult{Member: created, GrantedMemberType: member.TypeWorker}, nil
+				return projectapp.RegisterMemberResult{Member: created, GrantedMemberType: member.TypeCoordinator}, nil
 			},
 		},
 		ActorMemberID: "member-coordinator",
@@ -375,9 +375,9 @@ func TestHandleMemberUpdateConfigUsesRegistrar(t *testing.T) {
 	}
 }
 
-func TestHandleMemberCreateRequiresCoordinatorActor(t *testing.T) {
+func TestHandleMemberCreateAllowsActiveProjectMemberActor(t *testing.T) {
 	handler := NewHandler()
-	_, err := handler.Handle(context.Background(), CallContext{
+	result, err := handler.Handle(context.Background(), CallContext{
 		ProjectID: "project-1",
 		Members: stubMemberDirectory{
 			getFn: func(_ context.Context, id member.ID) (member.Record, error) {
@@ -387,8 +387,12 @@ func TestHandleMemberCreateRequiresCoordinatorActor(t *testing.T) {
 		Registrar:     stubMemberRegistrar{},
 		ActorMemberID: "member-worker",
 	}, json.RawMessage(`{"action":"member_create","harness_kind":"codex","model":"gpt-5","effort":"medium"}`))
-	if err == nil || !strings.Contains(err.Error(), "requires a coordinator member") {
-		t.Fatalf("unexpected err=%v", err)
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	if structured["action"] != "member_create" {
+		t.Fatalf("action=%v want member_create", structured["action"])
 	}
 }
 

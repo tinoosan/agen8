@@ -91,6 +91,9 @@ func (r *MemberSQLiteRepository) ensureSchema(ctx context.Context) error {
 	if _, err := r.db.ExecContext(ctx, memberCreateTableSQLite); err != nil {
 		return fmt.Errorf("ensure members table: %w", err)
 	}
+	if _, err := r.db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_members_one_active_coordinator`); err != nil {
+		return fmt.Errorf("drop stale coordinator index: %w", err)
+	}
 	for _, stmt := range memberIndexStatements {
 		if _, err := r.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("ensure members index: %w", err)
@@ -116,7 +119,6 @@ const memberCreateTableSQLite = `
 
 var memberIndexStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_members_project_state ON members(project_id, lifecycle_state, updated_at DESC)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_members_one_active_coordinator ON members(project_id) WHERE lifecycle_state = 'active' AND member_type = 'coordinator'`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_members_native_session ON members(project_id, harness_kind, native_session_ref) WHERE native_session_ref <> ''`,
 }
 

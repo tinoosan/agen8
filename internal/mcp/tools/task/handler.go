@@ -268,13 +268,9 @@ func (h Handler) listFilter(caller actor, input requestInput) (taskdomain.TaskFi
 		}
 		filter.Status = []taskdomain.TaskStatus{status}
 	}
-	if isCoordinatorType(caller.MemberType) {
-		if input.AssigneeMemberID != "" {
-			filter.AssignedTo = member.ID(input.AssigneeMemberID)
-		}
-		return filter, nil
+	if input.AssigneeMemberID != "" {
+		filter.AssignedTo = member.ID(input.AssigneeMemberID)
 	}
-	filter.AssignedTo = caller.MemberID
 	return filter, nil
 }
 
@@ -282,13 +278,7 @@ func (h Handler) canSeeTask(caller actor, task taskdomain.Task) error {
 	if task.ProjectID != caller.ProjectID {
 		return fmt.Errorf("task: task %s is not visible in project %s", task.ID, caller.ProjectID)
 	}
-	if isCoordinatorType(caller.MemberType) {
-		return nil
-	}
-	if task.AssignedTo == caller.MemberID || task.ClaimedByMemberID == caller.MemberID {
-		return nil
-	}
-	return fmt.Errorf("task: task %s is not visible to member %s", task.ID, caller.MemberID)
+	return nil
 }
 
 func requireTaskID(value string) (taskdomain.TaskID, error) {
@@ -337,8 +327,4 @@ func reviewCriteria(values []reviewCriterionInput) []taskdomain.CriterionReview 
 		out = append(out, taskdomain.CriterionReview{ID: strings.TrimSpace(value.ID), Satisfied: value.Satisfied})
 	}
 	return out
-}
-
-func isCoordinatorType(memberType string) bool {
-	return strings.TrimSpace(memberType) == member.TypeCoordinator
 }

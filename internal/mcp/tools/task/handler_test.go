@@ -229,7 +229,7 @@ func TestHandleListPrefersStampedTaskMemberLabels(t *testing.T) {
 	}
 }
 
-func TestHandleWorkerListScopesToAssignedMember(t *testing.T) {
+func TestHandleMemberListDefaultsToProjectScope(t *testing.T) {
 	svc := &stubService{}
 	_, err := NewHandler().Handle(context.Background(), callContext(svc, "worker-1"), json.RawMessage(`{"action":"list","limit":10}`))
 	if err != nil {
@@ -238,7 +238,7 @@ func TestHandleWorkerListScopesToAssignedMember(t *testing.T) {
 	if svc.called != "list" {
 		t.Fatalf("called=%q want list", svc.called)
 	}
-	if svc.listReq.AssignedTo != "worker-1" || svc.listReq.ProjectID != "space-1" || svc.listReq.Limit != 10 {
+	if svc.listReq.AssignedTo != "" || svc.listReq.ProjectID != "space-1" || svc.listReq.Limit != 10 {
 		t.Fatalf("list req = %+v", svc.listReq)
 	}
 }
