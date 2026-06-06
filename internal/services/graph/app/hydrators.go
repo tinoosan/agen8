@@ -72,10 +72,16 @@ func (h taskHydrator) Fetch(ctx context.Context, projectID string, nodeID string
 		ScopeID:   strings.TrimSpace(string(task.ProjectID)),
 		CreatedAt: createdAt.Format(time.RFC3339Nano),
 		Fields: map[string]any{
-			"description": strings.TrimSpace(task.Description),
-			"assigneeRef": strings.TrimSpace(string(task.AssignedTo)),
-			"taskKind":    strings.TrimSpace(task.TaskKind),
-			"dueDate":     taskDueDate(task),
+			"description":          strings.TrimSpace(task.Description),
+			"assigneeRef":          strings.TrimSpace(string(task.AssignedTo)),
+			"assignedTo":           strings.TrimSpace(string(task.AssignedTo)),
+			"assignedToLabel":      strings.TrimSpace(task.AssignedToLabel),
+			"claimedByMemberId":    strings.TrimSpace(string(task.ClaimedByMemberID)),
+			"claimedByMemberLabel": strings.TrimSpace(task.ClaimedByMemberLabel),
+			"createdBy":            strings.TrimSpace(task.CreatedBy),
+			"createdByLabel":       strings.TrimSpace(task.CreatedByLabel),
+			"taskKind":             strings.TrimSpace(task.TaskKind),
+			"dueDate":              taskDueDate(task),
 		},
 	}, nil
 }

@@ -77,6 +77,50 @@ func TestTaskHydrator_FetchCoordinatorScopeCanReadCrossProjectTask(t *testing.T)
 	}
 }
 
+func TestTaskHydrator_FetchIncludesReadableActorLabels(t *testing.T) {
+	now := time.Now().UTC()
+	task := taskdomain.Task{
+		ID:                   "task-readable-actors",
+		ProjectID:            types.ProjectID("project-a"),
+		Description:          "Make task actors readable",
+		Title:                "Make task actors readable",
+		Status:               taskdomain.TaskStatusActive,
+		AssignedTo:           "member-worker",
+		AssignedToLabel:      "Backend engineer",
+		ClaimedByMemberID:    "member-reviewer",
+		ClaimedByMemberLabel: "Reviewer",
+		CreatedBy:            "member-coordinator",
+		CreatedByLabel:       "Coordinator",
+		CreatedAt:            &now,
+	}
+	reader := stubTaskReader{
+		byID: map[taskdomain.TaskID]taskdomain.Task{
+			"task-readable-actors": task,
+		},
+		tasks: []taskdomain.Task{task},
+	}
+
+	hydrator := taskHydrator{tasks: reader}
+	node, err := hydrator.Fetch(context.Background(), "project-a", "task-readable-actors")
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	for key, want := range map[string]string{
+		"assigneeRef":          "member-worker",
+		"assignedTo":           "member-worker",
+		"assignedToLabel":      "Backend engineer",
+		"claimedByMemberId":    "member-reviewer",
+		"claimedByMemberLabel": "Reviewer",
+		"createdBy":            "member-coordinator",
+		"createdByLabel":       "Coordinator",
+	} {
+		if got, _ := node.Fields[key].(string); got != want {
+			t.Fatalf("field %s=%q want %q; fields=%+v", key, got, want, node.Fields)
+		}
+	}
+}
+
 func TestTaskHydrator_SearchCoordinatorScopeListsTasksAcrossProjects(t *testing.T) {
 	now := time.Now().UTC()
 	taskA := taskdomain.Task{
