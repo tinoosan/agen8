@@ -141,6 +141,16 @@ func NewApplication(cfg Config) (*Application, error) {
 		return nil, fmt.Errorf("build project service: %w", err)
 	}
 
+	// Retire the duplicate member rows left by the old harness-label fork bug. Resolve
+	// already heals such forks on read, so this is a data-hygiene pass, not a correctness
+	// gate: a failure is logged loudly but must not stop the daemon from starting. It is a
+	// no-op once each session has a single active member, so it is safe to run every boot.
+	if retired, err := projectSvc.ReconcileDuplicateMembers(context.Background()); err != nil {
+		logger.Error("reconcile duplicate session-fork members at startup", "error", err)
+	} else if retired > 0 {
+		logger.Info("reconciled duplicate session-fork members at startup", "retired", retired)
+	}
+
 	locationRepo, err := locationinfra.NewRepository(handle)
 	if err != nil {
 		return nil, fmt.Errorf("build location repository: %w", err)
