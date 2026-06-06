@@ -21,18 +21,9 @@ import { DatePicker } from '@/components/ui/date-picker'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import type { DecisionView } from '../../lib/types'
+import { formatRelative } from '@/lib/format'
 
 const PAGE_SIZE = 20
-
-function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  if (diffMs < 0) return 'just now'
-  const minutes = Math.floor(diffMs / 60_000)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
 
 // Confidence is the headline signal, so colour-code it for scanning: high
 // (>=80%) green, medium (>=50%) amber, low red. Literal class strings keep
@@ -105,7 +96,7 @@ function DecisionLogRow({ projectId, decision }: { projectId: string; decision: 
           >
             {confidencePct}%
           </span>
-          <span className="inline-flex items-center gap-1"><Clock size={10} />{timeAgo(decision.createdAt)}</span>
+          <span className="inline-flex items-center gap-1"><Clock size={10} />{formatRelative(decision.createdAt)}</span>
           {refTypes.map(type => (
             <span
               key={type}

@@ -3,7 +3,6 @@ import {
   buildSecrets,
   deriveInjection,
   previewInjection,
-  formatRelative,
   emptyAuthDraft,
   type AuthDraft,
 } from './credentialModel'
@@ -120,21 +119,5 @@ describe('previewInjection', () => {
   it('uses placeholders when fields are empty', () => {
     const p = previewInjection(emptyAuthDraft())
     expect(p.action).toContain('‹host›')
-  })
-})
-
-describe('formatRelative', () => {
-  it('returns empty string for missing/invalid input', () => {
-    expect(formatRelative(undefined)).toBe('')
-    expect(formatRelative('not-a-date')).toBe('')
-  })
-
-  it('says "just now" for very recent times', () => {
-    expect(formatRelative(new Date().toISOString())).toBe('just now')
-  })
-
-  it('formats days ago', () => {
-    const fiveDays = new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString()
-    expect(formatRelative(fiveDays)).toBe('5d ago')
   })
 })

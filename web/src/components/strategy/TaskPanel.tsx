@@ -7,8 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { taskStatusLabel, taskStatusColor } from '../../lib/statusLabels'
+import { formatRelative } from '@/lib/format'
 import {
-  relativeTime,
   taskIdShort,
   taskDuration,
   parseRetryTask,
@@ -250,7 +250,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)', textTransform: 'uppercase' }}>Created</span>
           <span className="flex items-center gap-1" style={{ fontSize: '0.6875rem', lineHeight: 1.33, color: 'var(--text-2)' }}>
             <Clock size={10} style={{ color: 'var(--text-3)' }} />
-            {relativeTime(task.createdAt)}
+            {formatRelative(task.createdAt, { fallback: 'unknown' })}
           </span>
         </div>
         {task.completedAt && (
@@ -260,7 +260,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
             </span>
             <span className="flex items-center gap-1" style={{ fontSize: '0.6875rem', lineHeight: 1.33, color: 'var(--text-2)' }}>
               <Clock size={10} style={{ color: 'var(--text-3)' }} />
-              {duration ?? relativeTime(task.completedAt)}
+              {duration ?? formatRelative(task.completedAt, { fallback: 'unknown' })}
             </span>
           </div>
         )}
@@ -367,7 +367,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
                     </span>
                   )}
                   {latestReview.reviewedAt && (
-                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>{relativeTime(latestReview.reviewedAt)}</span>
+                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>{formatRelative(latestReview.reviewedAt, { fallback: 'unknown' })}</span>
                   )}
                 </div>
                 {latestReview.feedback && (

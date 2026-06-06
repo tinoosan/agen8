@@ -25,3 +25,29 @@ export function formatPercent(ratio: number): string {
   if (ratio >= 1) return '100%'
   return `${(ratio * 100).toFixed(0)}%`
 }
+
+export interface RelativeTimeOptions {
+  /** Text for missing/unparseable input. Defaults to '' (some callers want '—' or 'unknown'). */
+  fallback?: string
+  /** Show "Ns ago" under a minute instead of "just now" — for high-churn feeds. Default false. */
+  seconds?: boolean
+}
+
+export function formatRelative(iso?: string, opts?: RelativeTimeOptions): string {
+  const fallback = opts?.fallback ?? ''
+  if (!iso) return fallback
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return fallback
+  const sec = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (opts?.seconds && sec < 60) return sec < 1 ? 'just now' : `${sec}s ago`
+  if (sec < 45) return 'just now'
+  const min = Math.round(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const day = Math.round(hr / 24)
+  if (day < 30) return `${day}d ago`
+  const mo = Math.round(day / 30)
+  if (mo < 12) return `${mo}mo ago`
+  return `${Math.round(mo / 12)}y ago`
+}

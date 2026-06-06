@@ -5,6 +5,7 @@ import { useNavigation } from '../lib/routing'
 import { useProjectMembers, useRemoveMember } from '../hooks/useProjectMembers'
 import { memberDisplayName } from '../lib/memberDisplay'
 import { cn } from '@/lib/utils'
+import { formatRelative } from '@/lib/format'
 import type { ProjectMember } from '../lib/types'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -45,23 +46,6 @@ function isHandTypedRef(ref?: string): boolean {
   if (UUID_RE.test(r)) return false
   if (/^bridge-[0-9a-f]{6,}$/i.test(r)) return false
   return true
-}
-
-function timeAgo(iso?: string): string {
-  if (!iso) return '—'
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return '—'
-  const diffMs = Date.now() - t
-  if (diffMs < 0) return 'just now'
-  const s = Math.floor(diffMs / 1000)
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  if (d < 30) return `${d}d ago`
-  return new Date(iso).toLocaleDateString()
 }
 
 function absTime(iso?: string): string {
@@ -246,7 +230,7 @@ function MemberCard({
         <CardField label="Effort" value={m.effort || '—'} />
         <CardField
           label="Registered"
-          value={timeAgo(m.registeredAt)}
+          value={formatRelative(m.registeredAt, { seconds: true, fallback: '—' })}
           title={absTime(m.registeredAt)}
         />
       </dl>
@@ -387,7 +371,7 @@ function MemberRow({
           className="whitespace-nowrap text-[0.8125rem] text-[var(--text-3)]"
           title={absTime(m.registeredAt)}
         >
-          {timeAgo(m.registeredAt)}
+          {formatRelative(m.registeredAt, { seconds: true, fallback: '—' })}
         </span>
       </TableCell>
       {!removed && (

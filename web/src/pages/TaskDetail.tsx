@@ -17,13 +17,13 @@ import { useTask, useCancelTask } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
 import { useKeyResult, useProjectKRs, useMissions } from '../hooks/useMissions'
 import { taskStatusLabel, taskStatusColor } from '../lib/statusLabels'
+import { formatRelative } from '@/lib/format'
 import {
   taskAssignedMemberLabel,
   taskClaimedMemberLabel,
   taskCreatedMemberLabel,
 } from '../lib/taskMembers'
 import {
-  relativeTime,
   taskIdShort,
   taskDuration,
   parseRetryTask,
@@ -396,13 +396,13 @@ export default function TaskDetail() {
             )}
             <StatItem
               label="Created"
-              value={relativeTime(task.createdAt)}
+              value={formatRelative(task.createdAt, { fallback: 'unknown' })}
               icon={<Clock size={11} style={{ color: 'var(--text-3)' }} />}
             />
             {task.completedAt && (
               <StatItem
                 label={duration ? 'Duration' : 'Completed'}
-                value={duration ?? relativeTime(task.completedAt)}
+                value={duration ?? formatRelative(task.completedAt, { fallback: 'unknown' })}
                 icon={<Clock size={11} style={{ color: 'var(--text-3)' }} />}
               />
             )}
@@ -489,7 +489,7 @@ export default function TaskDetail() {
                     </span>
                   )}
                   {latestReview.reviewedAt && (
-                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>{relativeTime(latestReview.reviewedAt)}</span>
+                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>{formatRelative(latestReview.reviewedAt, { fallback: 'unknown' })}</span>
                   )}
                 </div>
                 {latestReview.feedback && (

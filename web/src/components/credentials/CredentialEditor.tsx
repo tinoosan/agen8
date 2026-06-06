@@ -25,8 +25,8 @@ import {
   emptyAuthDraft,
   INJECTION_META,
   previewInjection,
-  formatRelative,
 } from './credentialModel'
+import { formatRelative } from '@/lib/format'
 
 export interface CredentialUpdatePatch {
   label?: string

@@ -7,6 +7,7 @@ import { taskClaimedMemberLabel, taskAssignedMemberLabel } from '../../lib/taskM
 import { taskStatusColor, taskStatusLabel } from '../../lib/statusLabels'
 import { taskDetailLink } from '../../lib/routing'
 import type { Task } from '../../lib/types'
+import { formatRelative } from '@/lib/format'
 
 /* In-flight = work an agent is actively on, not queued and not finished:
  * active, blocked, and in_review. Pending/terminal states live in the count
@@ -39,19 +40,6 @@ function avatarToken(seed: string): string {
 /* Who's on it: prefer the member who claimed the work, fall back to assignee. */
 function agentName(task: Task): string {
   return taskClaimedMemberLabel(task) ?? taskAssignedMemberLabel(task) ?? 'Unassigned'
-}
-
-function timeAgo(iso?: string): string {
-  if (!iso) return ''
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ''
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (secs < 60) return 'just now'
-  const mins = Math.round(secs / 60)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.round(hrs / 24)}d ago`
 }
 
 /* ── Working row — monogram + agent/role + task + status/time + disclosure ── */
@@ -95,7 +83,7 @@ function WorkingRow({ projectId, task, first }: { projectId: string; task: Task;
             <span className="hidden sm:inline">{taskStatusLabel(task.status)}</span>
           </span>
           <span className="hidden text-[0.6875rem] tabular-nums text-[var(--text-3)] sm:inline">
-            {timeAgo(task.updatedAt)}
+            {formatRelative(task.updatedAt)}
           </span>
         </div>
         <ChevronRight size={16} className="shrink-0 text-[var(--text-3)]" aria-hidden />

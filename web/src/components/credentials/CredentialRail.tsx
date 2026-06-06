@@ -8,7 +8,8 @@ import { useMemo, useState } from 'react'
 import { Search, Plus, KeyRound } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CredentialView } from '../../hooks/useCredentials'
-import { deriveInjection, INJECTION_META, formatRelative } from './credentialModel'
+import { deriveInjection, INJECTION_META } from './credentialModel'
+import { formatRelative } from '@/lib/format'
 
 function statusDotColor(status: CredentialView['status']): string {
   if (status === 'active') return 'var(--green)'

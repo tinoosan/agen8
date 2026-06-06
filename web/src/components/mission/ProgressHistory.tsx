@@ -1,24 +1,11 @@
 import { useProgressHistory } from '../../hooks/useMissions'
 import type { ProgressEntryView } from '../../hooks/useMissions'
 import { Skeleton } from '@/components/ui/skeleton'
+import { formatRelative } from '@/lib/format'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 
 /* ── Helpers ──────────────────────────────────────────── */
-
-function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  if (diffMs < 0) return 'just now'
-  const seconds = Math.floor(diffMs / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}d ago`
-  return new Date(iso).toLocaleDateString()
-}
 
 function shortAgent(raw: string): string {
   const slashPart = raw.split('/').pop() ?? raw
@@ -41,7 +28,7 @@ function EntryRow({ entry }: { entry: ProgressEntryView }) {
           {shortAgent(entry.updatedBy)}
         </span>
         <span className="text-[var(--text-3)] shrink-0 tabular-nums" style={{ fontSize: '0.625rem' }}>
-          {timeAgo(entry.createdAt)}
+          {formatRelative(entry.createdAt, { seconds: true })}
         </span>
       </div>
       {/* Note — wraps freely below */}

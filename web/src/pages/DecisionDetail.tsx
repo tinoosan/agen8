@@ -12,7 +12,7 @@ import {
 import { useDecision, useDeleteDecision } from '../hooks/useDecisions'
 import { useMissions, useProjectKRs } from '../hooks/useMissions'
 import { useProjectTasks } from '../hooks/useProjectTasks'
-import { relativeTime } from './boardHelpers'
+import { formatRelative } from '@/lib/format'
 import {
   decisionsPanelLink,
   missionDetailLink,
@@ -231,7 +231,7 @@ export default function DecisionDetail() {
                 </Badge>
                 <span className="flex items-center gap-1 text-[var(--text-3)]" style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}>
                   <Clock size={11} />
-                  {relativeTime(decision.createdAt)}
+                  {formatRelative(decision.createdAt, { fallback: 'unknown' })}
                 </span>
               </div>
             </div>
@@ -272,7 +272,7 @@ export default function DecisionDetail() {
             <StatItem label="Confidence" value={<span style={{ color: confColor, fontWeight: 600 }}>{confidencePct}%</span>} />
             <StatItem
               label="Logged"
-              value={relativeTime(decision.createdAt)}
+              value={formatRelative(decision.createdAt, { fallback: 'unknown' })}
               icon={<Clock size={11} style={{ color: 'var(--text-3)' }} />}
             />
             <StatItem label="By" value={actor.label} />
