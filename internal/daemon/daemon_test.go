@@ -1125,6 +1125,13 @@ func createTaskOverWireForSession(t *testing.T, handler http.Handler, token, ses
 // GATE's response to that state, not the daemon's resolution ambiguity itself (that
 // resolution contract is TestResolveMCPSessionTokenClasses, KR1).
 //
+// Residual risk this test does NOT close: its safety rests on resolution returning
+// member-LESS under ambiguity, never a guessed member. If resolveMCPSession ever fell back
+// to picking the sole/first member on a contended token, the gate would receive a (wrong)
+// actor id and this member-less path would sail right past the mis-attribution. KR1 is what
+// pins resolution to stay member-less for an unknown ref; KR1 and KR2 only close the gap
+// together.
+//
 // Scope: distinct from KR3 (TestMCPWireHappyPathForBoundMemberVerb), which drives a
 // different verb (decision.log) and only the happy path, and from the
 // resolveMCPSession-only concurrency tests, which never drive a verb through a tool
