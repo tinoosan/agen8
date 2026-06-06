@@ -6,7 +6,6 @@ import (
 	"embed"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,9 +18,9 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// currentSchemaVersion is bumped on hard cutover. Version 5 removes legacy
-// channel/message-delivery and plan tables from the fresh MCP-first core.
-// Existing v4 DBs are incompatible and must be wiped.
+// currentSchemaVersion is the current MCP-first schema baseline. Incompatible
+// local databases must be migrated or explicitly archived by the operator;
+// startup refuses to silently replace active user data.
 const currentSchemaVersion = 5
 
 // loadMigrationSQL reads all .sql files from the embedded migrations directory,
@@ -119,54 +118,7 @@ func getDBHandle(ctx context.Context, cfg config.Config) (*storagedb.Handle, err
 	if err == nil {
 		return handle, nil
 	}
-	if driver != storagedb.DriverSQLite || !isHardCutoverSchemaError(err) {
-		return nil, err
-	}
-	backup, archiveErr := archiveSQLiteDB(cfg.DataDir)
-	if archiveErr != nil {
-		return nil, fmt.Errorf("%w; also failed to archive incompatible sqlite db: %v", err, archiveErr)
-	}
-	handle, retryErr := storagedb.Open(ctx, openCfg)
-	if retryErr != nil {
-		return nil, fmt.Errorf("open fresh sqlite db after archiving incompatible db to %s: %w", backup, retryErr)
-	}
-	return handle, nil
-}
-
-func isHardCutoverSchemaError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := err.Error()
-	return strings.Contains(message, "incompatible schema version") ||
-		strings.Contains(message, "incompatible schema:")
-}
-
-func archiveSQLiteDB(dataDir string) (string, error) {
-	path := storagedb.SQLitePath(dataDir)
-	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("sqlite path is empty")
-	}
-	if _, err := os.Stat(path); err != nil {
-		return "", err
-	}
-	stamp := time.Now().UTC().Format("20060102T150405Z")
-	backup := fmt.Sprintf("%s.incompatible-%s.bak", path, stamp)
-	if err := os.Rename(path, backup); err != nil {
-		return "", fmt.Errorf("archive sqlite db: %w", err)
-	}
-	for _, suffix := range []string{"-wal", "-shm"} {
-		sidecar := path + suffix
-		if _, err := os.Stat(sidecar); err == nil {
-			sidecarBackup := filepath.Base(backup) + suffix
-			if err := os.Rename(sidecar, filepath.Join(filepath.Dir(path), sidecarBackup)); err != nil {
-				return backup, fmt.Errorf("archive sqlite sidecar %s: %w", sidecar, err)
-			}
-		} else if !os.IsNotExist(err) {
-			return backup, fmt.Errorf("stat sqlite sidecar %s: %w", sidecar, err)
-		}
-	}
-	return backup, nil
+	return nil, err
 }
 
 func getSQLiteDB(cfg config.Config) (*sql.DB, error) {
@@ -201,7 +153,7 @@ func migratePostgres(ctx context.Context, db *sql.DB) error {
 	}
 	if version > 0 && version != currentSchemaVersion {
 		tx.Rollback()
-		return fmt.Errorf("postgres: incompatible schema version %d; this MVP build requires a fresh schema version %d", version, currentSchemaVersion)
+		return fmt.Errorf("postgres: incompatible schema version %d; this build requires schema version %d; apply a preserving migration or use an explicitly isolated database", version, currentSchemaVersion)
 	}
 	if version == 0 {
 		stmt, err := loadPostgresSchemaSQL()
@@ -276,7 +228,7 @@ func migrateSQLite(db *sql.DB) error {
 	}
 	if version > 0 && version != currentSchemaVersion {
 		tx.Rollback()
-		return fmt.Errorf("sqlite: incompatible schema version %d; this MVP build requires a fresh schema version %d", version, currentSchemaVersion)
+		return fmt.Errorf("sqlite: incompatible schema version %d; this build requires schema version %d. Apply a preserving migration, or run with an explicitly isolated AGEN8_DATA_DIR / --data-dir for clean checks; startup will not replace the active database automatically", version, currentSchemaVersion)
 	}
 	if version == 0 {
 		stmts, err := loadMigrationSQL()
@@ -405,7 +357,7 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 
 func hardCutoverSchemaError(format string, args ...any) error {
 	detail := fmt.Sprintf(format, args...)
-	return fmt.Errorf("sqlite: incompatible schema: %s (hard cutover). Remove or archive the SQLite database in the configured Agen8 data directory (AGEN8_DATA_DIR / --data-dir) and retry", detail)
+	return fmt.Errorf("sqlite: incompatible schema: %s. Apply a preserving migration, or run with an explicitly isolated AGEN8_DATA_DIR / --data-dir for clean checks; startup will not replace the active database automatically", detail)
 }
 
 func repairDecisionMemberNameColumn(tx *sql.Tx) error {

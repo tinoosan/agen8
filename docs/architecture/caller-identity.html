@@ -109,7 +109,7 @@
   </table>
 
   <h2 id="storage">4. Member storage</h2>
-  <p>The canonical durable member table is <code>members</code>. A member belongs to a project, but the table name reflects the domain record, not one relationship. This is a hard-cutover schema: new local databases create <code>members</code>; old <code>project_members</code> databases are not kept alive through compatibility views or fallback reads.</p>
+  <p>The canonical durable member table is <code>members</code>. A member belongs to a project, but the table name reflects the domain record, not one relationship. New local databases create <code>members</code>; existing development databases should move through explicit preserving migrations rather than silent compatibility fallbacks or automatic replacement.</p>
 
 <pre><code class="lang-sql"><span class="tok-kw">CREATE TABLE</span> members (
     member_id TEXT PRIMARY KEY,
@@ -133,7 +133,7 @@
       <tr><td>Services do not import RPC or MCP to learn who called them.</td><td>Service constructors depend on <code>caller.Resolver</code>.</td></tr>
       <tr><td>Adapters authenticate; services authorize.</td><td>RPC/MCP stamp caller identity; service methods validate ownership, membership, and role rules.</td></tr>
       <tr><td>Member storage is canonical as <code>members</code>.</td><td>Schema validation requires <code>members</code> and the member repository reads/writes it.</td></tr>
-      <tr><td>No compatibility fallback reads old member tables.</td><td>Hard-cutover schema validation fails old databases loudly.</td></tr>
+      <tr><td>No compatibility fallback reads old member tables.</td><td>Schema validation fails incompatible databases loudly and points operators toward preserving migration work.</td></tr>
     </tbody>
   </table>
 </div>

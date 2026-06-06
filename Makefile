@@ -1,4 +1,5 @@
 DATA_DIR ?=
+RESET_DATA_DIR ?= $(if $(strip $(DATA_DIR)),$(DATA_DIR),$(HOME)/.agen8)
 HTTP_ADDR ?= 127.0.0.1:7777
 VITE_ADDR ?= 127.0.0.1:5173
 DEV_WEB_URL ?= http://$(VITE_ADDR)
@@ -20,13 +21,20 @@ REMOTE_HTTP_PORT := $(word 2,$(subst :, ,$(REMOTE_HTTP_ADDR)))
 REMOTE_VITE_HOST := $(word 1,$(subst :, ,$(REMOTE_VITE_ADDR)))
 REMOTE_VITE_PORT := $(word 2,$(subst :, ,$(REMOTE_VITE_ADDR)))
 
-.PHONY: run clean seed-clean seed-list ensure-air web-install web-build build-go build dev remote dev-remote daemon-remote test test-go test-web lint lint-go lint-web fmt-check guardrails ci race install-hooks worktree-create worktree-clean
+.PHONY: run clean reset-local-data seed-clean seed-list ensure-air web-install web-build build-go build dev remote dev-remote daemon-remote test test-go test-web lint lint-go lint-web fmt-check guardrails ci race install-hooks worktree-create worktree-clean
 
 # Seeding is automatic at startup (from ./defaults) for now.
 run: daemon-remote
 
 clean:
-	@rm -rf ./tmp ./bin ~/.agen8/agen8.db ~/.agen8/agen8.db-shm ~/.agen8/agen8.db-wal ~/.agen8/daemon.log ~/.agen8/debug.log
+	@rm -rf ./tmp ./bin ~/.agen8/daemon.log ~/.agen8/debug.log
+
+reset-local-data:
+	@if [ "$(CONFIRM)" != "DELETE" ]; then \
+		echo 'Refusing to remove local Agen8 data. Re-run with CONFIRM=DELETE only when an explicit reset is intended.'; \
+		exit 1; \
+	fi
+	@rm -f "$(RESET_DATA_DIR)/agen8.db" "$(RESET_DATA_DIR)/agen8.db-shm" "$(RESET_DATA_DIR)/agen8.db-wal"
 
 ensure-air:
 	@command -v $(AIR) >/dev/null

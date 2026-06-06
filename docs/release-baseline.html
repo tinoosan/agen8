@@ -20,7 +20,7 @@
   <span class="eyebrow">Release Readiness</span>
   <h1>Release baseline setup and verification</h1>
   <p class="lede">
-    This page describes the current releasable local baseline for agen8 MCP. It is a practical setup and verification checklist for the daemon, web UI, retained MCP tools, local data directory, and schema archive behavior.
+    This page describes the current releasable local baseline for agen8 MCP. It is a practical setup and verification checklist for the daemon, web UI, retained MCP tools, local data directory, and schema preservation policy.
   </p>
   <p>For release-facing notes and the v0.1.0 preflight checklist, see <a href="./release-notes-v0.1.0.html">v0.1.0 Release Notes</a>.</p>
 
@@ -33,7 +33,7 @@
       <li><a href="#setup">First local setup</a></li>
       <li><a href="#mcp">MCP connection</a></li>
       <li><a href="#uat">Retained tool UAT</a></li>
-      <li><a href="#schema">Schema archive behavior</a></li>
+      <li><a href="#schema">Schema preservation policy</a></li>
       <li><a href="#release">Before tagging</a></li>
     </ol>
   </nav>
@@ -60,6 +60,8 @@ make dev remote DATA_DIR=/tmp/agen8-release-check
 agen8-mcp daemon start --data-dir /tmp/agen8-release-check --listener http --http-addr 127.0.0.1:7777</code></pre>
 
   <p>The repository should not contain a live <code>agen8.db</code>. Local SQLite files belong in the resolved data directory; use an isolated <code>DATA_DIR</code> or <code>AGEN8_DATA_DIR</code> for clean setup checks.</p>
+
+  <p><code>make clean</code> removes build artifacts and logs only. It does not remove <code>agen8.db</code>, <code>agen8.db-wal</code>, or <code>agen8.db-shm</code>. Use isolated data directories for repeatable setup checks instead of resetting the active local database.</p>
 
   <h2 id="build">3. Build and version checks</h2>
   <p>The release version source is <code>pkg/buildinfo</code>. Builds set <code>Version</code>, <code>Commit</code>, and <code>BuildDate</code> with Go ldflags. Local development defaults to <code>dev</code> and <code>none</code>.</p>
@@ -106,10 +108,10 @@ curl http://127.0.0.1:7777/healthz</code></pre>
     </tbody>
   </table>
 
-  <h2 id="schema">7. Schema archive behavior</h2>
-  <p>The local SQLite schema uses a hard-cutover baseline. If the daemon sees an incompatible old schema, it archives the old database under the configured data directory using an <code>agen8.db.incompatible-*.bak</code> filename and starts with a fresh schema. If archive startup fails, the error points back to the configured data directory from <code>AGEN8_DATA_DIR</code> or <code>--data-dir</code>. This is intentional for the current local baseline.</p>
+  <h2 id="schema">7. Schema preservation policy</h2>
+  <p>The local SQLite schema validates the current MCP-first baseline at startup. If the daemon sees an incompatible old schema, startup fails loudly with migration guidance. It does not automatically archive, delete, or replace the active database. Use preserving migration scripts for development data and use an explicitly isolated <code>DATA_DIR</code> or <code>AGEN8_DATA_DIR</code> for clean release checks.</p>
 
-  <p>Schema validation rejects removed tables and legacy columns from removed concepts. The current task schema keeps mission and key-result references and rejects legacy task plan columns.</p>
+  <p>Schema validation rejects removed tables and legacy columns from removed concepts. The current task schema keeps mission and key-result references and rejects legacy task plan columns. A destructive reset is only a deliberate release-finalization or operator action, never the default startup or cleanup path.</p>
 
   <h2 id="release">8. Before tagging</h2>
   <p>Run these checks before creating a release tag:</p>

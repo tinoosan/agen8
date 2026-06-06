@@ -233,7 +233,7 @@ wlt_8c1f2a...9b
 <span class="tok-comment">//   RevokeLinkToken(ctx, id)</span>
 </code></pre>
 
-  <p>Minting reuses the existing primitives: <code>auth.NewRawToken("wlt", n)</code> for the <code>prefix_hex</code> string and <code>auth.HashToken</code> for storage. Persistence reuses the auth SQL store: an <code>auth_link_tokens</code> table self-creates in <code>ensureSchema</code>, with thin SQLite and Postgres wrappers — no migration files, consistent with every other table in the system.</p>
+  <p>Minting reuses the existing primitives: <code>auth.NewRawToken("wlt", n)</code> for the <code>prefix_hex</code> string and <code>auth.HashToken</code> for storage. Persistence reuses the auth SQL store with explicit schema changes and preserving migrations so existing local data is not replaced by startup behavior.</p>
 
   <h2 id="shim">6. The local shim</h2>
   <p>The shim already exists. <code>RunHTTPBridge</code> (<code>internal/mcp/http_bridge.go</code>) is a stdio-to-HTTP forwarder: it speaks stdio MCP to the harness and Streamable HTTP to the daemon, local or hosted, and already injects a per-session header. <code>agen8 mcp serve</code> is a thin CLI subcommand over that existing logic plus marker reading.</p>
@@ -404,7 +404,7 @@ _, err = s.workspaces.<span class="tok-fn">Upsert</span>(ctx, workspace.Record{
 
 <span class="dir">web/</span><span class="note">create/select project &rarr; &ldquo;link this folder&rdquo;</span></pre></div>
 
-  <p class="footnote">No migration files: the <code>auth_link_tokens</code> and <code>workspaces</code> tables self-create in <code>ensureSchema</code>, consistent with every other table in the system.</p>
+  <p class="footnote">Schema changes for <code>auth_link_tokens</code> and <code>workspaces</code> are migration-backed. Startup should validate the schema and fail loudly on incompatible data rather than replacing the active database.</p>
 </div>
 </body>
 </html>
