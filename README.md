@@ -23,6 +23,8 @@ harness session manager.
 - MCP endpoint: `http://127.0.0.1:7777/mcp?token=<token>`
 - Retained MCP tools: `project`, `mission`, `task`, `decision`,
   `graph_query`, and `http`
+- Pre-push gate: clean git status, Go tests, frontend lint/tests/build,
+  `npm audit`, and `govulncheck`
 
 See `docs/release-baseline.html` for the setup, verification, and release
 baseline checklist.
@@ -58,6 +60,26 @@ and the user's local Agen8 API key.
 Then call `project.register` with the project root and a readable
 `display_name`, such as `backend engineer` or `frontend reviewer`, so tasks,
 decisions, and graph records remain understandable.
+
+## Pre-Push Check
+
+Before publishing or tagging the baseline, run the same gate used for the
+current local release checks:
+
+```sh
+git status --short
+go test ./... -count=1
+npm --prefix web run lint
+npm --prefix web run test -- --run
+npm --prefix web run build
+npm --prefix web audit --audit-level=moderate
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+git status --short
+```
+
+The final status should be clean. If the web build regenerates
+`internal/web/dist`, commit that generated output with the matching source
+change. Publish `.mcp.example.json`, not a real local `.mcp.json`.
 
 ## Initial Repository Shape
 

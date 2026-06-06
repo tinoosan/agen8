@@ -119,10 +119,17 @@ curl http://127.0.0.1:7777/healthz</code></pre>
   <p>Run these checks before creating a release tag:</p>
 
 <pre><code class="lang-shell">go test ./... -count=1
+npm --prefix web run lint
+npm --prefix web run test -- --run
+npm --prefix web run build
+npm --prefix web audit --audit-level=moderate
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ./bin/agen8-mcp version
 make dev remote
 # Run retained MCP tool UAT from a real harness connection.</code></pre>
+
+  <p>Start and end with <code>git status --short</code>. The release candidate should be clean before tagging. If <code>npm --prefix web run build</code> updates <code>internal/web/dist</code>, commit the generated assets with the source change that produced them. Keep the real local <code>.mcp.json</code> ignored; publish <code>.mcp.example.json</code> only.</p>
 
   <p>The release workflow builds <code>agen8-mcp</code> archives for Linux and macOS on version tags matching <code>v*</code>.</p>
 
