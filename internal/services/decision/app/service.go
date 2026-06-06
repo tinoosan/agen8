@@ -7,12 +7,12 @@
 //   - Publishing a "decision.logged" event so the notification evaluator
 //     and other subscribers see new decisions.
 //   - De-duplicating identical decisions logged within a short window
-//     (same project + role + title + task) — guards against agent
+//     (same project + role + title + task) - guards against agent
 //     retry-storms creating dozens of identical entries.
 //
 // What this service is NOT responsible for:
-//   - Validating the decision's shape — that lives on domain.Decision.Validate().
-//   - Constructing decisions for callers — Log is a thin mapping wrapper;
+//   - Validating the decision's shape - that lives on domain.Decision.Validate().
+//   - Constructing decisions for callers - Log is a thin mapping wrapper;
 //     tools or RPC handlers can also build a Decision directly and call Create.
 package app
 
@@ -44,7 +44,7 @@ type Service struct {
 	members     MemberDisplayLookup
 }
 
-// LogRequest is the input shape for Service.Log — a "log" decision
+// LogRequest is the input shape for Service.Log - a "log" decision
 // recorded deliberately by an agent. Tool/RPC layers map their wire
 // formats onto this struct.
 type LogRequest struct {
@@ -174,7 +174,7 @@ func (s *Service) resolveDecisionRefs(ctx context.Context, d *domain.Decision) e
 //
 // Dedup behavior: if an identical decision (same project + source role +
 // title + task) was created within dedupWindow, Create returns the input
-// without writing anything. This is intentional — we don't want a single
+// without writing anything. This is intentional - we don't want a single
 // agent retry to spawn duplicate audit entries.
 //
 // Side-effect ordering matters: the graph edges reference the saved
@@ -246,7 +246,7 @@ func (s *Service) Create(ctx context.Context, d domain.Decision) (domain.Decisio
 
 // resolveMemberDisplay looks up the member's display name. Returns
 // empty string when the lookup func is nil or the lookup itself
-// fails — callers populate the resolved name into Result.MemberName
+// fails - callers populate the resolved name into Result.MemberName
 // so downstream consumers don't have to do the work.
 func (s *Service) resolveMemberDisplay(ctx context.Context, memberID string) string {
 	if s.members == nil {
@@ -300,7 +300,7 @@ func (s *Service) emitContextLinks(ctx context.Context, d domain.Decision) error
 	return nil
 }
 
-// Log records a deliberate "log" decision. This is the agent path —
+// Log records a deliberate "log" decision. This is the agent path -
 // the agent decided X, here's why, here's what alternatives were
 // rejected, here's what would invalidate this. Validate() rejects
 // blank rationale or title, so we don't trim at this boundary; we
@@ -360,7 +360,7 @@ func (s *Service) Get(ctx context.Context, id domain.DecisionID) (domain.Decisio
 
 // Delete removes a decision and the context links pointing at it.
 //
-// We delete links first then the row — if link deletion fails, the
+// We delete links first then the row - if link deletion fails, the
 // decision is preserved so the caller can retry. Deleting the row
 // first would orphan the links if the second step failed.
 func (s *Service) Delete(ctx context.Context, id domain.DecisionID) error {
@@ -415,6 +415,17 @@ func (s *Service) Count(ctx context.Context, filter domain.DecisionFilter) (int,
 		return 0, fmt.Errorf("decision count offset must be non-negative")
 	}
 	return s.repo.CountDecisions(ctx, filter)
+}
+
+// Stats returns aggregate counts over the filtered decision set. Pagination is
+// irrelevant here - the aggregate spans every matching row - so only the
+// project scope is validated.
+func (s *Service) Stats(ctx context.Context, filter domain.DecisionFilter) (domain.DecisionStats, error) {
+	filter.ProjectID = strings.TrimSpace(filter.ProjectID)
+	if filter.ProjectID == "" {
+		return domain.DecisionStats{}, fmt.Errorf("projectId is required")
+	}
+	return s.repo.StatsDecisions(ctx, filter)
 }
 
 func (s *Service) Export(ctx context.Context, filter domain.DecisionFilter) ([]domain.Decision, error) {

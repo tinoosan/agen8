@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -327,4 +328,258 @@ func createProjectLinkTokenForTest(t *testing.T, handler http.Handler, sessionTo
 		t.Fatalf("link token=%q want wlt_ prefix", resp.Result.Token)
 	}
 	return resp.Result.Token
+}
+
+// TestConcurrentSessionsResolveToOwnMember is the end-to-end proof of the
+// disambiguation feature: two Claude Code conversations that share ONE link token
+// must each resolve to their OWN member on a member-as-actor verb (here
+// task.claim), not collide on a single shared identity.
+//
+// The realistic Claude scenario is modelled exactly: each conversation registers
+// with only a session_id (its conversation id) - no thread_id, no transport
+// Mcp-Session-Id header - because Claude Code's PreToolUse hook can only stamp
+// session_id into the call's arguments. Resolution then runs through
+// d.resolveMCPSession with an EMPTY http.Header, so the only identity signal is
+// the in-band arguments.session_id. If the daemon ignored arguments on
+// non-register verbs (the old behaviour) both calls would resolve member-less and
+// this test would fail.
+func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
+	dataDir := t.TempDir()
+	projectRoot := t.TempDir()
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: dataDir},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("Accept", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setupResult struct {
+		Session struct {
+			Token string `json:"token"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	if setupResult.Session.Token == "" {
+		t.Fatal("setup response missing session token")
+	}
+
+	projectID := createProjectForLinkTokenTest(t, handler, setupResult.Session.Token, projectRoot)
+	linkToken := createProjectLinkTokenForTest(t, handler, setupResult.Session.Token, projectID)
+
+	// One initialize is enough for the stateless streamable handler to accept the
+	// subsequent tool calls over this token.
+	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(linkToken), bytes.NewReader(initializeBody))
+	initReq.Header.Set("Content-Type", "application/json")
+	initReq.Header.Set("Accept", "application/json, text/event-stream")
+	initRec := httptest.NewRecorder()
+	handler.ServeHTTP(initRec, initReq)
+	if initRec.Code != http.StatusOK {
+		t.Fatalf("mcp initialize status=%d body=%s", initRec.Code, initRec.Body.String())
+	}
+
+	// Two distinct conversations register under the SAME link token.
+	memberA := registerSessionMemberForTest(t, handler, linkToken, rootA, "claude-sess-A", "Worker A")
+	memberB := registerSessionMemberForTest(t, handler, linkToken, rootB, "claude-sess-B", "Worker B")
+	if memberA == memberB {
+		t.Fatalf("two sessions collided onto one member id %q", memberA)
+	}
+
+	ctx := context.Background()
+
+	// A non-register verb (task.claim) carrying only arguments.session_id, with NO
+	// transport header, must resolve to the matching member.
+	gotA, err := d.resolveMCPSession(ctx, linkToken, http.Header{}, claimBodyForSession("claude-sess-A"))
+	if err != nil {
+		t.Fatalf("resolve session A: %v", err)
+	}
+	if gotA.MemberID != memberA {
+		t.Fatalf("session A resolved to member %q want %q", gotA.MemberID, memberA)
+	}
+	gotB, err := d.resolveMCPSession(ctx, linkToken, http.Header{}, claimBodyForSession("claude-sess-B"))
+	if err != nil {
+		t.Fatalf("resolve session B: %v", err)
+	}
+	if gotB.MemberID != memberB {
+		t.Fatalf("session B resolved to member %q want %q", gotB.MemberID, memberB)
+	}
+
+	// Body-over-header precedence (the resolveMCPSession flip): a stale transport
+	// header naming the OTHER session must not override the fresh in-band id. With
+	// concurrent conversations multiplexed over one connection, the header is an
+	// unreliable per-call signal, so the body must win.
+	staleHeader := http.Header{}
+	staleHeader.Set("Agen8-Native-Session-Id", "claude-sess-B")
+	gotMixed, err := d.resolveMCPSession(ctx, linkToken, staleHeader, claimBodyForSession("claude-sess-A"))
+	if err != nil {
+		t.Fatalf("resolve with mixed body/header: %v", err)
+	}
+	if gotMixed.MemberID != memberA {
+		t.Fatalf("in-band session A lost to stale header: resolved %q want %q", gotMixed.MemberID, memberA)
+	}
+}
+
+// registerSessionMemberForTest registers one MCP member under linkToken using only
+// session_id (the Claude shape: a conversation id, no thread_id), and returns the
+// created member id.
+func registerSessionMemberForTest(t *testing.T, handler http.Handler, linkToken, callerRoot, sessionID, displayName string) string {
+	t.Helper()
+	registerBody := []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0",
+		"id":2,
+		"method":"tools/call",
+		"params":{
+			"name":"project",
+			"arguments":{
+				"action":"register",
+				"project_root":%q,
+				"display_name":%q,
+				"harness_kind":"claude",
+				"session_id":%q
+			}
+		}
+	}`, callerRoot, displayName, sessionID))
+	req := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(linkToken), bytes.NewReader(registerBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("register error=%s", resp.Error.Message)
+	}
+	if len(resp.Result.Content) == 0 {
+		t.Fatalf("register missing content: %s", rec.Body.String())
+	}
+	var registered struct {
+		MemberID string `json:"memberId"`
+	}
+	if err := json.Unmarshal([]byte(resp.Result.Content[0].Text), &registered); err != nil {
+		t.Fatalf("decode register content %q: %v", resp.Result.Content[0].Text, err)
+	}
+	if registered.MemberID == "" {
+		t.Fatalf("register missing member id: %s", resp.Result.Content[0].Text)
+	}
+	return registered.MemberID
+}
+
+// claimBodyForSession builds a non-register tools/call (task.claim) whose only
+// identity signal is arguments.session_id - the exact shape Claude Code's hook
+// produces for a member-as-actor verb.
+func claimBodyForSession(sessionID string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0",
+		"id":9,
+		"method":"tools/call",
+		"params":{
+			"name":"task",
+			"arguments":{"action":"claim","task_id":"task-1","session_id":%q}
+		}
+	}`, sessionID))
+}
+
+// TestBootstrapTokenResolvesConcurrentSessionMembers is the agen8-local mirror of
+// TestConcurrentSessionsResolveToOwnMember, and it pins the bug the live dogfood
+// exposed. The agen8-local bootstrap token is shared by EVERY harness, yet its
+// in-memory session is hardcoded HarnessKind="codex" (registerBootstrapMCPToken).
+// Two Claude conversations sharing agen8-local must still each resolve to their OWN
+// member on a non-register verb carrying only arguments.session_id. If the token's
+// "codex" harness were used to filter the lookup, a member registered as "claude"
+// would be invisible and the caller would resolve member-less - which is exactly
+// what happened against the live daemon: registration disambiguated the two members
+// but task.list returned "registered member_id is required". Resolution by native
+// session ref must be harness-agnostic.
+func TestBootstrapTokenResolvesConcurrentSessionMembers(t *testing.T) {
+	dataDir := t.TempDir()
+	projectRoot := t.TempDir()
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: dataDir},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("Accept", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+
+	// agen8-local is registered by New (registerBootstrapMCPToken); no link token is
+	// minted. This is the real Claude-on-bootstrap shape.
+	const bootstrapToken = "agen8-local"
+	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+bootstrapToken, bytes.NewReader(initializeBody))
+	initReq.Header.Set("Content-Type", "application/json")
+	initReq.Header.Set("Accept", "application/json, text/event-stream")
+	initRec := httptest.NewRecorder()
+	handler.ServeHTTP(initRec, initReq)
+	if initRec.Code != http.StatusOK {
+		t.Fatalf("mcp initialize status=%d body=%s", initRec.Code, initRec.Body.String())
+	}
+
+	// Two Claude conversations register under the SAME bootstrap token + SAME project.
+	memberA := registerSessionMemberForTest(t, handler, bootstrapToken, projectRoot, "claude-local-A", "Local Worker A")
+	memberB := registerSessionMemberForTest(t, handler, bootstrapToken, projectRoot, "claude-local-B", "Local Worker B")
+	if memberA == memberB {
+		t.Fatalf("two sessions collided onto one member id %q", memberA)
+	}
+
+	ctx := context.Background()
+	gotA, err := d.resolveMCPSession(ctx, bootstrapToken, http.Header{}, claimBodyForSession("claude-local-A"))
+	if err != nil {
+		t.Fatalf("resolve session A: %v", err)
+	}
+	if gotA.MemberID != memberA {
+		t.Fatalf("session A resolved to member %q want %q (bootstrap harness must not shadow claude member)", gotA.MemberID, memberA)
+	}
+	gotB, err := d.resolveMCPSession(ctx, bootstrapToken, http.Header{}, claimBodyForSession("claude-local-B"))
+	if err != nil {
+		t.Fatalf("resolve session B: %v", err)
+	}
+	if gotB.MemberID != memberB {
+		t.Fatalf("session B resolved to member %q want %q", gotB.MemberID, memberB)
+	}
 }

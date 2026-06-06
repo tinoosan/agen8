@@ -17,6 +17,7 @@ const (
 	MethodDecisionDelete = "decision.delete"
 	MethodDecisionList   = "decision.list"
 	MethodDecisionCount  = "decision.count"
+	MethodDecisionStats  = "decision.stats"
 	MethodDecisionExport = "decision.export"
 )
 
@@ -43,6 +44,9 @@ func RegisterDecision(reg *Registry, decisionSvc *decisionapp.Service, memberDis
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodDecisionCount, false, withDecisionIdentity(handler.Count))
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodDecisionStats, false, withDecisionIdentity(handler.Stats))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodDecisionExport, false, withDecisionIdentity(handler.Export))

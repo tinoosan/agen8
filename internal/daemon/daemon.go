@@ -292,21 +292,38 @@ func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header htt
 			session = d.mcpSession(token, account.ID.String(), "")
 		}
 	}
-	sessionID, threadID := mcp.SessionRefsFromHTTPHeader(header)
+	// Prefer the in-band session refs carried in the JSON-RPC body over the
+	// transport header. The body is the authoritative per-call identity: Codex
+	// self-identifies via params._meta and Claude Code's PreToolUse hook stamps
+	// arguments.session_id - both land in the body. The Mcp-Session-Id transport
+	// header is only a connection-level memo and can be stale when several
+	// concurrent conversations share one token over one connection, so it must not
+	// outrank a fresh in-band id. Header remains the fallback for callers that send
+	// no in-band refs. This is Codex-safe: Codex sends no Agen8-Native-Session-Id
+	// header, so flipping precedence cannot demote a value it relies on.
+	bodyRefs := mcp.SessionRequestContextFromJSONRPCBody(body)
+	sessionID, threadID := bodyRefs.SessionID, bodyRefs.ThreadID
 	if sessionID == "" && threadID == "" {
-		bodyRefs := mcp.SessionRequestContextFromJSONRPCBody(body)
-		sessionID = bodyRefs.SessionID
-		threadID = bodyRefs.ThreadID
+		sessionID, threadID = mcp.SessionRefsFromHTTPHeader(header)
 	}
 	if sessionID == "" && threadID == "" {
 		return session, nil
 	}
 	userID := d.mcpUserID(ctx, token)
 	rosterMember, err := d.app.ProjectSvc.ResolveMCPContext(ctx, projectapp.ResolveMCPContextInput{
-		Token:       token,
-		UserID:      userID,
-		ProjectID:   session.ProjectID,
-		HarnessKind: session.HarnessKind,
+		Token:     token,
+		UserID:    userID,
+		ProjectID: session.ProjectID,
+		// Resolve harness-agnostically. A shared token serves EVERY harness, so the
+		// token's own HarnessKind must not filter the lookup. The agen8-local bootstrap
+		// session is hardcoded "codex" (registerBootstrapMCPToken); forwarding it here
+		// would hide a Claude member registered for the same session_id and the caller
+		// would resolve member-less. The (user, native_session_ref) pair already
+		// identifies the member uniquely, and ResolveMCPContext fails loudly if it ever
+		// matches more than one. The resolved member's real HarnessKind is restored onto
+		// the session below. (wlt_ and ak_ tokens already pass "" here, so this only
+		// changes the bootstrap path.)
+		HarnessKind: "",
 		SessionID:   sessionID,
 		ThreadID:    threadID,
 	})

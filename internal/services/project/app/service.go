@@ -126,9 +126,17 @@ func (s *Service) SaveProject(ctx context.Context, input SaveProjectInput) (proj
 		return project.Project{}, fmt.Errorf("project service is nil")
 	}
 	now := s.now()
-	userID := ""
-	if c, err := s.caller.ResolveCaller(ctx); err == nil {
-		userID = c.Normalize().UserID
+	// A project is owned by a user. Resolve the caller and require a UserID so we
+	// never persist an owner-less project: a member-only caller (no UserID) is
+	// rejected loudly rather than silently writing UserID="". This is what gates
+	// later ownership checks (requireOwnedProject) and link-token minting.
+	c, err := s.resolveCaller(ctx)
+	if err != nil {
+		return project.Project{}, err
+	}
+	userID := c.UserID
+	if userID == "" {
+		return project.Project{}, fmt.Errorf("save project requires an owning user")
 	}
 	agg, err := project.New(project.NewInput{
 		ID:         input.ID,

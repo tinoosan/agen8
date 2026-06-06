@@ -191,6 +191,32 @@ func (r *SQLiteRepository) CountDecisions(ctx context.Context, filter domain.Dec
 	return count, nil
 }
 
+// StatsDecisions returns aggregate counts for decisions matching the filter,
+// computed in a single pass so the numbers scale with the table rather than the
+// page size. Reuses buildFilterClauses so stats reflect the same filters as the
+// list and count queries.
+func (r *SQLiteRepository) StatsDecisions(ctx context.Context, filter domain.DecisionFilter) (domain.DecisionStats, error) {
+	where, args := buildFilterClauses(filter)
+	query := `SELECT
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN confidence < ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN COALESCE(task_ref, '') = '' AND COALESCE(key_result_ref, '') = '' AND COALESCE(mission_ref, '') = '' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN COALESCE(invalidation_conditions_json, '') NOT IN ('', '[]') THEN 1 ELSE 0 END), 0)
+	FROM decisions WHERE ` + strings.Join(where, " AND ")
+
+	// The threshold placeholder appears in SELECT, ahead of the WHERE args.
+	queryArgs := append([]any{domain.LowConfidenceThreshold}, args...)
+
+	var stats domain.DecisionStats
+	err := r.db.QueryRowContext(ctx, r.rebind(query), queryArgs...).Scan(
+		&stats.Total, &stats.LowConfidence, &stats.Unlinked, &stats.WithInvalidationConditions,
+	)
+	if err != nil {
+		return domain.DecisionStats{}, fmt.Errorf("stats decisions: %w", err)
+	}
+	return stats, nil
+}
+
 // ExportDecisions returns all decisions matching the filter with no pagination limit.
 // Intended for CSV/JSON export use cases.
 func (r *SQLiteRepository) ExportDecisions(ctx context.Context, filter domain.DecisionFilter) ([]domain.Decision, error) {
@@ -201,7 +227,7 @@ func (r *SQLiteRepository) ExportDecisions(ctx context.Context, filter domain.De
 	}
 	query := `SELECT` + selectColumns + ` FROM decisions WHERE ` +
 		strings.Join(where, " AND ") + ` ORDER BY created_at ` + order
-	// Export ignores pagination — returns all matching rows.
+	// Export ignores pagination - returns all matching rows.
 	return r.queryDecisions(ctx, query, args...)
 }
 

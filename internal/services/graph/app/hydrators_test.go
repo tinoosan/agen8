@@ -180,6 +180,9 @@ func (s stubRepository) ListDecisionsByKeyResult(context.Context, string) ([]dec
 func (s stubRepository) CountDecisions(context.Context, decisiondomain.DecisionFilter) (int, error) {
 	return 0, nil
 }
+func (s stubRepository) StatsDecisions(context.Context, decisiondomain.DecisionFilter) (decisiondomain.DecisionStats, error) {
+	return decisiondomain.DecisionStats{}, nil
+}
 func (s stubRepository) ExportDecisions(context.Context, decisiondomain.DecisionFilter) ([]decisiondomain.Decision, error) {
 	return nil, nil
 }

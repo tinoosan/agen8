@@ -35,7 +35,7 @@ func internalError(format string, args ...any) *rpcError {
 // DecisionView is the wire-format read model for a decision.
 //
 // MemberID is the author's stable identity. MemberName is the resolved
-// display name at read time — UI surfaces should prefer MemberName so the
+// display name at read time - UI surfaces should prefer MemberName so the
 // raw id never reaches a user-facing card or list. SourceIdentity mirrors
 // MemberID for readers that project on it.
 type DecisionView struct {
@@ -136,6 +136,26 @@ type DecisionCountParams struct {
 
 type DecisionCountResult struct {
 	Count int `json:"count"`
+}
+
+// -- decision.stats --
+
+// DecisionStatsParams mirror the count filter - stats summarize the same
+// filtered set, so the wire shape matches DecisionCountParams.
+type DecisionStatsParams struct {
+	ProjectID string   `json:"projectId"`
+	Source    string   `json:"source,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	Query     string   `json:"query,omitempty"`
+	Since     string   `json:"since,omitempty"`
+	Until     string   `json:"until,omitempty"`
+}
+
+type DecisionStatsResult struct {
+	Total                      int `json:"total"`
+	LowConfidence              int `json:"lowConfidence"`
+	Unlinked                   int `json:"unlinked"`
+	WithInvalidationConditions int `json:"withInvalidationConditions"`
 }
 
 // -- decision.export --

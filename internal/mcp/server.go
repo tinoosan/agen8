@@ -620,6 +620,15 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 	if !json.Valid(arguments) {
 		return mcpToolCallErrorResult(fmt.Sprintf("tool %q arguments must be valid JSON", def.name)), nil
 	}
+	// Claude Code's PreToolUse hook stamps session_id/thread_id into arguments so
+	// the daemon can resolve the calling conversation to its own member (the body
+	// reader picked these up before dispatch). The tool handlers decode arguments
+	// with DisallowUnknownFields and per-action field whitelists, so we must remove
+	// these ambient refs before handing arguments to a handler - otherwise every
+	// non-register verb (task.claim, decision.record, ...) would reject the call.
+	// Register still receives its refs out-of-band via CallContext (read from the
+	// untouched req), so stripping the copy here does not regress registration.
+	arguments = stripAmbientSessionRefs(arguments)
 	if session.Bootstrap {
 		if !strings.EqualFold(strings.TrimSpace(def.name), projecttool.Name) {
 			return mcpToolCallErrorResult("mcp session is not registered; call project.register first"), nil
@@ -727,6 +736,40 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 	}
 }
 
+// stripAmbientSessionRefs removes the session_id/thread_id keys that Claude
+// Code's PreToolUse hook injects into a tool call's arguments for member
+// resolution. The daemon has already read these (via
+// SessionRequestContextFromJSONRPCBody) by the time a handler runs; the handlers
+// themselves use strict decoders that whitelist fields per action, so leaving the
+// refs in place would make them reject any verb that does not list them. Removing
+// them keeps resolution and decoding cleanly separated: the transport layer owns
+// who you are, the tool owns what you asked for. The input is a private copy
+// (executeNativeMCPTool dups req.Params.Arguments), so the raw request that
+// register reads from is never mutated. On any decode/encode error the original
+// arguments are returned unchanged - fail open to the handler's own validation
+// rather than silently corrupting the call.
+func stripAmbientSessionRefs(arguments json.RawMessage) json.RawMessage {
+	if len(arguments) == 0 {
+		return arguments
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(arguments, &obj); err != nil {
+		return arguments
+	}
+	_, hasSession := obj["session_id"]
+	_, hasThread := obj["thread_id"]
+	if !hasSession && !hasThread {
+		return arguments
+	}
+	delete(obj, "session_id")
+	delete(obj, "thread_id")
+	stripped, err := json.Marshal(obj)
+	if err != nil {
+		return arguments
+	}
+	return stripped
+}
+
 func mcpToolAction(arguments json.RawMessage) string {
 	var raw struct {
 		Action string `json:"action"`
@@ -825,10 +868,8 @@ func SessionRequestContextFromJSONRPCBody(body []byte) SessionRequestContext {
 	var envelope struct {
 		Method string `json:"method"`
 		Params struct {
-			Name      string         `json:"name,omitempty"`
 			Meta      map[string]any `json:"_meta,omitempty"`
 			Arguments struct {
-				Action    string `json:"action"`
 				SessionID string `json:"session_id"`
 				ThreadID  string `json:"thread_id"`
 			} `json:"arguments,omitempty"`
@@ -852,9 +893,16 @@ func SessionRequestContextFromJSONRPCBody(body []byte) SessionRequestContext {
 			turnID = firstMetaString(turnMeta, "turn_id", "turnId")
 		}
 	}
-	if strings.TrimSpace(envelope.Method) == "tools/call" &&
-		strings.TrimSpace(envelope.Params.Name) == projecttool.Name &&
-		strings.TrimSpace(envelope.Params.Arguments.Action) == "register" {
+	// Read the in-band session refs carried in arguments for ANY tools/call, not
+	// just projecttool register. Codex self-identifies via params._meta (read
+	// above, and it wins via the empty-checks); Claude Code cannot reach _meta, so
+	// its PreToolUse hook stamps arguments.session_id instead. Generalizing the
+	// read here means both harnesses resolve through this one function - and every
+	// member-as-actor verb (task.claim, etc.), not only register, gets the caller's
+	// real conversation id. The arguments.session_id is stripped before the tool
+	// decodes (see stripAmbientSessionRefs), so strict per-action whitelists never
+	// see it.
+	if strings.TrimSpace(envelope.Method) == "tools/call" {
 		if sessionID == "" {
 			sessionID = strings.TrimSpace(envelope.Params.Arguments.SessionID)
 		}

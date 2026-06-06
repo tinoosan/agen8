@@ -28,7 +28,7 @@ func NewHandler(svc *decisionapp.Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// SetMemberDisplayLookup wires a member-display resolver. Optional —
+// SetMemberDisplayLookup wires a member-display resolver. Optional -
 // when nil the handler returns DecisionView entries without MemberName
 // populated, and the UI falls back to MemberID.
 func (h *Handler) SetMemberDisplayLookup(lookup MemberDisplayLookup) {
@@ -162,6 +162,36 @@ func (h *Handler) Count(ctx context.Context, p DecisionCountParams) (DecisionCou
 	return DecisionCountResult{Count: count}, nil
 }
 
+// Stats handles decision.stats RPC calls.
+func (h *Handler) Stats(ctx context.Context, p DecisionStatsParams) (DecisionStatsResult, error) {
+	projectID := strings.TrimSpace(p.ProjectID)
+	if projectID == "" {
+		return DecisionStatsResult{}, invalidParams("projectId is required")
+	}
+
+	filter := decisionFilterFromParams(
+		projectID,
+		p.Source,
+		p.Tags,
+		p.Query,
+		p.Since,
+		p.Until,
+		"",
+		0,
+		0,
+	)
+	stats, err := h.svc.Stats(ctx, filter)
+	if err != nil {
+		return DecisionStatsResult{}, internalError("stats decisions: %v", err)
+	}
+	return DecisionStatsResult{
+		Total:                      stats.Total,
+		LowConfidence:              stats.LowConfidence,
+		Unlinked:                   stats.Unlinked,
+		WithInvalidationConditions: stats.WithInvalidationConditions,
+	}, nil
+}
+
 // Export handles decision.export RPC calls.
 func (h *Handler) Export(ctx context.Context, p DecisionExportParams) (DecisionExportResult, error) {
 	projectID := strings.TrimSpace(p.ProjectID)
@@ -236,7 +266,7 @@ func (h *Handler) resolveActorDisplay(ctx context.Context, d domain.Decision) st
 // resolveMemberDisplay returns the display name for a member id. Empty
 // when the lookup is not wired or the lookup itself fails. The handler
 // is read-mostly so the failure mode is "the UI shows the id instead
-// of a name" — we don't want the whole list view to error out when the
+// of a name" - we don't want the whole list view to error out when the
 // member registry is briefly unavailable.
 func (h *Handler) resolveMemberDisplay(ctx context.Context, memberID string) string {
 	if h == nil || h.memberDisplay == nil {

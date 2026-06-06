@@ -73,6 +73,10 @@ func (r *recordingRepository) CountDecisions(context.Context, domain.DecisionFil
 	return 0, nil
 }
 
+func (r *recordingRepository) StatsDecisions(context.Context, domain.DecisionFilter) (domain.DecisionStats, error) {
+	return domain.DecisionStats{}, nil
+}
+
 func (r *recordingRepository) ExportDecisions(context.Context, domain.DecisionFilter) ([]domain.Decision, error) {
 	return nil, nil
 }
