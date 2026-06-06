@@ -12,13 +12,16 @@ import (
 )
 
 type stubGraphService struct {
-	nodeProjectID string
-	nodeType      string
-	nodeID        string
-	nodeDepth     int
-	nodeCalls     int
-	searchReq     domain.GraphSearchRequest
-	linkReq       domain.GraphLinkRequest
+	nodeProjectID  string
+	nodeType       string
+	nodeID         string
+	nodeDepth      int
+	nodeCalls      int
+	searchReq      domain.GraphSearchRequest
+	linkReq        domain.GraphLinkRequest
+	searchNodes    []domain.GraphNodeSummary
+	searchWarnings []domain.GraphWarning
+	nodeWarnings   []domain.GraphWarning
 }
 
 func (s *stubGraphService) Node(_ context.Context, projectID, nodeType, nodeID string, depth int) (domain.GraphNodeDetail, []domain.GraphWarning, error) {
@@ -37,12 +40,20 @@ func (s *stubGraphService) Node(_ context.Context, projectID, nodeType, nodeID s
 		Edges: []domain.GraphEdge{
 			{SourceType: nodeType, SourceID: nodeID, TargetType: "key_result", TargetID: "kr-1", EdgeType: "serves"},
 		},
-	}, []domain.GraphWarning{}, nil
+	}, s.nodeWarnings, nil
 }
 
 func (s *stubGraphService) Search(_ context.Context, req domain.GraphSearchRequest) ([]domain.GraphNodeSummary, []domain.GraphWarning, error) {
 	s.searchReq = req
-	return []domain.GraphNodeSummary{{ID: "task-1", Type: "task", Title: "Ship"}}, []domain.GraphWarning{}, nil
+	nodes := s.searchNodes
+	if nodes == nil {
+		nodes = []domain.GraphNodeSummary{{ID: "task-1", Type: "task", Title: "Ship"}}
+	}
+	warnings := s.searchWarnings
+	if warnings == nil {
+		warnings = []domain.GraphWarning{}
+	}
+	return nodes, warnings, nil
 }
 
 func (s *stubGraphService) Link(_ context.Context, req domain.GraphLinkRequest) (domain.GraphEdge, []domain.GraphWarning, error) {
@@ -283,6 +294,66 @@ func TestHandleSearchDepthReturnsBoundedContexts(t *testing.T) {
 	}
 	if !strings.Contains(result.Text, `"contexts"`) {
 		t.Fatalf("result text=%s", result.Text)
+	}
+}
+
+func TestHandleSearchDepthDeduplicatesRepeatedWarnings(t *testing.T) {
+	service := &stubGraphService{
+		searchNodes: []domain.GraphNodeSummary{
+			{ID: "task-1", Type: "task", Title: "Ship"},
+			{ID: "task-2", Type: "task", Title: "Review"},
+		},
+		searchWarnings: []domain.GraphWarning{
+			{
+				Code:          "hydrator_partial",
+				Message:       "Task hydrator returned partial records.",
+				AffectedType:  "task",
+				AffectedIDs:   []string{"task-search"},
+				AffectedCount: 1,
+			},
+		},
+		nodeWarnings: []domain.GraphWarning{
+			{
+				Code:          "neighbours_truncated",
+				Message:       "Neighbour list truncated to 50 entries",
+				AffectedType:  "",
+				AffectedIDs:   []string{"task-a", "task-b"},
+				AffectedCount: 2,
+			},
+			{
+				Code:          "neighbours_truncated",
+				Message:       "Neighbour list truncated to 50 entries",
+				AffectedType:  "",
+				AffectedIDs:   []string{"task-b", "task-c"},
+				AffectedCount: 2,
+			},
+		},
+	}
+	result, err := NewHandler().Handle(context.Background(), graphCallContext(service), json.RawMessage(`{"action":"search","node_type":"all","query":"ship","limit":10,"depth":1}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if service.nodeCalls != 2 {
+		t.Fatalf("node calls=%d want 2", service.nodeCalls)
+	}
+	structured := result.Structured.(map[string]any)
+	warnings, ok := structured["warnings"].([]domain.GraphWarning)
+	if !ok {
+		t.Fatalf("warnings=%T %+v", structured["warnings"], structured["warnings"])
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("warnings len=%d warnings=%+v", len(warnings), warnings)
+	}
+	truncated := warnings[1]
+	if truncated.Code != "neighbours_truncated" {
+		t.Fatalf("warning order/code=%+v", warnings)
+	}
+	if truncated.AffectedCount != 3 {
+		t.Fatalf("affected count=%d warning=%+v", truncated.AffectedCount, truncated)
+	}
+	wantIDs := []string{"task-a", "task-b", "task-c"}
+	if strings.Join(truncated.AffectedIDs, ",") != strings.Join(wantIDs, ",") {
+		t.Fatalf("affected ids=%+v want %+v", truncated.AffectedIDs, wantIDs)
 	}
 }
 

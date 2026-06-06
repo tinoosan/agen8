@@ -124,7 +124,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		node, warnings, err := call.Graph.Node(ctx, projectID, input.NodeType, nodeID, input.Depth)
-		return result("node", map[string]any{"node": node, "warnings": warnings}, err)
+		return result("node", map[string]any{"node": node, "warnings": dedupeWarnings(warnings)}, err)
 	case "search":
 		nodes, warnings, err := call.Graph.Search(ctx, domain.GraphSearchRequest{
 			ProjectID:    projectID,
@@ -139,7 +139,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		if err != nil {
 			return Result{}, err
 		}
-		fields := map[string]any{"nodes": nodes, "warnings": warnings, "count": len(nodes)}
+		fields := map[string]any{"nodes": nodes, "warnings": dedupeWarnings(warnings), "count": len(nodes)}
 		if input.Depth > 0 {
 			contexts, contextWarnings, err := searchContexts(ctx, call.Graph, projectID, nodes, input.Depth)
 			if err != nil {
@@ -147,7 +147,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			}
 			fields["depth"] = normalizedSearchContextDepth(input.Depth)
 			fields["contexts"] = contexts
-			fields["warnings"] = append(warnings, contextWarnings...)
+			fields["warnings"] = dedupeWarnings(append(warnings, contextWarnings...))
 		}
 		return result("search", fields, nil)
 	case "link":
@@ -156,17 +156,57 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		edge, warnings, err := call.Graph.Link(ctx, req)
-		return result("link", map[string]any{"edge": edge, "warnings": warnings}, err)
+		return result("link", map[string]any{"edge": edge, "warnings": dedupeWarnings(warnings)}, err)
 	case "unlink":
 		req, err := linkRequest(projectID, input, false)
 		if err != nil {
 			return Result{}, err
 		}
 		edge, warnings, err := call.Graph.Unlink(ctx, req)
-		return result("unlink", map[string]any{"edge": edge, "warnings": warnings}, err)
+		return result("unlink", map[string]any{"edge": edge, "warnings": dedupeWarnings(warnings)}, err)
 	default:
 		return Result{}, fmt.Errorf("graph_query: unsupported action %q", input.Action)
 	}
+}
+
+func dedupeWarnings(warnings []domain.GraphWarning) []domain.GraphWarning {
+	if len(warnings) == 0 {
+		return []domain.GraphWarning{}
+	}
+	out := make([]domain.GraphWarning, 0, len(warnings))
+	indexByKey := make(map[string]int, len(warnings))
+	seenIDsByKey := make(map[string]map[string]struct{}, len(warnings))
+	for _, warning := range warnings {
+		key := warning.Code + "\x00" + warning.Message + "\x00" + warning.AffectedType
+		index, ok := indexByKey[key]
+		if !ok {
+			indexByKey[key] = len(out)
+			out = append(out, domain.GraphWarning{
+				Code:          warning.Code,
+				Message:       warning.Message,
+				AffectedType:  warning.AffectedType,
+				AffectedIDs:   []string{},
+				AffectedCount: warning.AffectedCount,
+			})
+			index = len(out) - 1
+			seenIDsByKey[key] = make(map[string]struct{}, len(warning.AffectedIDs))
+		}
+		seenIDs := seenIDsByKey[key]
+		for _, id := range warning.AffectedIDs {
+			if _, exists := seenIDs[id]; exists {
+				continue
+			}
+			seenIDs[id] = struct{}{}
+			out[index].AffectedIDs = append(out[index].AffectedIDs, id)
+		}
+		if warning.AffectedCount > out[index].AffectedCount {
+			out[index].AffectedCount = warning.AffectedCount
+		}
+		if len(out[index].AffectedIDs) > out[index].AffectedCount {
+			out[index].AffectedCount = len(out[index].AffectedIDs)
+		}
+	}
+	return out
 }
 
 func searchContexts(ctx context.Context, graph Service, projectID string, nodes []domain.GraphNodeSummary, depth int) ([]domain.GraphNodeDetail, []domain.GraphWarning, error) {
