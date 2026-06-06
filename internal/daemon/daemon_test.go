@@ -649,3 +649,45 @@ func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
 		t.Fatalf("unknown session resolved to member %q, want member-less", session.MemberID)
 	}
 }
+
+// TestInvalidLinkTokenFailsLoudly covers the wlt_ validation failure branch
+// (daemon.go:281-284): an unrecognised link token must surface ValidateLinkToken's
+// error, never fall through to the API-key path, and never yield a usable session.
+// This branch was previously asserted only by a code comment - the inverse of the
+// pre-registration affordance: an INVALID token fails loudly, whereas an unknown
+// session under a VALID token resolves member-less (see the test above).
+func TestInvalidLinkTokenFailsLoudly(t *testing.T) {
+	d, err := New(Config{
+		AppConfig: config.Config{DataDir: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	session, err := d.resolveMCPSession(context.Background(), "wlt_this-token-was-never-minted", http.Header{}, nil)
+	if err == nil {
+		t.Fatal("invalid wlt_ token must fail loudly, got nil error")
+	}
+	if session.Token != "" || session.MemberID != "" || session.ProjectID != "" {
+		t.Fatalf("invalid wlt_ token must yield an empty session, got %+v", session)
+	}
+}
+
+// TestInvalidAPIKeyFailsLoudly covers the API-key validation failure branch
+// (daemon.go:288-290): a token that is neither the registered bootstrap token nor a
+// wlt_ link token is treated as an API key, and an invalid one must return a non-nil
+// error with an empty session rather than a member-less but usable context.
+func TestInvalidAPIKeyFailsLoudly(t *testing.T) {
+	d, err := New(Config{
+		AppConfig: config.Config{DataDir: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	session, err := d.resolveMCPSession(context.Background(), "ak_this-key-does-not-exist", http.Header{}, nil)
+	if err == nil {
+		t.Fatal("invalid api key must fail loudly, got nil error")
+	}
+	if session.Token != "" || session.MemberID != "" || session.ProjectID != "" {
+		t.Fatalf("invalid api key must yield an empty session, got %+v", session)
+	}
+}
