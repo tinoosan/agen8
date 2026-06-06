@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rpcCall, onNotification } from '../lib/rpc'
-import type { Task } from '../lib/types'
+import type { Task, AcceptanceCriterion } from '../lib/types'
 import { normalizeTaskMembers } from '../lib/taskMembers'
 
 interface TaskListResult {
@@ -24,6 +24,79 @@ export function useProjectTasks(projectId: string | null) {
     enabled: !!projectId,
     refetchInterval: 10_000,
     staleTime: 2000,
+  })
+}
+
+// Fetches a single task by id for the routed detail page.
+export function useTask(taskId: string | null) {
+  return useQuery<Task>({
+    queryKey: ['task.get', taskId ?? ''],
+    queryFn: async () => {
+      const result = await rpcCall<{ task: Task }>('task.get', { taskId })
+      return normalizeTaskMembers(result.task)
+    },
+    enabled: !!taskId,
+    refetchInterval: 10_000,
+  })
+}
+
+/* ── Task mutation hooks ─────────────────────────────────────────────────
+ *
+ * All task mutations invalidate ['project.tasks.board'] (prefix match, every
+ * project) plus the affected ['task.get', id] so the dashboard panel and the
+ * routed detail page stay consistent after any write.
+ *
+ * ──────────────────────────────────────────────────────────────────────── */
+
+type CreateTaskInput = {
+  projectId: string
+  assignedTo: string
+  description: string
+  title?: string
+  acceptanceCriteria?: string[]
+  taskKind?: string
+  keyResultRef?: string
+  missionRef?: string
+}
+
+export function useCreateTask() {
+  const queryClient = useQueryClient()
+  return useMutation<{ task: Task }, Error, CreateTaskInput>({
+    mutationFn: (params) => rpcCall<{ task: Task }>('task.create', params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] })
+    },
+  })
+}
+
+type UpdateTaskInput = {
+  taskId: string
+  title?: string
+  description?: string
+  acceptanceCriteria?: AcceptanceCriterion[]
+  taskKind?: string
+  keyResultRef?: string
+}
+
+export function useUpdateTask() {
+  const queryClient = useQueryClient()
+  return useMutation<{ task: Task }, Error, UpdateTaskInput>({
+    mutationFn: (params) => rpcCall<{ task: Task }>('task.update', params),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] })
+      queryClient.invalidateQueries({ queryKey: ['task.get', vars.taskId] })
+    },
+  })
+}
+
+export function useCancelTask() {
+  const queryClient = useQueryClient()
+  return useMutation<{ task: Task }, Error, { taskId: string; reason: string }>({
+    mutationFn: (params) => rpcCall<{ task: Task }>('task.cancel', params),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] })
+      queryClient.invalidateQueries({ queryKey: ['task.get', vars.taskId] })
+    },
   })
 }
 

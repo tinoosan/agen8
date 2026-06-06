@@ -23,7 +23,8 @@ export default function Dashboard() {
   const queryClient = useQueryClient()
   const searchParams = useMemo(() => new URLSearchParams(rawSearch), [rawSearch])
   const rawPanel = searchParams.get('panel')
-  const dashboardPanel: DashboardPanel = rawPanel === 'decisions' ? 'decisions' : 'missions'
+  const dashboardPanel: DashboardPanel =
+    rawPanel === 'decisions' ? 'decisions' : rawPanel === 'tasks' ? 'tasks' : 'missions'
 
   const activeMissionsQuery = useMissions(projectId, 'active')
   const activeMissionCount = useMemo(
@@ -52,7 +53,7 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (rawPanel !== 'missions' && rawPanel !== 'decisions') return
+    if (rawPanel !== 'missions' && rawPanel !== 'decisions' && rawPanel !== 'tasks') return
     setContextCollapsed(false)
     writeStoredDashboardContextCollapsed(false)
   }, [rawPanel])
@@ -76,8 +77,14 @@ export default function Dashboard() {
     setManualRefreshing(true)
     try {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['missions'] }),
-        queryClient.invalidateQueries({ queryKey: ['decisions'] }),
+        queryClient.invalidateQueries({ queryKey: ['mission.list'] }),
+        queryClient.invalidateQueries({ queryKey: ['keyResult.list'] }),
+        queryClient.invalidateQueries({ queryKey: ['keyResult.listAll'] }),
+        queryClient.invalidateQueries({ queryKey: ['keyResult.progressHistory'] }),
+        queryClient.invalidateQueries({ queryKey: ['decision.list'] }),
+        queryClient.invalidateQueries({ queryKey: ['decision.log'] }),
+        queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] }),
+        queryClient.invalidateQueries({ queryKey: ['task.get'] }),
       ])
     } finally {
       window.setTimeout(() => setManualRefreshing(false), 120)

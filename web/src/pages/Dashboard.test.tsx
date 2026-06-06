@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const mockUseNavigation = vi.fn()
@@ -87,6 +88,27 @@ describe('Dashboard page', () => {
     const lastCall = mockDashboardContextPanel.mock.calls.at(-1)?.[0] as { open: boolean; panel: string }
     expect(lastCall?.open).toBe(true)
     expect(lastCall?.panel).toBe('missions')
+  })
+
+  it('refresh invalidates the dashboard query families that feed visible work', async () => {
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+    renderPage()
+
+    await userEvent.click(screen.getByRole('button', { name: /refresh/i }))
+
+    const invalidatedKeys = invalidateSpy.mock.calls
+      .map(([arg]) => (arg as { queryKey?: unknown[] } | undefined)?.queryKey?.[0])
+
+    expect(invalidatedKeys).toEqual(expect.arrayContaining([
+      'mission.list',
+      'keyResult.list',
+      'keyResult.listAll',
+      'keyResult.progressHistory',
+      'decision.list',
+      'decision.log',
+      'project.tasks.board',
+      'task.get',
+    ]))
   })
 
   it('prompts for a project when none is focused', () => {

@@ -57,17 +57,18 @@ function StatCell({ bucket, count }: { bucket: Bucket; count: number }) {
       className="flex flex-col gap-1.5 rounded-[var(--r-lg)] px-3 py-2.5"
       style={{ background: tint }}
     >
-      {/* rem sizing keeps the glyph in step with the user's font scale */}
-      <Icon size="1.1rem" style={{ color: accent }} aria-hidden />
       <span
-        className="text-[1.375rem] font-semibold leading-none tabular-nums"
+        className="text-[1.5rem] font-semibold leading-none tabular-nums"
         style={{ color: accent }}
       >
         {count}
       </span>
-      <span className="text-[0.75rem] font-medium text-[var(--text-3)]">
-        {bucket.label}
-      </span>
+      {/* icon decorates the label rather than floating above the digit;
+          rem sizing keeps both in step with the user's font scale */}
+      <div className="flex items-center gap-1.5 text-[var(--text-3)]">
+        <Icon size="0.875rem" style={{ color: accent }} aria-hidden />
+        <span className="text-[0.75rem] font-medium">{bucket.label}</span>
+      </div>
     </div>
   )
 }

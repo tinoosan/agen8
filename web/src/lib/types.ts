@@ -89,6 +89,17 @@ export interface AuthStatus {
   bridge?: BridgeConnection | null;
 }
 
+export interface ProjectMember {
+  id: string;
+  userId?: string;
+  projectId: string;
+  displayName?: string;
+  memberType: string;
+  lifecycleState: string;
+  harnessKind?: string;
+  model?: string;
+}
+
 export interface Task {
   id: string;
   projectId?: string;

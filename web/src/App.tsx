@@ -18,6 +18,7 @@ const Account = lazyWithRetry(() => import('./pages/Account'), 'pages/Account')
 const Credentials = lazyWithRetry(() => import('./pages/Credentials'), 'pages/Credentials')
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'), 'pages/Dashboard')
 const MissionDetail = lazyWithRetry(() => import('./pages/MissionDetail'), 'pages/MissionDetail')
+const TaskDetail = lazyWithRetry(() => import('./pages/TaskDetail'), 'pages/TaskDetail')
 const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/StrategyMap')
 const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisions')
 
@@ -218,6 +219,7 @@ export default function App() {
               <PageErrorBoundary>
                 <Switch>
                   <Route path="/project/:projectId/missions/:missionId" component={MissionDetail} />
+                  <Route path="/project/:projectId/tasks/:taskId" component={TaskDetail} />
                   <Route path="/project/:projectId/missions" component={MissionsRouteRedirect} />
                   <Route path="/project/:projectId/strategy">{(params) => <StrategyMap projectId={params.projectId} />}</Route>
                   <Route path="/project/:projectId/decisions" component={Decisions} />

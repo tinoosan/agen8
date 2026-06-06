@@ -4,7 +4,7 @@ import { useStore, type DefaultProjectView } from './store'
 import type { Project } from './types'
 
 export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy'
-export type DashboardPanel = 'missions' | 'decisions'
+export type DashboardPanel = 'missions' | 'decisions' | 'tasks'
 
 /* ── Route constants ──────────────────────────────── */
 
@@ -14,6 +14,7 @@ export const ROUTES = {
   DASHBOARD: '/project/:projectId/dashboard',
   MISSIONS: '/project/:projectId/missions',
   MISSION_DETAIL: '/project/:projectId/missions/:missionId',
+  TASK_DETAIL: '/project/:projectId/tasks/:taskId',
   STRATEGY_MAP: '/project/:projectId/strategy',
 } as const
 
@@ -22,6 +23,7 @@ export const ROUTES = {
 export function boardTaskLink(projectId: string, taskId: string): string {
   const base = dashboardLink(projectId)
   const params = new URLSearchParams()
+  params.set('panel', 'tasks')
   if (taskId.trim()) params.set('task', taskId)
   const qs = params.toString()
   return qs ? `${base}?${qs}` : base
@@ -39,6 +41,11 @@ export function missionDetailLink(projectId: string, missionId: string): string 
   return `/project/${encodeURIComponent(projectId)}/missions/${encodeURIComponent(missionId)}`
 }
 
+// Build a link to a task detail view
+export function taskDetailLink(projectId: string, taskId: string): string {
+  return `/project/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`
+}
+
 export function dashboardLink(projectId: string, params?: { panel?: DashboardPanel }): string {
   const base = `/project/${encodeURIComponent(projectId)}/dashboard`
   const search = new URLSearchParams()
@@ -53,6 +60,10 @@ export function missionsPanelLink(projectId: string): string {
 
 export function decisionsPanelLink(projectId: string): string {
   return dashboardLink(projectId, { panel: 'decisions' })
+}
+
+export function tasksPanelLink(projectId: string): string {
+  return dashboardLink(projectId, { panel: 'tasks' })
 }
 
 export function decisionsLink(projectId: string): string {
@@ -97,6 +108,8 @@ function parseLocation(pathname: string): ParsedRoute {
   let activeView: ActiveView = 'project'
 
   if (segments[2] === 'dashboard') {
+    activeView = 'dashboard'
+  } else if (segments[2] === 'tasks') {
     activeView = 'dashboard'
   } else if (segments[2] === 'missions') {
     activeView = 'missions'
