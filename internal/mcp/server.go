@@ -113,8 +113,8 @@ type Server struct {
 	registry                 *Registry
 	handler                  http.Handler
 	resolver                 SessionResolver
-	protocolSessionBindings  map[string]sessionRefs
 	protocolSessionBindingMu sync.RWMutex
+	protocolSessionBindings  map[string]sessionRefs
 }
 
 type SessionResolver func(ctx context.Context, token string, header http.Header, body []byte) (Session, error)
@@ -128,9 +128,8 @@ func NewServer(tokenStore *TokenStore) (*Server, error) {
 		return nil, err
 	}
 	out := &Server{
-		tokenStore:              tokenStore,
-		registry:                registry,
-		protocolSessionBindings: map[string]sessionRefs{},
+		tokenStore: tokenStore,
+		registry:   registry,
 	}
 	out.handler = mcp.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcp.Server {
@@ -248,16 +247,8 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	method := mcpRPCMethod(body)
 	slog.Info("mcp request received", "http_method", r.Method, "rpc_method", method, "has_body", len(bytes.TrimSpace(body)) > 0)
-	prepareInitialNativeSessionHeader(r, method)
 	resolverHeader := nativeSessionResolverHeader(r.Header, method)
-	if mappedSessionID, mappedThreadID := s.nativeRefsForProtocolSession(r.URL.Query().Get("token"), protocolSessionIDFromHeader(r.Header)); mappedSessionID != "" || mappedThreadID != "" {
-		if mappedSessionID != "" {
-			resolverHeader.Set("Mcp-Session-Id", mappedSessionID)
-		}
-		if mappedThreadID != "" {
-			resolverHeader.Set("Mcp-Thread-Id", mappedThreadID)
-		}
-	} else if explicitSessionID, explicitThreadID := explicitNativeSessionRefsFromHeader(r.Header); explicitSessionID != "" || explicitThreadID != "" {
+	if explicitSessionID, explicitThreadID := explicitNativeSessionRefsFromHeader(r.Header); explicitSessionID != "" || explicitThreadID != "" {
 		if explicitSessionID != "" {
 			resolverHeader.Set("Mcp-Session-Id", explicitSessionID)
 		}

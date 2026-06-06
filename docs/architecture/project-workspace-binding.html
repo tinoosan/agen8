@@ -236,7 +236,7 @@ wlt_8c1f2a...9b
   <p>Minting reuses the existing primitives: <code>auth.NewRawToken("wlt", n)</code> for the <code>prefix_hex</code> string and <code>auth.HashToken</code> for storage. Persistence reuses the auth SQL store with explicit schema changes and preserving migrations so existing local data is not replaced by startup behavior.</p>
 
   <h2 id="shim">6. The local shim</h2>
-  <p>The shim already exists. <code>RunHTTPBridge</code> (<code>internal/mcp/http_bridge.go</code>) is a stdio-to-HTTP forwarder: it speaks stdio MCP to the harness and Streamable HTTP to the daemon, local or hosted, and already injects a per-session header. <code>agen8 mcp serve</code> is a thin CLI subcommand over that existing logic plus marker reading.</p>
+  <p>The target shim is a small stdio-to-HTTP adapter for harnesses that only launch MCP servers over stdio. It speaks stdio MCP to the harness and Streamable HTTP to the daemon, reads the project marker, and forwards native session metadata without becoming a harness supervisor. The old experimental bridge implementation is not part of the public baseline.</p>
 
   <div class="layers">
     <div class="layer handler">
@@ -258,7 +258,7 @@ wlt_8c1f2a...9b
   </div>
 
   <div class="callout">
-    <strong>What changes inside the shim.</strong> Today <code>bridgeSessionID()</code> caches a per-folder UUID at <code>~/.agen8/bridge-sessions/&lt;sha256(projectRoot)&gt;.uuid</code> — that is path-as-identity again, one layer down. The target shim drops that cache in favour of the marker's token for the project axis, keeping the per-conversation ref for the member axis.
+    <strong>What the shim must avoid.</strong> The shim must not cache path-derived member identity. Project identity comes from the marker token, while member identity comes from the current harness conversation metadata when the client provides it.
   </div>
 
   <h2 id="axes">7. Two identity axes</h2>
@@ -395,7 +395,6 @@ _, err = s.workspaces.<span class="tok-fn">Upsert</span>(ctx, workspace.Record{
   <span class="file">daemon.go</span><span class="note">edit — integration point #1 (resolveMCPSession)</span>
 <span class="dir">internal/mcp/</span>
   <span class="file">server.go</span><span class="note">edit — Session gains ProjectID</span>
-  <span class="file">http_bridge.go</span><span class="note">edit — read .agen8 marker; drop path-as-identity cache</span>
 <span class="dir">cmd/agen8-mcp/</span>
   <span class="file">main.go</span><span class="note">edit — `mcp serve` subcommand</span>
 
