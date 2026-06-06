@@ -4,14 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/config"
+	"github.com/tinoosan/agen8-mcp-server/internal/mcp"
+	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
+	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
 	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
 )
 
@@ -587,20 +592,45 @@ func TestAPIKeyResolvesConcurrentSessionMembers(t *testing.T) {
 	}
 }
 
-// TestUnknownSessionResolvesMemberlessWithoutError locks the pre-registration
-// affordance that the reliability inventory's finding #1 mistook for a silent
-// fallback to convert into a loud error. resolveMCPSession deliberately returns a
-// member-LESS session with NO error when an in-band session ref matches no member:
-// a brand-new conversation must be able to reach project.register - the verb that
-// CREATES its member - before any member exists. Turning this into a loud error
-// would make the very first register call impossible (chicken-and-egg). Loud
-// failure for member-less callers is enforced DOWNSTREAM at each tool's actor gate
-// (see the mission/graph/decision handler member-less tests), not here.
+// TestResolveMCPSessionTokenClasses is the table-driven contract for how
+// resolveMCPSession turns a raw bearer token into a session. It is the one place
+// that lists every token class and its expected resolution outcome, so the failure
+// paths and the success paths sit side by side.
 //
-// The in-band ref must be present (otherwise the no-refs early return fires for an
-// unrelated reason); ResolveMCPContext returns member.ErrNotFound for the unknown
-// session, and resolveMCPSession must translate that into a member-less session.
-func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
+// It pins three invariants on purpose:
+//
+//   - Unseeded token store, so resolution goes through the DB (dec-fb325eff). New()
+//     builds its mcpTokens store with mcp.NewTokenStore() and never seeds it. On the
+//     HTTP daemon path d.mcpTokens.Resolve therefore always misses, and every token
+//     is resolved against the auth DB via HashToken -> GetByTokenHash. These cases
+//     run through that real path. If a later change ever seeds mcpTokens, it would
+//     short-circuit this and these assertions would stop exercising the DB.
+//
+//   - Member-less is success, not failure (dec-55648814). A valid token with no
+//     in-band session ref, or with a ref that matches no member, resolves to a
+//     member-LESS session with a nil error. That is the pre-registration affordance:
+//     a brand-new conversation must reach project.register - the verb that creates
+//     its member - before any member exists. Loud failure for member-less callers is
+//     enforced downstream at each tool's actor gate (see the mission/graph/decision
+//     handler member-less tests), not here.
+//
+//   - The two failure branches surface different errors, and that difference is the
+//     proof of no fall-through. An invalid wlt_ is handled in the link-token branch
+//     (daemon.go:271-275), which returns ValidateLinkToken's specific sentinel
+//     (ErrTokenNotFound when unminted, ErrTokenExpired when revoked or expired). An
+//     invalid ak_ is handled in the api-key branch (daemon.go:278-284), which returns
+//     the original mcpTokens store-miss error and DISCARDS authErr (line 281) - so
+//     every api-key failure collapses to the same generic error and the specific auth
+//     sentinel never surfaces. Asserting the wlt_ sentinel therefore proves the token
+//     was NOT silently retried down the api-key path: a fall-through would have yielded
+//     the generic store-miss error instead. (The collapse on the api-key side is the
+//     real behavior today; see dec-5c8aca7b for the asymmetry it leaves behind.)
+//
+// This subsumes the earlier single-purpose tests (invalid wlt_, invalid ak_, and
+// unknown-session member-less) and adds the valid, revoked, expired, and empty
+// classes.
+func TestResolveMCPSessionTokenClasses(t *testing.T) {
+	ctx := context.Background()
 	dataDir := t.TempDir()
 	projectRoot := t.TempDir()
 	d, err := New(Config{
@@ -615,6 +645,8 @@ func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
 		t.Fatalf("httpHandler: %v", err)
 	}
 
+	// Setup yields both an admin session token (for ownership-gated RPCs) and a real
+	// admin API key (an ak_ that resolves against the DB).
 	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
 	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
 	setupReq.Header.Set("Content-Type", "application/json")
@@ -625,6 +657,9 @@ func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
 	var setupResult struct {
+		Session struct {
+			Token string `json:"token"`
+		} `json:"session"`
 		APIKey struct {
 			Secret string `json:"secret"`
 		} `json:"apiKey"`
@@ -632,13 +667,26 @@ func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
 	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
 		t.Fatalf("decode setup response: %v", err)
 	}
-	if setupResult.APIKey.Secret == "" {
-		t.Fatal("setup response missing api key secret")
+	sessionToken := setupResult.Session.Token
+	adminAPIKey := setupResult.APIKey.Secret
+	if sessionToken == "" || adminAPIKey == "" {
+		t.Fatalf("setup response missing tokens: session=%q apiKey=%q", sessionToken, adminAPIKey)
 	}
 
-	apiKey := setupResult.APIKey.Secret
+	// The admin user id lets us mint extra keys directly through the auth service.
+	adminUser, err := d.app.AuthSvc.ValidateAPIKey(ctx, adminAPIKey)
+	if err != nil {
+		t.Fatalf("resolve admin user: %v", err)
+	}
+
+	// A real project plus one registered member, so an unknown session ref resolves
+	// to member.ErrNotFound (member-less) against a populated roster, not for some
+	// unrelated reason.
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, projectRoot)
+
+	// One initialize so the streamable MCP handler accepts the register tool call.
 	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
-	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(apiKey), bytes.NewReader(initializeBody))
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(adminAPIKey), bytes.NewReader(initializeBody))
 	initReq.Header.Set("Content-Type", "application/json")
 	initReq.Header.Set("Accept", "application/json, text/event-stream")
 	initRec := httptest.NewRecorder()
@@ -646,62 +694,143 @@ func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
 	if initRec.Code != http.StatusOK {
 		t.Fatalf("mcp initialize status=%d body=%s", initRec.Code, initRec.Body.String())
 	}
-
-	// Establish a real project + roster under the API key so the only thing
-	// missing during resolution is the specific session's member - proving an unknown
-	// session is member-less even against a populated roster.
-	known := registerSessionMemberForTest(t, handler, apiKey, projectRoot, "claude-local-known", "Known Worker")
-	if known == "" {
+	if m := registerSessionMemberForTest(t, handler, adminAPIKey, projectRoot, "known-session", "Known Worker"); m == "" {
 		t.Fatal("failed to register baseline member")
 	}
 
-	session, err := d.resolveMCPSession(context.Background(), apiKey, http.Header{}, claimBodyForSession("claude-local-UNREGISTERED"))
-	if err != nil {
-		t.Fatalf("unknown session must resolve member-less without error, got err=%v", err)
-	}
-	if session.MemberID != "" {
-		t.Fatalf("unknown session resolved to member %q, want member-less", session.MemberID)
-	}
-}
+	// A valid link token bound to the project (a real wlt_ that resolves via the DB).
+	validLinkToken := createProjectLinkTokenForTest(t, handler, sessionToken, projectID)
 
-// TestInvalidLinkTokenFailsLoudly covers the wlt_ validation failure branch
-// (daemon.go:281-284): an unrecognised link token must surface ValidateLinkToken's
-// error, never fall through to the API-key path, and never yield a usable session.
-// This branch was previously asserted only by a code comment - the inverse of the
-// pre-registration affordance: an INVALID token fails loudly, whereas an unknown
-// session under a VALID token resolves member-less (see the test above).
-func TestInvalidLinkTokenFailsLoudly(t *testing.T) {
-	d, err := New(Config{
-		AppConfig: config.Config{DataDir: t.TempDir()},
-	})
+	// Revoked and expired tokens are minted straight through the auth service so
+	// resolveMCPSession hits the !IsActive branch (ErrTokenExpired) - a class the
+	// not-found cases below never reach.
+	past := time.Now().Add(-1 * time.Hour)
+	revokedKey, err := d.app.AuthSvc.CreateAPIKey(ctx, authapp.CreateAPIKeyParams{UserID: adminUser.ID, Name: "revoked-key"})
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("create revoked api key: %v", err)
 	}
-	session, err := d.resolveMCPSession(context.Background(), "wlt_this-token-was-never-minted", http.Header{}, nil)
-	if err == nil {
-		t.Fatal("invalid wlt_ token must fail loudly, got nil error")
+	if err := d.app.AuthSvc.RevokeAPIKey(ctx, revokedKey.APIKey.ID); err != nil {
+		t.Fatalf("revoke api key: %v", err)
 	}
-	if session.Token != "" || session.MemberID != "" || session.ProjectID != "" {
-		t.Fatalf("invalid wlt_ token must yield an empty session, got %+v", session)
+	expiredKey, err := d.app.AuthSvc.CreateAPIKey(ctx, authapp.CreateAPIKeyParams{UserID: adminUser.ID, Name: "expired-key", ExpiresAt: &past})
+	if err != nil {
+		t.Fatalf("create expired api key: %v", err)
 	}
-}
+	revokedLink, err := d.app.AuthSvc.CreateLinkToken(ctx, authapp.CreateLinkTokenParams{UserID: adminUser.ID, ProjectID: projectID, Label: "revoked-link"})
+	if err != nil {
+		t.Fatalf("create revoked link token: %v", err)
+	}
+	if err := d.app.AuthSvc.RevokeLinkToken(ctx, revokedLink.LinkToken.ID); err != nil {
+		t.Fatalf("revoke link token: %v", err)
+	}
+	expiredLink, err := d.app.AuthSvc.CreateLinkToken(ctx, authapp.CreateLinkTokenParams{UserID: adminUser.ID, ProjectID: projectID, Label: "expired-link", ExpiresAt: &past})
+	if err != nil {
+		t.Fatalf("create expired link token: %v", err)
+	}
 
-// TestInvalidAPIKeyFailsLoudly covers the API-key validation failure branch
-// (daemon.go:288-290): a token that is not a wlt_ link token is treated as an
-// API key, and an invalid one must return a non-nil
-// error with an empty session rather than a member-less but usable context.
-func TestInvalidAPIKeyFailsLoudly(t *testing.T) {
-	d, err := New(Config{
-		AppConfig: config.Config{DataDir: t.TempDir()},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	// errClass names the error contract each token class must meet. It encodes WHERE the
+	// failure is produced, which is how this table proves an invalid wlt_ is handled
+	// inside the link-token branch and never falls through to the api-key path.
+	type errClass int
+	const (
+		resolves             errClass = iota // success: nil error, usable member-less session
+		authSentinelNotFound                 // wlt_ unminted: auth.ErrTokenNotFound surfaces from the link-token branch
+		authSentinelExpired                  // wlt_ revoked or expired: auth.ErrTokenExpired surfaces from the link-token branch
+		storeMissCollapsed                   // ak_ (any) or empty: collapses to the mcp store-miss error; authErr discarded at daemon.go:281
+	)
+
+	cases := []struct {
+		name          string
+		token         string
+		body          []byte
+		want          errClass
+		wantProjectID string // asserted only on a success row when non-empty
+	}{
+		{
+			name:  "valid api key, no session ref, resolves member-less",
+			token: adminAPIKey,
+			body:  nil,
+			want:  resolves,
+		},
+		{
+			name:          "valid link token, no session ref, resolves member-less bound to its project",
+			token:         validLinkToken,
+			body:          nil,
+			want:          resolves,
+			wantProjectID: projectID,
+		},
+		{
+			name:  "valid api key, unknown session ref, stays member-less (dec-55648814)",
+			token: adminAPIKey,
+			body:  claimBodyForSession("session-that-was-never-registered"),
+			want:  resolves,
+		},
+		// Every api-key failure collapses to the same mcp store-miss error: daemon.go:281
+		// returns the original mcpTokens.Resolve error and discards authErr, so unminted,
+		// revoked, and expired ak_ are indistinguishable to the caller.
+		{name: "revoked api key collapses to store-miss error", token: revokedKey.Token, want: storeMissCollapsed},
+		{name: "expired api key collapses to store-miss error", token: expiredKey.Token, want: storeMissCollapsed},
+		{name: "unminted api key collapses to store-miss error", token: "ak_this-key-does-not-exist", want: storeMissCollapsed},
+		{name: "empty token collapses to store-miss error", token: "", want: storeMissCollapsed},
+		// Every link-token failure surfaces its specific auth sentinel from the wlt_ branch.
+		// That specific sentinel is the proof of no fall-through: a fall-through to the
+		// api-key path would instead yield the generic store-miss error asserted above.
+		{name: "revoked link token surfaces ErrTokenExpired (no fall-through)", token: revokedLink.Token, want: authSentinelExpired},
+		{name: "expired link token surfaces ErrTokenExpired (no fall-through)", token: expiredLink.Token, want: authSentinelExpired},
+		{name: "unminted link token surfaces ErrTokenNotFound (no fall-through)", token: "wlt_this-token-was-never-minted", want: authSentinelNotFound},
 	}
-	session, err := d.resolveMCPSession(context.Background(), "ak_this-key-does-not-exist", http.Header{}, nil)
-	if err == nil {
-		t.Fatal("invalid api key must fail loudly, got nil error")
+
+	// assertLoudFailure is the shared no-silent-fallback check: any failed resolve must
+	// return a non-nil error AND a zero-value session, never a partial usable context.
+	assertLoudFailure := func(t *testing.T, got mcp.Session, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("want a loud error, got nil (session=%+v)", got)
+		}
+		if got.Token != "" || got.UserID != "" || got.MemberID != "" || got.ProjectID != "" {
+			t.Fatalf("failed resolve must yield a zero-value session, got %+v", got)
+		}
 	}
-	if session.Token != "" || session.MemberID != "" || session.ProjectID != "" {
-		t.Fatalf("invalid api key must yield an empty session, got %+v", session)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := d.resolveMCPSession(ctx, tc.token, http.Header{}, tc.body)
+			switch tc.want {
+			case authSentinelNotFound:
+				assertLoudFailure(t, got, err)
+				if !errors.Is(err, auth.ErrTokenNotFound) {
+					t.Fatalf("invalid wlt_ must surface auth.ErrTokenNotFound from the link-token branch (proves no fall-through to the api-key path), got %v", err)
+				}
+				return
+			case authSentinelExpired:
+				assertLoudFailure(t, got, err)
+				if !errors.Is(err, auth.ErrTokenExpired) {
+					t.Fatalf("revoked/expired wlt_ must surface auth.ErrTokenExpired from the link-token branch (proves no fall-through), got %v", err)
+				}
+				return
+			case storeMissCollapsed:
+				assertLoudFailure(t, got, err)
+				// authErr is discarded at daemon.go:281, so the specific auth sentinel must NOT
+				// surface here - the failure collapses to the generic mcp store-miss error.
+				if errors.Is(err, auth.ErrTokenNotFound) || errors.Is(err, auth.ErrTokenExpired) {
+					t.Fatalf("api-key/empty failure should collapse to the mcp store-miss error (authErr discarded at daemon.go:281), but a domain sentinel surfaced: %v", err)
+				}
+				return
+			}
+			// tc.want == resolves: a valid token yields a usable session carrying the token...
+			if err != nil {
+				t.Fatalf("want success, got err: %v", err)
+			}
+			if got.Token == "" {
+				t.Fatalf("resolved session missing token: %+v", got)
+			}
+			// ...but member-less: no member is bound without a matching registered session.
+			if got.MemberID != "" {
+				t.Fatalf("expected member-less resolution, got member %q", got.MemberID)
+			}
+			if tc.wantProjectID != "" && got.ProjectID != tc.wantProjectID {
+				t.Fatalf("projectID=%q want %q", got.ProjectID, tc.wantProjectID)
+			}
+		})
 	}
 }
