@@ -583,3 +583,69 @@ func TestBootstrapTokenResolvesConcurrentSessionMembers(t *testing.T) {
 		t.Fatalf("session B resolved to member %q want %q", gotB.MemberID, memberB)
 	}
 }
+
+// TestUnknownSessionResolvesMemberlessWithoutError locks the pre-registration
+// affordance that the reliability inventory's finding #1 mistook for a silent
+// fallback to convert into a loud error. resolveMCPSession deliberately returns a
+// member-LESS session with NO error when an in-band session ref matches no member:
+// a brand-new conversation must be able to reach project.register - the verb that
+// CREATES its member - before any member exists. Turning this into a loud error
+// would make the very first register call impossible (chicken-and-egg). Loud
+// failure for member-less callers is enforced DOWNSTREAM at each tool's actor gate
+// (see the mission/graph/decision handler member-less tests), not here.
+//
+// The in-band ref must be present (otherwise the no-refs early return fires for an
+// unrelated reason); ResolveMCPContext returns member.ErrNotFound for the unknown
+// session, and resolveMCPSession must translate that into a member-less session.
+func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
+	dataDir := t.TempDir()
+	projectRoot := t.TempDir()
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: dataDir},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("Accept", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+
+	const bootstrapToken = "agen8-local"
+	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+bootstrapToken, bytes.NewReader(initializeBody))
+	initReq.Header.Set("Content-Type", "application/json")
+	initReq.Header.Set("Accept", "application/json, text/event-stream")
+	initRec := httptest.NewRecorder()
+	handler.ServeHTTP(initRec, initReq)
+	if initRec.Code != http.StatusOK {
+		t.Fatalf("mcp initialize status=%d body=%s", initRec.Code, initRec.Body.String())
+	}
+
+	// Establish a real project + roster under the bootstrap token so the only thing
+	// missing during resolution is the specific session's member - proving an unknown
+	// session is member-less even against a populated roster.
+	known := registerSessionMemberForTest(t, handler, bootstrapToken, projectRoot, "claude-local-known", "Known Worker")
+	if known == "" {
+		t.Fatal("failed to register baseline member")
+	}
+
+	session, err := d.resolveMCPSession(context.Background(), bootstrapToken, http.Header{}, claimBodyForSession("claude-local-UNREGISTERED"))
+	if err != nil {
+		t.Fatalf("unknown session must resolve member-less without error, got err=%v", err)
+	}
+	if session.MemberID != "" {
+		t.Fatalf("unknown session resolved to member %q, want member-less", session.MemberID)
+	}
+}

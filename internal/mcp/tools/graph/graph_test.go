@@ -238,6 +238,24 @@ func TestHandleStampsCallerBeforeLoadingMember(t *testing.T) {
 	}
 }
 
+// TestHandleRejectsMemberlessCaller locks the loud-failure half of the
+// pre-registration affordance: the daemon resolves an unregistered session to a
+// member-LESS session (no member, no error). A read-only verb like graph_query must
+// still reject that caller loudly rather than reading the graph for nobody. The
+// member check runs first in contextWithActor, so the service is never reached.
+func TestHandleRejectsMemberlessCaller(t *testing.T) {
+	service := &stubGraphService{}
+	call := graphCallContext(service)
+	call.ActorMemberID = ""
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"search","node_type":"task","query":"ship","limit":10}`))
+	if err == nil || !strings.Contains(err.Error(), "graph_query: caller member is required") {
+		t.Fatalf("err=%v want graph_query caller member required", err)
+	}
+	if service.searchReq.ProjectID != "" {
+		t.Fatalf("graph service ran despite member-less caller: %+v", service.searchReq)
+	}
+}
+
 func TestHandleSearchReturnsNodesPayload(t *testing.T) {
 	service := &stubGraphService{}
 	result, err := NewHandler().Handle(context.Background(), graphCallContext(service), json.RawMessage(`{"action":"search","node_type":"all","query":"ship","limit":10}`))

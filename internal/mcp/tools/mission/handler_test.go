@@ -168,6 +168,25 @@ func TestHandleCreateMissionCallsServiceWithSessionProjectAndCaller(t *testing.T
 	}
 }
 
+// TestHandleRejectsMemberlessCaller locks the loud-failure half of the
+// pre-registration affordance: the daemon resolves an unregistered session to a
+// member-LESS session (no member, no error). Handle runs actor() for every action,
+// so a blank actor member id must fail loudly before any mission service method
+// runs. Members is non-nil here, so the failure is specifically the missing member
+// id - not a missing member service.
+func TestHandleRejectsMemberlessCaller(t *testing.T) {
+	svc := &stubMissionService{}
+	call := testCallContext(svc)
+	call.ActorMemberID = ""
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"create","title":"Launch v1","description":"Ship it"}`))
+	if err == nil || !strings.Contains(err.Error(), "mission: actor member id is required") {
+		t.Fatalf("err=%v want mission actor member id required", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("mission service action %q ran despite member-less caller", svc.called)
+	}
+}
+
 func TestHandleKRProgressCallsService(t *testing.T) {
 	svc := &stubMissionService{}
 	_, err := NewHandler().Handle(context.Background(), testCallContext(svc), json.RawMessage(`{"action":"kr_progress","key_result_id":"kr-1","value":50,"note":"halfway","expected_version":7}`))
