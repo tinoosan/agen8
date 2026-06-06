@@ -102,40 +102,42 @@ type LinkTokenCreateResult struct {
 }
 
 type MemberView struct {
-	ID             string     `json:"id"`
-	UserID         string     `json:"userId,omitempty"`
-	ProjectID      string     `json:"projectId"`
-	ChannelID      string     `json:"channelId,omitempty"`
-	DisplayName    string     `json:"displayName,omitempty"`
-	MemberType     string     `json:"memberType"`
-	LifecycleState string     `json:"lifecycleState"`
-	HarnessKind    string     `json:"harnessKind,omitempty"`
-	Model          string     `json:"model,omitempty"`
-	Effort         string     `json:"effort,omitempty"`
-	PermissionMode string     `json:"harnessPermissionMode,omitempty"`
-	ConfigRef      string     `json:"harnessConfigRef,omitempty"`
-	RegisteredAt   time.Time  `json:"registeredAt,omitempty"`
-	UpdatedAt      time.Time  `json:"updatedAt,omitempty"`
-	LastSeenAt     *time.Time `json:"lastSeenAt,omitempty"`
+	ID               string     `json:"id"`
+	UserID           string     `json:"userId,omitempty"`
+	ProjectID        string     `json:"projectId"`
+	NativeSessionRef string     `json:"nativeSessionRef,omitempty"`
+	ChannelID        string     `json:"channelId,omitempty"`
+	DisplayName      string     `json:"displayName,omitempty"`
+	MemberType       string     `json:"memberType"`
+	LifecycleState   string     `json:"lifecycleState"`
+	HarnessKind      string     `json:"harnessKind,omitempty"`
+	Model            string     `json:"model,omitempty"`
+	Effort           string     `json:"effort,omitempty"`
+	PermissionMode   string     `json:"harnessPermissionMode,omitempty"`
+	ConfigRef        string     `json:"harnessConfigRef,omitempty"`
+	RegisteredAt     time.Time  `json:"registeredAt,omitempty"`
+	UpdatedAt        time.Time  `json:"updatedAt,omitempty"`
+	LastSeenAt       *time.Time `json:"lastSeenAt,omitempty"`
 }
 
 func NewMemberView(m member.Record) MemberView {
 	return MemberView{
-		ID:             string(m.ID),
-		UserID:         m.UserID,
-		ProjectID:      string(m.ProjectID),
-		ChannelID:      string(m.ChannelID),
-		DisplayName:    m.DisplayName,
-		MemberType:     m.MemberType,
-		LifecycleState: m.LifecycleState,
-		HarnessKind:    m.HarnessKind,
-		Model:          m.Model,
-		Effort:         m.Effort,
-		PermissionMode: m.PermissionMode,
-		ConfigRef:      m.ConfigRef,
-		RegisteredAt:   m.RegisteredAt,
-		UpdatedAt:      m.UpdatedAt,
-		LastSeenAt:     m.LastSeenAt,
+		ID:               string(m.ID),
+		UserID:           m.UserID,
+		ProjectID:        string(m.ProjectID),
+		NativeSessionRef: m.NativeSessionRef,
+		ChannelID:        string(m.ChannelID),
+		DisplayName:      m.DisplayName,
+		MemberType:       m.MemberType,
+		LifecycleState:   m.LifecycleState,
+		HarnessKind:      m.HarnessKind,
+		Model:            m.Model,
+		Effort:           m.Effort,
+		PermissionMode:   m.PermissionMode,
+		ConfigRef:        m.ConfigRef,
+		RegisteredAt:     m.RegisteredAt,
+		UpdatedAt:        m.UpdatedAt,
+		LastSeenAt:       m.LastSeenAt,
 	}
 }
 

@@ -75,11 +75,19 @@ export interface ProjectMember {
   id: string;
   userId?: string;
   projectId: string;
+  nativeSessionRef?: string;
+  channelId?: string;
   displayName?: string;
   memberType: string;
   lifecycleState: string;
   harnessKind?: string;
   model?: string;
+  effort?: string;
+  harnessPermissionMode?: string;
+  harnessConfigRef?: string;
+  registeredAt?: string;
+  updatedAt?: string;
+  lastSeenAt?: string;
 }
 
 export interface Task {

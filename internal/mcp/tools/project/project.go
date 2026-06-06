@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
@@ -389,12 +390,22 @@ func (h Handler) memberRemove(ctx context.Context, call CallContext, memberID st
 }
 
 type memberEntry struct {
-	ID             string `json:"id"`
-	ProjectID      string `json:"projectId,omitempty"`
-	DisplayName    string `json:"displayName,omitempty"`
-	MemberType     string `json:"memberType,omitempty"`
-	LifecycleState string `json:"lifecycleState,omitempty"`
-	ChannelID      string `json:"channelId,omitempty"`
+	ID               string     `json:"id"`
+	UserID           string     `json:"userId,omitempty"`
+	ProjectID        string     `json:"projectId,omitempty"`
+	NativeSessionRef string     `json:"nativeSessionRef,omitempty"`
+	ChannelID        string     `json:"channelId,omitempty"`
+	DisplayName      string     `json:"displayName,omitempty"`
+	MemberType       string     `json:"memberType,omitempty"`
+	LifecycleState   string     `json:"lifecycleState,omitempty"`
+	HarnessKind      string     `json:"harnessKind,omitempty"`
+	Model            string     `json:"model,omitempty"`
+	Effort           string     `json:"effort,omitempty"`
+	PermissionMode   string     `json:"harnessPermissionMode,omitempty"`
+	ConfigRef        string     `json:"harnessConfigRef,omitempty"`
+	RegisteredAt     time.Time  `json:"registeredAt,omitempty"`
+	UpdatedAt        time.Time  `json:"updatedAt,omitempty"`
+	LastSeenAt       *time.Time `json:"lastSeenAt,omitempty"`
 }
 
 type request struct {
@@ -642,12 +653,22 @@ func ptrString(value *string) string {
 
 func toMemberEntry(item member.Record) memberEntry {
 	return memberEntry{
-		ID:             strings.TrimSpace(string(item.ID)),
-		ProjectID:      strings.TrimSpace(item.ProjectID),
-		DisplayName:    strings.TrimSpace(item.DisplayName),
-		MemberType:     strings.TrimSpace(item.MemberType),
-		LifecycleState: strings.TrimSpace(item.LifecycleState),
-		ChannelID:      strings.TrimSpace(string(item.ChannelID)),
+		ID:               strings.TrimSpace(string(item.ID)),
+		UserID:           strings.TrimSpace(item.UserID),
+		ProjectID:        strings.TrimSpace(item.ProjectID),
+		NativeSessionRef: strings.TrimSpace(item.NativeSessionRef),
+		ChannelID:        strings.TrimSpace(item.ChannelID),
+		DisplayName:      strings.TrimSpace(item.DisplayName),
+		MemberType:       strings.TrimSpace(item.MemberType),
+		LifecycleState:   strings.TrimSpace(item.LifecycleState),
+		HarnessKind:      strings.TrimSpace(item.HarnessKind),
+		Model:            strings.TrimSpace(item.Model),
+		Effort:           strings.TrimSpace(item.Effort),
+		PermissionMode:   strings.TrimSpace(item.PermissionMode),
+		ConfigRef:        strings.TrimSpace(item.ConfigRef),
+		RegisteredAt:     item.RegisteredAt,
+		UpdatedAt:        item.UpdatedAt,
+		LastSeenAt:       item.LastSeenAt,
 	}
 }
 
