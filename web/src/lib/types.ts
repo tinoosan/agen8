@@ -122,16 +122,6 @@ export interface AcceptanceCriterion {
   satisfied: boolean;
 }
 
-export interface TaskActivity {
-  eventId?: string;
-  timestamp: string;
-  kind: string;
-  actor: string;
-  agent_id?: string;
-  summary: string;
-  details?: Record<string, unknown>;
-}
-
 export interface AttemptReview {
   decision: string;
   feedback?: string;

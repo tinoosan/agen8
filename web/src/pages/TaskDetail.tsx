@@ -30,7 +30,6 @@ import {
   getAcceptanceCriteria,
   getLatestReview,
 } from './boardHelpers'
-import { getTaskActivities } from './taskActivity'
 import { tasksPanelLink, missionDetailLink, decisionsLink } from '../lib/routing'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import EditTaskDialog from '../components/task/EditTaskDialog'
@@ -47,67 +46,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import type { Task, TaskActivity } from '../lib/types'
+import type { Task } from '../lib/types'
 
 const TERMINAL_STATUSES = ['succeeded', 'failed', 'canceled']
-
-/* ── Activity entry (mirrors TaskPanel's local component) ── */
-
-function activityKindLabel(kind: string): string {
-  switch (kind) {
-    case 'tool_call': return 'Tool'
-    case 'decision_logged': return 'Decision'
-    case 'sub_task_created': return 'Sub-task'
-    default: return 'State'
-  }
-}
-
-function activityKindColor(kind: string): string {
-  switch (kind) {
-    case 'decision_logged': return 'var(--green)'
-    case 'tool_call': return 'var(--accent)'
-    case 'sub_task_created': return 'var(--accent)'
-    default: return 'var(--text-3)'
-  }
-}
-
-function ActivityEntry({ activity }: { activity: TaskActivity }) {
-  const details = activity.details
-    ? Object.entries(activity.details).filter(([, v]) => v !== '' && v != null)
-    : []
-  return (
-    <div className="flex gap-3">
-      <div className="w-12 shrink-0 pt-0.5">
-        <div style={{ fontSize: '0.625rem', color: 'var(--text-3)' }}>{relativeTime(activity.timestamp)}</div>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap mb-1">
-          <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: activityKindColor(activity.kind) }}>
-            {activityKindLabel(activity.kind)}
-          </span>
-          <span style={{ fontSize: '0.625rem', color: 'var(--text-3)' }}>·</span>
-          <span style={{ fontSize: '0.625rem', color: 'var(--text-2)' }}>{activity.actor}</span>
-        </div>
-        <div style={{ fontSize: '0.8125rem', lineHeight: 1.47, color: 'var(--text-2)' }}>{activity.summary}</div>
-        {details.length > 0 && (
-          <details className="mt-1.5">
-            <summary style={{ fontSize: '0.625rem', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer' }}>Details</summary>
-            <div
-              className="flex flex-col"
-              style={{ marginTop: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '6px 10px', gap: 4 }}
-            >
-              {details.map(([key, value]) => (
-                <div key={key} style={{ fontSize: '0.6875rem', color: 'var(--text-2)', wordBreak: 'break-word' }}>
-                  <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{key}:</span> {String(value)}
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-      </div>
-    </div>
-  )
-}
 
 /* ── Stat row in the metadata grid ── */
 
@@ -223,7 +164,6 @@ export default function TaskDetail() {
 
   const [editOpen, setEditOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
-  const [showOlderActivity, setShowOlderActivity] = useState(false)
 
   const { data: task, isLoading, isError, error } = useTask(taskId)
 
@@ -270,9 +210,6 @@ export default function TaskDetail() {
   const claimedByLabel = taskClaimedMemberLabel(task)
   const createdByLabel = taskCreatedMemberLabel(task)
   const latestReview = getLatestReview(task)
-  const activities = getTaskActivities(task)
-  const visibleActivities = showOlderActivity ? activities : activities.slice(-8)
-  const hiddenActivityCount = activities.length - visibleActivities.length
 
   const taskDecisions = (decisionsQuery.data ?? []).filter((d) => d.taskRef === task.id)
   const kr = task.keyResultRef
@@ -646,25 +583,6 @@ export default function TaskDetail() {
                   <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{a}</span>
                 </div>
               ))}
-            </div>
-          </CollapsibleSection>
-        )}
-
-        {/* Activity */}
-        {activities.length > 0 && (
-          <CollapsibleSection storageKey="task-detail-activity" defaultOpen label="Activity">
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-              <div className="flex flex-col" style={{ gap: '12px', paddingLeft: 10, borderLeft: '2px solid var(--border)' }}>
-                {hiddenActivityCount > 0 && (
-                  <button
-                    onClick={() => setShowOlderActivity((v) => !v)}
-                    style={{ fontSize: '0.625rem', fontWeight: 600, color: 'var(--accent)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
-                  >
-                    {showOlderActivity ? 'Hide earlier activity' : `Show ${hiddenActivityCount} earlier event${hiddenActivityCount > 1 ? 's' : ''}`}
-                  </button>
-                )}
-                {visibleActivities.map((a, i) => <ActivityEntry key={a.eventId ?? i} activity={a} />)}
-              </div>
             </div>
           </CollapsibleSection>
         )}

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { X, Clock, Hash, AlertTriangle } from 'lucide-react'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useResizableSummary } from './useResizableSummary'
@@ -15,7 +15,6 @@ import {
   getAcceptanceCriteria,
   getLatestReview,
 } from '../../pages/boardHelpers'
-import { getTaskActivities } from '../../pages/taskActivity'
 import { useRecentDecisions } from '../../hooks/useDecisions'
 import { useKeyResult, useProjectKRs, useMissions } from '../../hooks/useMissions'
 import {
@@ -23,7 +22,6 @@ import {
   taskClaimedMemberLabel,
   taskCreatedMemberLabel,
 } from '../../lib/taskMembers'
-import type { TaskActivity } from '../../lib/types'
 import type { TaskNodeData } from './TaskNode'
 import type { NodePanelProps } from './types'
 import { PANEL_FONT } from './panelTypography'
@@ -31,62 +29,6 @@ import { PANEL_FONT } from './panelTypography'
 const SUMMARY_MIN = 80
 const SUMMARY_MAX = 480
 const SUMMARY_DEFAULT = 200
-
-function activityKindLabel(kind: string): string {
-  switch (kind) {
-    case 'tool_call': return 'Tool'
-    case 'decision_logged': return 'Decision'
-    case 'sub_task_created': return 'Sub-task'
-    default: return 'State'
-  }
-}
-
-function activityKindColor(kind: string): string {
-  switch (kind) {
-    case 'decision_logged': return 'var(--green)'
-    case 'tool_call': return 'var(--accent)'
-    case 'sub_task_created': return 'var(--accent)'
-    default: return 'var(--text-3)'
-  }
-}
-
-function ActivityEntry({ activity }: { activity: TaskActivity }) {
-  const details = activity.details
-    ? Object.entries(activity.details).filter(([, v]) => v !== '' && v != null)
-    : []
-  return (
-    <div className="flex gap-3">
-      <div className="w-10 shrink-0 pt-0.5">
-        <div style={{ fontSize: '0.625rem', color: 'var(--text-3)' }}>{relativeTime(activity.timestamp)}</div>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap mb-1">
-          <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: activityKindColor(activity.kind) }}>
-            {activityKindLabel(activity.kind)}
-          </span>
-          <span style={{ fontSize: '0.625rem', color: 'var(--text-3)' }}>·</span>
-          <span style={{ fontSize: '0.625rem', color: 'var(--text-2)' }}>{activity.actor}</span>
-        </div>
-        <div style={{ fontSize: '0.75rem', lineHeight: 1.47, color: 'var(--text-2)' }}>{activity.summary}</div>
-        {details.length > 0 && (
-          <details className="mt-1.5">
-            <summary style={{ fontSize: '0.625rem', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer' }}>Details</summary>
-            <div
-              className="flex flex-col"
-              style={{ marginTop: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '6px 10px', gap: 4 }}
-            >
-              {details.map(([key, value]) => (
-                <div key={key} style={{ fontSize: '0.6875rem', color: 'var(--text-2)', wordBreak: 'break-word' }}>
-                  <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{key}:</span> {String(value)}
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-      </div>
-    </div>
-  )
-}
 
 export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   const d = data as TaskNodeData
@@ -126,13 +68,6 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
 
   const missionsQuery = useMissions(projectId)
   const mission = kr ? (missionsQuery.data ?? []).find(m => m.id === kr.missionId) : undefined
-
-  // Activity
-  const activities = getTaskActivities(task)
-  const [showOlderActivity, setShowOlderActivity] = useState(false)
-  const visibleActivities = showOlderActivity ? activities : activities.slice(-8)
-  const hiddenActivityCount = activities.length - visibleActivities.length
-
 
   const goalContent: ReactNode = !retry.isRetry && task.description
     ? <p style={{ fontFamily: PANEL_FONT, fontSize: '0.875rem', letterSpacing: '-0.224px', lineHeight: 1.47, color: 'var(--text-2)', margin: 0 }}>{task.description}</p>
@@ -487,24 +422,6 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           </CollapsibleSection>
         )}
 
-        {/* 8. Activity timeline */}
-        {activities.length > 0 && (
-          <CollapsibleSection storageKey="task-panel-activity" defaultOpen={true} label="Activity">
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-              <div className="flex flex-col" style={{ gap: '12px', paddingLeft: 10, borderLeft: '2px solid var(--border)' }}>
-                {hiddenActivityCount > 0 && (
-                  <button
-                    onClick={() => setShowOlderActivity(v => !v)}
-                    style={{ fontSize: '0.625rem', fontWeight: 600, color: 'var(--accent)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
-                  >
-                    {showOlderActivity ? 'Hide earlier activity' : `Show ${hiddenActivityCount} earlier event${hiddenActivityCount > 1 ? 's' : ''}`}
-                  </button>
-                )}
-                {visibleActivities.map((a, i) => <ActivityEntry key={a.eventId ?? i} activity={a} />)}
-              </div>
-            </div>
-          </CollapsibleSection>
-        )}
       </div>
     </div>
   )
