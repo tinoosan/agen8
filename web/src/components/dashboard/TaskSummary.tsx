@@ -45,7 +45,7 @@ function StatCell({ bucket, count }: { bucket: Bucket; count: number }) {
   return (
     <div
       className={cn(
-        'dashboard-list-surface flex flex-1 min-w-[84px] flex-col gap-0.5 px-3.5 py-2.5',
+        'dashboard-list-surface flex flex-col gap-0.5 px-3 py-2.5',
         active && 'ring-1 ring-[var(--red)]/40',
       )}
     >
@@ -74,9 +74,9 @@ export default function TaskSummary({ projectId }: { projectId: string | null })
 
   if (isLoading) {
     return (
-      <div className="flex gap-2">
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-w-[560px]">
         {BUCKETS.map((b) => (
-          <Skeleton key={b.key} className="h-[58px] flex-1 min-w-[84px] rounded-[var(--r-lg)]" />
+          <Skeleton key={b.key} className="h-[58px] rounded-[var(--r-lg)]" />
         ))}
       </div>
     )
@@ -108,7 +108,7 @@ export default function TaskSummary({ projectId }: { projectId: string | null })
           <span className="dashboard-section-counter">{tasks.length} total</span>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-w-[560px]">
         {BUCKETS.map((bucket) => (
           <StatCell key={bucket.key} bucket={bucket} count={counts[bucket.key]} />
         ))}
