@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'wouter'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import CreateTaskDialog from '../task/CreateTaskDialog'
-import { boardTaskLink } from '../../lib/routing'
+import { taskDetailLink } from '../../lib/routing'
 import { taskStatusLabel, taskStatusColor } from '../../lib/statusLabels'
 import { taskAssignedMemberLabel } from '../../lib/taskMembers'
 import { Button } from '@/components/ui/button'
@@ -230,7 +230,7 @@ export default function DashboardTasksPanel({
               return (
                 <Link
                   key={task.id}
-                  to={boardTaskLink(projectId, task.id)}
+                  to={taskDetailLink(projectId, task.id)}
                   className="dashboard-queue-row flex items-center gap-2 px-3 py-2.5 rounded-[var(--r-md)] hover:bg-[var(--bg-hover)] transition-colors no-underline"
                 >
                   <span
