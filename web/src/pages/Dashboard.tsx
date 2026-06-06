@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import DecisionFeed from '../components/dashboard/DecisionFeed'
 import MissionSummary from '../components/dashboard/MissionSummary'
 import TaskSummary from '../components/dashboard/TaskSummary'
+import DashboardWorkingNow from '../components/dashboard/DashboardWorkingNow'
 import DashboardContextPanel from '../components/dashboard/DashboardContextPanel'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { writeStoredDashboardContextCollapsed, readStoredDashboardContextCollapsed } from '../lib/dashboardContextPanelStorage'
@@ -209,6 +210,10 @@ export default function Dashboard() {
 
         <div className="mb-8">
           <TaskSummary projectId={projectId} />
+        </div>
+
+        <div className="mb-8">
+          <DashboardWorkingNow projectId={projectId} />
         </div>
 
         <div className="mt-0">
