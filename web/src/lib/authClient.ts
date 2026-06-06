@@ -73,7 +73,6 @@ export async function getAuthStatus(): Promise<AuthStatus> {
       hostedMode: true,
       authenticated: false,
       user: null,
-      bridge: null,
     }
   }
 
@@ -89,7 +88,6 @@ export async function getAuthStatus(): Promise<AuthStatus> {
       role: auth.role ?? auth.user?.role,
       createdAt: '',
     },
-    bridge: null,
   }
 }
 

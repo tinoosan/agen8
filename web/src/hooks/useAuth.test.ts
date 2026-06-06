@@ -33,7 +33,6 @@ describe('useAuth', () => {
       hostedMode: false,
       authenticated: false,
       user: null,
-      bridge: null,
     })
 
     const { result } = renderHook(() => useAuth(), { wrapper: createWrapper() })
@@ -55,7 +54,6 @@ describe('useAuth', () => {
         name: 'User',
         createdAt: '2026-01-01T00:00:00Z',
       },
-      bridge: { connected: false },
     })
 
     const { result } = renderHook(() => useAuth(), { wrapper: createWrapper() })

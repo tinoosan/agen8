@@ -11,7 +11,6 @@ const mockAuth = {
     email: 'tino@example.com',
     createdAt: '2026-04-28T12:00:00Z',
   },
-  bridge: null as null | { connected: boolean },
   logout: mockLogout,
   updateProfile: mockUpdateProfile,
 }
@@ -35,13 +34,10 @@ describe('Account page', () => {
       theme: 'dark',
       defaultProjectView: 'dashboard',
     })
-    mockAuth.bridge = null
     mockUpdateProfile.mockResolvedValue(undefined)
   })
 
   it('renders signed-in identity and preferences', () => {
-    mockAuth.bridge = { connected: true }
-
     render(<Account />)
 
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()

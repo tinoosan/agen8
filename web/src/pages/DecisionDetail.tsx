@@ -277,7 +277,6 @@ export default function DecisionDetail() {
             />
             <StatItem label="By" value={actor.label} />
             {decision.kind && <StatItem label="Kind" value={decision.kind} />}
-            {decision.spaceName && <StatItem label="Space" value={decision.spaceName} />}
           </div>
         </div>
 

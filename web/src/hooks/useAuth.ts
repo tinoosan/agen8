@@ -27,7 +27,6 @@ export function useAuth() {
     ...statusQuery,
     status: statusQuery.data,
     user: statusQuery.data?.user ?? null,
-    bridge: statusQuery.data?.bridge ?? null,
     isHosted: !!statusQuery.data?.hostedMode,
     isAuthenticated: !!statusQuery.data?.authenticated,
     async login(input: LoginInput) {

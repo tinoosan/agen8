@@ -52,7 +52,6 @@ describe('Sidebar', () => {
     mockRpcCall.mockImplementation(() => Promise.resolve({}))
     mockUseAuth.mockReturnValue({
       isHosted: false,
-      bridge: null,
       user: null,
       logout: vi.fn(),
     })
@@ -65,18 +64,16 @@ describe('Sidebar', () => {
     })
   })
 
-  it('shows the local daemon status in the sidebar footer', () => {
+  it('shows the signed-in identity in the sidebar footer', () => {
     mockUseAuth.mockReturnValue({
       isHosted: false,
-      bridge: { connected: true, projects: [{ id: 'project-1', name: 'Playground' }] },
       user: { id: 'user-1', name: 'User', email: 'user@example.com', createdAt: '2026-03-25T00:00:00Z' },
       logout: vi.fn(),
     })
 
     renderSidebar()
 
-    // Daemon status is always visible in the footer (no popover to open).
-    expect(screen.getAllByText(/^Local daemon$/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/^Connected$/)).toBeInTheDocument()
+    expect(screen.getByText(/^User$/)).toBeInTheDocument()
+    expect(screen.queryByText(/^Local daemon$/)).not.toBeInTheDocument()
   })
 })

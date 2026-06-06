@@ -46,23 +46,6 @@ export interface ExecutionLocation {
   updatedAt?: string;
 }
 
-export interface BridgeProject {
-  id: string;
-  name: string;
-  root?: string;
-}
-
-export interface BridgeConnection {
-  connected: boolean;
-  connectionId?: string;
-  status?: string;
-  connectedAt?: string;
-  lastSeenAt?: string;
-  agentVersion?: string;
-  platform?: string;
-  projects?: BridgeProject[];
-}
-
 export interface AuthUser {
   id: string;
   email: string;
@@ -86,7 +69,6 @@ export interface AuthStatus {
   hostedMode?: boolean;
   authenticated: boolean;
   user?: AuthUser | null;
-  bridge?: BridgeConnection | null;
 }
 
 export interface ProjectMember {
@@ -103,7 +85,6 @@ export interface ProjectMember {
 export interface Task {
   id: string;
   projectId?: string;
-  spaceId?: string;
   assignedTo?: string;
   assignedToLabel?: string;
   claimedByMemberId?: string;
@@ -161,41 +142,11 @@ export interface TaskAttempt {
   review?: AttemptReview;
 }
 
-// ---- Agent event types ----
-
-export type AgentEventStatus = "pending" | "ok" | "error" | "canceled";
-
-export interface AgentEvent {
-  id: string;
-  kind: string;
-  title: string;
-  status: AgentEventStatus;
-  startedAt: string;
-  completedAt?: string;
-  duration?: number;
-  from?: string;
-  to?: string;
-  path?: string;
-  maxBytes?: string;
-  textPreview?: string;
-  textTruncated?: boolean;
-  textRedacted?: boolean;
-  textIsJSON?: boolean;
-  textBytes?: string;
-  ok?: string;
-  error?: string;
-  outputPreview?: string;
-  bytesLen?: string;
-  truncated?: boolean;
-  data?: Record<string, string>;
-}
-
 export interface ArtifactNode {
   nodeKey: string;
   parentKey?: string;
   kind: "day" | "member" | "stream" | "task" | "file";
   label: string;
-  spaceId?: string;
   runId?: string;
   dayBucket?: string;
   member?: string;
@@ -244,58 +195,6 @@ export interface FilesListDirResult {
   rootKind?: string;
   rootLabel?: string;
   relativePath?: string;
-}
-
-export interface EventRecord {
-  eventId: string;
-  runId: string;
-  timestamp: string;
-  type: string;
-  message: string;
-  data?: Record<string, string>;
-  origin?: string;
-}
-
-export interface LogEntry {
-  eventId: string;
-  runId?: string;
-  timestamp: string;
-  type: string;
-  message: string;
-  origin?: string;
-  severity: 'info' | 'warning' | 'error' | string;
-  category: 'task' | 'agent' | 'llm' | 'system' | 'tools' | string;
-  actor?: string;
-  scope?: string;
-  summary: string;
-  details?: string[];
-  typeLabel?: string;
-  data?: Record<string, string>;
-}
-
-export interface ThinkingEntry {
-  id: string;
-  text: string;
-  live: boolean;
-  createdAt: number;
-  completedAt?: number;
-  member?: string;
-}
-
-export interface HostOpStreamEvent {
-  runId?: string;
-  spaceId?: string;
-  opId: string;
-  op: string;
-  stream: "stdout" | "stderr" | string;
-  seq: number;
-  chunk: string;
-  truncated?: boolean;
-  timestamp?: string;
-}
-
-export interface HostOpStreamNotification {
-  event: HostOpStreamEvent;
 }
 
 // ---- Notification types ----
@@ -504,8 +403,8 @@ export interface KeyResultView {
   lastUpdatedBy?: string;
   lastUpdateNote?: string;
   lastMilestoneNotified: number;
-  spaceId?: string;
-  ownerSpaceName?: string;
+  projectId?: string;
+  ownerProjectName?: string;
   ownerAssignedAt?: string;
   status: KeyResultStatus;
   createdAt: string;
@@ -546,12 +445,10 @@ export type DecisionSource = "agent";
 export interface DecisionView {
   id: string;
   projectId: string;
-  spaceId?: string;
-  spaceName?: string;
   source: DecisionSource;
   kind?: string;
   // memberId is the asker's stable id. memberName is the resolved
-  // display name from the space-member registry — UI surfaces should
+  // display name from the project member registry — UI surfaces should
   // prefer memberName so the raw id never lands in a card.
   memberId?: string;
   memberName?: string;

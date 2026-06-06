@@ -7,15 +7,11 @@ export interface TaskBlockerInfo {
   createdAt?: string
 }
 
-/** Returns true for system/coordination tasks that should be hidden from the board. */
+/** Returns true for internal maintenance tasks that should be hidden from the board. */
 export function isSystemTask(t: Task): boolean {
   const source = String(t.metadata?.source ?? '')
-  const systemSources = [
-    'spawn_worker',
-    'coordinator.continuation', 'coordinator.stalled',
-  ]
+  const systemSources = ['system.maintenance']
   if (systemSources.includes(source)) return true
-  if (t.taskKind === 'coordinator') return true
   return false
 }
 

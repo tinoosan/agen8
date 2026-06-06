@@ -14,12 +14,12 @@ function makeTask(overrides: Partial<Task> & { id: string }): Task {
 }
 
 describe('isSystemTask', () => {
-  it('hides spawn-worker tasks', () => {
-    expect(isSystemTask(makeTask({ id: 'b-1', metadata: { source: 'spawn_worker' } }))).toBe(true)
+  it('hides internal maintenance tasks', () => {
+    expect(isSystemTask(makeTask({ id: 'b-1', metadata: { source: 'system.maintenance' } }))).toBe(true)
   })
 
-  it('shows regular delegated tasks with an assignedRole', () => {
-    expect(isSystemTask(makeTask({ id: 't-1', assignedRole: 'researcher', metadata: { source: 'task_create' } }))).toBe(false)
+  it('shows regular assigned tasks', () => {
+    expect(isSystemTask(makeTask({ id: 't-1', assignedToLabel: 'researcher', metadata: { source: 'task_create' } }))).toBe(false)
   })
 
   it('shows regular tasks even before a member is assigned', () => {
@@ -29,7 +29,7 @@ describe('isSystemTask', () => {
 
 describe('effectiveStatus', () => {
   it('keeps original review_pending status authoritative', () => {
-    const t = makeTask({ id: 'task-review', status: 'review_pending', assignedRole: 'reviewer' })
+    const t = makeTask({ id: 'task-review', status: 'review_pending', assignedToLabel: 'reviewer' })
     expect(effectiveStatus(t)).toBe('review_pending')
   })
 

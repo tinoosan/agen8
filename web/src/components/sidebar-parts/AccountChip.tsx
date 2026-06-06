@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { useLocation } from 'wouter'
 import {
-  UserRound, Plug, KeyRound, LogOut, Moon, Sun,
+  UserRound, KeyRound, LogOut, Moon, Sun,
 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useStore, isLightTheme } from '../../lib/store'
@@ -22,11 +22,7 @@ export function AccountChip() {
   const [, navigate] = useLocation()
   const [loggingOut, setLoggingOut] = useState(false)
 
-  const bridgeConnected = !!auth.bridge?.connected
-
-  // Composite dot: green if nothing needs attention, amber otherwise.
-  const needsAttention = auth.bridge !== null && !bridgeConnected
-  const dotColor = needsAttention ? 'var(--amber)' : 'var(--green)'
+  const dotColor = 'var(--green)'
 
   const identity = accountDisplayName(auth.user)
 
@@ -67,22 +63,6 @@ export function AccountChip() {
       </button>
 
       <div className="h-px mx-2.5 my-1 bg-[var(--border)] opacity-40" />
-
-      {/* Daemon status — only shown when a local daemon is present */}
-      {auth.bridge !== null && (
-        <div
-          className="flex items-center gap-2 w-full px-2.5 py-[6px] rounded-[6px] text-[0.8125rem] text-[var(--text-3)]"
-          style={ROW_STYLE}
-          title={bridgeConnected ? 'Local daemon connected' : 'Local daemon offline'}
-        >
-          <span className={DOT_CLS} style={{ backgroundColor: bridgeConnected ? 'var(--green)' : 'var(--amber)' }} />
-          <Plug size={13} className="shrink-0" />
-          <span>Local daemon</span>
-          <span className="ml-auto text-[0.6875rem] text-[var(--text-3)]" style={{ letterSpacing: '-0.06px' }}>
-            {bridgeConnected ? 'Connected' : 'Offline'}
-          </span>
-        </div>
-      )}
 
       {/* Identity + theme toggle, pinned at the bottom */}
       <div className="flex items-center gap-2 px-2.5 py-[6px]" style={{ fontSize: '0.75rem' }}>
