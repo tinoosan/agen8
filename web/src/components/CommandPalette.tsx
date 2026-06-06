@@ -82,7 +82,7 @@ export default function CommandPalette() {
               Dashboard
             </Command.Item>
             <Command.Item
-              value="strategy map context graph missions key results tasks"
+              value="context map strategy graph missions key results tasks"
               onSelect={() => {
                 if (projectId) navigate(strategyMapLink(projectId))
                 close()
@@ -90,7 +90,7 @@ export default function CommandPalette() {
               className="py-2.5 px-3.5 cursor-pointer text-[0.8125rem] flex items-center gap-2.5 text-[var(--text-1)] rounded-[var(--r-md)] mx-1.5 my-px"
             >
               <Network size={13} className="text-[var(--text-3)]" />
-              Strategy map
+              Context Map
             </Command.Item>
             <Command.Item
               value="decisions log record choices"

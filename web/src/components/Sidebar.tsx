@@ -181,7 +181,7 @@ export default function Sidebar() {
                     style={ROW_STYLE}
                   >
                     <Network size={15} className="shrink-0" />
-                    <span>Strategy</span>
+                    <span>Context Map</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

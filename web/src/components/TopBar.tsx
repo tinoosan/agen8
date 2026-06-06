@@ -7,7 +7,7 @@ const VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   dashboard: 'Dashboard',
   missions: 'Missions',
   decisions: 'Decision Log',
-  strategy: 'Strategy',
+  strategy: 'Context Map',
 }
 
 export default function TopBar() {

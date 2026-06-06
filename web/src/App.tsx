@@ -41,7 +41,7 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   dashboard: 'Dashboard',
   missions: 'Missions',
   decisions: 'Decision Log',
-  strategy: 'Strategy',
+  strategy: 'Context Map',
   members: 'Members',
 }
 

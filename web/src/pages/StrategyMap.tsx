@@ -975,7 +975,7 @@ export default function StrategyMap({ projectId }: Props) {
       <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border/50 shrink-0"
         style={{ background: 'var(--color-bg)' }}>
         <Network size={16} className="text-muted-foreground/60 hidden md:block" />
-        <h1 className="text-sm font-medium text-foreground/70 hidden md:block">Strategy Map</h1>
+        <h1 className="text-sm font-medium text-foreground/70 hidden md:block">Context Map</h1>
         <Button
           type="button"
           variant={showArchived ? 'secondary' : 'ghost'}

@@ -73,7 +73,7 @@ describe('Account page', () => {
     render(<Account />)
 
     await user.click(screen.getByLabelText(/default project view/i))
-    await user.click(await screen.findByRole('option', { name: 'Strategy map' }))
+    await user.click(await screen.findByRole('option', { name: 'Context Map' }))
 
     expect(useStore.getState().defaultProjectView).toBe('strategy')
     expect(localStorage.getItem('agen8-default-project-view')).toBe('strategy')

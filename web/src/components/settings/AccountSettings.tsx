@@ -51,7 +51,7 @@ const fontGroupOrder: Array<'Sans' | 'Serif' | 'Mono'> = ['Sans', 'Serif', 'Mono
 
 const defaultViewOptions: Array<{ value: DefaultProjectView; label: string; description: string }> = [
   { value: 'dashboard', label: 'Dashboard', description: 'Start from project health, missions, and actions.' },
-  { value: 'strategy', label: 'Strategy map', description: 'Open directly into the mission and context graph.' },
+  { value: 'strategy', label: 'Context Map', description: 'Open directly into the mission and context graph.' },
 ]
 
 const fontFamilyOptions: Array<{ value: FontFamily; label: string; note: string; category: 'Sans' | 'Serif' | 'Mono'; stack: string }> = [
