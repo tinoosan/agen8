@@ -10,7 +10,7 @@ import {
   UserRound, Plug, KeyRound, LogOut, Moon, Sun,
 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
-import { useStore } from '../../lib/store'
+import { useStore, isLightTheme } from '../../lib/store'
 import { accountDisplayName } from '../../lib/accountHelpers'
 
 const ROW_CLS = 'flex items-center gap-2 w-full px-2.5 py-[6px] rounded-[6px] text-[0.8125rem] text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-2)] cursor-pointer border-none bg-transparent transition-colors text-left'
@@ -30,8 +30,9 @@ export function AccountChip() {
 
   const identity = accountDisplayName(auth.user)
 
-  const setTheme = useStore((s) => s.setTheme)
+  const toggleThemeMode = useStore((s) => s.toggleThemeMode)
   const theme = useStore((s) => s.theme)
+  const isLight = isLightTheme(theme)
 
   async function handleHostedLogout() {
     setLoggingOut(true)
@@ -95,11 +96,11 @@ export function AccountChip() {
         <button
           type="button"
           className="shrink-0 bg-transparent border-none cursor-pointer p-0.5 text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors"
-          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-          title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          onClick={toggleThemeMode}
+          title={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
+          aria-label={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
         >
-          {theme === 'light' ? <Sun size={13} /> : <Moon size={13} />}
+          {isLight ? <Sun size={13} /> : <Moon size={13} />}
         </button>
       </div>
     </div>

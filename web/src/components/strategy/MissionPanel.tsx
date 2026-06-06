@@ -16,8 +16,8 @@ import { useProjectTasks } from '../../hooks/useProjectTasks'
 import type { MissionNodeData } from './MissionNode'
 import type { MissionStatus } from '../../lib/types'
 import type { NodePanelProps } from './types'
+import { PANEL_FONT } from './panelTypography'
 
-const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
 const SUMMARY_MIN = 80
 const SUMMARY_MAX = 480
 const SUMMARY_DEFAULT = 220
@@ -116,7 +116,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
           </p>
           <h2
             className="text-foreground line-clamp-2"
-            style={{ fontFamily: SF_TEXT, fontSize: '1.0625rem', fontWeight: 600, lineHeight: 1.24, letterSpacing: '-0.374px' }}
+            style={{ fontFamily: PANEL_FONT, fontSize: '1.0625rem', fontWeight: 600, lineHeight: 1.24, letterSpacing: '-0.374px' }}
           >
             {mission.title}
           </h2>
@@ -172,7 +172,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
         {mission.description && (
           <div
             className="md-prose"
-            style={{ fontFamily: SF_TEXT, fontSize: '0.875rem', letterSpacing: '-0.224px', color: 'var(--text-2)' }}
+            style={{ fontFamily: PANEL_FONT, fontSize: '0.875rem', letterSpacing: '-0.224px', color: 'var(--text-2)' }}
           >
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {mission.description}
@@ -238,7 +238,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
           variant="outline"
           className="w-full gap-2"
           style={{
-            fontFamily: SF_TEXT,
+            fontFamily: PANEL_FONT,
             fontSize: '0.875rem',
             fontWeight: 400,
             lineHeight: 1.43,

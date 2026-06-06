@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
-import type { DecisionView, DecisionSource } from '../lib/types'
+import type { DecisionView, DecisionSource, DecisionStats } from '../lib/types'
 
 export interface DecisionListFilter {
   source?: DecisionSource
@@ -85,6 +85,32 @@ export function useDecisionLog(projectId: string | null, filter: DecisionLogFilt
         decisions: listRes.decisions ?? [],
         total: countRes.count ?? 0,
       }
+    },
+    enabled: !!projectId,
+    refetchInterval: 15_000,
+  })
+}
+
+// useDecisionStats summarizes the same filtered set the log view shows. It
+// takes the content filters (source/tags/query/since/until) but not sort or
+// page — aggregates span every matching row, so paging is irrelevant.
+export function useDecisionStats(projectId: string | null, filter?: DecisionListFilter) {
+  const source = filter?.source ?? ''
+  const query = filter?.query ?? ''
+  const since = filter?.since ?? ''
+  const until = filter?.until ?? ''
+  const tagsKey = (filter?.tags ?? []).join(',')
+
+  return useQuery<DecisionStats>({
+    queryKey: ['decision.stats', projectId ?? '', source, tagsKey, query, since, until],
+    queryFn: async () => {
+      const params: Record<string, unknown> = { projectId: projectId ?? '' }
+      if (filter?.source) params.source = filter.source
+      if (filter?.tags?.length) params.tags = filter.tags
+      if (filter?.query) params.query = filter.query
+      if (filter?.since) params.since = filter.since
+      if (filter?.until) params.until = filter.until
+      return rpcCall<DecisionStats>('decision.stats', params)
     },
     enabled: !!projectId,
     refetchInterval: 15_000,

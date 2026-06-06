@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import DecisionFeed from '../components/dashboard/DecisionFeed'
 import MissionSummary from '../components/dashboard/MissionSummary'
+import TaskSummary from '../components/dashboard/TaskSummary'
 import DashboardContextPanel from '../components/dashboard/DashboardContextPanel'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { writeStoredDashboardContextCollapsed, readStoredDashboardContextCollapsed } from '../lib/dashboardContextPanelStorage'
@@ -180,6 +181,10 @@ export default function Dashboard() {
               Only the work waiting on a person.
             </div>
           )}
+        </div>
+
+        <div className="mb-8">
+          <TaskSummary projectId={projectId} />
         </div>
 
         <div className="mt-0">

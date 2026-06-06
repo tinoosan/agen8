@@ -106,7 +106,7 @@ export default function Credentials() {
     <div className="h-full overflow-y-auto md:overflow-hidden p-[clamp(16px,4vw,32px)]">
       <div className="mx-auto flex h-auto md:h-full w-full max-w-[1180px] flex-col gap-5">
         <header>
-          <h1 className="m-0 text-2xl font-bold text-[var(--text-1)]">Credentials</h1>
+          <h1 className="m-0 text-2xl font-bold text-[var(--text-1)] hidden md:block">Credentials</h1>
           <p className="m-0 mt-1 max-w-[620px] text-[0.8125rem] leading-relaxed text-[var(--text-3)]">
             Secrets the <b className="text-[var(--text-2)]">http</b> tool injects automatically, matched by host. Stored
             locally and encrypted; values are redacted from model output.

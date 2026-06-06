@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLocation } from 'wouter'
 import { Moon, Sun } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
-import { useStore } from '../lib/store'
+import { useStore, isLightTheme } from '../lib/store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -75,18 +75,15 @@ export default function Login() {
   const auth = useAuth()
   const [, navigate] = useLocation()
   const theme = useStore((s) => s.theme)
-  const setTheme = useStore((s) => s.setTheme)
+  const toggleThemeMode = useStore((s) => s.toggleThemeMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submittingPassword, setSubmittingPassword] = useState(false)
 
-  function toggleTheme() {
-    setTheme(theme === 'light' ? 'dark' : 'light')
-  }
-
-  const ThemeIcon = theme === 'light' ? Sun : Moon
-  const toggleLabel = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'
+  const isLight = isLightTheme(theme)
+  const ThemeIcon = isLight ? Sun : Moon
+  const toggleLabel = isLight ? 'Switch to dark mode' : 'Switch to light mode'
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -109,7 +106,7 @@ export default function Login() {
       <main className="relative flex items-center justify-center bg-[var(--bg-app)] px-6 py-10">
         <button
           type="button"
-          onClick={toggleTheme}
+          onClick={toggleThemeMode}
           className="absolute right-5 top-5 rounded-[var(--r-md)] p-2 text-[var(--text-3)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-2)]"
           title={toggleLabel}
           aria-label={toggleLabel}

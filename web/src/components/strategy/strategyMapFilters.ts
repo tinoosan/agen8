@@ -1,6 +1,6 @@
 import type { Node, Edge } from '@xyflow/react'
 
-export type FilterPreset = 'attention' | 'failed' | 'trace'
+export type FilterPreset = 'in_motion' | 'blocked' | 'done' | 'decisions' | 'trace'
 
 export interface FilterResult {
   nodeIds: ReadonlySet<string>
@@ -32,60 +32,145 @@ function connectedEdges(nodeIds: Set<string>, edges: Edge[]): Set<string> {
   return edgeIds
 }
 
-// ── Attention filter ────────────────────────────────────────────────────
+/** Read a node's status string regardless of entity type. */
+function nodeStatus(node: Node): string | undefined {
+  const d = node.data as Record<string, unknown>
+  switch (node.type) {
+    case 'mission': return (d.mission as { status?: string } | undefined)?.status
+    case 'keyResult': return (d.kr as { status?: string } | undefined)?.status
+    case 'task': return (d.task as { status?: string } | undefined)?.status
+    default: return undefined
+  }
+}
 
-/** Nodes needing attention: blocked/review tasks. */
-export function computeAttentionFilter(
-  nodes: Node[],
-  edges: Edge[],
-): FilterResult | null {
+/** Endpoints of context edges whose semantic type matches `edgeType`. */
+function contextEdgeEndpoints(edges: Edge[], edgeType: string): Set<string> {
+  const ids = new Set<string>()
+  for (const edge of edges) {
+    if (edge.type !== 'contextEdge') continue
+    if ((edge.data as { edgeType?: string } | undefined)?.edgeType !== edgeType) continue
+    ids.add(edge.source)
+    ids.add(edge.target)
+  }
+  return ids
+}
+
+// ── In Motion lens ───────────────────────────────────────────────────────
+
+/** Live work: active missions, on-track KRs, and tasks being worked or
+ *  reviewed. Highlights the slice of the map that's actually moving. */
+export function computeInMotionFilter(nodes: Node[], edges: Edge[]): FilterResult {
   const matchedIds = new Set<string>()
-
   for (const node of nodes) {
-    const d = node.data as Record<string, unknown>
-
-    switch (node.type) {
-      case 'task': {
-        const task = d.task as { status?: string } | undefined
-        if (task?.status === 'blocked' || task?.status === 'in_review') {
-          matchedIds.add(node.id)
-        }
-        break
-      }
+    const status = nodeStatus(node)
+    if (
+      (node.type === 'mission' && status === 'active')
+      || (node.type === 'keyResult' && status === 'on_track')
+      || (node.type === 'task' && (status === 'active' || status === 'in_review'))
+    ) {
+      matchedIds.add(node.id)
     }
   }
+  const matchCount = matchedIds.size
+  if (matchCount > 0) includeParents(matchedIds, edges)
+  return { nodeIds: matchedIds, edgeIds: connectedEdges(matchedIds, edges), matchCount }
+}
+
+// ── Blocked lens ─────────────────────────────────────────────────────────
+
+/** Stuck work: blocked tasks, at-risk KRs, paused missions, plus anything
+ *  on either end of a `blocked_by` context link — the full snag surface. */
+export function computeBlockedFilter(nodes: Node[], edges: Edge[]): FilterResult {
+  const matchedIds = new Set<string>()
+  for (const node of nodes) {
+    const status = nodeStatus(node)
+    if (
+      (node.type === 'task' && status === 'blocked')
+      || (node.type === 'keyResult' && status === 'at_risk')
+      || (node.type === 'mission' && status === 'paused')
+    ) {
+      matchedIds.add(node.id)
+    }
+  }
+  for (const id of contextEdgeEndpoints(edges, 'blocked_by')) matchedIds.add(id)
 
   const matchCount = matchedIds.size
   if (matchCount > 0) includeParents(matchedIds, edges)
   return { nodeIds: matchedIds, edgeIds: connectedEdges(matchedIds, edges), matchCount }
 }
 
-// ── Failed & Cancelled filter ───────────────────────────────────────────
+// ── Decisions lens ───────────────────────────────────────────────────────
 
-/** Dead/failed work: failed tasks. */
-export function computeFailedFilter(
-  nodes: Node[],
-  edges: Edge[],
-): FilterResult | null {
-  const matchedIds = new Set<string>()
-
+/** Reasoning layer: every decision node plus the nodes its context links
+ *  touch (what informed it, what it produced). Only the context edges that
+ *  actually touch a decision are lit — structural tree edges stay dim, so the
+ *  lens surfaces the "why" rather than re-lighting the whole map. */
+export function computeDecisionsFilter(nodes: Node[], edges: Edge[]): FilterResult {
+  const decisionIds = new Set<string>()
   for (const node of nodes) {
-    const d = node.data as Record<string, unknown>
+    if (node.type === 'decision') decisionIds.add(node.id)
+  }
 
-    switch (node.type) {
-      case 'task': {
-        const task = d.task as { status?: string } | undefined
-        if (task?.status === 'failed' || task?.status === 'canceled') {
-          matchedIds.add(node.id)
-        }
-        break
+  // Light each decision plus the far end of its context links, and mark only
+  // those context edges as direct. We deliberately skip structural edges and
+  // context edges between two non-decision nodes.
+  const matchedIds = new Set<string>(decisionIds)
+  const edgeIds = new Set<string>()
+  for (const edge of edges) {
+    if (edge.type !== 'contextEdge') continue
+    if (!decisionIds.has(edge.source) && !decisionIds.has(edge.target)) continue
+    edgeIds.add(edge.id)
+    matchedIds.add(edge.source)
+    matchedIds.add(edge.target)
+  }
+
+  return { nodeIds: matchedIds, edgeIds, matchCount: decisionIds.size }
+}
+
+// ── Done lens (declutter / hide) ─────────────────────────────────────────
+
+const DONE_STATUS: Record<string, ReadonlySet<string>> = {
+  mission: new Set(['completed', 'archived']),
+  keyResult: new Set(['completed', 'dropped']),
+  task: new Set(['succeeded', 'canceled']),
+}
+
+/** Finished work to hide so the live map is uncluttered. Returns the set of
+ *  node ids to remove. A done node is kept only if it's an ancestor of some
+ *  still-live node, so hiding never orphans unfinished work below it. */
+export function computeDoneFilter(nodes: Node[], structuralEdges: Edge[]): FilterResult {
+  const doneIds = new Set<string>()
+  for (const node of nodes) {
+    const status = nodeStatus(node)
+    if (node.type && status && DONE_STATUS[node.type]?.has(status)) doneIds.add(node.id)
+  }
+
+  // Walk up from every live node, marking ancestors that must stay visible.
+  const parentsOf = new Map<string, string[]>()
+  for (const edge of structuralEdges) {
+    if (!parentsOf.has(edge.target)) parentsOf.set(edge.target, [])
+    parentsOf.get(edge.target)!.push(edge.source)
+  }
+  const keep = new Set<string>()
+  const queue: string[] = []
+  for (const node of nodes) {
+    if (!doneIds.has(node.id)) queue.push(node.id)
+  }
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    for (const parent of parentsOf.get(current) ?? []) {
+      if (!keep.has(parent)) {
+        keep.add(parent)
+        queue.push(parent)
       }
     }
   }
 
-  const matchCount = matchedIds.size
-  if (matchCount > 0) includeParents(matchedIds, edges)
-  return { nodeIds: matchedIds, edgeIds: connectedEdges(matchedIds, edges), matchCount }
+  const hiddenIds = new Set<string>()
+  for (const id of doneIds) {
+    if (!keep.has(id)) hiddenIds.add(id)
+  }
+  return { nodeIds: hiddenIds, edgeIds: new Set(), matchCount: hiddenIds.size }
 }
 
 // ── Path trace filter ───────────────────────────────────────────────────

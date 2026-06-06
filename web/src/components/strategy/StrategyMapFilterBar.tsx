@@ -1,12 +1,12 @@
 import { memo } from 'react'
-import { AlertCircle, XCircle, GitBranch, Minus, Plus } from 'lucide-react'
+import { Activity, Ban, CheckCircle2, Diamond, GitBranch, Minus, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { FilterPreset } from './strategyMapFilters'
 
 interface FilterButton {
   key: FilterPreset
   label: string
-  icon: typeof AlertCircle
+  icon: typeof Activity
   color: string
   visible: boolean
 }
@@ -31,8 +31,10 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
   onContextDepthChange,
 }: Props) {
   const buttons: FilterButton[] = [
-    { key: 'attention', label: 'Attention', icon: AlertCircle, color: 'var(--amber)', visible: true },
-    { key: 'failed', label: 'Failed', icon: XCircle, color: 'var(--red)', visible: true },
+    { key: 'in_motion', label: 'In Motion', icon: Activity, color: 'var(--blue)', visible: true },
+    { key: 'blocked', label: 'Blocked', icon: Ban, color: 'var(--amber)', visible: true },
+    { key: 'done', label: 'Done', icon: CheckCircle2, color: 'var(--green)', visible: true },
+    { key: 'decisions', label: 'Decisions', icon: Diamond, color: 'var(--accent)', visible: true },
     { key: 'trace', label: 'Trace Path', icon: GitBranch, color: 'var(--accent)', visible: hasSelectedNode },
   ]
 
@@ -50,7 +52,7 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
             type="button"
             onClick={() => onFilterChange(isActive ? null : btn.key)}
             className={cn(
-              'inline-flex items-center gap-1.5 transition-all duration-200',
+              'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap transition-all duration-200',
               'focus:outline-none focus-visible:outline-none',
               'hover:scale-[1.03]',
             )}

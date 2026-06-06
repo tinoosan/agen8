@@ -562,3 +562,12 @@ export interface DecisionView {
   metadata?: Record<string, string>;
   createdAt: string;
 }
+
+// DecisionStats is the aggregate summary returned by decision.stats — computed
+// server-side over the full filtered set, not just the current page.
+export interface DecisionStats {
+  total: number;
+  lowConfidence: number;
+  unlinked: number;
+  withInvalidationConditions: number;
+}

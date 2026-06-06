@@ -26,8 +26,8 @@ import {
 import type { TaskActivity } from '../../lib/types'
 import type { TaskNodeData } from './TaskNode'
 import type { NodePanelProps } from './types'
+import { PANEL_FONT } from './panelTypography'
 
-const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
 const SUMMARY_MIN = 80
 const SUMMARY_MAX = 480
 const SUMMARY_DEFAULT = 200
@@ -135,7 +135,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
 
 
   const goalContent: ReactNode = !retry.isRetry && task.description
-    ? <p style={{ fontFamily: SF_TEXT, fontSize: '0.875rem', letterSpacing: '-0.224px', lineHeight: 1.47, color: 'var(--text-2)', margin: 0 }}>{task.description}</p>
+    ? <p style={{ fontFamily: PANEL_FONT, fontSize: '0.875rem', letterSpacing: '-0.224px', lineHeight: 1.47, color: 'var(--text-2)', margin: 0 }}>{task.description}</p>
     : null
 
   const reviewTone: Record<string, { fg: string; bg: string; label: string }> = {
@@ -169,7 +169,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           </div>
           <h2
             className="text-foreground line-clamp-2"
-            style={{ fontFamily: SF_TEXT, fontSize: '1.0625rem', fontWeight: 600, lineHeight: 1.24, letterSpacing: '-0.374px' }}
+            style={{ fontFamily: PANEL_FONT, fontSize: '1.0625rem', fontWeight: 600, lineHeight: 1.24, letterSpacing: '-0.374px' }}
           >
             {displayTitle}
           </h2>
@@ -214,7 +214,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
               fontSize: '0.6875rem',
               lineHeight: 1.47,
               color: 'var(--amber)',
-              fontFamily: SF_TEXT,
+              fontFamily: PANEL_FONT,
               letterSpacing: '-0.08px',
             }}
           >
@@ -236,7 +236,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
               Summary
             </p>
             <p
-              style={{ fontFamily: SF_TEXT, fontSize: '0.8125rem', letterSpacing: '-0.08px', lineHeight: 1.47, color: 'var(--text-3)', margin: 0 }}
+              style={{ fontFamily: PANEL_FONT, fontSize: '0.8125rem', letterSpacing: '-0.08px', lineHeight: 1.47, color: 'var(--text-3)', margin: 0 }}
             >
               {task.summary}
             </p>
@@ -388,7 +388,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
                     </span>
                     <span
                       style={{
-                        fontFamily: SF_TEXT,
+                        fontFamily: PANEL_FONT,
                         fontSize: '0.8125rem',
                         lineHeight: 1.47,
                         letterSpacing: '-0.08px',
@@ -438,7 +438,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
                 {latestReview.feedback && (
                   <div
                     className="md-prose"
-                    style={{ fontFamily: SF_TEXT, fontSize: '0.75rem', lineHeight: 1.47, color: 'var(--text-2)', marginTop: 8 }}
+                    style={{ fontFamily: PANEL_FONT, fontSize: '0.75rem', lineHeight: 1.47, color: 'var(--text-2)', marginTop: 8 }}
                   >
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{latestReview.feedback}</ReactMarkdown>
                   </div>

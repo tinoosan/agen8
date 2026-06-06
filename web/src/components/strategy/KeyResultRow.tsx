@@ -2,8 +2,7 @@ import { ChevronRight, ExternalLink } from 'lucide-react'
 import KRDetailBody from './KRDetailBody'
 import { NodeLink } from './NodeLink'
 import type { KeyResultView, KeyResultStatus } from '../../lib/types'
-
-const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
+import { PANEL_FONT } from './panelTypography'
 
 const KR_STATUS_DOT: Record<KeyResultStatus, string> = {
   open: 'var(--text-3)',
@@ -37,7 +36,7 @@ export default function KeyResultRow({ kr, expanded, onToggle, isLast }: KeyResu
         paddingTop: '12px',
         paddingBottom: '12px',
         borderBottom: isLast ? 'none' : '1px solid var(--border)',
-        fontFamily: SF_TEXT,
+        fontFamily: PANEL_FONT,
       }}
     >
       {/* Header — click or keyboard to toggle expansion */}
@@ -147,7 +146,7 @@ export default function KeyResultRow({ kr, expanded, onToggle, isLast }: KeyResu
             padding: '14px',
             borderRadius: '12px',
             background: 'var(--bg-elevated)',
-            fontFamily: SF_TEXT,
+            fontFamily: PANEL_FONT,
           }}
         >
           <KRDetailBody kr={kr} />

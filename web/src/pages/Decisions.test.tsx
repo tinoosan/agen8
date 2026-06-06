@@ -9,6 +9,7 @@ vi.mock('../lib/routing', () => ({
 }))
 
 const mockUseDecisionLog = vi.fn()
+const mockUseDecisionStats = vi.fn()
 const mockUseExportDecisions = vi.fn()
 const mockUseDeleteDecision = vi.fn()
 vi.mock('../hooks/useDecisions', async (importOriginal) => {
@@ -16,6 +17,7 @@ vi.mock('../hooks/useDecisions', async (importOriginal) => {
   return {
     ...mod,
     useDecisionLog: (...args: unknown[]) => mockUseDecisionLog(...args),
+    useDecisionStats: (...args: unknown[]) => mockUseDecisionStats(...args),
     useExportDecisions: (...args: unknown[]) => mockUseExportDecisions(...args),
     useDeleteDecision: (...args: unknown[]) => mockUseDeleteDecision(...args),
   }
@@ -66,6 +68,11 @@ describe('Decisions page', () => {
       mutateAsync: mockDeleteMutateAsync.mockResolvedValue(true),
       isPending: false,
     })
+    mockUseDecisionStats.mockReturnValue({
+      data: { total: 1, lowConfidence: 0, unlinked: 0, withInvalidationConditions: 0 },
+      isLoading: false,
+      isError: false,
+    })
   })
 
   it('renders full decision log controls instead of the dashboard feed', () => {
@@ -83,7 +90,7 @@ describe('Decisions page', () => {
     renderPage()
 
     expect(screen.getByText('Use PostgreSQL')).toBeInTheDocument()
-    expect(screen.getByText('agent')).toBeInTheDocument()
+    expect(screen.getByText('80%')).toBeInTheDocument()
   })
 
   it('renders logged decision details and linked refs in the expanded row', async () => {
@@ -167,5 +174,34 @@ describe('Decisions page', () => {
     await user.click(screen.getByRole('button', { name: /^delete decision$/i }))
 
     expect(mockDeleteMutateAsync).toHaveBeenCalledWith('dec-1')
+  })
+
+  it('renders metric cards from decision stats', () => {
+    mockUseDecisionStats.mockReturnValue({
+      data: { total: 12, lowConfidence: 3, unlinked: 5, withInvalidationConditions: 4 },
+      isLoading: false,
+      isError: false,
+    })
+    renderPage()
+
+    expect(screen.getByText('Total')).toBeInTheDocument()
+    expect(screen.getByText('Needs review')).toBeInTheDocument()
+    expect(screen.getByText('Unlinked')).toBeInTheDocument()
+    expect(screen.getByText('Revisit conditions')).toBeInTheDocument()
+    expect(screen.getByText('12')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
+    expect(screen.getByText('5')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+  })
+
+  it('hides the metric cards when there are no decisions', () => {
+    mockUseDecisionStats.mockReturnValue({
+      data: { total: 0, lowConfidence: 0, unlinked: 0, withInvalidationConditions: 0 },
+      isLoading: false,
+      isError: false,
+    })
+    renderPage()
+
+    expect(screen.queryByText('Needs review')).not.toBeInTheDocument()
   })
 })

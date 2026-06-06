@@ -1,8 +1,9 @@
 import React, { Suspense, useEffect, useRef } from 'react'
 import { Redirect, Route, Switch, useLocation } from 'wouter'
-import { Menu } from 'lucide-react'
+import { Menu, Search } from 'lucide-react'
 import { useStore } from './lib/store'
-import { missionsPanelLink, useNavigation } from './lib/routing'
+import { brandIconFor } from './lib/brandIcon'
+import { missionsPanelLink, useNavigation, type ActiveView } from './lib/routing'
 import { useAuth } from './hooks/useAuth'
 import { lazyWithRetry } from './lib/lazyWithRetry'
 import Sidebar from './components/Sidebar'
@@ -32,21 +33,57 @@ const Spinner = () => (
   </div>
 )
 
-/** Mobile-only top bar with a hamburger that opens the sidebar drawer.
+const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
+  project: 'Projects',
+  dashboard: 'Dashboard',
+  missions: 'Missions',
+  decisions: 'Decision Log',
+  strategy: 'Strategy',
+}
+
+/** Mobile-only top bar: hamburger (opens the sidebar drawer) + app icon +
+ *  contextual page title + a search button that opens the command palette
+ *  (otherwise keyboard-only via Cmd+K, unreachable on touch).
  *  Must live inside SidebarProvider so useSidebar() resolves. */
 function MobileTopBar() {
   const { toggleSidebar } = useSidebar()
+  const { activeView } = useNavigation()
+  const [location] = useLocation()
+  const theme = useStore((s) => s.theme)
+
+  const title = location.startsWith('/credentials')
+    ? 'Credentials'
+    : location.startsWith('/account')
+      ? 'Settings'
+      : MOBILE_VIEW_TITLES[activeView] ?? 'agen8'
+
   return (
-    <div className="md:hidden shrink-0 flex items-center gap-2 h-12 px-2 border-b border-[var(--border)] bg-[var(--bg-surface)]">
+    <div className="md:hidden shrink-0 flex items-center gap-2 min-h-12 px-2 pt-[env(safe-area-inset-top)] border-b border-[var(--border)] bg-[var(--bg-surface)]">
       <button
         type="button"
         onClick={toggleSidebar}
         aria-label="Open navigation menu"
-        className="h-9 w-9 flex items-center justify-center rounded-[8px] border-none bg-transparent cursor-pointer text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors"
+        className="h-9 w-9 flex items-center justify-center rounded-[8px] border-none bg-transparent cursor-pointer text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors shrink-0"
       >
         <Menu size={18} />
       </button>
-      <span className="text-[0.875rem] font-semibold tracking-[-0.02em] text-[var(--text-1)]">agen8</span>
+      <img
+        src={brandIconFor(theme)}
+        alt=""
+        aria-hidden="true"
+        className="w-[22px] h-[22px] shrink-0 rounded-[6px]"
+      />
+      <span className="flex-1 min-w-0 truncate text-[0.9375rem] font-semibold tracking-[-0.02em] text-[var(--text-1)]">
+        {title}
+      </span>
+      <button
+        type="button"
+        onClick={() => useStore.getState().setPaletteOpen(true)}
+        aria-label="Open search"
+        className="h-9 w-9 flex items-center justify-center rounded-[8px] border-none bg-transparent cursor-pointer text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors shrink-0"
+      >
+        <Search size={18} />
+      </button>
     </div>
   )
 }
@@ -85,6 +122,11 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
+    // Point the iOS home-screen icon at the active theme's tile. Safari reads
+    // this link live when "Add to Home Screen" is tapped, so the saved icon
+    // matches whatever theme is showing at that moment.
+    const link = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]')
+    if (link) link.href = `/apple-touch-icon-${theme}.png`
   }, [theme])
 
   useEffect(() => {
@@ -171,7 +213,7 @@ export default function App() {
           </a>
           <MobileTopBar />
           <Sidebar />
-          <main id="main-content" className="app-main">
+          <main id="main-content" className="app-main md:pt-[env(safe-area-inset-top)]">
             <Suspense fallback={<Spinner />}>
               <PageErrorBoundary>
                 <Switch>

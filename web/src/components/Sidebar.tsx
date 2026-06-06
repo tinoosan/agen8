@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useNavigation, dashboardLink } from '../lib/routing'
 import { useStore } from '../lib/store'
+import { brandIconFor } from '../lib/brandIcon'
 import CreateMissionDialog from './mission/CreateMissionDialog'
 import { AccountChip, MissionsSidebarSection, GlobalSidebarContent } from './sidebar-parts'
 import {
@@ -38,9 +39,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-
-import agen8IconDark from '../assets/agen8-app-icon-dark.svg'
-import agen8IconLight from '../assets/agen8-app-icon-light.svg'
 
 /* ── Style constants ─────────────────────────────────── */
 
@@ -132,7 +130,7 @@ export default function Sidebar() {
             title="All projects"
           >
             <img
-              src={theme === 'light' ? agen8IconLight : agen8IconDark}
+              src={brandIconFor(theme)}
               alt=""
               className="w-5 h-5 shrink-0 rounded-[5px] select-none"
               draggable={false}
@@ -226,12 +224,12 @@ export default function Sidebar() {
       <Sheet open={openMobile} onOpenChange={setOpenMobile}>
         <SheetContent
           side="left"
-          className={cn('w-[288px] max-w-[85vw] p-0 gap-0 [&>button]:hidden', SIDEBAR_CARD_CHROME)}
+          className={cn('w-screen max-w-none p-0 gap-0 [&>button]:hidden', SIDEBAR_CARD_CHROME)}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Navigation</SheetTitle>
           </SheetHeader>
-          <div className="flex h-full w-full flex-col">{body}</div>
+          <div className="flex h-full w-full flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">{body}</div>
         </SheetContent>
       </Sheet>
     )
@@ -252,7 +250,7 @@ export default function Sidebar() {
   return (
     <ShadcnSidebar
       collapsible="none"
-      className={cn('!w-[272px] overflow-hidden', SIDEBAR_CARD_CHROME)}
+      className={cn('!w-[272px] overflow-hidden md:pt-[env(safe-area-inset-top)]', SIDEBAR_CARD_CHROME)}
     >
       {body}
     </ShadcnSidebar>

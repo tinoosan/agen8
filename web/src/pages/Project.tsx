@@ -37,8 +37,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useStore } from '../lib/store'
 import { cn } from '@/lib/utils'
-import agen8IconDark from '../assets/agen8-app-icon-dark.svg'
-import agen8IconLight from '../assets/agen8-app-icon-light.svg'
+import { brandIconFor } from '../lib/brandIcon'
 
 /* ── Utility helpers ─────────────────────────────── */
 
@@ -175,7 +174,6 @@ function CreateProjectDialog({
   onOpenChange: (open: boolean) => void
   onSuccess: (project: Project) => void
 }) {
-  const [, navigate] = useLocation()
   const locationsQuery = useLocations()
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
   const readyLocations = useMemo(() => locations.filter(l => l.ready), [locations])
@@ -247,9 +245,6 @@ function CreateProjectDialog({
           ) : noLocations ? (
             <div className="flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)] p-4 text-[0.8125rem] text-[var(--text-2)]">
               <div>No ready execution location is available.</div>
-              <Button variant="secondary" className="w-fit" onClick={() => { onOpenChange(false); navigate('/locations') }}>
-                Open Locations
-              </Button>
             </div>
           ) : (
             <>
@@ -718,7 +713,7 @@ export default function ProjectPage() {
       <div className="mx-auto w-full max-w-[960px] px-4 py-6 sm:px-6 md:px-10 md:py-8">
         {/* Header */}
         <div className="flex items-center gap-3 mb-5 flex-wrap">
-          <h1 className="m-0 text-[1.125rem] font-semibold tracking-[-0.03em] text-[var(--text-1)] leading-[1.1] sm:text-[1.25rem]">
+          <h1 className="m-0 text-[1.125rem] font-semibold tracking-[-0.03em] text-[var(--text-1)] leading-[1.1] sm:text-[1.25rem] hidden md:block">
             Projects
           </h1>
           <div className="flex-1" />
@@ -759,7 +754,7 @@ export default function ProjectPage() {
           <div className="flex flex-col items-center justify-center py-16 gap-5 text-center sm:py-20">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--bg-elevated)]">
               <img
-                src={theme === 'light' ? agen8IconLight : agen8IconDark}
+                src={brandIconFor(theme)}
                 alt=""
                 className="w-7 h-7 rounded-[5px]"
                 aria-hidden="true"

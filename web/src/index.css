@@ -2111,6 +2111,9 @@ body {
 .dashboard-dialog-content > button {
   top: 14px;
   right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 28px;
   height: 28px;
   border-radius: 999px;

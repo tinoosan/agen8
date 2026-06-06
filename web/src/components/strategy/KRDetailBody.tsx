@@ -5,8 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useProgressHistory } from '../../hooks/useMissions'
 import type { KeyResultView } from '../../lib/types'
-
-const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
+import { PANEL_FONT } from './panelTypography'
 
 const LABEL_STYLE: CSSProperties = {
   fontSize: '0.625rem',
@@ -18,7 +17,7 @@ const LABEL_STYLE: CSSProperties = {
 }
 
 const VALUE_STYLE: CSSProperties = {
-  fontFamily: SF_TEXT,
+  fontFamily: PANEL_FONT,
   fontSize: '0.9375rem',
   fontWeight: 500,
   letterSpacing: '-0.224px',
@@ -29,7 +28,7 @@ const VALUE_STYLE: CSSProperties = {
 }
 
 const SECONDARY_STYLE: CSSProperties = {
-  fontFamily: SF_TEXT,
+  fontFamily: PANEL_FONT,
   fontSize: '0.8125rem',
   fontWeight: 400,
   letterSpacing: '-0.224px',
@@ -74,7 +73,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
         <div
           className="md-prose"
           style={{
-            fontFamily: SF_TEXT,
+            fontFamily: PANEL_FONT,
             fontSize: '0.8125rem',
             fontWeight: 400,
             lineHeight: 1.43,
@@ -145,7 +144,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
           {(kr.lastUpdatedBy || formattedUpdatedAt) && (
             <p
               style={{
-                fontFamily: SF_TEXT,
+                fontFamily: PANEL_FONT,
                 fontSize: '0.6875rem',
                 fontWeight: 400,
                 letterSpacing: '-0.12px',
@@ -195,7 +194,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
             {historyQuery.isLoading && (
               <p
                 style={{
-                  fontFamily: SF_TEXT,
+                  fontFamily: PANEL_FONT,
                   fontSize: '0.6875rem',
                   letterSpacing: '-0.12px',
                   color: 'var(--text-3)',
@@ -208,7 +207,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
             {!historyQuery.isLoading && historyEntries.length === 0 && (
               <p
                 style={{
-                  fontFamily: SF_TEXT,
+                  fontFamily: PANEL_FONT,
                   fontSize: '0.6875rem',
                   letterSpacing: '-0.12px',
                   color: 'var(--text-3)',
@@ -226,7 +225,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
                 <div className="flex justify-between items-baseline">
                   <span
                     style={{
-                      fontFamily: SF_TEXT,
+                      fontFamily: PANEL_FONT,
                       fontSize: '0.75rem',
                       fontWeight: 500,
                       letterSpacing: '-0.12px',
@@ -239,7 +238,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
                   </span>
                   <span
                     style={{
-                      fontFamily: SF_TEXT,
+                      fontFamily: PANEL_FONT,
                       fontSize: '0.625rem',
                       fontWeight: 600,
                       letterSpacing: '-0.08px',
@@ -253,7 +252,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
                 {entry.note && (
                   <p
                     style={{
-                      fontFamily: SF_TEXT,
+                      fontFamily: PANEL_FONT,
                       fontSize: '0.6875rem',
                       fontWeight: 400,
                       lineHeight: 1.43,
@@ -267,7 +266,7 @@ export default function KRDetailBody({ kr }: KRDetailBodyProps) {
                 )}
                 <p
                   style={{
-                    fontFamily: SF_TEXT,
+                    fontFamily: PANEL_FONT,
                     fontSize: '0.625rem',
                     fontWeight: 400,
                     letterSpacing: '-0.08px',

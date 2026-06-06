@@ -9,8 +9,7 @@ import { useKeyResult, useProjectKRs, useMissions } from '../../hooks/useMission
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import type { NodePanelProps } from './types'
 import { decisionActorDisplay } from '../../lib/decisionDisplay'
-
-const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
+import { PANEL_FONT } from './panelTypography'
 
 const SOURCE_DOT: Record<DecisionSource, string> = {
   agent: 'var(--accent)',
@@ -26,7 +25,7 @@ const LABEL_STYLE: CSSProperties = {
 }
 
 const PROSE_STYLE: CSSProperties = {
-  fontFamily: SF_TEXT,
+  fontFamily: PANEL_FONT,
   fontSize: '0.8125rem',
   fontWeight: 400,
   letterSpacing: '-0.224px',
@@ -90,7 +89,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           <h2
             className="text-foreground line-clamp-3"
             style={{
-              fontFamily: SF_TEXT,
+              fontFamily: PANEL_FONT,
               fontSize: '1.0625rem',
               fontWeight: 600,
               lineHeight: 1.24,
@@ -117,7 +116,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           background: 'var(--bg-panel)',
           padding: '16px',
           gap: '16px',
-          fontFamily: SF_TEXT,
+          fontFamily: PANEL_FONT,
         }}
       >
         {/* Source + confidence — typographic metadata, not a progress indicator */}
@@ -125,7 +124,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           <span
             className="flex items-center min-w-0"
             style={{
-              fontFamily: SF_TEXT,
+              fontFamily: PANEL_FONT,
               fontSize: '0.75rem',
               fontWeight: 600,
               letterSpacing: '-0.12px',
@@ -157,7 +156,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           {hasConfidence && (
             <span
               style={{
-                fontFamily: SF_TEXT,
+                fontFamily: PANEL_FONT,
                 fontSize: '0.6875rem',
                 fontWeight: 400,
                 letterSpacing: '-0.12px',
@@ -232,7 +231,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
                     padding: '2px 8px',
                     borderRadius: '4px',
                     background: 'var(--bg-elevated)',
-                    fontFamily: SF_TEXT,
+                    fontFamily: PANEL_FONT,
                     fontSize: '0.625rem',
                     fontWeight: 500,
                     letterSpacing: '-0.08px',
@@ -274,7 +273,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
         </p>
         <p
           style={{
-            fontFamily: SF_TEXT,
+            fontFamily: PANEL_FONT,
             fontSize: '0.75rem',
             fontWeight: 400,
             letterSpacing: '-0.12px',

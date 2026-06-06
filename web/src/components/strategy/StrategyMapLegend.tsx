@@ -1,7 +1,5 @@
 import { CircleCheck, Diamond, Target } from 'lucide-react'
 
-export const strategyMapLegendItems = ['Mission', 'Key Result', 'Task', 'Decision'] as const
-
 export function StrategyMapLegend() {
   return (
     <div

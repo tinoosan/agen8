@@ -34,8 +34,10 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['Esc'], desc: 'Close detail panel and clear selection', group: 'Selection' },
 
   // Filters
-  { keys: ['A'], desc: 'Toggle Attention filter (needs human action)', group: 'Filters' },
-  { keys: ['X'], desc: 'Toggle Failed filter (dead/cancelled work)', group: 'Filters' },
+  { keys: ['M'], desc: 'Toggle In Motion lens (active, on-track work)', group: 'Filters' },
+  { keys: ['B'], desc: 'Toggle Blocked lens (stuck / at-risk work)', group: 'Filters' },
+  { keys: ['D'], desc: 'Toggle Done lens (hide finished work)', group: 'Filters' },
+  { keys: ['R'], desc: 'Toggle Decisions lens (reasoning links)', group: 'Filters' },
   { keys: ['T'], desc: 'Toggle Trace Path from selected node', group: 'Filters' },
   { keys: ['['], desc: 'Decrease context depth (trace mode)', group: 'Filters' },
   { keys: [']'], desc: 'Increase context depth (trace mode)', group: 'Filters' },

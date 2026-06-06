@@ -22,8 +22,10 @@ import { StrategyMapSearch } from '../components/strategy/StrategyMapSearch'
 import { StrategyMapFilterBar } from '../components/strategy/StrategyMapFilterBar'
 import { StrategyMapLegend } from '../components/strategy/StrategyMapLegend'
 import {
-  computeAttentionFilter,
-  computeFailedFilter,
+  computeInMotionFilter,
+  computeBlockedFilter,
+  computeDecisionsFilter,
+  computeDoneFilter,
   computeTraceFilter,
   type FilterPreset,
 } from '../components/strategy/strategyMapFilters'
@@ -140,17 +142,39 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
     ? focusNodeId
     : null
 
-  // Smart filter computation — overrides focus-neighborhood dimming when active.
+  // Highlight lenses — compute a match set that dims everything else.
+  // 'done' is handled separately below because it hides rather than dims.
   const filterResult = useMemo(() => {
     if (!activeFilter) return null
-    if (activeFilter === 'attention') return computeAttentionFilter(displayNodes, displayEdges)
-    if (activeFilter === 'failed') return computeFailedFilter(displayNodes, displayEdges)
+    if (activeFilter === 'in_motion') return computeInMotionFilter(displayNodes, displayEdges)
+    if (activeFilter === 'blocked') return computeBlockedFilter(displayNodes, displayEdges)
+    if (activeFilter === 'decisions') return computeDecisionsFilter(displayNodes, displayEdges)
     if (activeFilter === 'trace' && selectedNodeId) {
       const structuralEdges = displayEdges.filter((e) => e.type === 'statusEdge')
       return computeTraceFilter(selectedNodeId, structuralEdges, displayEdges, contextDepth)
     }
     return null
   }, [activeFilter, displayNodes, displayEdges, selectedNodeId, contextDepth])
+
+  // Declutter lens — the set of finished nodes to remove from the map.
+  const doneHidden = useMemo(() => {
+    if (activeFilter !== 'done') return null
+    const structuralEdges = displayEdges.filter((e) => e.type === 'statusEdge')
+    return computeDoneFilter(displayNodes, structuralEdges)
+  }, [activeFilter, displayNodes, displayEdges])
+
+  // What actually reaches the canvas: with 'done' active, drop hidden nodes
+  // and any edge touching them; otherwise render the full graph.
+  const renderNodes = useMemo(
+    () => (doneHidden ? displayNodes.filter((n) => !doneHidden.nodeIds.has(n.id)) : displayNodes),
+    [doneHidden, displayNodes],
+  )
+  const renderEdges = useMemo(
+    () => (doneHidden
+      ? displayEdges.filter((e) => !doneHidden.nodeIds.has(e.source) && !doneHidden.nodeIds.has(e.target))
+      : displayEdges),
+    [doneHidden, displayEdges],
+  )
 
   // Clear trace filter and reset depth when node is deselected
   useEffect(() => {
@@ -326,16 +350,28 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
       }
 
       // ── Smart filter shortcuts ─────────────────────────────────────
-      // A = toggle Attention filter
-      if (e.key === 'a' || e.key === 'A') {
+      // M = toggle In Motion lens
+      if (e.key === 'm' || e.key === 'M') {
         e.preventDefault()
-        setActiveFilter((f) => f === 'attention' ? null : 'attention')
+        setActiveFilter((f) => f === 'in_motion' ? null : 'in_motion')
         return
       }
-      // X = toggle Failed filter
-      if (e.key === 'x' || e.key === 'X') {
+      // B = toggle Blocked lens
+      if (e.key === 'b' || e.key === 'B') {
         e.preventDefault()
-        setActiveFilter((f) => f === 'failed' ? null : 'failed')
+        setActiveFilter((f) => f === 'blocked' ? null : 'blocked')
+        return
+      }
+      // D = toggle Done (declutter) lens
+      if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault()
+        setActiveFilter((f) => f === 'done' ? null : 'done')
+        return
+      }
+      // R = toggle Decisions (reasoning) lens
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault()
+        setActiveFilter((f) => f === 'decisions' ? null : 'decisions')
         return
       }
       // T = toggle Trace Path (only when a node is selected)
@@ -760,14 +796,14 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
           hasSelectedNode={!!selectedNodeId}
-          matchCount={filterResult?.matchCount ?? 0}
+          matchCount={(activeFilter === 'done' ? doneHidden?.matchCount : filterResult?.matchCount) ?? 0}
           contextDepth={contextDepth}
           onContextDepthChange={setContextDepth}
         />
 
           <ReactFlow
-            nodes={displayNodes}
-            edges={displayEdges}
+            nodes={renderNodes}
+            edges={renderEdges}
             nodeTypes={reactFlowNodeTypes}
             edgeTypes={reactFlowEdgeTypes}
             onNodeClick={handleNodeClick}
@@ -938,8 +974,8 @@ export default function StrategyMap({ projectId }: Props) {
     <div className="flex flex-col h-full" style={{ background: 'var(--color-bg)' }}>
       <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border/50 shrink-0"
         style={{ background: 'var(--color-bg)' }}>
-        <Network size={16} className="text-muted-foreground/60" />
-        <h1 className="text-sm font-medium text-foreground/70">Strategy Map</h1>
+        <Network size={16} className="text-muted-foreground/60 hidden md:block" />
+        <h1 className="text-sm font-medium text-foreground/70 hidden md:block">Strategy Map</h1>
         <Button
           type="button"
           variant={showArchived ? 'secondary' : 'ghost'}

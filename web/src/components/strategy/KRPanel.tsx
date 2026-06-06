@@ -10,8 +10,7 @@ import KRDetailBody from './KRDetailBody'
 import type { KRNodeData } from './KRNode'
 import type { KeyResultStatus } from '../../lib/types'
 import type { NodePanelProps } from './types'
-
-const SF_TEXT = 'SF Pro Text, SF Pro Icons, Helvetica Neue, Helvetica, Arial, sans-serif'
+import { PANEL_FONT } from './panelTypography'
 
 const KR_STATUS_DOT: Record<KeyResultStatus, string> = {
   open: 'var(--text-3)',
@@ -78,7 +77,7 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
           <h2
             className="text-foreground line-clamp-2"
             style={{
-              fontFamily: SF_TEXT,
+              fontFamily: PANEL_FONT,
               fontSize: '1.0625rem',
               fontWeight: 600,
               lineHeight: 1.24,
@@ -105,7 +104,7 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
           background: 'var(--bg-panel)',
           padding: '16px',
           gap: '16px',
-          fontFamily: SF_TEXT,
+          fontFamily: PANEL_FONT,
         }}
       >
         {/* Status + percent — at-a-glance summary */}
@@ -113,7 +112,7 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
           <span
             className="flex items-center"
             style={{
-              fontFamily: SF_TEXT,
+              fontFamily: PANEL_FONT,
               fontSize: '0.75rem',
               fontWeight: 600,
               letterSpacing: '-0.12px',
@@ -135,7 +134,7 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
           </span>
           <span
             style={{
-              fontFamily: SF_TEXT,
+              fontFamily: PANEL_FONT,
               fontSize: '0.9375rem',
               fontWeight: 600,
               letterSpacing: '-0.224px',
@@ -187,7 +186,7 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
           variant="outline"
           className="w-full gap-2"
           style={{
-            fontFamily: SF_TEXT,
+            fontFamily: PANEL_FONT,
             fontSize: '0.875rem',
             fontWeight: 400,
             lineHeight: 1.43,

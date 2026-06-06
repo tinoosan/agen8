@@ -29,6 +29,16 @@ export const THEMES: Theme[] = [
   'dark', 'midnight', 'dim', 'nebula', 'nord', 'rose', 'forest', 'ember',
   'light', 'sepia', 'solarized',
 ]
+
+/** Themes that render on a light canvas. Everything else is treated as dark.
+ *  Single source of truth for icon-variant selection and the dark/light
+ *  toggle, so consumers never hardcode `theme === 'light'` (which silently
+ *  miscategorizes sepia/solarized). */
+export const LIGHT_THEMES: Theme[] = ['light', 'sepia', 'solarized']
+
+export function isLightTheme(theme: Theme): boolean {
+  return (LIGHT_THEMES as string[]).includes(theme)
+}
 export const FONT_FAMILIES: FontFamily[] = [
   'inter', 'geist', 'figtree', 'space-grotesk', 'atkinson',
   'system', 'serif', 'lora', 'fraunces', 'mono',
@@ -57,6 +67,13 @@ interface AppStore {
   theme: Theme
   setTheme: (theme: Theme) => void
 
+  /** Last theme picked in each mode. The sidebar dark/light toggle restores
+   *  these so flipping out of (say) nebula and back returns to nebula, not a
+   *  generic 'dark'. */
+  lastDarkTheme: Theme
+  lastLightTheme: Theme
+  toggleThemeMode: () => void
+
   defaultProjectView: DefaultProjectView
   setDefaultProjectView: (view: DefaultProjectView) => void
 
@@ -80,6 +97,22 @@ function loadTheme(): Theme {
     // Ignore localStorage access failures and fall back to the default theme.
   }
   return 'dark'
+}
+
+/** Resolve the remembered theme for one mode. Falls back to `seed` if it
+ *  matches the requested mode, else to the generic theme for that mode — so a
+ *  user whose only-ever theme is dark still gets a sensible 'light' to flip to. */
+function loadModeTheme(key: string, seed: Theme, wantLight: boolean): Theme {
+  try {
+    const stored = localStorage.getItem(key)
+    if (stored && (THEMES as string[]).includes(stored) && isLightTheme(stored as Theme) === wantLight) {
+      return stored as Theme
+    }
+  } catch {
+    // Ignore localStorage access failures and fall back below.
+  }
+  if (isLightTheme(seed) === wantLight) return seed
+  return wantLight ? 'light' : 'dark'
 }
 
 function loadDefaultProjectView(): DefaultProjectView {
@@ -135,9 +168,21 @@ export const useStore = create<AppStore>((set, get) => ({
   setPaletteOpen: (open) => set({ paletteOpen: open }),
 
   theme: loadTheme(),
+  lastDarkTheme: loadModeTheme('agen8-theme-dark', loadTheme(), false),
+  lastLightTheme: loadModeTheme('agen8-theme-light', loadTheme(), true),
   setTheme: (theme) => {
     localStorage.setItem('agen8-theme', theme)
-    set({ theme })
+    if (isLightTheme(theme)) {
+      localStorage.setItem('agen8-theme-light', theme)
+      set({ theme, lastLightTheme: theme })
+    } else {
+      localStorage.setItem('agen8-theme-dark', theme)
+      set({ theme, lastDarkTheme: theme })
+    }
+  },
+  toggleThemeMode: () => {
+    const { theme, lastDarkTheme, lastLightTheme, setTheme } = get()
+    setTheme(isLightTheme(theme) ? lastDarkTheme : lastLightTheme)
   },
 
   defaultProjectView: loadDefaultProjectView(),

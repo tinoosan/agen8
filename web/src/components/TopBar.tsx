@@ -1,7 +1,6 @@
 import { useNavigation, type ActiveView } from '../lib/routing'
 import { useStore } from '../lib/store'
-import agen8IconDark from '../assets/agen8-app-icon-dark.svg'
-import agen8IconLight from '../assets/agen8-app-icon-light.svg'
+import { brandIconFor } from '../lib/brandIcon'
 
 const VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   project: 'Projects',
@@ -20,7 +19,7 @@ export default function TopBar() {
     <div className="h-12 border-b border-[var(--border)] bg-[var(--bg-panel)] flex items-center shrink-0">
       {/* Logo section — matches sidebar width */}
       <div className="w-[var(--sidebar-width)] shrink-0 flex items-center gap-2 px-4 h-full">
-        <img src={theme === 'light' ? agen8IconLight : agen8IconDark} alt="" className="w-6 h-6 shrink-0 rounded-[7px]" aria-hidden="true" />
+        <img src={brandIconFor(theme)} alt="" className="w-6 h-6 shrink-0 rounded-[7px]" aria-hidden="true" />
         <span className="font-semibold text-[0.9375rem] tracking-[-0.03em] text-[var(--text-1)]">agen8</span>
       </div>
 
