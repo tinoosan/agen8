@@ -160,7 +160,7 @@ export default function Members() {
                       tone="warning"
                     />
                   </div>
-                  <MemberTable members={active} dupeIds={dupeIds} />
+                  <MemberRoster members={active} dupeIds={dupeIds} />
                 </div>
               )}
             </TabsContent>
@@ -169,7 +169,7 @@ export default function Members() {
               {removed.length === 0 ? (
                 <EmptyState text="No removed members." />
               ) : (
-                <MemberTable members={removed} dupeIds={EMPTY_IDS} removed />
+                <MemberRoster members={removed} dupeIds={EMPTY_IDS} removed />
               )}
             </TabsContent>
           </Tabs>
@@ -181,7 +181,116 @@ export default function Members() {
 
 const EMPTY_IDS: Set<string> = new Set()
 
-/* ── Table ───────────────────────────────────────────── */
+/* ── Roster (responsive) ─────────────────────────────────
+ * A data table can't reflow its seven columns, so narrow widths get the same
+ * roster as stacked cards and only wide widths get the table. The switch is a
+ * CONTAINER query, not a viewport one: the inline sidebar eats ~272px, so an
+ * iPad-width *viewport* still leaves the roster far less room than its pixel
+ * count implies. Querying the roster's own width (≥720px ⇒ the 7-col table fits
+ * with breathing room) keeps that decision honest — and makes the table return
+ * on its own if the sidebar is collapsed to its icon rail. */
+
+function MemberRoster(props: {
+  members: ProjectMember[]
+  dupeIds: Set<string>
+  removed?: boolean
+}) {
+  return (
+    <div className="@container">
+      <div className="flex flex-col gap-3 @min-[720px]:hidden">
+        {props.members.map((m) => (
+          <MemberCard
+            key={m.id}
+            m={m}
+            isDupe={props.dupeIds.has(m.id)}
+            removed={props.removed}
+          />
+        ))}
+      </div>
+      <MemberTable {...props} />
+    </div>
+  )
+}
+
+/* ── Card (mobile/narrow) ────────────────────────────── */
+
+function MemberCard({
+  m,
+  isDupe,
+  removed,
+}: {
+  m: ProjectMember
+  isDupe: boolean
+  removed?: boolean
+}) {
+  const name = memberDisplayName(m.displayName, m.id) ?? m.id
+  const handTyped = isHandTypedRef(m.nativeSessionRef)
+
+  return (
+    <div
+      className={cn(
+        'flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)] p-4',
+        removed && 'opacity-60',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="font-medium text-[var(--text-1)]">{name}</span>
+          {isDupe && <DupeBadge />}
+        </div>
+        {!removed && <RemoveMemberButton member={m} name={name} />}
+      </div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <CardField label="Harness" value={m.harnessKind || '—'} />
+        <CardField label="Model" value={m.model || '—'} />
+        <CardField label="Effort" value={m.effort || '—'} />
+        <CardField
+          label="Registered"
+          value={timeAgo(m.registeredAt)}
+          title={absTime(m.registeredAt)}
+        />
+      </dl>
+      <div className="flex flex-col gap-1">
+        <CardLabel>Session ref</CardLabel>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <code className="break-all text-[0.75rem] text-[var(--text-3)]">
+            {m.nativeSessionRef || '—'}
+          </code>
+          {handTyped && <HandTypedBadge />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CardLabel({ children }: { children: ReactNode }) {
+  return (
+    <dt className="text-[0.625rem] font-semibold uppercase tracking-[0.04em] text-[var(--text-3)]">
+      {children}
+    </dt>
+  )
+}
+
+function CardField({
+  label,
+  value,
+  title,
+}: {
+  label: string
+  value: string
+  title?: string
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <CardLabel>{label}</CardLabel>
+      <dd className="m-0 truncate text-[0.8125rem] text-[var(--text-2)]" title={title}>
+        {value}
+      </dd>
+    </div>
+  )
+}
+
+/* ── Table (wide containers) ─────────────────────────── */
 
 function MemberTable({
   members,
@@ -193,7 +302,7 @@ function MemberTable({
   removed?: boolean
 }) {
   return (
-    <div className="overflow-hidden rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)]">
+    <div className="hidden overflow-hidden rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)] @min-[720px]:block">
       <Table>
         <TableHeader>
           <TableRow className="border-[var(--border)] hover:bg-transparent">
@@ -259,21 +368,7 @@ function MemberRow({
       <TableCell className="px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="font-medium text-[var(--text-1)]">{name}</span>
-          {isDupe && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Badge variant="warning" className="cursor-default">
-                    possible duplicate
-                  </Badge>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-[260px]">
-                Another active member shares this name and harness. Compare the
-                session refs and registration times to find the stale one.
-              </TooltipContent>
-            </Tooltip>
-          )}
+          {isDupe && <DupeBadge />}
         </div>
       </TableCell>
       <Td>{m.harnessKind || '—'}</Td>
@@ -284,25 +379,7 @@ function MemberRow({
           <code className="break-all text-[0.75rem] text-[var(--text-3)]">
             {m.nativeSessionRef || '—'}
           </code>
-          {handTyped && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Badge
-                    variant="secondary"
-                    className="shrink-0 cursor-default"
-                  >
-                    hand-typed
-                  </Badge>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-[260px]">
-                This session ref was typed by a human at register time, not
-                issued by the harness. Hand-typed refs often create accidental
-                duplicate members.
-              </TooltipContent>
-            </Tooltip>
-          )}
+          {handTyped && <HandTypedBadge />}
         </div>
       </TableCell>
       <TableCell className="px-4 py-3">
@@ -315,7 +392,7 @@ function MemberRow({
       </TableCell>
       {!removed && (
         <TableCell className="px-4 py-3 text-right">
-          <RemoveMemberButton member={m} name={name} />
+          <RemoveMemberButton member={m} name={name} revealOnHover />
         </TableCell>
       )}
     </TableRow>
@@ -327,9 +404,11 @@ function MemberRow({
 function RemoveMemberButton({
   member,
   name,
+  revealOnHover,
 }: {
   member: ProjectMember
   name: string
+  revealOnHover?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const removeMember = useRemoveMember()
@@ -359,7 +438,14 @@ function RemoveMemberButton({
           variant="ghost-danger"
           size="icon"
           aria-label={`Remove ${name}`}
-          className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+          className={cn(
+            'transition-opacity focus-visible:opacity-100',
+            // Hide-until-hover only where a pointer can actually hover. On touch
+            // (iPad, phones) there's no hover, so the button stays visible and
+            // the remove action remains reachable.
+            revealOnHover &&
+              '[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100',
+          )}
         >
           <Trash2 size={14} />
         </Button>
@@ -387,6 +473,44 @@ function RemoveMemberButton({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+/* ── Badges (shared by table + card) ─────────────────── */
+
+function DupeBadge() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Badge variant="warning" className="cursor-default">
+            possible duplicate
+          </Badge>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[260px]">
+        Another active member shares this name and harness. Compare the session
+        refs and registration times to find the stale one.
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+function HandTypedBadge() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Badge variant="secondary" className="shrink-0 cursor-default">
+            hand-typed
+          </Badge>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[260px]">
+        This session ref was typed by a human at register time, not issued by
+        the harness. Hand-typed refs often create accidental duplicate members.
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
