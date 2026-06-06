@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
-import { Check, Minus, Plus, RotateCcw, UserRound } from 'lucide-react'
+import { Check, Copy, Minus, Plus, RotateCcw, Terminal, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '../../hooks/useAuth'
 import {
@@ -65,6 +65,19 @@ const fontFamilyOptions: Array<{ value: FontFamily; label: string; note: string;
   { value: 'lora', label: 'Lora', note: 'Warm book serif', category: 'Serif', stack: "'Lora Variable', Georgia, serif" },
   { value: 'fraunces', label: 'Fraunces', note: 'Expressive display', category: 'Serif', stack: "'Fraunces Variable', Georgia, serif" },
   { value: 'mono', label: 'JetBrains Mono', note: 'Monospace', category: 'Mono', stack: "'JetBrains Mono Variable', ui-monospace, monospace" },
+]
+
+const skillInstallCommands = [
+  {
+    harness: 'Codex',
+    command: 'agen8-mcp skill install --harness codex',
+    path: '~/.codex/skills/agen8/SKILL.md',
+  },
+  {
+    harness: 'Claude CLI',
+    command: 'agen8-mcp skill install --harness claude-cli',
+    path: '~/.claude/skills/agen8/SKILL.md',
+  },
 ]
 
 function formatDate(value?: string): string {
@@ -258,6 +271,55 @@ export function AccountSecuritySection() {
                 {signingOut ? 'Signing out...' : 'Sign out'}
               </Button>
             </div>
+          </div>
+        </SettingsRow>
+      </SettingsPanel>
+    </section>
+  )
+}
+
+export function AccountSkillSection() {
+  async function copyCommand(command: string) {
+    try {
+      await navigator.clipboard.writeText(command)
+      toast.success('Command copied')
+    } catch {
+      toast.error('Copy failed')
+    }
+  }
+
+  return (
+    <section id="settings-skill" className="grid gap-4">
+      <div>
+        <h2 className="m-0 text-[1.0625rem] font-semibold text-[var(--text-1)]">Agen8 skill</h2>
+        <p className="mt-1 mb-0 text-[0.8125rem] text-[var(--text-3)]">Install or refresh the harness instructions that teach agents how to use Agen8.</p>
+      </div>
+      <SettingsPanel>
+        <SettingsRow title="Install" description="Run the command for each harness you use. Rerun it after updating Agen8.">
+          <div className="grid gap-3">
+            {skillInstallCommands.map((item) => (
+              <div
+                key={item.harness}
+                className="grid gap-3 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+              >
+                <div className="min-w-0">
+                  <div className="mb-2 flex items-center gap-2 text-[0.8125rem] font-semibold text-[var(--text-1)]">
+                    <Terminal size={14} aria-hidden />
+                    {item.harness}
+                  </div>
+                  <code className="block overflow-x-auto rounded-[var(--r-sm)] bg-[var(--bg-app)] px-2.5 py-2 text-[0.75rem] text-[var(--text-1)]">
+                    {item.command}
+                  </code>
+                  <p className="mt-2 mb-0 text-[0.6875rem] text-[var(--text-3)]">
+                    Installs to {item.path}.
+                  </p>
+                </div>
+                <Button type="button" variant="ghost" size="sm" className="gap-1.5" onClick={() => void copyCommand(item.command)}>
+                  <Copy size={13} />
+                  Copy
+                </Button>
+              </div>
+            ))}
           </div>
         </SettingsRow>
       </SettingsPanel>
@@ -523,6 +585,7 @@ export function AccountSettingsSections() {
     <>
       <AccountProfileSection />
       <AccountSecuritySection />
+      <AccountSkillSection />
       <AccountPreferencesSection />
     </>
   )

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -31,6 +32,30 @@ func TestRunVersionPrintsBuildInfo(t *testing.T) {
 		"agen8-mcp v0.1.0",
 		"commit: abc1234",
 		"built: 2026-06-05T19:30:00Z",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output %q missing %q", output, want)
+		}
+	}
+}
+
+func TestRunSkillInstallWritesSkill(t *testing.T) {
+	home := t.TempDir()
+
+	output := captureStdout(t, func() {
+		if err := run([]string{"skill", "install", "--harness", "codex", "--home", home}); err != nil {
+			t.Fatalf("run skill install: %v", err)
+		}
+	})
+
+	wantPath := filepath.Join(home, ".codex", "skills", "agen8", "SKILL.md")
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("expected installed skill at %s: %v", wantPath, err)
+	}
+	for _, want := range []string{
+		"installed agen8 skill for codex",
+		"path: " + wantPath,
+		"rerun this command to refresh the skill",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output %q missing %q", output, want)

@@ -1,2 +1,0 @@
-import{j as r}from"./query-vendor-CuwYThd-.js";import{ap as t}from"./index-DaQN2vPu.js";import{D as i}from"./DashboardDecisionsPanel-0fd_UrEa.js";import"./useDecisions-sExkrbIF.js";import"./displaySanitizers-BSj9hefv.js";import"./badge-BvUZ86Ag.js";import"./scroll-text-nANIZekz.js";import"./arrow-left-DHR20rD6.js";function u(){const{projectId:o}=t();return r.jsx(i,{projectId:o})}export{u as default};
-//# sourceMappingURL=Decisions-CS2F4eFv.js.map

@@ -13,6 +13,7 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/claudehook"
 	"github.com/tinoosan/agen8-mcp-server/internal/config"
 	"github.com/tinoosan/agen8-mcp-server/internal/daemon"
+	"github.com/tinoosan/agen8-mcp-server/internal/skillinstaller"
 	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
 )
 
@@ -37,6 +38,8 @@ func run(args []string) error {
 		return nil
 	case "claude":
 		return runClaude(args[1:])
+	case "skill":
+		return runSkill(args[1:])
 	}
 	if args[0] != "daemon" {
 		return fmt.Errorf("unknown command %q", args[0])
@@ -57,6 +60,38 @@ func runClaude(args []string) error {
 		return fmt.Errorf("usage: agen8-mcp claude hook")
 	}
 	return claudehook.Run(os.Stdin, os.Stdout, os.Stderr)
+}
+
+func runSkill(args []string) error {
+	if len(args) == 0 || args[0] != "install" {
+		return fmt.Errorf("usage: agen8-mcp skill install --harness codex|claude-cli [--home DIR]")
+	}
+	fs := flag.NewFlagSet("skill install", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var (
+		harness string
+		homeDir string
+	)
+	fs.StringVar(&harness, "harness", "", "target harness: codex or claude-cli")
+	fs.StringVar(&homeDir, "home", "", "home directory override")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(harness) == "" {
+		return fmt.Errorf("usage: agen8-mcp skill install --harness codex|claude-cli [--home DIR]")
+	}
+	result, err := skillinstaller.Install(skillinstaller.Options{
+		Harness: skillinstaller.Harness(harness),
+		HomeDir: homeDir,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("installed agen8 skill for %s\npath: %s\nrerun this command to refresh the skill\n", result.Harness, result.Path)
+	return nil
 }
 
 func runDaemonStart(args []string) error {

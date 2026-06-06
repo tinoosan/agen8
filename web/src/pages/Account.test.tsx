@@ -51,6 +51,9 @@ describe('Account page', () => {
     expect(screen.getByText('Current browser')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
     expect(screen.getByText('Signed in as Tino')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Agen8 skill' })).toBeInTheDocument()
+    expect(screen.getByText('agen8-mcp skill install --harness codex')).toBeInTheDocument()
+    expect(screen.getByText('agen8-mcp skill install --harness claude-cli')).toBeInTheDocument()
     expect(screen.queryByText(/auth\.status/i)).not.toBeInTheDocument()
   })
 
