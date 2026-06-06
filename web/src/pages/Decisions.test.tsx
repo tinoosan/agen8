@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 vi.mock('../lib/routing', () => ({
   decisionsPanelLink: (projectId: string) => `/project/${projectId}/dashboard?panel=decisions`,
+  decisionDetailLink: (projectId: string, decisionId: string) => `/project/${projectId}/decisions/${decisionId}`,
   useNavigation: () => ({ projectId: 'proj-1', focusedProjectRoot: '/repo' }),
 }))
 
@@ -93,8 +94,7 @@ describe('Decisions page', () => {
     expect(screen.getByText('80%')).toBeInTheDocument()
   })
 
-  it('renders logged decision details and linked refs in the expanded row', async () => {
-    const user = userEvent.setup()
+  it('links decision rows to the routed detail page', () => {
     mockUseDecisionLog.mockReturnValue({
       data: {
         decisions: [
@@ -120,13 +120,9 @@ describe('Decisions page', () => {
 
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: /^toggle details for decision next iteration pricing packaging priority$/i }))
-
-    expect(screen.getByText('Rationale')).toBeInTheDocument()
-    expect(screen.getByText('Usage overage validates metering before a broader rollout.')).toBeInTheDocument()
-    expect(screen.getByText('Alternatives')).toBeInTheDocument()
-    expect(screen.getByText('Flat subscription does not test usage-based willingness to pay.')).toBeInTheDocument()
-    expect(screen.getByText('Mission: mis-1234567890ab')).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: /next iteration pricing packaging priority/i }),
+    ).toHaveAttribute('href', '/project/proj-1/decisions/dec-log-1')
   })
 
   it('shows pagination when there are multiple pages', () => {
@@ -164,16 +160,6 @@ describe('Decisions page', () => {
       projectId: 'proj-1',
       sort: 'newest',
     }))
-  })
-
-  it('deletes a decision after confirmation', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await user.click(screen.getByRole('button', { name: /delete decision use postgresql/i }))
-    await user.click(screen.getByRole('button', { name: /^delete decision$/i }))
-
-    expect(mockDeleteMutateAsync).toHaveBeenCalledWith('dec-1')
   })
 
   it('renders metric cards from decision stats', () => {

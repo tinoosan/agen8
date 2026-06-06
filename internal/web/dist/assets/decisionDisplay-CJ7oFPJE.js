@@ -1,0 +1,2 @@
+function o(e){const t=e.memberName?.trim(),r=e.sourceIdentity?.trim(),n=e.memberId?.trim(),c=e.source?.trim(),s=t||m(r)||m(n)||n||r||c||"agent";return{label:s,clusterKey:n||r||s}}function m(e){const t=e?.trim();return!t||i(t)?"":t}function i(e){return/^(member|user|session|thread|channel|space|project|task|kr|mission|dec)-[a-z0-9-]{4,}$/i.test(e.trim())}export{o as d};
+//# sourceMappingURL=decisionDisplay-CJ7oFPJE.js.map

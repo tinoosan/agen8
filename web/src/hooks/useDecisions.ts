@@ -46,6 +46,19 @@ export function useRecentDecisions(
   })
 }
 
+// Fetches a single decision by id for the routed detail page.
+export function useDecision(decisionId: string | null) {
+  return useQuery<DecisionView>({
+    queryKey: ['decision.get', decisionId ?? ''],
+    queryFn: async () => {
+      const res = await rpcCall<{ decision: DecisionView }>('decision.get', { decisionId })
+      return res.decision
+    },
+    enabled: !!decisionId,
+    refetchInterval: 15_000,
+  })
+}
+
 export interface DecisionLogFilter extends DecisionListFilter {
   page: number
   pageSize: number

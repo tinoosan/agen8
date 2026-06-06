@@ -15,6 +15,7 @@ export const ROUTES = {
   MISSIONS: '/project/:projectId/missions',
   MISSION_DETAIL: '/project/:projectId/missions/:missionId',
   TASK_DETAIL: '/project/:projectId/tasks/:taskId',
+  DECISION_DETAIL: '/project/:projectId/decisions/:decisionId',
   STRATEGY_MAP: '/project/:projectId/strategy',
 } as const
 
@@ -44,6 +45,11 @@ export function missionDetailLink(projectId: string, missionId: string): string 
 // Build a link to a task detail view
 export function taskDetailLink(projectId: string, taskId: string): string {
   return `/project/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`
+}
+
+// Build a link to a decision detail view
+export function decisionDetailLink(projectId: string, decisionId: string): string {
+  return `/project/${encodeURIComponent(projectId)}/decisions/${encodeURIComponent(decisionId)}`
 }
 
 export function dashboardLink(projectId: string, params?: { panel?: DashboardPanel }): string {

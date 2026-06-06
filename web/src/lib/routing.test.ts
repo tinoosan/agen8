@@ -15,7 +15,7 @@ vi.mock('../hooks/useProjects', () => ({
   }),
 }))
 
-const { useNavigation, boardTaskLink } = await import('./routing')
+const { useNavigation, boardTaskLink, decisionDetailLink } = await import('./routing')
 
 describe('useNavigation', () => {
   it('parses projectId from URL', () => {
@@ -45,5 +45,9 @@ describe('useNavigation', () => {
 
   it('omits the task query parameter when the task id is empty', () => {
     expect(boardTaskLink('proj-1', '')).toBe('/project/proj-1/dashboard?panel=tasks')
+  })
+
+  it('builds routed decision detail links', () => {
+    expect(decisionDetailLink('proj-1', 'dec-123')).toBe('/project/proj-1/decisions/dec-123')
   })
 })

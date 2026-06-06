@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import type { DashboardPanel } from '../../lib/routing'
 import DashboardMissionsPanel from './DashboardMissionsPanel'
 import DashboardTasksPanel from './DashboardTasksPanel'
-import DecisionFeed from './DecisionFeed'
+import DashboardDecisionsPanel from './DashboardDecisionsPanel'
 
 const CONTEXT_WIDTH_KEY = 'dashboard.context-panel-width'
 const CONTEXT_DEFAULT_WIDTH = 460
@@ -160,10 +160,8 @@ export default function DashboardContextPanel({
           <TabsContent value="tasks" className="flex-1 min-h-0 mt-0 overflow-hidden">
             <DashboardTasksPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
           </TabsContent>
-          <TabsContent value="decisions" className="flex-1 min-h-0 mt-0 overflow-y-auto">
-            <div className="p-[var(--dashboard-context-gutter)]">
-              <DecisionFeed projectId={projectId} hideHeader defaultExpanded />
-            </div>
+          <TabsContent value="decisions" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <DashboardDecisionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
           </TabsContent>
         </Tabs>
       </div>
