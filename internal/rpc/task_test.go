@@ -27,7 +27,7 @@ func TestRegisterTaskListResolvesLegacyLabelsAfterMCPRehome(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
 
 	legacy, err := projectSvc.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "local",
 		ProjectRoot: root,
 		DisplayName: "codex",
@@ -38,7 +38,7 @@ func TestRegisterTaskListResolvesLegacyLabelsAfterMCPRehome(t *testing.T) {
 		t.Fatalf("legacy register: %v", err)
 	}
 	registered, err := projectSvc.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: root,
 		DisplayName: "Codex backend engineer",

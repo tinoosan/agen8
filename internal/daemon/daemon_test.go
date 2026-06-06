@@ -511,18 +511,12 @@ func claimBodyForSession(sessionID string) []byte {
 	}`, sessionID))
 }
 
-// TestBootstrapTokenResolvesConcurrentSessionMembers is the agen8-local mirror of
-// TestConcurrentSessionsResolveToOwnMember, and it pins the bug the live dogfood
-// exposed. The agen8-local bootstrap token is shared by EVERY harness, yet its
-// in-memory session is hardcoded HarnessKind="codex" (registerBootstrapMCPToken).
-// Two Claude conversations sharing agen8-local must still each resolve to their OWN
-// member on a non-register verb carrying only arguments.session_id. If the token's
-// "codex" harness were used to filter the lookup, a member registered as "claude"
-// would be invisible and the caller would resolve member-less - which is exactly
-// what happened against the live daemon: registration disambiguated the two members
-// but task.list returned "registered member_id is required". Resolution by native
-// session ref must be harness-agnostic.
-func TestBootstrapTokenResolvesConcurrentSessionMembers(t *testing.T) {
+// TestAPIKeyResolvesConcurrentSessionMembers pins the shared-token concurrency
+// case with the public setup token model: two Claude conversations sharing one
+// user-scoped API key must each resolve to their own member on a non-register verb
+// carrying only arguments.session_id. Resolution by native session ref must stay
+// harness-agnostic.
+func TestAPIKeyResolvesConcurrentSessionMembers(t *testing.T) {
 	dataDir := t.TempDir()
 	projectRoot := t.TempDir()
 	d, err := New(Config{
@@ -546,12 +540,21 @@ func TestBootstrapTokenResolvesConcurrentSessionMembers(t *testing.T) {
 	if setupRec.Code != http.StatusOK {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
+	var setupResult struct {
+		APIKey struct {
+			Secret string `json:"secret"`
+		} `json:"apiKey"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	if setupResult.APIKey.Secret == "" {
+		t.Fatal("setup response missing api key secret")
+	}
 
-	// agen8-local is registered by New (registerBootstrapMCPToken); no link token is
-	// minted. This is the real Claude-on-bootstrap shape.
-	const bootstrapToken = "agen8-local"
+	apiKey := setupResult.APIKey.Secret
 	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
-	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+bootstrapToken, bytes.NewReader(initializeBody))
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(apiKey), bytes.NewReader(initializeBody))
 	initReq.Header.Set("Content-Type", "application/json")
 	initReq.Header.Set("Accept", "application/json, text/event-stream")
 	initRec := httptest.NewRecorder()
@@ -560,22 +563,22 @@ func TestBootstrapTokenResolvesConcurrentSessionMembers(t *testing.T) {
 		t.Fatalf("mcp initialize status=%d body=%s", initRec.Code, initRec.Body.String())
 	}
 
-	// Two Claude conversations register under the SAME bootstrap token + SAME project.
-	memberA := registerSessionMemberForTest(t, handler, bootstrapToken, projectRoot, "claude-local-A", "Local Worker A")
-	memberB := registerSessionMemberForTest(t, handler, bootstrapToken, projectRoot, "claude-local-B", "Local Worker B")
+	// Two Claude conversations register under the SAME user-scoped API key + SAME project.
+	memberA := registerSessionMemberForTest(t, handler, apiKey, projectRoot, "claude-local-A", "Local Worker A")
+	memberB := registerSessionMemberForTest(t, handler, apiKey, projectRoot, "claude-local-B", "Local Worker B")
 	if memberA == memberB {
 		t.Fatalf("two sessions collided onto one member id %q", memberA)
 	}
 
 	ctx := context.Background()
-	gotA, err := d.resolveMCPSession(ctx, bootstrapToken, http.Header{}, claimBodyForSession("claude-local-A"))
+	gotA, err := d.resolveMCPSession(ctx, apiKey, http.Header{}, claimBodyForSession("claude-local-A"))
 	if err != nil {
 		t.Fatalf("resolve session A: %v", err)
 	}
 	if gotA.MemberID != memberA {
-		t.Fatalf("session A resolved to member %q want %q (bootstrap harness must not shadow claude member)", gotA.MemberID, memberA)
+		t.Fatalf("session A resolved to member %q want %q", gotA.MemberID, memberA)
 	}
-	gotB, err := d.resolveMCPSession(ctx, bootstrapToken, http.Header{}, claimBodyForSession("claude-local-B"))
+	gotB, err := d.resolveMCPSession(ctx, apiKey, http.Header{}, claimBodyForSession("claude-local-B"))
 	if err != nil {
 		t.Fatalf("resolve session B: %v", err)
 	}
@@ -621,10 +624,21 @@ func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
 	if setupRec.Code != http.StatusOK {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
+	var setupResult struct {
+		APIKey struct {
+			Secret string `json:"secret"`
+		} `json:"apiKey"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	if setupResult.APIKey.Secret == "" {
+		t.Fatal("setup response missing api key secret")
+	}
 
-	const bootstrapToken = "agen8-local"
+	apiKey := setupResult.APIKey.Secret
 	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
-	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+bootstrapToken, bytes.NewReader(initializeBody))
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(apiKey), bytes.NewReader(initializeBody))
 	initReq.Header.Set("Content-Type", "application/json")
 	initReq.Header.Set("Accept", "application/json, text/event-stream")
 	initRec := httptest.NewRecorder()
@@ -633,15 +647,15 @@ func TestUnknownSessionResolvesMemberlessWithoutError(t *testing.T) {
 		t.Fatalf("mcp initialize status=%d body=%s", initRec.Code, initRec.Body.String())
 	}
 
-	// Establish a real project + roster under the bootstrap token so the only thing
+	// Establish a real project + roster under the API key so the only thing
 	// missing during resolution is the specific session's member - proving an unknown
 	// session is member-less even against a populated roster.
-	known := registerSessionMemberForTest(t, handler, bootstrapToken, projectRoot, "claude-local-known", "Known Worker")
+	known := registerSessionMemberForTest(t, handler, apiKey, projectRoot, "claude-local-known", "Known Worker")
 	if known == "" {
 		t.Fatal("failed to register baseline member")
 	}
 
-	session, err := d.resolveMCPSession(context.Background(), bootstrapToken, http.Header{}, claimBodyForSession("claude-local-UNREGISTERED"))
+	session, err := d.resolveMCPSession(context.Background(), apiKey, http.Header{}, claimBodyForSession("claude-local-UNREGISTERED"))
 	if err != nil {
 		t.Fatalf("unknown session must resolve member-less without error, got err=%v", err)
 	}
@@ -673,8 +687,8 @@ func TestInvalidLinkTokenFailsLoudly(t *testing.T) {
 }
 
 // TestInvalidAPIKeyFailsLoudly covers the API-key validation failure branch
-// (daemon.go:288-290): a token that is neither the registered bootstrap token nor a
-// wlt_ link token is treated as an API key, and an invalid one must return a non-nil
+// (daemon.go:288-290): a token that is not a wlt_ link token is treated as an
+// API key, and an invalid one must return a non-nil
 // error with an empty session rather than a member-less but usable context.
 func TestInvalidAPIKeyFailsLoudly(t *testing.T) {
 	d, err := New(Config{

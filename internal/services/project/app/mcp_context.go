@@ -83,7 +83,7 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	// 1. The link-token binding carried by the session — authoritative.
 	projectID := types.ProjectID(strings.TrimSpace(input.BoundProjectID))
 	if projectID == "" {
-		// 2. An explicit caller-asserted id (e.g. the bootstrap agen8-local token).
+		// 2. An explicit caller-asserted id from a user-scoped token.
 		projectID = types.ProjectID(strings.TrimSpace(input.ProjectID))
 	}
 	root := strings.TrimSpace(input.ProjectRoot)

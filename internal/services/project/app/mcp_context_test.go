@@ -79,7 +79,7 @@ func TestRegisterMCPContextUpdatesExistingMemberDisplayName(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
 
 	first, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: root,
 		DisplayName: "codex",
@@ -94,7 +94,7 @@ func TestRegisterMCPContextUpdatesExistingMemberDisplayName(t *testing.T) {
 	}
 
 	second, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: root,
 		DisplayName: "backend engineer",
@@ -127,7 +127,7 @@ func TestRegisterMCPContextRehomesLegacyLocalMemberToTokenUser(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
 
 	legacy, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "local",
 		ProjectRoot: root,
 		DisplayName: "codex",
@@ -139,7 +139,7 @@ func TestRegisterMCPContextRehomesLegacyLocalMemberToTokenUser(t *testing.T) {
 	}
 
 	registered, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: root,
 		DisplayName: "Codex backend engineer",
@@ -154,7 +154,7 @@ func TestRegisterMCPContextRehomesLegacyLocalMemberToTokenUser(t *testing.T) {
 	}
 
 	resolved, err := service.ResolveMCPContext(ctx, ResolveMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		HarnessKind: "codex",
 		SessionID:   "session-1",
@@ -188,7 +188,7 @@ func TestRegisterMCPContextRecordsWorkspace(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
 
 	result, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: root,
 		HarnessKind: "codex",
@@ -226,7 +226,7 @@ func TestRegisterMCPContextBoundProjectOverridesCallerAssertedProjectID(t *testi
 
 	// Stand up two distinct projects via the path-hash fallback.
 	bound, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: rootA,
 		HarnessKind: "codex",
@@ -236,7 +236,7 @@ func TestRegisterMCPContextBoundProjectOverridesCallerAssertedProjectID(t *testi
 		t.Fatalf("register bound project: %v", err)
 	}
 	spoofed, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: rootB,
 		HarnessKind: "codex",
@@ -252,7 +252,7 @@ func TestRegisterMCPContextBoundProjectOverridesCallerAssertedProjectID(t *testi
 	// The session is bound (server-side) to bound.ProjectID, but the caller
 	// asserts spoofed.ProjectID. The unspoofable binding must win.
 	result, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:          "agen8-local",
+		Token:          "ak_test_token",
 		UserID:         "user-1",
 		BoundProjectID: bound.ProjectID,
 		ProjectID:      spoofed.ProjectID,
@@ -275,7 +275,7 @@ func TestRegisterMCPContextPathHashFallbackForUnmarkedFolder(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "unmarked")
 
 	result, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: root,
 		HarnessKind: "codex",
@@ -296,7 +296,7 @@ func TestRegisterMCPContextRequiresSomeProjectBinding(t *testing.T) {
 	service := newProjectServiceForMCPContextTest(t)
 
 	_, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		HarnessKind: "codex",
 		SessionID:   "session-1",

@@ -186,7 +186,7 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 	ctx := context.Background()
 
 	legacy, err := svc.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "local",
 		ProjectRoot: root,
 		DisplayName: "codex",
@@ -197,7 +197,7 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 		t.Fatalf("legacy register: %v", err)
 	}
 	registered, err := svc.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
-		Token:       "agen8-local",
+		Token:       "ak_test_token",
 		UserID:      "user-1",
 		ProjectRoot: root,
 		DisplayName: "Codex backend engineer",

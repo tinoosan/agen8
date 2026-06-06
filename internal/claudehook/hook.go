@@ -1,8 +1,8 @@
 // Package claudehook implements the Claude Code hook entrypoint that gives each
 // Claude conversation its own identity inside agen8.
 //
-// The problem: several Claude Code conversations can share one agen8 token (the
-// agen8-local bootstrap token, or a wlt_ link token). Claude Code does not send
+// The problem: several Claude Code conversations can share one agen8 token (for
+// example a user-scoped API key or a wlt_ link token). Claude Code does not send
 // its conversation id to an MCP server - unlike Codex, which self-identifies via
 // params._meta. So without help, every Claude conversation on a shared token
 // looks identical to the daemon and they collide on a single member when calling

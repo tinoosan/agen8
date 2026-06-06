@@ -162,7 +162,7 @@ func TestHandleRegisterPassesDisplayNameAndReturnsGuidance(t *testing.T) {
 				}, nil
 			},
 		},
-		MCPToken:    "agen8-local",
+		MCPToken:    "ak_test_token",
 		HarnessKind: "codex",
 	}, json.RawMessage(`{"action":"register","project_root":"/repo","display_name":"backend engineer"}`))
 	if err != nil {

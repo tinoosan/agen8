@@ -95,9 +95,6 @@ func New(cfg Config) (*Daemon, error) {
 		logger:    logger.With("service", "daemon"),
 	}
 	mcpServer.SetSessionResolver(d.resolveMCPSession)
-	if err := d.registerBootstrapMCPToken(); err != nil {
-		return nil, fmt.Errorf("register bootstrap mcp token: %w", err)
-	}
 	return d, nil
 }
 
@@ -237,12 +234,6 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 	<-r.Context().Done()
 }
 
-func (d *Daemon) registerBootstrapMCPToken() error {
-	const token = "agen8-local"
-	d.mcpTokens.Register(token, d.mcpSession(token, "local", "codex"))
-	return nil
-}
-
 func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
 	return mcp.Session{
 		Token:       strings.TrimSpace(token),
@@ -314,15 +305,12 @@ func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header htt
 		Token:     token,
 		UserID:    userID,
 		ProjectID: session.ProjectID,
-		// Resolve harness-agnostically. A shared token serves EVERY harness, so the
-		// token's own HarnessKind must not filter the lookup. The agen8-local bootstrap
-		// session is hardcoded "codex" (registerBootstrapMCPToken); forwarding it here
-		// would hide a Claude member registered for the same session_id and the caller
-		// would resolve member-less. The (user, native_session_ref) pair already
-		// identifies the member uniquely, and ResolveMCPContext fails loudly if it ever
-		// matches more than one. The resolved member's real HarnessKind is restored onto
-		// the session below. (wlt_ and ak_ tokens already pass "" here, so this only
-		// changes the bootstrap path.)
+		// Resolve harness-agnostically. A shared user-scoped API key or link token can
+		// serve more than one harness, so the token's own HarnessKind must not filter
+		// the lookup. The (user, native_session_ref) pair identifies the member
+		// uniquely, and ResolveMCPContext fails loudly if it ever matches more than
+		// one. The resolved member's real HarnessKind is restored onto the session
+		// below.
 		HarnessKind: "",
 		SessionID:   sessionID,
 		ThreadID:    threadID,
@@ -406,12 +394,6 @@ func mcpUserID(ctx context.Context, users *userapp.Service, auth *authapp.Servic
 			}
 		}
 		record, err := auth.ValidateAPIKey(ctx, token)
-		if err == nil && strings.TrimSpace(record.ID.String()) != "" {
-			return strings.TrimSpace(record.ID.String())
-		}
-	}
-	if strings.TrimSpace(token) == "agen8-local" && users != nil {
-		record, err := users.FirstActive(ctx)
 		if err == nil && strings.TrimSpace(record.ID.String()) != "" {
 			return strings.TrimSpace(record.ID.String())
 		}
