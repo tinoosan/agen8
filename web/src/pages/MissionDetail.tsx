@@ -9,9 +9,12 @@ import {
   useUpdateKRProgress,
   useDeleteKeyResult,
 } from '../hooks/useMissions'
+import { useProjectTasks } from '../hooks/useProjectTasks'
+import { useRecentDecisions } from '../hooks/useDecisions'
 import { formatKRProgress } from '../lib/missionUtils'
-import { missionsPanelLink } from '../lib/routing'
+import { missionsPanelLink, taskDetailLink, decisionDetailLink } from '../lib/routing'
 import ProgressHistory from '../components/mission/ProgressHistory'
+import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -537,6 +540,12 @@ export default function MissionDetail() {
   const { data: keyResults, isLoading: krsLoading, isError: krsError, error: krsErr } =
     useKeyResults(missionId)
 
+  // Related cross-references — the same set the strategy map's mission panel
+  // surfaces. Called unconditionally (rules of hooks); both no-op until
+  // projectId resolves.
+  const { data: projectTasks } = useProjectTasks(projectId)
+  const { data: projectDecisions } = useRecentDecisions(projectId)
+
   if (!projectId || !missionId) {
     return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Mission not found.</div>
   }
@@ -558,6 +567,45 @@ export default function MissionDetail() {
 
   if (!mission) {
     return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Mission not found.</div>
+  }
+
+  // Grouped "Related" links (tasks + decisions). Filtering mirrors the strategy
+  // map mission panel; rows link to routed detail pages instead of map nodes.
+  const krIds = new Set((keyResults ?? []).map((kr) => kr.id))
+  const relatedTasks = (projectTasks ?? []).filter((t) => t.keyResultRef && krIds.has(t.keyResultRef))
+  const relatedDecisions = (projectDecisions ?? []).filter(
+    (d) => d.missionRef === mission.id || (d.keyResultRef && krIds.has(d.keyResultRef)),
+  )
+  const relatedGroups: Array<{
+    type: string
+    rows: Array<{ id: string; title: string; to: string; suffix?: string; suffixColor?: string }>
+  }> = []
+  if (relatedTasks.length > 0) {
+    relatedGroups.push({
+      type: 'Task',
+      rows: relatedTasks.map((t) => ({
+        id: t.id,
+        title: t.title || t.description || t.id.slice(0, 12),
+        to: taskDetailLink(projectId, t.id),
+      })),
+    })
+  }
+  if (relatedDecisions.length > 0) {
+    relatedGroups.push({
+      type: 'Decision',
+      rows: relatedDecisions.map((d) => ({
+        id: d.id,
+        title: d.title,
+        to: decisionDetailLink(projectId, d.id),
+        ...(d.confidence > 0
+          ? {
+              suffix: `${Math.round(d.confidence * 100)}%`,
+              suffixColor:
+                d.confidence >= 0.8 ? 'var(--green)' : d.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
+            }
+          : {}),
+      })),
+    })
   }
 
   const statusBadge = missionStatusBadge(mission.status)
@@ -682,6 +730,51 @@ export default function MissionDetail() {
           </div>
         )}
       </div>
+
+      {/* Related entities — tasks + decisions linked to this mission, grouped by
+          type like the strategy map's mission context panel */}
+      {relatedGroups.length > 0 && (
+        <div className="px-6 pb-8 max-w-4xl mx-auto w-full">
+          <CollapsibleSection storageKey="mission-detail-related" defaultOpen label="Related">
+            <div className="flex flex-col gap-2 mt-1.5">
+              {relatedGroups.map((group) => (
+                <div key={group.type} className="flex flex-col gap-0.5">
+                  <div
+                    className="uppercase flex items-center gap-1.5 px-2 pt-1"
+                    style={{ fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.06em', color: 'var(--text-3)' }}
+                  >
+                    {group.type}s
+                    <span style={{ opacity: 0.5 }}>{group.rows.length}</span>
+                  </div>
+                  {group.rows.map((row) => (
+                    <Link
+                      key={row.id}
+                      to={row.to}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-md no-underline hover:bg-[var(--bg-elevated)] transition-colors"
+                    >
+                      <span
+                        className="flex-1 min-w-0 truncate text-[var(--text-2)]"
+                        style={{ fontSize: '0.75rem', letterSpacing: '-0.12px' }}
+                      >
+                        {row.title}
+                      </span>
+                      {row.suffix && (
+                        <span
+                          className="shrink-0 tabular-nums font-semibold"
+                          style={{ fontSize: '0.625rem', color: row.suffixColor ?? 'var(--text-3)' }}
+                        >
+                          {row.suffix}
+                        </span>
+                      )}
+                      <ChevronRight size={11} className="shrink-0 text-[var(--text-3)]" />
+                    </Link>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </CollapsibleSection>
+        </div>
+      )}
     </div>
   )
 }
