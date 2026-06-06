@@ -1,0 +1,2 @@
+import{c as s}from"./index-DaQN2vPu.js";const c=s("Minus",[["path",{d:"M5 12h14",key:"1ays0h"}]]);export{c as M};
+//# sourceMappingURL=minus-D-w9rbs5.js.map
