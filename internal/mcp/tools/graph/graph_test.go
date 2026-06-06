@@ -15,15 +15,29 @@ type stubGraphService struct {
 	nodeProjectID string
 	nodeType      string
 	nodeID        string
+	nodeDepth     int
+	nodeCalls     int
 	searchReq     domain.GraphSearchRequest
 	linkReq       domain.GraphLinkRequest
 }
 
-func (s *stubGraphService) Node(_ context.Context, projectID, nodeType, nodeID string, _ int) (domain.GraphNodeDetail, []domain.GraphWarning, error) {
+func (s *stubGraphService) Node(_ context.Context, projectID, nodeType, nodeID string, depth int) (domain.GraphNodeDetail, []domain.GraphWarning, error) {
 	s.nodeProjectID = projectID
 	s.nodeType = nodeType
 	s.nodeID = nodeID
-	return domain.GraphNodeDetail{ID: nodeID, Type: nodeType, Title: "Launch"}, []domain.GraphWarning{}, nil
+	s.nodeDepth = depth
+	s.nodeCalls++
+	return domain.GraphNodeDetail{
+		ID:    nodeID,
+		Type:  nodeType,
+		Title: "Launch",
+		Neighbours: []domain.GraphNodeSummary{
+			{ID: "kr-1", Type: "key_result", Title: "Stabilize"},
+		},
+		Edges: []domain.GraphEdge{
+			{SourceType: nodeType, SourceID: nodeID, TargetType: "key_result", TargetID: "kr-1", EdgeType: "serves"},
+		},
+	}, []domain.GraphWarning{}, nil
 }
 
 func (s *stubGraphService) Search(_ context.Context, req domain.GraphSearchRequest) ([]domain.GraphNodeSummary, []domain.GraphWarning, error) {
@@ -167,6 +181,16 @@ func TestDecodeRejectsFieldFromOtherAction(t *testing.T) {
 	}
 }
 
+func TestDecodeAllowsDepthForSearch(t *testing.T) {
+	input, err := decode(json.RawMessage(`{"action":"search","node_type":"task","query":"ship","depth":1}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if input.Depth != 1 {
+		t.Fatalf("depth=%d want 1", input.Depth)
+	}
+}
+
 func TestHandleRejectsUnknownNodeTypeBeforeServiceCall(t *testing.T) {
 	service := &stubGraphService{}
 	_, err := NewHandler().Handle(context.Background(), graphCallContext(service), json.RawMessage(`{"action":"search","node_type":"goal","query":"ship","limit":10}`))
@@ -223,8 +247,57 @@ func TestHandleSearchReturnsNodesPayload(t *testing.T) {
 	if len(nodes) != 1 || nodes[0].ID != "task-1" {
 		t.Fatalf("nodes=%+v", nodes)
 	}
+	if service.nodeCalls != 0 {
+		t.Fatalf("search without depth should not fetch node context, calls=%d", service.nodeCalls)
+	}
+	if structured["contexts"] != nil {
+		t.Fatalf("search without depth should stay compact: %+v", structured)
+	}
 	if !strings.Contains(result.Text, `"nodes"`) || strings.Contains(result.Text, `"results"`) {
 		t.Fatalf("result text=%s", result.Text)
+	}
+}
+
+func TestHandleSearchDepthReturnsBoundedContexts(t *testing.T) {
+	service := &stubGraphService{}
+	result, err := NewHandler().Handle(context.Background(), graphCallContext(service), json.RawMessage(`{"action":"search","node_type":"all","query":"ship","limit":10,"depth":1}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if service.nodeCalls != 1 || service.nodeDepth != 1 || service.nodeID != "task-1" {
+		t.Fatalf("node context call count=%d depth=%d node=%q", service.nodeCalls, service.nodeDepth, service.nodeID)
+	}
+	structured, ok := result.Structured.(map[string]any)
+	if !ok {
+		t.Fatalf("structured=%T", result.Structured)
+	}
+	contexts, ok := structured["contexts"].([]domain.GraphNodeDetail)
+	if !ok {
+		t.Fatalf("contexts=%T %+v", structured["contexts"], structured["contexts"])
+	}
+	if len(contexts) != 1 || contexts[0].ID != "task-1" || len(contexts[0].Neighbours) != 1 || len(contexts[0].Edges) != 1 {
+		t.Fatalf("contexts=%+v", contexts)
+	}
+	if structured["depth"] != 1 {
+		t.Fatalf("depth=%v want 1", structured["depth"])
+	}
+	if !strings.Contains(result.Text, `"contexts"`) {
+		t.Fatalf("result text=%s", result.Text)
+	}
+}
+
+func TestHandleSearchDepthIsCapped(t *testing.T) {
+	service := &stubGraphService{}
+	result, err := NewHandler().Handle(context.Background(), graphCallContext(service), json.RawMessage(`{"action":"search","node_type":"all","query":"ship","limit":10,"depth":99}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if service.nodeDepth != maxSearchContextDepth {
+		t.Fatalf("node depth=%d want %d", service.nodeDepth, maxSearchContextDepth)
+	}
+	structured := result.Structured.(map[string]any)
+	if structured["depth"] != maxSearchContextDepth {
+		t.Fatalf("structured depth=%v want %d", structured["depth"], maxSearchContextDepth)
 	}
 }
 

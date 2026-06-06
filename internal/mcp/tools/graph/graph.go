@@ -14,6 +14,7 @@ import (
 
 const Name = "graph_query"
 const Description = "[GRAPH] Read, search, link, and unlink workspace graph nodes."
+const maxSearchContextDepth = 3
 
 var allActions = []string{"node", "search", "link", "unlink"}
 var searchableNodeTypes = []string{
@@ -75,7 +76,7 @@ func (h Handler) Schema() json.RawMessage {
 			"action":        map[string]any{"type": "string", "enum": allActions},
 			"node_type":     enumSchema(searchableNodeTypes, "Node type for node/search. Optional for node when node_id has a typed prefix. Use all only with action=search."),
 			"node_id":       stringSchema("Node id for node."),
-			"depth":         integerSchema("Node expansion depth. Maximum 3."),
+			"depth":         integerSchema("Node expansion depth for node and optional bounded context for search. Maximum 3."),
 			"query":         stringSchema("Search query. Empty is valid only with a concrete node_type or an edge filter."),
 			"limit":         integerSchema("Search limit. Maximum 50."),
 			"has_edge":      enumSchema(edgeTypes, "Only return search hits with this edge type."),
@@ -135,7 +136,20 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			OutgoingEdge: input.OutgoingEdge,
 			IncomingEdge: input.IncomingEdge,
 		})
-		return result("search", map[string]any{"nodes": nodes, "warnings": warnings, "count": len(nodes)}, err)
+		if err != nil {
+			return Result{}, err
+		}
+		fields := map[string]any{"nodes": nodes, "warnings": warnings, "count": len(nodes)}
+		if input.Depth > 0 {
+			contexts, contextWarnings, err := searchContexts(ctx, call.Graph, projectID, nodes, input.Depth)
+			if err != nil {
+				return Result{}, err
+			}
+			fields["depth"] = normalizedSearchContextDepth(input.Depth)
+			fields["contexts"] = contexts
+			fields["warnings"] = append(warnings, contextWarnings...)
+		}
+		return result("search", fields, nil)
 	case "link":
 		req, err := linkRequest(projectID, input, true)
 		if err != nil {
@@ -153,6 +167,37 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	default:
 		return Result{}, fmt.Errorf("graph_query: unsupported action %q", input.Action)
 	}
+}
+
+func searchContexts(ctx context.Context, graph Service, projectID string, nodes []domain.GraphNodeSummary, depth int) ([]domain.GraphNodeDetail, []domain.GraphWarning, error) {
+	if len(nodes) == 0 {
+		return []domain.GraphNodeDetail{}, []domain.GraphWarning{}, nil
+	}
+	depth = normalizedSearchContextDepth(depth)
+	contexts := make([]domain.GraphNodeDetail, 0, len(nodes))
+	var warnings []domain.GraphWarning
+	for _, node := range nodes {
+		detail, nodeWarnings, err := graph.Node(ctx, projectID, node.Type, node.ID, depth)
+		if err != nil {
+			return []domain.GraphNodeDetail{}, []domain.GraphWarning{}, err
+		}
+		contexts = append(contexts, detail)
+		warnings = append(warnings, nodeWarnings...)
+	}
+	if warnings == nil {
+		warnings = []domain.GraphWarning{}
+	}
+	return contexts, warnings, nil
+}
+
+func normalizedSearchContextDepth(depth int) int {
+	if depth <= 0 {
+		return 0
+	}
+	if depth > maxSearchContextDepth {
+		return maxSearchContextDepth
+	}
+	return depth
 }
 
 func (h Handler) contextWithActor(ctx context.Context, call CallContext) (context.Context, error) {
@@ -328,6 +373,7 @@ var fieldsByAction = map[string]map[string]struct{}{
 	"search": fieldSet(
 		"action",
 		"node_type",
+		"depth",
 		"query",
 		"limit",
 		"has_edge",
