@@ -189,7 +189,7 @@ wlt_8c1f2a...9b
 
   <div class="flow">
     <div class="step"><span class="marker">1</span><span class="body"><strong>Link-token binding.</strong> The session carries a <code>project_id</code> bound server-side from its <code>wlt_</code> token. This is authoritative and cannot be overridden by request input.</span></div>
-    <div class="step"><span class="marker">2</span><span class="body"><strong>Explicit <code>project_id</code>.</strong> A caller with no token binding (e.g. the bootstrap <code>agen8-local</code> token) may still pass an explicit id, as today.</span></div>
+    <div class="step"><span class="marker">2</span><span class="body"><strong>Explicit <code>project_id</code>.</strong> A caller authenticated by a user-scoped API key and carrying no project binding may pass an explicit id. The project service still validates membership before member-scoped actions.</span></div>
     <div class="step"><span class="marker">3</span><span class="body"><strong>Path-hash fallback.</strong> With neither binding nor explicit id, and only a <code>root</code>, <code>ProjectIDForLocationRoot(location, root)</code> derives an id from the path — the legacy behaviour, now demoted to last resort.</span></div>
     <div class="step"><span class="marker">&times;</span><span class="body"><strong>Otherwise: fail.</strong> No binding, no id, no root &rarr; an explicit error. The function never invents a project.</span></div>
   </div>
@@ -204,7 +204,6 @@ wlt_8c1f2a...9b
     <tbody>
       <tr><td>Session token</td><td><code>ses_</code></td><td>user</td><td>Web UI bearer.</td></tr>
       <tr><td>API key</td><td><code>ak_</code></td><td>user</td><td>Programmatic MCP callers. No project binding.</td></tr>
-      <tr><td>Bootstrap</td><td><code>agen8-local</code></td><td>user <code>local</code></td><td>Single in-memory local MCP token.</td></tr>
       <tr><td><strong>Link token</strong></td><td><code>wlt_</code></td><td><strong>user + project</strong> (+ workspace)</td><td>The shim, from a marked folder. <span class="pill new">new</span></td></tr>
     </tbody>
   </table>
