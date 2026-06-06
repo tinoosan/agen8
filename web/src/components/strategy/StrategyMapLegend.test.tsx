@@ -1,7 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { StrategyMapLegend, strategyMapLegendItems } from './StrategyMapLegend'
+import { StrategyMapLegend } from './StrategyMapLegend'
+import { strategyMapLegendItems } from './strategyMapLegendItems'
 
 describe('StrategyMapLegend', () => {
   it('renders all Strategy Map node types', () => {
