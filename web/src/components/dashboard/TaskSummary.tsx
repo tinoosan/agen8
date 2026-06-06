@@ -1,8 +1,11 @@
 import { useMemo } from 'react'
+import { Link } from 'wouter'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AlertCircle, ListChecks, CircleDashed, CircleDot, Ban, Eye, CircleCheck } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useProjectTasks, useProjectTasksSSE } from '../../hooks/useProjectTasks'
+import { filteredTasksLink } from '../../lib/routing'
+import { taskStatusColor, taskStatusLabel } from '../../lib/statusLabels'
 import type { Task } from '../../lib/types'
 
 /* ── Status buckets ───────────────────────────────────────
@@ -11,23 +14,21 @@ import type { Task } from '../../lib/types'
  * `failed`/`canceled` are intentionally omitted — the strip
  * surfaces live work plus recently-completed, not the graveyard.
  *
- * `color` doubles as the tile tint source. `succeeded` uses a muted
- * tone so settled work recedes and live counts dominate. */
+ * Labels and colors come from the shared statusLabels helpers so the
+ * tiles speak the same language as the Tasks panel and every other view. */
 
 type Bucket = {
   key: string
-  label: string
   match: (status: string) => boolean
-  color: string
   Icon: LucideIcon
 }
 
 const BUCKETS: Bucket[] = [
-  { key: 'pending', label: 'Queued', match: (s) => s === 'pending', color: 'var(--text-2)', Icon: CircleDashed },
-  { key: 'active', label: 'Active', match: (s) => s === 'active', color: 'var(--green)', Icon: CircleDot },
-  { key: 'blocked', label: 'Blocked', match: (s) => s === 'blocked', color: 'var(--red)', Icon: Ban },
-  { key: 'in_review', label: 'Review', match: (s) => s === 'in_review', color: 'var(--amber)', Icon: Eye },
-  { key: 'succeeded', label: 'Done', match: (s) => s === 'succeeded', color: 'var(--text-3)', Icon: CircleCheck },
+  { key: 'pending', match: (s) => s === 'pending', Icon: CircleDashed },
+  { key: 'active', match: (s) => s === 'active', Icon: CircleDot },
+  { key: 'blocked', match: (s) => s === 'blocked', Icon: Ban },
+  { key: 'in_review', match: (s) => s === 'in_review', Icon: Eye },
+  { key: 'succeeded', match: (s) => s === 'succeeded', Icon: CircleCheck },
 ]
 
 function countByBucket(tasks: Task[]): Record<string, number> {
@@ -43,33 +44,33 @@ function countByBucket(tasks: Task[]): Record<string, number> {
 
 /* ── Stat cell ────────────────────────────────────────── */
 
-function StatCell({ bucket, count }: { bucket: Bucket; count: number }) {
+function StatCell({ projectId, bucket, count }: { projectId: string; bucket: Bucket; count: number }) {
   const hasCount = count > 0
-  const accent = hasCount ? bucket.color : 'var(--text-3)'
-  // Borderless: the tile is a soft tint of its status colour (calm grey
-  // when empty), so colour — not chrome — carries the meaning.
-  const tint = hasCount
-    ? `color-mix(in srgb, ${bucket.color} 13%, var(--bg-app))`
-    : `color-mix(in srgb, var(--text-3) 6%, var(--bg-app))`
+  // Number and icon share the status accent; an empty bucket recedes to grey
+  // so a busy column reads first. Colour comes from the shared helper.
+  const accent = hasCount ? taskStatusColor(bucket.key) : 'var(--text-3)'
   const Icon = bucket.Icon
   return (
-    <div
-      className="flex flex-col gap-1.5 rounded-[var(--r-lg)] px-3 py-2.5"
-      style={{ background: tint }}
+    <Link
+      to={filteredTasksLink(projectId, bucket.key)}
+      aria-label={`${count} ${taskStatusLabel(bucket.key)} — open filtered Tasks list`}
+      className="flex flex-col gap-1.5 rounded-[16px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-4 no-underline transition-colors hover:bg-[var(--bg-hover)]"
     >
       <span
-        className="text-[1.5rem] font-semibold leading-none tabular-nums"
+        className="text-[1.75rem] font-semibold leading-none tracking-[-0.02em] tabular-nums"
         style={{ color: accent }}
       >
         {count}
       </span>
       {/* icon decorates the label rather than floating above the digit;
           rem sizing keeps both in step with the user's font scale */}
-      <div className="flex items-center gap-1.5 text-[var(--text-3)]">
-        <Icon size="0.875rem" style={{ color: accent }} aria-hidden />
-        <span className="text-[0.75rem] font-medium">{bucket.label}</span>
+      <div className="flex items-center gap-1 text-[var(--text-3)]">
+        <Icon size="0.75rem" style={{ color: accent }} aria-hidden />
+        <span className="text-[0.625rem] font-semibold uppercase tracking-[0.06em]">
+          {taskStatusLabel(bucket.key)}
+        </span>
       </div>
-    </div>
+    </Link>
   )
 }
 
@@ -119,9 +120,9 @@ export default function TaskSummary({ projectId }: { projectId: string | null })
           <span className="dashboard-section-counter">{tasks.length} total</span>
         </div>
       </div>
-      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-w-[560px]">
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5 max-w-[560px]">
         {BUCKETS.map((bucket) => (
-          <StatCell key={bucket.key} bucket={bucket} count={counts[bucket.key]} />
+          <StatCell key={bucket.key} projectId={projectId} bucket={bucket} count={counts[bucket.key]} />
         ))}
       </div>
     </section>
