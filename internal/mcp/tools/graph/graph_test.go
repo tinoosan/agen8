@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -93,6 +94,16 @@ func (m *callerRequiredMembers) GetMember(ctx context.Context, id member.ID) (me
 		ProjectID:      string(seen.ProjectID),
 		LifecycleState: member.LifecycleActive,
 	}, nil
+}
+
+// membersFunc adapts a function to the members lookup port. stubMembers always
+// returns an active record and never errors, so it cannot drive the inactive or
+// load-error branches of contextWithActor(); tests that need those shapes use
+// this instead.
+type membersFunc func(context.Context, member.ID) (member.Record, error)
+
+func (f membersFunc) GetMember(ctx context.Context, id member.ID) (member.Record, error) {
+	return f(ctx, id)
 }
 
 func graphCallContext(svc *stubGraphService) CallContext {
@@ -253,6 +264,45 @@ func TestHandleRejectsMemberlessCaller(t *testing.T) {
 	}
 	if service.searchReq.ProjectID != "" {
 		t.Fatalf("graph service ran despite member-less caller: %+v", service.searchReq)
+	}
+}
+
+// contextWithActor runs before any graph read. Beyond the member-less case, it
+// must reject a caller it cannot load and a caller that is no longer active —
+// graph_query is read-only, but reading the graph "for nobody" or for a removed
+// member is still an authorization failure. Both tests assert the graph service
+// is never reached (searchReq stays zero).
+
+func TestHandleRejectsInactiveCaller(t *testing.T) {
+	service := &stubGraphService{}
+	call := graphCallContext(service)
+	call.Members = membersFunc(func(_ context.Context, id member.ID) (member.Record, error) {
+		return member.Record{ID: id, ProjectID: "proj-1", LifecycleState: member.LifecycleRemoved}, nil
+	})
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"search","node_type":"task","query":"ship","limit":10}`))
+	if err == nil || !strings.Contains(err.Error(), `caller member "member-1" is not active`) {
+		t.Fatalf("err=%v want inactive caller", err)
+	}
+	if service.searchReq.ProjectID != "" {
+		t.Fatalf("graph service ran despite inactive caller: %+v", service.searchReq)
+	}
+}
+
+func TestHandleRejectsCallerLoadError(t *testing.T) {
+	service := &stubGraphService{}
+	call := graphCallContext(service)
+	call.Members = membersFunc(func(context.Context, member.ID) (member.Record, error) {
+		return member.Record{}, member.ErrNotFound
+	})
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"search","node_type":"task","query":"ship","limit":10}`))
+	if err == nil || !strings.Contains(err.Error(), "load caller member") {
+		t.Fatalf("err=%v want load caller member", err)
+	}
+	if !errors.Is(err, member.ErrNotFound) {
+		t.Fatalf("error does not wrap member.ErrNotFound: %v", err)
+	}
+	if service.searchReq.ProjectID != "" {
+		t.Fatalf("graph service ran despite caller load error: %+v", service.searchReq)
 	}
 }
 

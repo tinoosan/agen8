@@ -3,6 +3,7 @@ package mission
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -148,6 +149,16 @@ func (stubMembers) GetMember(context.Context, member.ID) (member.Record, error) 
 	return member.Record{ID: "member-1", UserID: "user-1", ProjectID: "space-1", DisplayName: "Coordinator", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive}, nil
 }
 
+// membersFunc adapts a function to the members lookup port. stubMembers always
+// returns the same active record and never errors, so it cannot drive the
+// inactive or load-error branches of actor(); tests that need those shapes use
+// this instead.
+type membersFunc func(context.Context, member.ID) (member.Record, error)
+
+func (f membersFunc) GetMember(ctx context.Context, id member.ID) (member.Record, error) {
+	return f(ctx, id)
+}
+
 func TestHandleCreateMissionCallsServiceWithSessionProjectAndCaller(t *testing.T) {
 	svc := &stubMissionService{}
 	result, err := NewHandler().Handle(context.Background(), testCallContext(svc), json.RawMessage(`{"action":"create","title":"Launch v1","description":"Ship it"}`))
@@ -184,6 +195,46 @@ func TestHandleRejectsMemberlessCaller(t *testing.T) {
 	}
 	if svc.called != "" {
 		t.Fatalf("mission service action %q ran despite member-less caller", svc.called)
+	}
+}
+
+// actor() runs for every mission action before the service is touched. Beyond
+// the member-less case above, it must reject a member it cannot load and a
+// member that is no longer active. Both tests assert svc.called stays "" — the
+// guard fires before dispatch reaches the mission service.
+
+func TestHandleRejectsInactiveActor(t *testing.T) {
+	svc := &stubMissionService{}
+	call := testCallContext(svc)
+	// Non-empty ID so the actor.ID=="" guard (handler.go:109) passes and the
+	// inactive check (112) is what rejects.
+	call.Members = membersFunc(func(_ context.Context, id member.ID) (member.Record, error) {
+		return member.Record{ID: id, ProjectID: "space-1", LifecycleState: member.LifecycleRemoved}, nil
+	})
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"create","title":"Launch v1","description":"Ship it"}`))
+	if err == nil || !strings.Contains(err.Error(), "mission: actor member is not active") {
+		t.Fatalf("err=%v want inactive actor", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("mission service action %q ran despite inactive actor", svc.called)
+	}
+}
+
+func TestHandleRejectsActorLoadError(t *testing.T) {
+	svc := &stubMissionService{}
+	call := testCallContext(svc)
+	call.Members = membersFunc(func(context.Context, member.ID) (member.Record, error) {
+		return member.Record{}, member.ErrNotFound
+	})
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"create","title":"Launch v1","description":"Ship it"}`))
+	if err == nil || !strings.Contains(err.Error(), "mission: load actor member") {
+		t.Fatalf("err=%v want load actor member", err)
+	}
+	if !errors.Is(err, member.ErrNotFound) {
+		t.Fatalf("error does not wrap member.ErrNotFound: %v", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("mission service action %q ran despite actor load error", svc.called)
 	}
 }
 

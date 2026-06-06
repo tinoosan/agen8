@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -110,6 +111,16 @@ type stubMembers struct {
 
 func (s stubMembers) GetMember(_ context.Context, id member.ID) (member.Record, error) {
 	return s.members[id], nil
+}
+
+// membersFunc adapts a function to the members lookup port. The map-backed
+// stubMembers always succeeds (a missing id returns the zero Record, not an
+// error), so it cannot express a roster load failure or a per-id error. The
+// actor and assignee load-error guards need exactly those shapes.
+type membersFunc func(context.Context, member.ID) (member.Record, error)
+
+func (f membersFunc) GetMember(ctx context.Context, id member.ID) (member.Record, error) {
+	return f(ctx, id)
 }
 
 func TestHandleCreateCallsTaskService(t *testing.T) {
@@ -254,6 +265,117 @@ func TestHandleRequiresRegisteredMemberID(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "caller member") {
 		t.Fatalf("error leaked internal caller wording: %q", err)
+	}
+}
+
+// actor() and assignee() are the task tool's authorization layer: both run
+// before any task-service call, so a caller or assignee that is unloadable,
+// inactive, or from another project must be rejected with the service never
+// touched. Only the member-less actor path was covered. The tests below pin
+// the remaining failure paths; each asserts svc.called stays "" — proof the
+// guard fired before dispatch reached the service.
+
+func TestHandleRejectsActorLoadError(t *testing.T) {
+	svc := &stubService{}
+	call := CallContext{
+		Tasks:         svc,
+		Members:       membersFunc(func(context.Context, member.ID) (member.Record, error) { return member.Record{}, member.ErrNotFound }),
+		ProjectID:     "space-1",
+		ActorMemberID: "coord-1",
+	}
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"list","limit":10}`))
+	if err == nil || !strings.Contains(err.Error(), "load registered member") {
+		t.Fatalf("error=%v want load registered member", err)
+	}
+	if !errors.Is(err, member.ErrNotFound) {
+		t.Fatalf("error does not wrap member.ErrNotFound: %v", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("task service ran despite unloadable actor: %q", svc.called)
+	}
+}
+
+func TestHandleRejectsInactiveActor(t *testing.T) {
+	svc := &stubService{}
+	call := CallContext{
+		Tasks: svc,
+		Members: stubMembers{members: map[member.ID]member.Record{
+			"coord-1": {ID: "coord-1", ProjectID: "space-1", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleRemoved},
+		}},
+		ProjectID:     "space-1",
+		ActorMemberID: "coord-1",
+	}
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"list","limit":10}`))
+	if err == nil || !strings.Contains(err.Error(), `registered member "coord-1" is not active`) {
+		t.Fatalf("error=%v want inactive actor", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("task service ran despite inactive actor: %q", svc.called)
+	}
+}
+
+func TestHandleRejectsCrossProjectAssignee(t *testing.T) {
+	svc := &stubService{}
+	call := CallContext{
+		Tasks: svc,
+		Members: stubMembers{members: map[member.ID]member.Record{
+			"coord-1": {ID: "coord-1", ProjectID: "space-1", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive},
+			"alien-1": {ID: "alien-1", ProjectID: "space-2", MemberType: member.TypeWorker, LifecycleState: member.LifecycleActive},
+		}},
+		ProjectID:     "space-1",
+		ActorMemberID: "coord-1",
+	}
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"create","description":"x","assignee_member_id":"alien-1","mission_ref":"m-1"}`))
+	if err == nil || !strings.Contains(err.Error(), "belongs to project") {
+		t.Fatalf("error=%v want cross-project assignee", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("task service ran despite cross-project assignee: %q", svc.called)
+	}
+}
+
+func TestHandleRejectsInactiveAssignee(t *testing.T) {
+	svc := &stubService{}
+	call := CallContext{
+		Tasks: svc,
+		Members: stubMembers{members: map[member.ID]member.Record{
+			"coord-1": {ID: "coord-1", ProjectID: "space-1", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive},
+			"dead-1":  {ID: "dead-1", ProjectID: "space-1", MemberType: member.TypeWorker, LifecycleState: member.LifecycleRemoved},
+		}},
+		ProjectID:     "space-1",
+		ActorMemberID: "coord-1",
+	}
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"create","description":"x","assignee_member_id":"dead-1","mission_ref":"m-1"}`))
+	if err == nil || !strings.Contains(err.Error(), `assignee member "dead-1" is not active`) {
+		t.Fatalf("error=%v want inactive assignee", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("task service ran despite inactive assignee: %q", svc.called)
+	}
+}
+
+func TestHandleRejectsAssigneeLoadError(t *testing.T) {
+	svc := &stubService{}
+	call := CallContext{
+		Tasks: svc,
+		Members: membersFunc(func(_ context.Context, id member.ID) (member.Record, error) {
+			if id == "coord-1" {
+				return member.Record{ID: "coord-1", ProjectID: "space-1", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive}, nil
+			}
+			return member.Record{}, member.ErrNotFound
+		}),
+		ProjectID:     "space-1",
+		ActorMemberID: "coord-1",
+	}
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"create","description":"x","assignee_member_id":"ghost-1","mission_ref":"m-1"}`))
+	if err == nil || !strings.Contains(err.Error(), "load assignee member") {
+		t.Fatalf("error=%v want load assignee member", err)
+	}
+	if !errors.Is(err, member.ErrNotFound) {
+		t.Fatalf("error does not wrap member.ErrNotFound: %v", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("task service ran despite unloadable assignee: %q", svc.called)
 	}
 }
 

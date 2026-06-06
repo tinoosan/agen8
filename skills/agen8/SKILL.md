@@ -54,7 +54,7 @@ Call Agen8 MCP tools directly. If a wrapper or parallel call mangles the namespa
 7. Record important choices with `decision.log`, linked to the current task and mission/KR.
 8. Use `graph_query` links when the relationship matters: task serves KR, decision made during task, decision informed by another node, task blocked by another node.
 9. Submit task results with artifacts, verification evidence, decision ids, graph links, and remaining risks.
-10. Review against every acceptance criterion when you are responsible for closing the task.
+10. Review against every acceptance criterion when you are responsible for closing the task. Treat the review as a reflection point, not a rubber stamp: before approving, articulate what the work proves, what it does *not* prove, and any residual risk. Record durable findings with `decision.log` so the reflection becomes work memory rather than a transient pass/fail.
 
 ## Mission Discipline
 
