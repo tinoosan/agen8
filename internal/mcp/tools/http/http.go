@@ -256,9 +256,6 @@ func decode(args json.RawMessage) (requestInput, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return requestInput{}, fmt.Errorf("http: invalid arguments: %w", err)
 	}
-	if dec.More() {
-		return requestInput{}, fmt.Errorf("http: invalid arguments: trailing JSON tokens are not allowed")
-	}
 	requestURL := strings.TrimSpace(raw.URL)
 	if requestURL == "" {
 		return requestInput{}, fmt.Errorf("http: url is required")

@@ -386,6 +386,21 @@ func TestDecodeRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestDecodeRejectsTrailingJSON feeds trailing JSON after a valid object. The
+// json.Unmarshal-based validateActionFields runs first and rejects any trailing
+// token, so the input surfaces as the generic "invalid arguments" error and never
+// reaches a trailing-JSON guard. This proves the old guard was unreachable; it was
+// removed as dead code (see dec-21debbd9). Trailing input is still rejected loudly.
+func TestDecodeRejectsTrailingJSON(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"list"} {}`))
+	if err == nil || !strings.Contains(err.Error(), "invalid arguments") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+	if strings.Contains(err.Error(), "trailing JSON") {
+		t.Fatalf("trailing-JSON guard was expected unreachable, but its message surfaced: %v", err)
+	}
+}
+
 func TestSchemaIncludesMissionAndKRActions(t *testing.T) {
 	var schema map[string]any
 	if err := json.Unmarshal(NewHandler().Schema(), &schema); err != nil {

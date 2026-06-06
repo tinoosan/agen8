@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 )
 
@@ -17,9 +16,6 @@ func decode(args json.RawMessage) (requestInput, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&raw); err != nil {
 		return requestInput{}, fmt.Errorf("task: invalid arguments: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return requestInput{}, fmt.Errorf("task: invalid arguments: trailing JSON")
 	}
 	action := strings.TrimSpace(strings.ToLower(raw.Action))
 	if !containsAction(action) {

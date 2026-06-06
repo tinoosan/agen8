@@ -321,7 +321,7 @@ func decode(args json.RawMessage) (requestInput, error) {
 	}
 	var raw rawRequest
 	if err := json.Unmarshal(args, &raw); err != nil {
-		return requestInput{}, fmt.Errorf("graph_query: decode arguments: %w", err)
+		return requestInput{}, fmt.Errorf("graph_query: invalid arguments: %w", err)
 	}
 	action, err := requireString(raw.Action, "action")
 	if err != nil {
@@ -377,7 +377,7 @@ func decode(args json.RawMessage) (requestInput, error) {
 func validateActionFields(args json.RawMessage) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(args, &fields); err != nil {
-		return fmt.Errorf("graph_query: decode arguments: %w", err)
+		return fmt.Errorf("graph_query: invalid arguments: %w", err)
 	}
 	actionRaw, ok := fields["action"]
 	if !ok || isJSONNull(actionRaw) {

@@ -93,21 +93,19 @@ func TestDecodeRejectsUnknownField(t *testing.T) {
 	}
 }
 
-// TestDecodeRejectsTrailingJSON documents that the dec.More() guard at
-// http.go:259-261 ("trailing JSON tokens are not allowed") is unreachable
-// dead code: rejectNullFields runs first and its json.Unmarshal already
-// rejects any trailing token, so trailing JSON surfaces as the generic
-// "invalid arguments" error rather than the dec.More() message. Verified
-// empirically — `{...} {}` and `{...} 5` both error in rejectNullFields,
-// while trailing whitespace passes both checks. Pinning the actual message
-// keeps the divergence visible (mirrors T3.2's graph wording pin).
+// TestDecodeRejectsTrailingJSON feeds trailing JSON after a valid object. The
+// json.Unmarshal-based rejectNullFields runs first and rejects any trailing
+// token, so the input surfaces as the generic "invalid arguments" error. This
+// proves the old dec.More() guard at decode() was unreachable; it was removed
+// as dead code (see dec-21debbd9). Trailing input is still rejected loudly, and
+// this test guards against the dead guard creeping back.
 func TestDecodeRejectsTrailingJSON(t *testing.T) {
 	_, err := decode(json.RawMessage(`{"url":"https://example.com","method":"GET"} {}`))
 	if err == nil || !strings.Contains(err.Error(), "invalid arguments") {
 		t.Fatalf("unexpected err=%v", err)
 	}
 	if strings.Contains(err.Error(), "trailing JSON tokens are not allowed") {
-		t.Fatalf("dec.More() guard is expected to be unreachable, but its message surfaced: %v", err)
+		t.Fatalf("removed dec.More() guard message resurfaced; it should stay deleted: %v", err)
 	}
 }
 

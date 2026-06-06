@@ -234,14 +234,14 @@ func TestDecodeRejectsUnsupportedAction(t *testing.T) {
 	}
 }
 
-// TestDecodeRejectsMalformedJSON pins graph_query's malformed-JSON wording, which
-// diverges from the other action tools: graph says "decode arguments" where
-// mission/task/project/decision all say "invalid arguments". Locking the actual
-// string keeps the divergence visible rather than silently drifting.
+// TestDecodeRejectsMalformedJSON pins graph_query's malformed-JSON wording.
+// graph_query now matches the other action tools (mission/task/project/decision/http),
+// all of which emit "invalid arguments". The prior "decode arguments" divergence was
+// normalized in the MCP decode error-contract cleanup mission (see dec-a4181ffe).
 func TestDecodeRejectsMalformedJSON(t *testing.T) {
 	_, err := decode(json.RawMessage(`{"action":"search"`))
-	if err == nil || !strings.Contains(err.Error(), "decode arguments") {
-		t.Fatalf("err=%v want decode arguments", err)
+	if err == nil || !strings.Contains(err.Error(), "invalid arguments") {
+		t.Fatalf("err=%v want invalid arguments", err)
 	}
 }
 
