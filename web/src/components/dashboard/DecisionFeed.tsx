@@ -142,8 +142,8 @@ function PrimaryRefLink({ decision, catalogs }: { decision: DecisionView; catalo
 
   return (
     <span className="decision-ref-link decision-ref-link-primary">
-      <Link2 size={8} />
-      {primary.label}: {primary.value}
+      <Link2 size={8} className="shrink-0" />
+      <span className="truncate min-w-0">{primary.label}: {primary.value}</span>
     </span>
   )
 }
@@ -208,10 +208,10 @@ function DecisionRow({ decision, catalogs }: { decision: DecisionView; catalogs:
             {/* Content column */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-[0.6875rem] font-semibold tracking-[-0.01em]" style={{ color: clusterColor }}>
+                <span className="text-[0.6875rem] font-semibold tracking-[-0.01em] truncate min-w-0" style={{ color: clusterColor }}>
                   {identity}
                 </span>
-                <span className="text-[0.625rem] text-[var(--text-3)] tabular-nums">
+                <span className="text-[0.625rem] text-[var(--text-3)] tabular-nums shrink-0">
                   {timeAgo(decision.createdAt)}
                 </span>
               </div>

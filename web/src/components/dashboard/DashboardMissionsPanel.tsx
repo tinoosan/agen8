@@ -125,7 +125,7 @@ export default function DashboardMissionsPanel({
 
       <div className={cn('shrink-0', embedded ? 'px-[var(--dashboard-context-gutter)] py-3 border-b border-[color-mix(in_srgb,var(--border)_42%,transparent)]' : 'px-6 pt-4 pb-2 max-w-4xl mx-auto w-full')}>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-0.5 overflow-x-auto flex-1">
+          <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5 flex-1 min-w-0">
             {STATUS_FILTERS.map((filter) => {
               const isActive = statusFilter === filter.value
               const count = filter.value === 'all' ? (allMissions?.length ?? 0) : (statusCounts[filter.value] ?? 0)

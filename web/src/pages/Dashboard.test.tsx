@@ -81,12 +81,13 @@ describe('Dashboard page', () => {
     expect(lastCall).toMatchObject({ projectId: 'proj-1', mode: 'active' })
   })
 
-  it('opens the dashboard context panel with the missions panel by default', () => {
+  it('renders the dashboard context drawer closed by default below the overlay breakpoint', () => {
     renderPage()
 
     expect(mockDashboardContextPanel).toHaveBeenCalled()
-    const lastCall = mockDashboardContextPanel.mock.calls.at(-1)?.[0] as { open: boolean; panel: string }
-    expect(lastCall?.open).toBe(true)
+    const lastCall = mockDashboardContextPanel.mock.calls.at(-1)?.[0] as { open: boolean; overlay: boolean; panel: string }
+    expect(lastCall?.overlay).toBe(true)
+    expect(lastCall?.open).toBe(false)
     expect(lastCall?.panel).toBe('missions')
   })
 

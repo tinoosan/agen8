@@ -13,6 +13,10 @@ import DashboardContextPanel from '../components/dashboard/DashboardContextPanel
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { writeStoredDashboardContextCollapsed, readStoredDashboardContextCollapsed } from '../lib/dashboardContextPanelStorage'
 import { useAuth } from '../hooks/useAuth'
+import { useIsBelow } from '../hooks/use-mobile'
+
+/* Below this width the context panel becomes an on-demand overlay drawer instead of an inline rail. */
+const CONTEXT_OVERLAY_BREAKPOINT = 1280
 
 /* ── Dashboard page ──────────────────────────────── */
 
@@ -37,6 +41,8 @@ export default function Dashboard() {
     try { return localStorage.getItem('dashboard.focusMode') === 'true' } catch { return false }
   })
   const [contextCollapsed, setContextCollapsed] = useState(readStoredDashboardContextCollapsed)
+  const isContextOverlay = useIsBelow(CONTEXT_OVERLAY_BREAKPOINT)
+  const [contextDrawerOpen, setContextDrawerOpen] = useState(false)
   const toggleFocusMode = useCallback(() => {
     setFocusMode(prev => {
       const next = !prev
@@ -51,11 +57,19 @@ export default function Dashboard() {
       return next
     })
   }, [])
+  const handleToggleContext = useCallback(() => {
+    if (isContextOverlay) {
+      setContextDrawerOpen(prev => !prev)
+    } else {
+      toggleDashboardContext()
+    }
+  }, [isContextOverlay, toggleDashboardContext])
 
   useEffect(() => {
     if (rawPanel !== 'missions' && rawPanel !== 'decisions' && rawPanel !== 'tasks') return
     setContextCollapsed(false)
     writeStoredDashboardContextCollapsed(false)
+    setContextDrawerOpen(true)
   }, [rawPanel])
 
   const auth = useAuth()
@@ -124,6 +138,9 @@ export default function Dashboard() {
     return 'idle'
   }, [activeMissionCount])
 
+  const contextPanelVisible = isContextOverlay ? contextDrawerOpen : !contextCollapsed
+  const inlineContextOpen = !isContextOverlay && !contextCollapsed
+
   if (!projectId) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center">
@@ -155,29 +172,29 @@ export default function Dashboard() {
             type="button"
             variant="ghost"
             size="icon"
-            title={contextCollapsed ? 'Show context panel' : 'Hide context panel'}
-            aria-label={contextCollapsed ? 'Show context panel' : 'Hide context panel'}
+            title={contextPanelVisible ? 'Hide context panel' : 'Show context panel'}
+            aria-label={contextPanelVisible ? 'Hide context panel' : 'Show context panel'}
             data-testid="dashboard-context-panel-toggle"
-            onClick={toggleDashboardContext}
+            onClick={handleToggleContext}
             className={cn(
-              'hidden md:inline-flex w-8 h-8 rounded-[10px] transition-colors',
-              contextCollapsed
-                ? 'text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)]'
-                : 'text-[var(--text-1)] bg-[var(--bg-hover)]',
+              'inline-flex w-8 h-8 rounded-[10px] transition-colors',
+              contextPanelVisible
+                ? 'text-[var(--text-1)] bg-[var(--bg-hover)]'
+                : 'text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)]',
             )}
           >
             <PanelRight size={16} aria-hidden />
           </Button>
         </div>
       </div>
-      <div className={cn('dashboard-shell-body', !contextCollapsed && 'dashboard-shell-body-context-open')}>
-      <div className={cn('dashboard-main-shell min-w-0 flex-1', !contextCollapsed && 'dashboard-main-shell-context-open')}>
+      <div className={cn('dashboard-shell-body', inlineContextOpen && 'dashboard-shell-body-context-open')}>
+      <div className={cn('dashboard-main-shell min-w-0 flex-1', inlineContextOpen && 'dashboard-main-shell-context-open')}>
         <div
           className={cn('dashboard-main-scroll', mainScrollActive && 'dashboard-scroll-active')}
           onScroll={handleMainScroll}
         >
         {/* Header */}
-        <div className={cn('dashboard-hero mb-8 flex items-start justify-between gap-6', !contextCollapsed && 'dashboard-hero-context-open')}>
+        <div className={cn('dashboard-hero mb-8 flex items-start justify-between gap-6', inlineContextOpen && 'dashboard-hero-context-open')}>
           <div className="min-w-0">
             <h1 className="m-0 mt-1 text-[1.9375rem] font-semibold tracking-[-0.05em] leading-[1.05] text-[var(--text-1)]">
               Hello {userFirstName}
@@ -210,11 +227,13 @@ export default function Dashboard() {
         </div>
       </div>
       <DashboardContextPanel
-        open={!contextCollapsed}
+        open={contextPanelVisible}
+        overlay={isContextOverlay}
         panel={dashboardPanel}
         projectId={projectId}
         focusedProjectRoot={focusedProjectRoot}
         onPanelChange={setDashboardPanel}
+        onOpenChange={setContextDrawerOpen}
       />
       </div>
       </div>

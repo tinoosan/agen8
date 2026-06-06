@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import type { DashboardPanel } from '../../lib/routing'
 import DashboardMissionsPanel from './DashboardMissionsPanel'
@@ -35,18 +36,22 @@ function writeContextWidth(value: number): void {
 
 interface DashboardContextPanelProps {
   open: boolean
+  overlay: boolean
   panel: DashboardPanel
   projectId: string | null
   focusedProjectRoot: string | null
   onPanelChange: (panel: DashboardPanel) => void
+  onOpenChange: (open: boolean) => void
 }
 
 export default function DashboardContextPanel({
   open,
+  overlay,
   panel,
   projectId,
   focusedProjectRoot,
   onPanelChange,
+  onOpenChange,
 }: DashboardContextPanelProps) {
   const [contextWidth, setContextWidth] = useState(readContextWidth)
   const contextRailRef = useRef<HTMLDivElement | null>(null)
@@ -121,6 +126,43 @@ export default function DashboardContextPanel({
     resizeCleanupRef.current = cleanup
   }, [open])
 
+  const panelBody = (
+    <Tabs value={panel} onValueChange={(value) => onPanelChange(value as DashboardPanel)} className="flex h-full flex-col">
+      <div className="dashboard-context-header shrink-0 h-12 flex items-center px-[var(--dashboard-context-gutter)] border-b border-[color-mix(in_srgb,var(--border)_48%,transparent)]">
+        <TabsList className="dashboard-context-tabs h-auto bg-transparent gap-0 p-0 rounded-none shrink-0">
+          <TabsTrigger value="missions" className="dashboard-context-tab">Missions</TabsTrigger>
+          <TabsTrigger value="tasks" className="dashboard-context-tab">Tasks</TabsTrigger>
+          <TabsTrigger value="decisions" className="dashboard-context-tab">Decisions</TabsTrigger>
+        </TabsList>
+      </div>
+
+      <TabsContent value="missions" className="flex-1 min-h-0 mt-0 overflow-hidden">
+        <DashboardMissionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
+      </TabsContent>
+      <TabsContent value="tasks" className="flex-1 min-h-0 mt-0 overflow-hidden">
+        <DashboardTasksPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
+      </TabsContent>
+      <TabsContent value="decisions" className="flex-1 min-h-0 mt-0 overflow-hidden">
+        <DashboardDecisionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
+      </TabsContent>
+    </Tabs>
+  )
+
+  if (overlay) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="right"
+          className="dashboard-context-drawer w-[92vw] sm:max-w-[400px] p-0 gap-0 flex flex-col border-l border-[color-mix(in_srgb,var(--border)_48%,transparent)] bg-[var(--bg-panel)]"
+        >
+          <SheetTitle className="sr-only">Context panel</SheetTitle>
+          <SheetDescription className="sr-only">Missions, tasks, and decisions for this project</SheetDescription>
+          {panelBody}
+        </SheetContent>
+      </Sheet>
+    )
+  }
+
   return (
     <div
       ref={contextRailRef}
@@ -145,25 +187,7 @@ export default function DashboardContextPanel({
         )}
         style={{ clipPath: open ? 'inset(0 0 0 0)' : 'inset(0 100% 0 0)' }}
       >
-        <Tabs value={panel} onValueChange={(value) => onPanelChange(value as DashboardPanel)} className="flex h-full flex-col">
-          <div className="dashboard-context-header shrink-0 h-12 flex items-center px-[var(--dashboard-context-gutter)] border-b border-[color-mix(in_srgb,var(--border)_48%,transparent)]">
-            <TabsList className="dashboard-context-tabs h-auto bg-transparent gap-0 p-0 rounded-none shrink-0">
-              <TabsTrigger value="missions" className="dashboard-context-tab">Missions</TabsTrigger>
-              <TabsTrigger value="tasks" className="dashboard-context-tab">Tasks</TabsTrigger>
-              <TabsTrigger value="decisions" className="dashboard-context-tab">Decisions</TabsTrigger>
-            </TabsList>
-          </div>
-
-          <TabsContent value="missions" className="flex-1 min-h-0 mt-0 overflow-hidden">
-            <DashboardMissionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
-          </TabsContent>
-          <TabsContent value="tasks" className="flex-1 min-h-0 mt-0 overflow-hidden">
-            <DashboardTasksPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
-          </TabsContent>
-          <TabsContent value="decisions" className="flex-1 min-h-0 mt-0 overflow-hidden">
-            <DashboardDecisionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
-          </TabsContent>
-        </Tabs>
+        {panelBody}
       </div>
     </div>
   )

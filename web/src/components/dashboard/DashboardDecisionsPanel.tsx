@@ -248,6 +248,11 @@ export default function DashboardDecisionsPanel({
     </Button>
   )
 
+  // Date controls are sized by container, not viewport: the embedded panel is a
+  // user-resizable rail whose width is decoupled from `sm:`, so fixed 150px
+  // pickers overflow it. Let them flex-shrink there; keep fixed widths on the page.
+  const dateRowClass = embedded ? 'flex w-full items-center gap-1.5' : 'flex w-full items-center gap-1.5 sm:w-auto'
+  const datePickerClass = embedded ? 'min-w-0 flex-1' : 'min-w-0 flex-1 sm:w-[150px] sm:flex-none'
   const filterControls = (
     <>
       <div className="relative min-w-[180px] flex-1">
@@ -263,11 +268,11 @@ export default function DashboardDecisionsPanel({
           }}
         />
       </div>
-      <div className="flex w-full items-center gap-1.5 sm:w-auto">
+      <div className={dateRowClass}>
         <Label htmlFor="decision-from-date" className="text-[0.6875rem] text-[var(--text-3)]">From</Label>
         <DatePicker
           id="decision-from-date"
-          className="min-w-0 flex-1 sm:w-[150px] sm:flex-none"
+          className={datePickerClass}
           placeholder="Start date"
           value={fromDate}
           max={toDate || undefined}
@@ -279,7 +284,7 @@ export default function DashboardDecisionsPanel({
         <Label htmlFor="decision-to-date" className="text-[0.6875rem] text-[var(--text-3)]">To</Label>
         <DatePicker
           id="decision-to-date"
-          className="min-w-0 flex-1 sm:w-[150px] sm:flex-none"
+          className={datePickerClass}
           placeholder="End date"
           value={toDate}
           min={fromDate || undefined}
