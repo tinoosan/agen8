@@ -109,12 +109,10 @@ func (s *TokenStore) Resolve(token string) (Session, error) {
 }
 
 type Server struct {
-	tokenStore               *TokenStore
-	registry                 *Registry
-	handler                  http.Handler
-	resolver                 SessionResolver
-	protocolSessionBindingMu sync.RWMutex
-	protocolSessionBindings  map[string]sessionRefs
+	tokenStore *TokenStore
+	registry   *Registry
+	handler    http.Handler
+	resolver   SessionResolver
 }
 
 type SessionResolver func(ctx context.Context, token string, header http.Header, body []byte) (Session, error)
@@ -283,24 +281,6 @@ func mcpRPCMethod(body []byte) string {
 	return strings.TrimSpace(req.Method)
 }
 
-func prepareInitialNativeSessionHeader(r *http.Request, method string) {
-	if r == nil || !strings.EqualFold(strings.TrimSpace(method), "initialize") {
-		return
-	}
-	nativeSessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id"))
-	if nativeSessionID == "" {
-		nativeSessionID = strings.TrimSpace(r.Header.Get("MCP-Session-Id"))
-	}
-	if nativeSessionID == "" {
-		return
-	}
-	if strings.TrimSpace(r.Header.Get(agen8NativeSessionIDHeader)) == "" {
-		r.Header.Set(agen8NativeSessionIDHeader, nativeSessionID)
-	}
-	r.Header.Del("Mcp-Session-Id")
-	r.Header.Del("MCP-Session-Id")
-}
-
 func nativeSessionResolverHeader(header http.Header, method string) http.Header {
 	out := header.Clone()
 	if out == nil {
@@ -412,11 +392,6 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 				sessionID, threadID := mcpSessionRefs(req)
 				header := nativeRefsHeaderFromRequest(req)
 				headerSessionID, headerThreadID := explicitNativeSessionRefsFromHeader(header)
-				if headerSessionID == "" && headerThreadID == "" {
-					if mappedSessionID, mappedThreadID := s.nativeRefsForProtocolSession(conn.token, protocolSessionIDFromHeader(header)); mappedSessionID != "" || mappedThreadID != "" {
-						headerSessionID, headerThreadID = mappedSessionID, mappedThreadID
-					}
-				}
 				if sessionID == "" {
 					sessionID = headerSessionID
 				}
@@ -453,7 +428,6 @@ func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSess
 					if resultThreadID == "" {
 						resultThreadID = threadID
 					}
-					s.bindProtocolSession(conn.token, protocolSessionIDFromHeader(header), resultSessionID, resultThreadID)
 					conn.observe(resultSessionID, resultThreadID)
 				}
 				return result, err
@@ -471,17 +445,6 @@ func nativeRefsHeaderFromRequest(req interface{ GetExtra() *mcp.RequestExtra }) 
 	return req.GetExtra().Header
 }
 
-func protocolSessionIDFromHeader(header http.Header) string {
-	if len(header) == 0 {
-		return ""
-	}
-	sessionID := strings.TrimSpace(header.Get("Mcp-Session-Id"))
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(header.Get("MCP-Session-Id"))
-	}
-	return sessionID
-}
-
 func explicitNativeSessionRefsFromHeader(header http.Header) (sessionID, threadID string) {
 	if len(header) == 0 {
 		return "", ""
@@ -489,51 +452,9 @@ func explicitNativeSessionRefsFromHeader(header http.Header) (sessionID, threadI
 	return strings.TrimSpace(header.Get(agen8NativeSessionIDHeader)), strings.TrimSpace(header.Get(agen8NativeThreadIDHeader))
 }
 
-func (s *Server) bindProtocolSession(token string, protocolSessionID string, sessionID string, threadID string) {
-	if s == nil {
-		return
-	}
-	token = strings.TrimSpace(token)
-	protocolSessionID = strings.TrimSpace(protocolSessionID)
-	sessionID = strings.TrimSpace(sessionID)
-	threadID = strings.TrimSpace(threadID)
-	if token == "" || protocolSessionID == "" || (sessionID == "" && threadID == "") {
-		return
-	}
-	s.protocolSessionBindingMu.Lock()
-	if s.protocolSessionBindings == nil {
-		s.protocolSessionBindings = map[string]sessionRefs{}
-	}
-	s.protocolSessionBindings[protocolSessionBindingKey(token, protocolSessionID)] = sessionRefs{sessionID: sessionID, threadID: threadID}
-	s.protocolSessionBindingMu.Unlock()
-	slog.Info("mcp protocol session bound to native refs", "protocol_session_id", protocolSessionID, "has_session_id", sessionID != "", "has_thread_id", threadID != "")
-}
-
-func (s *Server) nativeRefsForProtocolSession(token string, protocolSessionID string) (sessionID, threadID string) {
-	if s == nil {
-		return "", ""
-	}
-	token = strings.TrimSpace(token)
-	protocolSessionID = strings.TrimSpace(protocolSessionID)
-	if token == "" || protocolSessionID == "" {
-		return "", ""
-	}
-	s.protocolSessionBindingMu.RLock()
-	refs := s.protocolSessionBindings[protocolSessionBindingKey(token, protocolSessionID)]
-	s.protocolSessionBindingMu.RUnlock()
-	return strings.TrimSpace(refs.sessionID), strings.TrimSpace(refs.threadID)
-}
-
-func protocolSessionBindingKey(token string, protocolSessionID string) string {
-	return strings.TrimSpace(token) + "\x00" + strings.TrimSpace(protocolSessionID)
-}
-
 func (s *Server) resolveSessionForMCPCall(ctx context.Context, conn *mcpConnectionState, header http.Header, sessionID string, threadID string, rpcBody []byte) (Session, error) {
 	if conn == nil {
 		return Session{}, fmt.Errorf("mcp connection state is required")
-	}
-	if sessionID == "" && threadID == "" {
-		sessionID, threadID = s.nativeRefsForProtocolSession(conn.token, protocolSessionIDFromHeader(header))
 	}
 	conn.observe(sessionID, threadID)
 	storedSessionID, storedThreadID := conn.nativeRefs()
