@@ -834,3 +834,151 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 		})
 	}
 }
+
+// decisionLogBodyForSession builds a non-register tools/call (decision.log) whose
+// only identity signal is arguments.session_id - the exact shape Claude Code's hook
+// produces for a member-as-actor verb. The wire layer strips session_id from the
+// arguments (stripAmbientSessionRefs) before the decision tool's strict decoder runs,
+// so this models a real Claude call rather than a hand-massaged one.
+func decisionLogBodyForSession(sessionID, title, rationale string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0",
+		"id":10,
+		"method":"tools/call",
+		"params":{
+			"name":"decision",
+			"arguments":{"action":"log","title":%q,"rationale":%q,"session_id":%q}
+		}
+	}`, title, rationale, sessionID))
+}
+
+// TestMCPWireHappyPathForBoundMemberVerb is KR3's end-to-end happy path: one
+// representative member-as-actor verb (decision.log) driven from a raw token all the
+// way through the live HTTP /mcp pipeline - resolveMCPSession (token -> bound member)
+// -> executeNativeMCPTool building the tool CallContext -> the decision tool's Handle
+// -> the decision service -> a well-formed success response.
+//
+// It is the positive counterpart to the failure-path coverage, and it fills a real
+// gap. The existing wire tests do not exercise this path: the register flow runs
+// member-LESS by design (it is the verb that CREATES the member), and
+// TestConcurrentSessionsResolveToOwnMember stops at d.resolveMCPSession for task.claim
+// without ever driving the verb through a tool handler. Nothing else proves the
+// pipeline composes for a NORMAL verb that REQUIRES a pre-bound member.
+//
+// decision.log is the right probe precisely because its handler hard-requires
+// call.ActorMemberID (see internal/mcp/tools/decision/handler.go): it returns
+// "member_id is required" when no actor is bound. So a 200 carrying a real decision id
+// is only possible if the in-band arguments.session_id resolved to the registered
+// member AND that member was threaded into the decision CallContext as the actor. A
+// server-generated dec- id additionally proves the decision SERVICE actually ran, not
+// a stub.
+//
+// Scope: happy path only. Loud failure on bad tokens is KR1
+// (TestResolveMCPSessionTokenClasses); the binding gate's success-vs-contention split
+// is KR2's task.claim work. There is deliberately no overlap here.
+func TestMCPWireHappyPathForBoundMemberVerb(t *testing.T) {
+	dataDir := t.TempDir()
+	projectRoot := t.TempDir()
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: dataDir},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	// Setup yields a real admin API key (an ak_ that resolves against the DB). The
+	// member registers under it, and the same key carries the later decision.log call.
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("Accept", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setupResult struct {
+		APIKey struct {
+			Secret string `json:"secret"`
+		} `json:"apiKey"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	apiKey := setupResult.APIKey.Secret
+	if apiKey == "" {
+		t.Fatal("setup response missing api key secret")
+	}
+
+	// One initialize so the streamable MCP handler accepts the subsequent tool calls.
+	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(apiKey), bytes.NewReader(initializeBody))
+	initReq.Header.Set("Content-Type", "application/json")
+	initReq.Header.Set("Accept", "application/json, text/event-stream")
+	initRec := httptest.NewRecorder()
+	handler.ServeHTTP(initRec, initReq)
+	if initRec.Code != http.StatusOK {
+		t.Fatalf("mcp initialize status=%d body=%s", initRec.Code, initRec.Body.String())
+	}
+
+	// Register the member whose session_id the verb will carry. Registration creates
+	// the project from project_root, so the resolved session has a bound project too.
+	const sessionID = "kr3-happy-session"
+	memberID := registerSessionMemberForTest(t, handler, apiKey, projectRoot, sessionID, "KR3 Happy Worker")
+
+	// Drive decision.log end to end over the wire, carrying only arguments.session_id.
+	body := decisionLogBodyForSession(sessionID, "KR3 wire-path proof", "Driven end to end through /mcp to prove the pipeline composes for a bound-member verb.")
+	req := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(apiKey), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("decision.log status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode decision.log response: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("decision.log rpc error=%s", resp.Error.Message)
+	}
+	if len(resp.Result.Content) == 0 {
+		t.Fatalf("decision.log missing result content: %s", rec.Body.String())
+	}
+
+	// The content text is the decision tool's structured JSON. A server-generated dec-
+	// id proves the decision service ran; memberId == the registered member proves the
+	// resolved member was threaded through CallContext as the actor. decision.log
+	// hard-requires an actor, so neither field could be satisfied by a member-less call.
+	var logged struct {
+		Decision struct {
+			ID       string `json:"id"`
+			MemberID string `json:"memberId"`
+		} `json:"decision"`
+	}
+	if err := json.Unmarshal([]byte(resp.Result.Content[0].Text), &logged); err != nil {
+		t.Fatalf("decode decision content %q: %v", resp.Result.Content[0].Text, err)
+	}
+	if !strings.HasPrefix(logged.Decision.ID, "dec-") {
+		t.Fatalf("decision id=%q want dec- prefix (a server-generated id proves the service ran)", logged.Decision.ID)
+	}
+	if logged.Decision.MemberID != memberID {
+		t.Fatalf("decision memberId=%q want %q (the resolved member must thread through CallContext as the actor)", logged.Decision.MemberID, memberID)
+	}
+}
