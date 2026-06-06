@@ -12,7 +12,6 @@ vi.mock('../lib/routing', () => ({
 const mockUseDecisionLog = vi.fn()
 const mockUseDecisionStats = vi.fn()
 const mockUseExportDecisions = vi.fn()
-const mockUseDeleteDecision = vi.fn()
 vi.mock('../hooks/useDecisions', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../hooks/useDecisions')>()
   return {
@@ -20,7 +19,6 @@ vi.mock('../hooks/useDecisions', async (importOriginal) => {
     useDecisionLog: (...args: unknown[]) => mockUseDecisionLog(...args),
     useDecisionStats: (...args: unknown[]) => mockUseDecisionStats(...args),
     useExportDecisions: (...args: unknown[]) => mockUseExportDecisions(...args),
-    useDeleteDecision: (...args: unknown[]) => mockUseDeleteDecision(...args),
   }
 })
 
@@ -37,7 +35,6 @@ function renderPage() {
 
 describe('Decisions page', () => {
   const mockMutateAsync = vi.fn()
-  const mockDeleteMutateAsync = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -63,10 +60,6 @@ describe('Decisions page', () => {
     })
     mockUseExportDecisions.mockReturnValue({
       mutateAsync: mockMutateAsync.mockResolvedValue([]),
-      isPending: false,
-    })
-    mockUseDeleteDecision.mockReturnValue({
-      mutateAsync: mockDeleteMutateAsync.mockResolvedValue(true),
       isPending: false,
     })
     mockUseDecisionStats.mockReturnValue({
