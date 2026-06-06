@@ -53,13 +53,13 @@
   </table>
 
   <h2 id="data">2. Data directory</h2>
-  <p>Runtime state lives outside the repository. On macOS the default is <code>~/.agen8</code>. The daemon accepts <code>--data-dir</code> and the Makefile accepts <code>DATA_DIR=...</code> when a test run needs an isolated state directory.</p>
+  <p>Runtime state lives outside the repository. On macOS the default is <code>~/.agen8</code>. The daemon accepts <code>--data-dir</code>, the environment accepts <code>AGEN8_DATA_DIR</code>, and the Makefile accepts <code>DATA_DIR=...</code> when a test run needs an isolated state directory.</p>
 
 <pre><code class="lang-shell">make dev remote
 make dev remote DATA_DIR=/tmp/agen8-release-check
 agen8-mcp daemon start --data-dir /tmp/agen8-release-check --listener http --http-addr 127.0.0.1:7777</code></pre>
 
-  <p>The repository should not contain a live <code>agen8.db</code>. Local SQLite files belong in the resolved data directory.</p>
+  <p>The repository should not contain a live <code>agen8.db</code>. Local SQLite files belong in the resolved data directory; use an isolated <code>DATA_DIR</code> or <code>AGEN8_DATA_DIR</code> for clean setup checks.</p>
 
   <h2 id="build">3. Build and version checks</h2>
   <p>The release version source is <code>pkg/buildinfo</code>. Builds set <code>Version</code>, <code>Commit</code>, and <code>BuildDate</code> with Go ldflags. Local development defaults to <code>dev</code> and <code>none</code>.</p>
@@ -107,7 +107,7 @@ curl http://127.0.0.1:7777/healthz</code></pre>
   </table>
 
   <h2 id="schema">7. Schema archive behavior</h2>
-  <p>The local SQLite schema uses a hard-cutover baseline. If the daemon sees an incompatible old schema, it archives the old database under the data directory using an <code>agen8.db.incompatible-*.bak</code> filename and starts with a fresh schema. This is intentional for the current local baseline.</p>
+  <p>The local SQLite schema uses a hard-cutover baseline. If the daemon sees an incompatible old schema, it archives the old database under the configured data directory using an <code>agen8.db.incompatible-*.bak</code> filename and starts with a fresh schema. If archive startup fails, the error points back to the configured data directory from <code>AGEN8_DATA_DIR</code> or <code>--data-dir</code>. This is intentional for the current local baseline.</p>
 
   <p>Schema validation rejects removed tables and legacy columns from removed concepts. The current task schema keeps mission and key-result references and rejects legacy task plan columns.</p>
 

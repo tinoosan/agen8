@@ -143,6 +143,12 @@ func TestHardCutoverRejectsLegacyTaskPlanColumns(t *testing.T) {
 	if !strings.Contains(err.Error(), `table "tasks" has legacy column "plan_phase_id"`) {
 		t.Fatalf("error=%q", err)
 	}
+	if !strings.Contains(err.Error(), "configured Agen8 data directory") {
+		t.Fatalf("error should point at configured data directory, got %q", err)
+	}
+	if strings.Contains(err.Error(), "Delete agen8.db") {
+		t.Fatalf("error should not imply a repo-local database file, got %q", err)
+	}
 }
 
 func TestDecisionMemberNameRepairBackfillsFromMemberRecord(t *testing.T) {

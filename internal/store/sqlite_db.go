@@ -67,8 +67,8 @@ func GetDBHandle(ctx context.Context, cfg config.Config) (*storagedb.Handle, err
 }
 
 // SQLitePathForConfig resolves the SQLite path for the provided config.
-// Local and hosted mode both resolve to the same DataDir-backed SQLite file
-// (agen8.db). User isolation is enforced via user_id ownership in tables.
+// Local SQLite state lives in the configured Agen8 data directory, not in the
+// project repository. User isolation is enforced via user_id ownership.
 func SQLitePathForConfig(cfg config.Config) string {
 	return storagedb.SQLitePath(cfg.DataDir)
 }
@@ -349,7 +349,7 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 			if tbl.name == "tasks" {
 				continue
 			}
-			return fmt.Errorf("sqlite: incompatible schema: missing table %q (hard cutover). Delete agen8.db and retry", tbl.name)
+			return hardCutoverSchemaError("missing table %q", tbl.name)
 		}
 		rows, err := tx.Query(`PRAGMA table_info(` + tbl.name + `)`)
 		if err != nil {
@@ -372,12 +372,12 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 
 		for _, want := range tbl.columns {
 			if _, ok := cols[want]; !ok {
-				return fmt.Errorf("sqlite: incompatible schema: table %q missing column %q (hard cutover). Delete agen8.db and retry", tbl.name, want)
+				return hardCutoverSchemaError("table %q missing column %q", tbl.name, want)
 			}
 		}
 		for _, bad := range tbl.forbid {
 			if _, ok := cols[bad]; ok {
-				return fmt.Errorf("sqlite: incompatible schema: table %q has legacy column %q (hard cutover). Delete agen8.db and retry", tbl.name, bad)
+				return hardCutoverSchemaError("table %q has legacy column %q", tbl.name, bad)
 			}
 		}
 	}
@@ -397,10 +397,15 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 			return fmt.Errorf("sqlite: validate schema: check removed table %s: %w", table, err)
 		}
 		if exists > 0 {
-			return fmt.Errorf("sqlite: incompatible schema: removed table %q exists (hard cutover). Delete agen8.db and retry", table)
+			return hardCutoverSchemaError("removed table %q exists", table)
 		}
 	}
 	return nil
+}
+
+func hardCutoverSchemaError(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	return fmt.Errorf("sqlite: incompatible schema: %s (hard cutover). Remove or archive the SQLite database in the configured Agen8 data directory (AGEN8_DATA_DIR / --data-dir) and retry", detail)
 }
 
 func repairDecisionMemberNameColumn(tx *sql.Tx) error {

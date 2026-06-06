@@ -14,7 +14,8 @@ harness session manager.
 ## Current Baseline
 
 - Binary: `agen8-mcp`
-- Default local data directory: `~/.agen8`
+- Default local data directory: `~/.agen8` (`--data-dir` or
+  `AGEN8_DATA_DIR` can point isolated runs somewhere else)
 - Development daemon: `make dev remote`
 - Build command: `make build-go`
 - Version check: `./bin/agen8-mcp version`
