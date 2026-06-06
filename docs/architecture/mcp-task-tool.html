@@ -107,7 +107,7 @@
   <tr><td><code>block</code></td><td><code>Block</code></td><td>service publishes <code>blocked</code></td></tr>
   <tr><td><code>unblock</code></td><td><code>Unblock</code></td><td>service publishes <code>unblocked</code></td></tr>
   <tr><td><code>reassign</code></td><td><code>Assign</code></td><td>service publishes <code>assigned</code></td></tr>
-  <tr><td><code>cancel</code></td><td><code>Cancel</code></td><td>service publishes <code>canceled</code> when a worker may still act</td></tr>
+  <tr><td><code>cancel</code></td><td><code>Cancel</code></td><td>service publishes <code>canceled</code> when an assigned member may still act</td></tr>
   <tr><td><code>review</code> approve</td><td><code>ApproveReview</code></td><td>none</td></tr>
   <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td>service publishes <code>retry_requested</code></td></tr>
   <tr><td><code>review</code> fail</td><td><code>FailReview</code></td><td>none</td></tr>
@@ -141,11 +141,10 @@
 
 <table>
   <tr><th>Caller</th><th>Allowed task behavior</th></tr>
-  <tr><td>Coordinator member</td><td>Create, list same-project tasks, get same-project tasks, assign/reassign, review, cancel, and unblock same-project blocked tasks.</td></tr>
-  <tr><td>Worker member</td><td>List assigned tasks, get visible assigned/claimed tasks, claim assigned tasks, release claimed tasks, submit claimed tasks, block claimed tasks, and unblock claimed tasks.</td></tr>
+  <tr><td>Active project member</td><td>Create, list/get same-project tasks, assign/reassign, review, cancel, and unblock same-project blocked tasks. Assigned or claimed members can claim, release, submit, and block their own active work.</td></tr>
 </table>
 
-<p>Coordinator unblock exists because blocked tasks need an explicit recorded resolution. After the coordinator resolves the blocker, the same task service transition returns the task to active work.</p>
+<p>Unblock exists because blocked tasks need an explicit recorded resolution. After an active project member resolves the blocker, the same task service transition returns the task to active work.</p>
 
 <footer>Architecture · agen8 · This document describes the current MCP task tool shape.</footer>
 

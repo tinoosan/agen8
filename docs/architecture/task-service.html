@@ -209,7 +209,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
     <line x1="560" y1="305" x2="640" y2="305" stroke="var(--text-faint)" stroke-width="1.8" marker-end="url(#ar)"/>
     <text x="600" y="298" fill="var(--text-muted)" font-size="11" font-weight="500">Cancel</text>
 
-    <text x="40" y="330" fill="var(--text-muted)" font-size="11">Workers submit tasks into review; coordinators approve, retry, fail, or cancel them.</text>
+    <text x="40" y="330" fill="var(--text-muted)" font-size="11">Assigned members submit tasks into review; responsible reviewers approve, retry, fail, or cancel them.</text>
   </svg>
   </div>
 
@@ -222,11 +222,11 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
       <tr><td><code>create</code></td><td><code>Create</code></td><td><code>claim</code> when assigned to the caller, otherwise inspect the task record.</td><td>The result tells the caller what to do without requiring async delivery.</td></tr>
       <tr><td><code>get</code> / <code>list</code></td><td><code>Get</code> / <code>List</code></td><td>Return read models.</td><td>Read-only actions do not create lifecycle obligations.</td></tr>
       <tr><td><code>claim</code></td><td><code>Claim</code></td><td><code>work</code></td><td>The caller now owns active work.</td></tr>
-      <tr><td><code>release</code></td><td><code>Release</code></td><td><code>reassign</code> or <code>cancel</code></td><td>The coordinator decides what happens next.</td></tr>
-      <tr><td><code>submit</code></td><td><code>Complete</code></td><td><code>review</code></td><td>The coordinator reviews the completed work.</td></tr>
+      <tr><td><code>release</code></td><td><code>Release</code></td><td><code>reassign</code> or <code>cancel</code></td><td>A responsible member decides what happens next.</td></tr>
+      <tr><td><code>submit</code></td><td><code>Complete</code></td><td><code>review</code></td><td>A responsible reviewer checks the completed work.</td></tr>
       <tr><td><code>block</code></td><td><code>Block</code></td><td><code>unblock</code> when resolved.</td><td>The blocker stays attached to the task record.</td></tr>
       <tr><td><code>unblock</code></td><td><code>Unblock</code></td><td><code>work</code></td><td>The assigned member can continue.</td></tr>
-      <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td><code>work</code></td><td>The worker needs another pass with feedback.</td></tr>
+      <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td><code>work</code></td><td>The assigned member needs another pass with feedback.</td></tr>
       <tr><td><code>review</code> approve</td><td><code>ApproveReview</code></td><td><code>done</code></td><td>The task is complete.</td></tr>
       <tr><td><code>review</code> fail</td><td><code>FailReview</code></td><td><code>stop</code></td><td>The task is terminal.</td></tr>
       <tr><td><code>cancel</code></td><td><code>Cancel</code></td><td><code>stop</code></td><td>No more work should continue for that task.</td></tr>
@@ -234,7 +234,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
   </table>
 
   <h3>Domain transition methods</h3>
-  <p>Each labelled arrow is a method on <code>domain.Task</code>. Assignment is a single product concept: if a task needs a different worker, the service assigns it again and returns the updated task state.</p>
+  <p>Each labelled arrow is a method on <code>domain.Task</code>. Assignment is a single product concept: if a task needs a different member, the service assigns it again and returns the updated task state.</p>
 
   <table>
     <thead><tr><th>Method</th><th>Source state</th><th>Result</th><th>Required inputs</th></tr></thead>
@@ -253,7 +253,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
   </table>
 
   <h3>Acceptance criteria as review state</h3>
-  <p>Acceptance criteria are task state, not metadata. Creation turns criterion text into stable criterion objects. Review transitions update their satisfaction state so a retry can tell the worker which criteria already passed and which still need work.</p>
+  <p>Acceptance criteria are task state, not metadata. Creation turns criterion text into stable criterion objects. Review transitions update their satisfaction state so a retry can tell the assigned member which criteria already passed and which still need work.</p>
 
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">AcceptanceCriterion</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">ID</span>        string <span class="tok-string">`json:"id"`</span>
@@ -271,8 +271,8 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
   <table>
     <thead><tr><th>Review rule</th><th>Reason</th></tr></thead>
     <tbody>
-      <tr><td><code>ApproveReview</code> requires every criterion to be satisfied</td><td>Approval means the task meets the coordinator's stated acceptance bar.</td></tr>
-      <tr><td><code>RetryReview</code> accepts partial satisfaction</td><td>The worker receives durable state for what passed and what remains.</td></tr>
+      <tr><td><code>ApproveReview</code> requires every criterion to be satisfied</td><td>Approval means the task meets the reviewer's stated acceptance bar.</td></tr>
+      <tr><td><code>RetryReview</code> accepts partial satisfaction</td><td>The assigned member receives durable state for what passed and what remains.</td></tr>
       <tr><td><code>FailReview</code> records criterion outcomes and requires a reason</td><td>The terminal failure preserves why the task did not satisfy the bar.</td></tr>
       <tr><td>Unknown, duplicate, or missing criterion ids fail the review</td><td>Partial review payloads are ambiguous and stale ids hide protocol bugs.</td></tr>
     </tbody>
@@ -290,7 +290,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
 
   <h2 id="routing">4. Routing model — tasks go to members</h2>
 
-  <p>Tasks are routed by member id. Every task has exactly one assigned member. Assigning a task to a different worker is still assignment; it is not a separate product concept.</p>
+  <p>Tasks are routed by member id. Every task has exactly one assigned member. Assigning a task to a different member is still assignment; it is not a separate product concept.</p>
 
   <ul>
     <li><code>AssignedTo</code> holds the member id.</li>
@@ -318,12 +318,12 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
       <dl>
         <dt>UserID</dt><dd>project tenant</dd>
         <dt>MemberID</dt><dd>present</dd>
-        <dt>Authorized for</dt><dd>claim, complete, block, and release by assigned/claimed member; unblock by assigned/claimed member or same-project coordinator; create, assign, review, update, and cancel by coordinator members</dd>
+        <dt>Authorized for</dt><dd>claim, complete, block, and release by assigned/claimed member; create, list, get, assign, review, cancel, and unblock same-project tasks as an active project member</dd>
       </dl>
     </div>
   </div>
 
-  <p>User-owned calls authorize against <code>Project.UserID</code>. Member-owned calls authorize against the member record and member type. When both <code>UserID</code> and <code>MemberID</code> are present, member authorization is used so a worker cannot become a coordinator just because the owning user is also authenticated.</p>
+  <p>User-owned calls authorize against <code>Project.UserID</code>. Member-owned calls authorize against active same-project member identity. When both <code>UserID</code> and <code>MemberID</code> are present, member authorization is used so attribution and project membership stay explicit.</p>
 
   <p class="meta">Authorization happens at the service boundary, before any domain transition runs. The domain assumes any caller it sees has already been authorized — it only validates state and inputs.</p>
 
@@ -386,7 +386,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
       <tr><td>Task with empty <code>ProjectID</code>, <code>CreatedBy</code>, <code>AssignedTo</code>, or <code>Description</code></td><td><code>NewTask</code> returns an error before any repository call</td></tr>
       <tr><td>Task claimed by the wrong member</td><td><code>Claim</code> compares the caller member id to <code>AssignedTo</code></td></tr>
       <tr><td>Task with status <code>Active</code> but no <code>ClaimedByMemberID</code></td><td><code>Claim</code> is the only normal entry to Active; <code>Complete</code> rejects unclaimed active tasks</td></tr>
-      <tr><td>Worker output marked <code>Succeeded</code> without coordinator review</td><td><code>Complete</code> moves Active to In Review only; <code>ApproveReview</code> is the success transition</td></tr>
+      <tr><td>Submitted output marked <code>Succeeded</code> without review</td><td><code>Complete</code> moves Active to In Review only; <code>ApproveReview</code> is the success transition</td></tr>
       <tr><td>Approved task with unsatisfied acceptance criteria</td><td><code>ApproveReview</code> requires a criterion outcome for every criterion and rejects any unsatisfied result</td></tr>
       <tr><td>Retry that loses completed criteria</td><td><code>RetryReview</code> persists the reviewed satisfaction state before returning the task to Active</td></tr>
       <tr><td>Task with status <code>Canceled</code> or <code>Failed</code> but no reason</td><td><code>Cancel</code> and <code>FailReview</code> reject empty reason</td></tr>
@@ -394,7 +394,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
       <tr><td>Pending task with a stale <code>ClaimedByMemberID</code></td><td><code>Release</code> drops the claim</td></tr>
       <tr><td>No-action lifecycle update creating phantom work</td><td>Approval and failure return terminal status; retry or cancel carries the next action when one exists</td></tr>
       <tr><td>Re-claiming a terminal task</td><td><code>Claim</code> rejects unless the source status is Pending</td></tr>
-      <tr><td>User-owned action by an unauthorized caller</td><td>The service checks user ownership or coordinator membership before state changes</td></tr>
+      <tr><td>User-owned action by an unauthorized caller</td><td>The service checks user ownership or active same-project membership before state changes</td></tr>
       <tr><td>Task service parsing protocol payloads</td><td>Protocol handlers decode requests and call typed service commands</td></tr>
       <tr><td>Task service writing another service's repository</td><td>The service depends on <code>MessagePublisher</code>, not a message repository</td></tr>
     </tbody>

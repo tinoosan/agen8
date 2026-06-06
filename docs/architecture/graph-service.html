@@ -525,8 +525,7 @@ internal/mcp/tools/graph/
     <thead><tr><th>Caller</th><th>Allowed graph behavior</th><th>Scope basis</th></tr></thead>
     <tbody>
       <tr><td>Authenticated user</td><td>Read and mutate graph links for projects the user owns.</td><td>User owns the project.</td></tr>
-      <tr><td>Coordinator member</td><td>Read same-project graph context and create or remove links for visible nodes.</td><td>Active member belongs to the project and has coordinator member type.</td></tr>
-      <tr><td>Worker member</td><td>Read visible graph context and create relation links only for nodes visible to that worker.</td><td>Active member belongs to the project and is authorized by node visibility.</td></tr>
+      <tr><td>Active project member</td><td>Read same-project graph context and create or remove links for visible nodes.</td><td>Active member belongs to the project.</td></tr>
     </tbody>
   </table>
 

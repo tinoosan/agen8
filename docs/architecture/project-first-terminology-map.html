@@ -71,8 +71,8 @@
     <tbody>
       <tr><td><code>Project</code></td><td>Durable workspace and live coordination/context boundary (location + root).</td><td>Not a chat thread and not a template instance. This is the team boundary for now.</td></tr>
       <tr><td><code>Member</code></td><td>One live harness session registered into a project, identified by <code>(project_id, harness_kind, native_session_ref)</code>.</td><td>Not a role and not a bare external session id.</td></tr>
-      <tr><td><code>MemberType</code></td><td>Structural behavior category.</td><td>Not a persona or domain capability.</td></tr>
-      <tr><td><code>Role</code></td><td>Optional reusable capability/persona definition.</td><td>Not coordinator or worker status.</td></tr>
+      <tr><td><code>MemberType</code></td><td>Compatibility metadata retained by current APIs and storage.</td><td>Not the public permission model, persona, or domain capability.</td></tr>
+      <tr><td><code>Role</code></td><td>Optional reusable capability/persona definition.</td><td>Not a permission class.</td></tr>
       <tr><td><code>RoleSnapshot</code></td><td>Immutable snapshot of effective member instructions and capabilities.</td><td>Preserves traceability when role definitions change.</td></tr>
       <tr><td><code>ProjectTemplate</code></td><td>Optional blueprint and provenance for setting up a project roster.</td><td>Not the live runtime owner.</td></tr>
       <tr><td><code>NativeSessionRef</code></td><td>Stable session/thread reference exposed by a connected harness when available.</td><td>Used for member identity, not for recreating harness thread management.</td></tr>
@@ -85,22 +85,22 @@
   <p>A project is the coordination and context boundary. A <code>Member</code> is the Agen8 actor record for one connected harness session when the harness exposes a stable reference. Agen8 records member work; it does not own the external harness session.</p>
 
   <div class="callout">
-    <strong>Do not introduce run-backed projects.</strong> Member behavior derives from the <code>Member</code> record, <code>MemberType</code>, harness kind, and optional native session reference. It does not derive from hidden containers or role-owned runs.
+    <strong>Do not introduce run-backed projects.</strong> Member behavior derives from the <code>Member</code> record, harness kind, and optional native session reference. It does not derive from hidden containers, compatibility member type metadata, or role-owned runs.
   </div>
 
-  <h2 id="member-types">3. Member types</h2>
-  <p>Member type answers: what structural behavior is this member allowed to perform inside a project?</p>
+  <h2 id="member-types">3. Member type compatibility</h2>
+  <p>Member type is compatibility metadata in the public baseline. Authorization is based on active same-project membership, not coordinator/worker categories.</p>
 
   <table>
-    <thead><tr><th>Type</th><th>Structural meaning</th><th>Notes</th></tr></thead>
+    <thead><tr><th>Type</th><th>Current meaning</th><th>Notes</th></tr></thead>
     <tbody>
-      <tr><td><code>coordinator</code></td><td>Active coordinator for a project.</td><td>At most one active coordinator per project. A coordinator remains a coordinator even when no workers are present.</td></tr>
-      <tr><td><code>worker</code></td><td>Member that can receive, claim, and submit work.</td><td>May have any optional role.</td></tr>
-      <tr><td><code>reviewer</code></td><td>Transitional dedicated review member.</td><td>Prefer migration to review policy or review capability.</td></tr>
+      <tr><td><code>coordinator</code></td><td>Compatibility value returned by older contracts.</td><td>Does not grant unique permissions in the public baseline.</td></tr>
+      <tr><td><code>worker</code></td><td>Compatibility value accepted from older callers.</td><td>Normalized to the flat member-rights model.</td></tr>
+      <tr><td><code>reviewer</code></td><td>Transitional compatibility value.</td><td>Prefer explicit task review responsibility or future review policy.</td></tr>
     </tbody>
   </table>
 
-  <p>Member type influences structural permissions and default tool exposure. It does not imply a domain role such as backend engineer or market analyst.</p>
+  <p>Member type does not imply a domain role such as backend engineer or market analyst. Use member display names and future role snapshots for human-readable responsibility.</p>
 
   <h2 id="roles">4. Roles</h2>
   <p>Role answers: what capability, persona, or domain expertise does this member bring?</p>
@@ -148,7 +148,7 @@
 
   <h2 id="rules">7. Naming rules</h2>
   <ol>
-    <li>Use <code>member_type</code> for <code>coordinator</code>, <code>worker</code>, and transitional <code>reviewer</code>.</li>
+    <li>Keep <code>member_type</code> only where compatibility with existing contracts or storage requires it.</li>
     <li>Use <code>role</code> only for capability, persona, or domain function.</li>
     <li>Use <code>project_template</code> for reusable project setup.</li>
     <li>Use <code>project</code> for the live coordination/context boundary.</li>
@@ -169,7 +169,7 @@
       <tr><td><code>CrossSpaceMessage</code></td><td>task or decision reference</td><td>Cross-space coordination is removed. Coordination is recorded as project-scoped work context.</td></tr>
       <tr><td><code>SpaceTemplate</code> / <code>space instance</code></td><td><code>ProjectTemplate</code> / project created from template</td><td>Templates set up a project roster, not a space.</td></tr>
       <tr><td><code>thread</code></td><td><code>project</code></td><td>Only external harness vocabulary may remain where the harness itself says thread.</td></tr>
-      <tr><td><code>coordinator_run</code></td><td><code>coordinator_member</code></td><td>Replace as route authority.</td></tr>
+      <tr><td><code>coordinator_run</code></td><td><code>member</code></td><td>Replace as route authority.</td></tr>
     </tbody>
   </table>
 
@@ -186,8 +186,8 @@
     </div>
     <div class="card">
       <div class="label">Avoid</div>
-      <div class="title">Coordinator role</div>
-      <div class="meta">Use <span class="term-note">coordinator member</span></div>
+      <div class="title">Coordinator or worker permission classes</div>
+      <div class="meta">Use <span class="term-note">active project member</span></div>
     </div>
     <div class="card">
       <div class="label">Avoid</div>

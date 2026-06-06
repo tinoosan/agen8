@@ -51,7 +51,7 @@
   </tr>
   <tr>
     <td><code>member_create</code></td>
-    <td>Resolve the active coordinator member, stamp caller context, validate the requested runtime config, and delegate worker registration to the project service.</td>
+    <td>Resolve the active actor member, stamp caller context, validate the requested runtime config, and delegate member registration to the project service.</td>
     <td><code>ProjectSvc.GetMember</code>, <code>ProjectSvc.RegisterMember</code>.</td>
     <td>Created member with member id, display label, granted member type, lifecycle state, and channel id.</td>
   </tr>
@@ -168,9 +168,9 @@ project.NewHandler().Handle(ctx, project.CallContext{
   <tr><th>Input</th><th>Source</th><th>Behavior</th></tr>
   <tr><td><code>project_root</code> or <code>project_id</code></td><td>Tool arguments</td><td>Creates or reuses the Agen8 project.</td></tr>
   <tr><td><code>thread_id</code> or <code>session_id</code></td><td>Tool arguments, then MCP metadata fallback</td><td>Creates or reuses a member for that native harness session and stores the value as the harness session reference.</td></tr>
-  <tr><td>No native session reference</td><td>Absent metadata</td><td>Reuses the active coordinator for the project/harness when available, otherwise creates the first coordinator member.</td></tr>
-  <tr><td>First member in a project</td><td>Agen8 roster state</td><td>Receives the coordinator role.</td></tr>
-  <tr><td>Later session-specific members</td><td>Agen8 roster state</td><td>Receive the worker role unless an existing member already has a different valid role.</td></tr>
+  <tr><td>No native session reference</td><td>Absent metadata</td><td>Reuses a token/project-bound member when available, otherwise creates a member for the project/harness.</td></tr>
+  <tr><td>First member in a project</td><td>Agen8 roster state</td><td>Receives the public-baseline member type for compatibility metadata.</td></tr>
+  <tr><td>Later session-specific members</td><td>Agen8 roster state</td><td>Receive the same project-level rights as other active members.</td></tr>
 </table>
 
 <table>
@@ -191,22 +191,21 @@ project.NewHandler().Handle(ctx, project.CallContext{
   <tr><td><code>session_id</code></td><td><code>register</code></td><td>Optional stable native harness session id. Explicit arguments take precedence over MCP metadata.</td></tr>
   <tr><td><code>thread_id</code></td><td><code>register</code></td><td>Optional stable native harness thread id. Explicit arguments take precedence over MCP metadata and session id.</td></tr>
   <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
-  <tr><td><code>display_name</code></td><td><code>member_create</code></td><td>Optional display label. Created members are workers; coordinators cannot mint another coordinator through the tool.</td></tr>
+  <tr><td><code>display_name</code></td><td><code>member_create</code></td><td>Optional display label. Created members have the same project-level rights as other active members.</td></tr>
   <tr><td><code>harness_kind</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime harness kind passed to service config validation.</td></tr>
   <tr><td><code>model</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime model passed to service config validation.</td></tr>
   <tr><td><code>effort</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime reasoning effort passed to service config validation.</td></tr>
   <tr><td>permission mode</td><td><code>member_create</code>, <code>member_update_config</code></td><td>Not accepted by the MCP tool. The project service uses the loosest default for the harness kind when a member is created.</td></tr>
 </table>
 
-<h2>Role policy</h2>
+<h2>Member policy</h2>
 
 <table>
-  <tr><th>Member type</th><th>Visible actions</th><th>Reason</th></tr>
-  <tr><td><code>coordinator</code></td><td><code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Sees registered peers and manages the roster when coordination requires another member.</td></tr>
-  <tr><td><code>worker</code></td><td><code>member_get</code>, <code>member_list</code></td><td>Discovers registered peer identities. If a worker calls roster mutation actions, the tool rejects the request before mutation.</td></tr>
+  <tr><th>Caller</th><th>Visible actions</th><th>Reason</th></tr>
+  <tr><td>Active project member</td><td><code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Members are equal project participants in the public baseline. Display names identify who did what in the graph.</td></tr>
 </table>
 
-<p>Visibility is prompt/tool-surface policy. Authorization remains enforced by the handler and the underlying services using caller identity from <code>ctx</code>. The handler rejects missing or removed actor members before it calls <code>ProjectSvc</code>.</p>
+<p><code>memberType</code> can still appear in responses for compatibility, but authorization is based on active same-project membership. The handler rejects missing or removed actor members before it calls <code>ProjectSvc</code>.</p>
 
 <h2>Result rules</h2>
 

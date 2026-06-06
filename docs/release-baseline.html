@@ -89,7 +89,7 @@ curl http://127.0.0.1:7777/healthz</code></pre>
   }
 }</code></pre>
 
-  <p>After registration, the response includes <code>projectId</code>, <code>memberId</code>, <code>memberType</code>, <code>channelId</code>, <code>url</code>, and <code>token</code>. Agents should use those values rather than inventing ids.</p>
+  <p>After registration, the response includes <code>projectId</code>, <code>memberId</code>, <code>channelId</code>, <code>url</code>, and <code>token</code>. It may also include <code>memberType</code> as compatibility metadata. Agents should use returned ids rather than inventing them.</p>
 
   <h2 id="uat">6. Retained tool UAT</h2>
   <p>Before tagging a baseline, verify the retained tools through the actual MCP connection:</p>

@@ -73,7 +73,7 @@
     </div>
     <div class="layer service">
       <div class="label">App</div>
-      <div class="role"><code>app.Service</code> manages projects and the member roster, validates member runtime config, and enforces coordinator admission.</div>
+      <div class="role"><code>app.Service</code> manages projects and the member roster, validates member runtime config, and authorizes active same-project members.</div>
     </div>
     <div class="layer domain">
       <div class="label">Domain</div>
@@ -95,7 +95,7 @@
     <div class="card">
       <div class="label">Member aggregate</div>
       <div class="title"><code>internal/services/project/domain/member</code></div>
-      <div class="meta">Creates and validates member records: id, project id, harness kind, native session ref, display label, member type, channel id, and lifecycle state. Enforces one active coordinator per project.</div>
+      <div class="meta">Creates and validates member records: id, project id, harness kind, native session ref, display label, compatibility member type, channel id, and lifecycle state.</div>
     </div>
   </div>
 
@@ -126,7 +126,7 @@
   <h2 id="roster">4. Member roster</h2>
   <p>The member roster is a subdomain of the project. A member is one harness session registered into the project when a stable native session reference is available, identified by <code>(project_id, harness_kind, native_session_ref)</code>. The channel id is deterministic: <code>channel:&lt;project&gt;:member:&lt;id&gt;</code>. Registration is the boundary where the MCP <a href="./mcp-project-tool.html">project tool</a> binds the caller to an Agen8 member record.</p>
 
-  <p>Coordinator admission is a project-scoped invariant: a project has at most one active coordinator member. The first member registered into a project becomes the coordinator; later session-specific members become workers. When the future group primitive is introduced, coordinator uniqueness can be re-scoped from project to group additively, without changing member identity.</p>
+  <p>For the public baseline, members are equal project participants. <code>memberType</code> remains in records and responses as compatibility metadata, but it is not the current permission model. A project can have many active registered members, each tied to a harness session when the harness exposes a stable native session reference.</p>
 
 <pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">MemberFilter</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">ProjectID</span> types.ProjectID
@@ -155,8 +155,8 @@
       <tr><td><code>project.archive</code></td><td>Hide a project from active work without deleting its record immediately.</td><td><code>ArchiveProject</code></td><td>Sets project status to <code>archived</code> and keeps durable project metadata available.</td></tr>
       <tr><td><code>project.delete</code></td><td>Permanently remove an archived project record.</td><td><code>DeleteProject</code></td><td>Refuses active projects. A project must be archived before it can be deleted.</td></tr>
       <tr><td><code>project.list</code></td><td>Render project switchers and recent projects.</td><td><code>ListProjects</code></td><td>Returns durable project records, not inferred filesystem entries.</td></tr>
-      <tr><td><code>project.member.list</code></td><td>Render the project roster, boards, dashboards, and pickers.</td><td><code>ListMembers</code></td><td>Lists members by project, sorted coordinator-first then by lifecycle and label.</td></tr>
-      <tr><td><code>project.member.register</code></td><td>Bind a connected harness session to a project member.</td><td><code>RegisterMember</code></td><td>Enforces coordinator admission. Derives the deterministic channel id.</td></tr>
+      <tr><td><code>project.member.list</code></td><td>Render the project roster, boards, dashboards, and pickers.</td><td><code>ListMembers</code></td><td>Lists members by project, lifecycle, and label.</td></tr>
+      <tr><td><code>project.member.register</code></td><td>Bind a connected harness session to a project member.</td><td><code>RegisterMember</code></td><td>Creates an active project member and derives the deterministic channel id.</td></tr>
       <tr><td><code>project.member.update_config</code></td><td>Update a member's desired runtime settings.</td><td><code>UpdateMemberConfig</code></td><td>Validates harness kind, model, and effort.</td></tr>
       <tr><td><code>project.member.remove</code></td><td>Remove a member from the project roster.</td><td><code>RemoveMember</code></td><td>Sets a terminal lifecycle state; does not delete actor attribution history.</td></tr>
     </tbody>
@@ -199,7 +199,7 @@
     <div class="card">
       <div class="label">Member list</div>
       <div class="title"><code>project.member.list</code></div>
-      <div class="meta">Accepts <code>projectId</code>. Returns members sorted coordinator-first, active before inactive, then by label.</div>
+      <div class="meta">Accepts <code>projectId</code>. Returns members sorted active before inactive, then by label.</div>
     </div>
     <div class="card">
       <div class="label">Creation command</div>
@@ -279,7 +279,7 @@
     <thead><tr><th>Rule</th><th>Enforced by</th><th>Reason</th></tr></thead>
     <tbody>
       <tr><td>A member belongs to one project through <code>Member.ProjectID</code>.</td><td>Member aggregate</td><td>Members attach directly to a project; there is no space indirection.</td></tr>
-      <tr><td>A project has at most one active coordinator member.</td><td><code>app.Service.RegisterMember</code></td><td>Coordinator admission is the project-scoped coordination invariant.</td></tr>
+      <tr><td>A project can have many active registered members.</td><td><code>app.Service.RegisterMember</code></td><td>Member identity is used for attribution, routing, and graph readability, not hierarchy.</td></tr>
       <tr><td>Member identity is <code>(project_id, harness_kind, native_session_ref)</code>.</td><td>Member aggregate</td><td>One member equals one harness session; a run id is never the actor identity.</td></tr>
       <tr><td>Channel ids are deterministic: <code>channel:&lt;project&gt;:member:&lt;id&gt;</code>.</td><td>Member aggregate</td><td>Existing member records keep a stable route key without introducing a separate channel service.</td></tr>
       <tr><td>Project creation uses a known location.</td><td>Location service contract and project creation validation</td><td>A project location must identify where the project root lives.</td></tr>

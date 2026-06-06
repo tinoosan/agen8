@@ -510,7 +510,7 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
 <pre><code class="lang-go">count(nonDroppedKRs) &gt; <span class="tok-num">0</span> &amp;&amp; every(nonDroppedKRs, ownerProjectID != <span class="tok-string">""</span> &amp;&amp; ownerProjectStatus == <span class="tok-string">"open"</span>)</code></pre>
 
   <p>
-    These mission states do not activate: no KRs, all KRs dropped, or any non-dropped KR without an owning project. If there is no active measurable scope, the coordinator should add KRs. If a live KR has no owner, the coordinator should assign it to a project before activation.
+    These mission states do not activate: no KRs, all KRs dropped, or any non-dropped KR without an owning project. If there is no active measurable scope, an active project member should add KRs. If a live KR has no owner, an active project member should assign it to a project before activation.
   </p>
 
   <h3>Owner project availability</h3>
@@ -541,7 +541,7 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
 <pre><code class="lang-go">count(nonDroppedKRs) &gt; <span class="tok-num">0</span> &amp;&amp; every(nonDroppedKRs, status == <span class="tok-string">"completed"</span>)</code></pre>
 
   <p>
-    These mission states do not complete: no KRs, all KRs dropped, or only draft/open/in-progress KRs. If there is no active measurable scope, the coordinator should add KRs, pause the mission, or archive it instead of completing it.
+    These mission states do not complete: no KRs, all KRs dropped, or only draft/open/in-progress KRs. If there is no active measurable scope, an active project member should add KRs, pause the mission, or archive it instead of completing it.
   </p>
 
   <h3>Dropping KRs recomputes mission state</h3>
@@ -777,7 +777,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
         <td><code>mission.lifecycle</code></td>
         <td><code>mission.completed</code></td>
         <td>A mission completes manually or through KR auto-completion.</td>
-        <td>Same lifecycle payload; <code>trigger</code> is <code>manual</code>, <code>coordinator</code>, or <code>auto</code>.</td>
+        <td>Same lifecycle payload; <code>trigger</code> is <code>manual</code>, <code>member</code>, or <code>auto</code>.</td>
       </tr>
       <tr>
         <td><code>mission.lifecycle</code></td>
@@ -969,7 +969,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <rect x="588" y="202" width="190" height="82" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
       <text x="683" y="232" text-anchor="middle" fill="var(--text)" font-weight="700">Activation subscriber</text>
       <text x="683" y="254" text-anchor="middle" fill="var(--text-muted)">resolve assigned projects</text>
-      <text x="683" y="272" text-anchor="middle" fill="var(--text-muted)">find coordinators</text>
+      <text x="683" y="272" text-anchor="middle" fill="var(--text-muted)">find active members</text>
 
       <rect x="44" y="202" width="190" height="82" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)"/>
       <text x="139" y="232" text-anchor="middle" fill="var(--text)" font-weight="700">History projection</text>

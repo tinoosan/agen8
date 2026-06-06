@@ -11,8 +11,8 @@ Use Agen8 as the durable work-context layer behind the harness. Codex, Claude Co
 
 1. Call `project.register` early for the current project.
    - Prefer `project_root` when working from a local project directory.
-   - Set `display_name` when the human gives a role or when a clearer graph label helps, for example `Research analyst`, `Reviewer`, or `Coordinator`.
-   - Use the returned `projectId`, `memberId`, `memberType`, `channelId`, `url`, and `token` for later calls.
+   - Set `display_name` when the human gives a working identity or when a clearer graph label helps, for example `Research analyst`, `Backend engineer`, or `Reviewer`.
+   - Use the returned `projectId`, `memberId`, `channelId`, `url`, and `token` for later calls. Treat `memberType` as compatibility metadata, not as a permission model.
    - Do not invent a thread id. If the harness exposes native session metadata through MCP, Agen8 can bind it. If not, use explicit user-provided ids only.
 2. After context compaction, thread resume, handoff, or a user says to continue, inspect Agen8 before continuing.
    - Prefer `graph_query` for project memory, then check active missions, KRs, open tasks, recent decisions, and the member roster.
@@ -25,7 +25,7 @@ Use Agen8 as the durable work-context layer behind the harness. Codex, Claude Co
    - Create or claim the task, then claim before doing the work.
    - Work from its acceptance criteria.
    - Submit with concise artifacts and verification results.
-   - Review only when acting as the coordinator and the task is ready to close.
+   - Review when the task is ready to close and you are responsible for checking the submitted work.
 
 ## Tool Use
 
@@ -40,7 +40,7 @@ Call Agen8 MCP tools directly. If a wrapper or parallel call mangles the namespa
 
 ## Work Loop
 
-1. Register into Agen8 and identify the current member role.
+1. Register into Agen8 and identify the current member id and display name.
 2. Inspect graph/context, active missions, open KRs, open tasks, recent decisions, and relevant members before choosing work.
 3. Anchor work to a mission and key result before creating tasks.
    - Reuse an active mission/KR when it matches the current goal.
@@ -54,7 +54,7 @@ Call Agen8 MCP tools directly. If a wrapper or parallel call mangles the namespa
 7. Record important choices with `decision.log`, linked to the current task and mission/KR.
 8. Use `graph_query` links when the relationship matters: task serves KR, decision made during task, decision informed by another node, task blocked by another node.
 9. Submit task results with artifacts, verification evidence, decision ids, graph links, and remaining risks.
-10. If acting as coordinator, review against every acceptance criterion and close or retry the task.
+10. Review against every acceptance criterion when you are responsible for closing the task.
 
 ## Mission Discipline
 
