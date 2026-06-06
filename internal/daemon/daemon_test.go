@@ -505,15 +505,22 @@ func registerSessionMemberForTest(t *testing.T, handler http.Handler, linkToken,
 // identity signal is arguments.session_id - the exact shape Claude Code's hook
 // produces for a member-as-actor verb.
 func claimBodyForSession(sessionID string) []byte {
+	return claimTaskBodyForSession(sessionID, "task-1")
+}
+
+// claimTaskBodyForSession is claimBodyForSession for a caller-chosen task id, so a wire
+// test can claim a task it actually created instead of the placeholder id the
+// resolveMCPSession-only callers use.
+func claimTaskBodyForSession(sessionID, taskID string) []byte {
 	return []byte(fmt.Sprintf(`{
 		"jsonrpc":"2.0",
 		"id":9,
 		"method":"tools/call",
 		"params":{
 			"name":"task",
-			"arguments":{"action":"claim","task_id":"task-1","session_id":%q}
+			"arguments":{"action":"claim","task_id":%q,"session_id":%q}
 		}
-	}`, sessionID))
+	}`, taskID, sessionID))
 }
 
 // TestAPIKeyResolvesConcurrentSessionMembers pins the shared-token concurrency
@@ -980,5 +987,266 @@ func TestMCPWireHappyPathForBoundMemberVerb(t *testing.T) {
 	}
 	if logged.Decision.MemberID != memberID {
 		t.Fatalf("decision memberId=%q want %q (the resolved member must thread through CallContext as the actor)", logged.Decision.MemberID, memberID)
+	}
+}
+
+// getTaskBodyForSession builds a task.get tools/call carrying only arguments.session_id,
+// so a wire test can read a task back as a specific registered member.
+func getTaskBodyForSession(sessionID, taskID string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0",
+		"id":12,
+		"method":"tools/call",
+		"params":{
+			"name":"task",
+			"arguments":{"action":"get","task_id":%q,"session_id":%q}
+		}
+	}`, taskID, sessionID))
+}
+
+// wireToolResponse is the decoded JSON-RPC envelope of a tools/call over /mcp. It carries
+// both the JSON-RPC error (a transport/protocol failure) and the tool result, including
+// IsError - the flag mcpToolCallErrorResult sets when a tool returns an error. A loud tool
+// refusal is IsError==true with the message in Content, NOT a JSON-RPC error.
+type wireToolResponse struct {
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+	Result struct {
+		IsError bool `json:"isError"`
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"result"`
+}
+
+// postMCPToolCall drives one tools/call body through the live /mcp pipeline under token
+// and returns the decoded envelope. It asserts transport success (HTTP 200) only; the
+// caller decides whether a tool success or a loud isError result is expected, because
+// this suite asserts on both.
+func postMCPToolCall(t *testing.T, handler http.Handler, token string, body []byte) wireToolResponse {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(token), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mcp tool status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp wireToolResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode mcp tool response: %v body=%s", err, rec.Body.String())
+	}
+	return resp
+}
+
+// wireToolSuccessText asserts resp is a clean tool success - no JSON-RPC error and no
+// isError result - and returns its first content text, the tool's structured JSON.
+func wireToolSuccessText(t *testing.T, resp wireToolResponse, label string) string {
+	t.Helper()
+	if resp.Error != nil {
+		t.Fatalf("%s: unexpected rpc error: %s", label, resp.Error.Message)
+	}
+	if resp.Result.IsError {
+		text := ""
+		if len(resp.Result.Content) > 0 {
+			text = resp.Result.Content[0].Text
+		}
+		t.Fatalf("%s: unexpected loud tool error: %s", label, text)
+	}
+	if len(resp.Result.Content) == 0 {
+		t.Fatalf("%s: result missing content", label)
+	}
+	return resp.Result.Content[0].Text
+}
+
+// createTaskOverWireForSession drives task.create over the live /mcp pipeline as the
+// member behind sessionID, assigns the new task to assigneeMemberID, and returns the
+// server-generated task id. It asserts the new task starts pending and assigned to the
+// requested member, so callers rely on a known claimable starting state.
+func createTaskOverWireForSession(t *testing.T, handler http.Handler, token, sessionID, assigneeMemberID, title, description string) string {
+	t.Helper()
+	body := []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0",
+		"id":11,
+		"method":"tools/call",
+		"params":{
+			"name":"task",
+			"arguments":{"action":"create","title":%q,"description":%q,"assignee_member_id":%q,"session_id":%q}
+		}
+	}`, title, description, assigneeMemberID, sessionID))
+	text := wireToolSuccessText(t, postMCPToolCall(t, handler, token, body), "task.create")
+	var created struct {
+		Task struct {
+			ID                 string `json:"id"`
+			Status             string `json:"status"`
+			AssignedToMemberID string `json:"assignedToMemberId"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(text), &created); err != nil {
+		t.Fatalf("decode task.create content %q: %v", text, err)
+	}
+	if !strings.HasPrefix(created.Task.ID, "task-") {
+		t.Fatalf("task.create id=%q want task- prefix", created.Task.ID)
+	}
+	if created.Task.Status != "pending" {
+		t.Fatalf("new task status=%q want pending", created.Task.Status)
+	}
+	if created.Task.AssignedToMemberID != assigneeMemberID {
+		t.Fatalf("new task assignedTo=%q want %q", created.Task.AssignedToMemberID, assigneeMemberID)
+	}
+	return created.Task.ID
+}
+
+// TestMCPWireBindingGateOnTaskClaim is KR2's end-to-end coverage of the binding gate that
+// guards member-as-actor dispatch, driven through the live HTTP /mcp pipeline for
+// task.claim. It pins the two halves of that gate side by side:
+//
+//   - Success: a task.claim carrying the in-band session_id of a registered member
+//     resolves to that member and claims the task (pending -> active, claimedBy == the
+//     member). The bound identity threads all the way into the task service.
+//
+//   - Loud failure (the multibinding-contention shape): over the SAME shared token -
+//     bound to TWO registered members here, so the resolver genuinely has more than one
+//     candidate - a task.claim whose session_id matches no registered member resolves
+//     member-LESS. The task tool's actor gate (internal/mcp/tools/task/handler.go:
+//     "task: registered member_id is required") then refuses the dispatch LOUDLY as an
+//     isError result. It does NOT default to either registered member, and the task is
+//     left untouched: still pending, still claimed by nobody. Only after the refusal does
+//     the rightful member claim it, proving the task was claimable all along and the gate
+//     refused on identity, not state.
+//
+// This is the property that makes the documented agen8-local multibinding bug
+// (task-74b59b64) a loud, safe failure instead of a silent mis-attribution: when the
+// actor member cannot be resolved for a session, dispatch stops rather than guessing. The
+// trigger here is an unregistered session ref - a deterministic way to reach the same
+// member-LESS state the production token-only ambiguity produces. So this test covers the
+// GATE's response to that state, not the daemon's resolution ambiguity itself (that
+// resolution contract is TestResolveMCPSessionTokenClasses, KR1).
+//
+// Scope: distinct from KR3 (TestMCPWireHappyPathForBoundMemberVerb), which drives a
+// different verb (decision.log) and only the happy path, and from the
+// resolveMCPSession-only concurrency tests, which never drive a verb through a tool
+// handler.
+func TestMCPWireBindingGateOnTaskClaim(t *testing.T) {
+	dataDir := t.TempDir()
+	projectRoot := t.TempDir()
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: dataDir},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	// Setup yields a real admin API key. Both members register under it and every later
+	// task verb carries it, so it is a genuinely shared token.
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("Accept", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setupResult struct {
+		APIKey struct {
+			Secret string `json:"secret"`
+		} `json:"apiKey"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	apiKey := setupResult.APIKey.Secret
+	if apiKey == "" {
+		t.Fatal("setup response missing api key secret")
+	}
+
+	// One initialize so the streamable MCP handler accepts the subsequent tool calls.
+	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(apiKey), bytes.NewReader(initializeBody))
+	initReq.Header.Set("Content-Type", "application/json")
+	initReq.Header.Set("Accept", "application/json, text/event-stream")
+	initRec := httptest.NewRecorder()
+	handler.ServeHTTP(initRec, initReq)
+	if initRec.Code != http.StatusOK {
+		t.Fatalf("mcp initialize status=%d body=%s", initRec.Code, initRec.Body.String())
+	}
+
+	// Two members register under the SAME api key + project. Two members on one token is
+	// the multibinding shape: the resolver has more than one candidate, so a call it
+	// cannot pin to a session must refuse rather than pick one.
+	const claimantSession = "kr2-bound-claimant"
+	const otherSession = "kr2-other-member"
+	claimant := registerSessionMemberForTest(t, handler, apiKey, projectRoot, claimantSession, "KR2 Bound Claimant")
+	other := registerSessionMemberForTest(t, handler, apiKey, projectRoot, otherSession, "KR2 Other Member")
+	if claimant == other {
+		t.Fatalf("two sessions collided onto one member id %q", claimant)
+	}
+
+	// A claimable task assigned to the claimant. Registration created the project from
+	// project_root, so the resolved sessions share that bound project.
+	taskID := createTaskOverWireForSession(t, handler, apiKey, claimantSession, claimant, "KR2 claimable task", "Task used to prove the binding gate on claim.")
+
+	// Loud-failure half FIRST, while the task is still pending and unclaimed: a claim
+	// carrying a session_id that matches no registered member resolves member-LESS, and
+	// the actor gate refuses the dispatch.
+	failResp := postMCPToolCall(t, handler, apiKey, claimTaskBodyForSession("kr2-session-never-registered", taskID))
+	if failResp.Error != nil {
+		t.Fatalf("member-less claim returned a JSON-RPC error %q; the gate must surface a tool isError result instead", failResp.Error.Message)
+	}
+	if !failResp.Result.IsError {
+		t.Fatalf("member-less claim must be a loud isError result, got a success: %+v", failResp.Result)
+	}
+	if len(failResp.Result.Content) == 0 {
+		t.Fatalf("member-less claim isError result missing content")
+	}
+	if msg := failResp.Result.Content[0].Text; !strings.Contains(msg, "registered member_id is required") {
+		t.Fatalf("member-less claim error=%q want it to name the missing registered member_id", msg)
+	}
+
+	// No wrong-actor default: reading the task back (as the claimant) shows the failed
+	// claim claimed it for NOBODY - still pending, claimedBy still empty. The gate did not
+	// borrow the claimant's, the other member's, or any identity.
+	afterFail := wireToolSuccessText(t, postMCPToolCall(t, handler, apiKey, getTaskBodyForSession(claimantSession, taskID)), "task.get after failed claim")
+	var afterFailTask struct {
+		Task struct {
+			Status            string `json:"status"`
+			ClaimedByMemberID string `json:"claimedByMemberId"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(afterFail), &afterFailTask); err != nil {
+		t.Fatalf("decode task.get content %q: %v", afterFail, err)
+	}
+	if afterFailTask.Task.Status != "pending" {
+		t.Fatalf("after failed claim status=%q want pending (the refused dispatch must not mutate the task)", afterFailTask.Task.Status)
+	}
+	if afterFailTask.Task.ClaimedByMemberID != "" {
+		t.Fatalf("after failed claim claimedBy=%q want empty (no wrong-actor default)", afterFailTask.Task.ClaimedByMemberID)
+	}
+
+	// Success half: the rightful member's session claims the same task. pending -> active,
+	// claimedBy == the claimant - the bound identity threads through to the task service.
+	okText := wireToolSuccessText(t, postMCPToolCall(t, handler, apiKey, claimTaskBodyForSession(claimantSession, taskID)), "task.claim by bound member")
+	var claimed struct {
+		Task struct {
+			Status            string `json:"status"`
+			ClaimedByMemberID string `json:"claimedByMemberId"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(okText), &claimed); err != nil {
+		t.Fatalf("decode task.claim content %q: %v", okText, err)
+	}
+	if claimed.Task.Status != "active" {
+		t.Fatalf("claimed task status=%q want active", claimed.Task.Status)
+	}
+	if claimed.Task.ClaimedByMemberID != claimant {
+		t.Fatalf("claimed task claimedBy=%q want %q (the bound member must thread through as the actor)", claimed.Task.ClaimedByMemberID, claimant)
 	}
 }
