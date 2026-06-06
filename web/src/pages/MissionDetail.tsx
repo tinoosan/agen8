@@ -569,42 +569,36 @@ export default function MissionDetail() {
     return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Mission not found.</div>
   }
 
-  // Grouped "Related" links (tasks + decisions). Filtering mirrors the strategy
-  // map mission panel; rows link to routed detail pages instead of map nodes.
+  // Related cross-references (tasks + decisions). Filtering mirrors the strategy
+  // map mission panel; rendered as the same flat, per-row-labelled list the task
+  // and decision detail pages use.
   const krIds = new Set((keyResults ?? []).map((kr) => kr.id))
   const relatedTasks = (projectTasks ?? []).filter((t) => t.keyResultRef && krIds.has(t.keyResultRef))
   const relatedDecisions = (projectDecisions ?? []).filter(
     (d) => d.missionRef === mission.id || (d.keyResultRef && krIds.has(d.keyResultRef)),
   )
-  const relatedGroups: Array<{
-    type: string
-    rows: Array<{ id: string; title: string; to: string; suffix?: string; suffixColor?: string }>
-  }> = []
-  if (relatedTasks.length > 0) {
-    relatedGroups.push({
-      type: 'Task',
-      rows: relatedTasks.map((t) => ({
-        id: t.id,
-        title: t.title || t.description || t.id.slice(0, 12),
-        to: taskDetailLink(projectId, t.id),
-      })),
+  const related: Array<{ key: string; label: string; title: string; to: string; suffix?: string; suffixColor?: string }> = []
+  for (const t of relatedTasks) {
+    related.push({
+      key: t.id,
+      label: 'Task',
+      title: t.title || t.description || t.id.slice(0, 12),
+      to: taskDetailLink(projectId, t.id),
     })
   }
-  if (relatedDecisions.length > 0) {
-    relatedGroups.push({
-      type: 'Decision',
-      rows: relatedDecisions.map((d) => ({
-        id: d.id,
-        title: d.title,
-        to: decisionDetailLink(projectId, d.id),
-        ...(d.confidence > 0
-          ? {
-              suffix: `${Math.round(d.confidence * 100)}%`,
-              suffixColor:
-                d.confidence >= 0.8 ? 'var(--green)' : d.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
-            }
-          : {}),
-      })),
+  for (const d of relatedDecisions) {
+    related.push({
+      key: d.id,
+      label: 'Decision',
+      title: d.title,
+      to: decisionDetailLink(projectId, d.id),
+      ...(d.confidence > 0
+        ? {
+            suffix: `${Math.round(d.confidence * 100)}%`,
+            suffixColor:
+              d.confidence >= 0.8 ? 'var(--green)' : d.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
+          }
+        : {}),
     })
   }
 
@@ -731,45 +725,32 @@ export default function MissionDetail() {
         )}
       </div>
 
-      {/* Related entities — tasks + decisions linked to this mission, grouped by
-          type like the strategy map's mission context panel */}
-      {relatedGroups.length > 0 && (
+      {/* Related — tasks + decisions linked to this mission, rendered with the
+          same flat, per-row-labelled list the task and decision detail pages use */}
+      {related.length > 0 && (
         <div className="px-6 pb-8 max-w-4xl mx-auto w-full">
           <CollapsibleSection storageKey="mission-detail-related" defaultOpen label="Related">
-            <div className="flex flex-col gap-2 mt-1.5">
-              {relatedGroups.map((group) => (
-                <div key={group.type} className="flex flex-col gap-0.5">
-                  <div
-                    className="uppercase flex items-center gap-1.5 px-2 pt-1"
-                    style={{ fontSize: '0.5625rem', fontWeight: 600, letterSpacing: '0.06em', color: 'var(--text-3)' }}
-                  >
-                    {group.type}s
-                    <span style={{ opacity: 0.5 }}>{group.rows.length}</span>
-                  </div>
-                  {group.rows.map((row) => (
-                    <Link
-                      key={row.id}
-                      to={row.to}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-md no-underline hover:bg-[var(--bg-elevated)] transition-colors"
-                    >
-                      <span
-                        className="flex-1 min-w-0 truncate text-[var(--text-2)]"
-                        style={{ fontSize: '0.75rem', letterSpacing: '-0.12px' }}
-                      >
-                        {row.title}
-                      </span>
-                      {row.suffix && (
-                        <span
-                          className="shrink-0 tabular-nums font-semibold"
-                          style={{ fontSize: '0.625rem', color: row.suffixColor ?? 'var(--text-3)' }}
-                        >
-                          {row.suffix}
-                        </span>
-                      )}
-                      <ChevronRight size={11} className="shrink-0 text-[var(--text-3)]" />
-                    </Link>
-                  ))}
-                </div>
+            <div className="flex flex-col" style={{ borderTop: '1px solid var(--border)' }}>
+              {related.map((item, i) => (
+                <Link
+                  key={item.key}
+                  to={item.to}
+                  className="flex items-center gap-2 py-2.5 no-underline group"
+                  style={{ borderBottom: i < related.length - 1 ? '1px solid var(--border)' : 'none' }}
+                >
+                  <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-3)', width: 78 }}>
+                    {item.label}
+                  </span>
+                  <span className="flex-1 min-w-0 truncate text-[var(--text-1)] group-hover:text-[var(--accent)] transition-colors" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
+                    {item.title}
+                  </span>
+                  {item.suffix && (
+                    <span className="shrink-0 tabular-nums" style={{ fontSize: '0.6875rem', color: item.suffixColor ?? 'var(--text-3)' }}>
+                      {item.suffix}
+                    </span>
+                  )}
+                  <ChevronRight size={13} className="shrink-0 text-[var(--text-3)]" />
+                </Link>
               ))}
             </div>
           </CollapsibleSection>
