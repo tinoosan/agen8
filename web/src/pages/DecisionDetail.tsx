@@ -13,6 +13,7 @@ import { useDecision, useDeleteDecision } from '../hooks/useDecisions'
 import { useMissions, useProjectKRs } from '../hooks/useMissions'
 import { useProjectTasks } from '../hooks/useProjectTasks'
 import { formatRelative } from '@/lib/format'
+import { confidenceColor } from '@/lib/decisionDisplay'
 import {
   decisionsPanelLink,
   missionDetailLink,
@@ -34,12 +35,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-
-function confidenceColor(confidence: number): string {
-  if (confidence >= 0.8) return 'var(--green)'
-  if (confidence >= 0.5) return 'var(--amber)'
-  return 'var(--red)'
-}
 
 // Raw refs are opaque ids — shorten them so a missing title doesn't blow out the row.
 function shortRef(ref: string): string {

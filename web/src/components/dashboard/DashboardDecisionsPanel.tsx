@@ -22,17 +22,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import type { DecisionView } from '../../lib/types'
 import { formatRelative } from '@/lib/format'
+import { confidenceBadgeClass } from '@/lib/decisionDisplay'
 
 const PAGE_SIZE = 20
-
-// Confidence is the headline signal, so colour-code it for scanning: high
-// (>=80%) green, medium (>=50%) amber, low red. Literal class strings keep
-// Tailwind's JIT happy (no dynamic interpolation).
-function confidenceClass(confidence: number): string {
-  if (confidence >= 0.8) return 'bg-[var(--green-dim)] text-[var(--green)]'
-  if (confidence >= 0.5) return 'bg-[var(--amber-dim)] text-[var(--amber)]'
-  return 'bg-[var(--red-dim)] text-[var(--red)]'
-}
 
 function isoStart(date: string): string | undefined {
   return date ? new Date(`${date}T00:00:00Z`).toISOString() : undefined
@@ -92,7 +84,7 @@ function DecisionLogRow({ projectId, decision }: { projectId: string; decision: 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[0.6875rem] text-[var(--text-3)]">
           <span
             title={`${confidencePct}% confidence`}
-            className={`inline-flex items-center rounded-full px-1.5 py-px text-[0.625rem] font-semibold ${confidenceClass(decision.confidence ?? 0)}`}
+            className={`inline-flex items-center rounded-full px-1.5 py-px text-[0.625rem] font-semibold ${confidenceBadgeClass(decision.confidence ?? 0)}`}
           >
             {confidencePct}%
           </span>

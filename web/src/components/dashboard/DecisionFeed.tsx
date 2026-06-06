@@ -8,6 +8,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
 import { ScrollText, ChevronRight, AlertCircle, Link2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { confidenceColor } from '@/lib/decisionDisplay'
 import type { DecisionView } from '../../lib/types'
 import { safeReferenceLabel, sanitizeDecisionTitle } from '../../lib/displaySanitizers'
 import DecisionDetails from '../decision/DecisionDetails'
@@ -23,10 +24,7 @@ function ConfidenceDots({ confidence }: { confidence: number }) {
   // 0..1 mapped to 1..5 filled dots
   const filled = Math.max(1, Math.min(5, Math.round(confidence * 5)))
 
-  const color =
-    confidence >= 0.8 ? 'bg-[var(--green)]' :
-    confidence >= 0.5 ? 'bg-[var(--amber)]' :
-    'bg-[var(--red)]'
+  const fill = confidenceColor(confidence)
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -36,10 +34,8 @@ function ConfidenceDots({ confidence }: { confidence: number }) {
             {Array.from({ length: 5 }, (_, i) => (
               <span
                 key={i}
-                className={cn(
-                  'w-1 h-1 rounded-full',
-                  i < filled ? color : 'bg-[var(--text-3)]/30',
-                )}
+                className={cn('w-1 h-1 rounded-full', i < filled ? '' : 'bg-[var(--text-3)]/30')}
+                style={i < filled ? { backgroundColor: fill } : undefined}
               />
             ))}
           </div>

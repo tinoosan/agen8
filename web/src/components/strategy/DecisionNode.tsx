@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { Diamond } from 'lucide-react'
 import type { DecisionView, DecisionSource } from '../../lib/types'
 import { useStrategyMapStore } from './strategyMapStore'
-import { decisionActorDisplay } from '../../lib/decisionDisplay'
+import { confidenceColor, decisionActorDisplay } from '../../lib/decisionDisplay'
 
 export interface DecisionNodeData {
   decision: DecisionView
@@ -25,12 +25,6 @@ type DecisionNodeMeta = {
   linkLabel: string | null
 }
 
-function confidenceToColor(value: number): string {
-  if (value >= 0.8) return 'var(--green)'
-  if (value >= 0.6) return 'var(--amber)'
-  return 'var(--red)'
-}
-
 function relationCount(decision: DecisionView): number {
   return [
     decision.taskRef,
@@ -45,7 +39,7 @@ function decisionMeta(decision: DecisionView): DecisionNodeMeta {
   const links = relationCount(decision)
   const confidence = decision.confidence > 0 ? `${Math.round(decision.confidence * 100)}%` : null
 
-  const confColor = decision.confidence > 0 ? confidenceToColor(decision.confidence) : null
+  const confColor = decision.confidence > 0 ? confidenceColor(decision.confidence) : null
 
   return {
     label: 'Decision',

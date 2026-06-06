@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { formatDate } from '@/lib/format'
+import { confidenceColor } from '@/lib/decisionDisplay'
 import {
   ChevronRight,
   ChevronDown,
@@ -596,8 +597,7 @@ export default function MissionDetail() {
       ...(d.confidence > 0
         ? {
             suffix: `${Math.round(d.confidence * 100)}%`,
-            suffixColor:
-              d.confidence >= 0.8 ? 'var(--green)' : d.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
+            suffixColor: confidenceColor(d.confidence),
           }
         : {}),
     })

@@ -18,6 +18,7 @@ import { useRecentDecisions } from '../hooks/useDecisions'
 import { useKeyResult, useProjectKRs, useMissions } from '../hooks/useMissions'
 import { taskStatusLabel, taskStatusColor } from '../lib/statusLabels'
 import { formatRelative } from '@/lib/format'
+import { confidenceColor } from '@/lib/decisionDisplay'
 import {
   taskAssignedMemberLabel,
   taskClaimedMemberLabel,
@@ -551,7 +552,7 @@ export default function TaskDetail() {
                   {dec.confidence > 0 && (
                     <span
                       className="shrink-0 tabular-nums"
-                      style={{ fontSize: '0.6875rem', color: dec.confidence >= 0.8 ? 'var(--green)' : dec.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)' }}
+                      style={{ fontSize: '0.6875rem', color: confidenceColor(dec.confidence) }}
                     >
                       {Math.round(dec.confidence * 100)}%
                     </span>

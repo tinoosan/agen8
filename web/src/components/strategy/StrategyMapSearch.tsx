@@ -5,7 +5,7 @@ import { Search, Target, Diamond } from 'lucide-react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { normalizeTaskMembers, taskAssignedMemberLabel } from '../../lib/taskMembers'
-import { decisionActorDisplay } from '../../lib/decisionDisplay'
+import { confidenceColor, decisionActorDisplay } from '../../lib/decisionDisplay'
 import type { Task } from '../../lib/types'
 
 interface StrategyMapSearchProps {
@@ -92,12 +92,6 @@ function getNodeTypeLabel(type: string | undefined): string {
     case 'task': return 'Task'
     default: return ''
   }
-}
-
-function confidenceColor(value: number): string {
-  if (value >= 0.8) return 'var(--green)'
-  if (value >= 0.6) return 'var(--amber)'
-  return 'var(--red)'
 }
 
 const STATUS_TONE: Record<string, string> = {

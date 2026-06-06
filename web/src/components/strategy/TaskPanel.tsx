@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { taskStatusLabel, taskStatusColor } from '../../lib/statusLabels'
 import { formatRelative } from '@/lib/format'
+import { confidenceColor } from '@/lib/decisionDisplay'
 import {
   taskIdShort,
   taskDuration,
@@ -393,7 +394,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
             title: dec.title,
             ...(dec.confidence > 0 ? {
               badge: `${Math.round(dec.confidence * 100)}%`,
-              badgeColor: dec.confidence >= 0.8 ? 'var(--green)' : dec.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
+              badgeColor: confidenceColor(dec.confidence),
             } : {}),
           })),
         ]} />

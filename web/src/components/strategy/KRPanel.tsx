@@ -5,6 +5,7 @@ import { useRecentDecisions } from '../../hooks/useDecisions'
 import { useMissions } from '../../hooks/useMissions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import { missionDetailLink } from '../../lib/routing'
+import { confidenceColor } from '../../lib/decisionDisplay'
 import { RelatedSection } from './RelatedSection'
 import KRDetailBody from './KRDetailBody'
 import type { KRNodeData } from './KRNode'
@@ -49,7 +50,7 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
       title: dec.title,
       ...(dec.confidence > 0 ? {
         badge: `${Math.round(dec.confidence * 100)}%`,
-        badgeColor: dec.confidence >= 0.8 ? 'var(--green)' : dec.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
+        badgeColor: confidenceColor(dec.confidence),
       } : {}),
     })),
   ]

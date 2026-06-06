@@ -38,3 +38,34 @@ function readableIdentity(value: string | undefined): string {
 function isRawIdentifier(value: string): boolean {
   return /^(member|user|session|thread|channel|space|project|task|kr|mission|dec)-[a-z0-9-]{4,}$/i.test(value.trim())
 }
+
+export type ConfidenceTone = 'high' | 'medium' | 'low'
+
+// Confidence colour-codes a decision for scanning: high (>=80%) green,
+// medium (>=60%) amber, low red. One threshold source for every surface.
+export function confidenceTone(confidence: number): ConfidenceTone {
+  if (confidence >= 0.8) return 'high'
+  if (confidence >= 0.6) return 'medium'
+  return 'low'
+}
+
+const TONE_COLOR: Record<ConfidenceTone, string> = {
+  high: 'var(--green)',
+  medium: 'var(--amber)',
+  low: 'var(--red)',
+}
+
+export function confidenceColor(confidence: number): string {
+  return TONE_COLOR[confidenceTone(confidence)]
+}
+
+// Literal class strings keep Tailwind's JIT happy (no dynamic interpolation).
+const TONE_BADGE_CLASS: Record<ConfidenceTone, string> = {
+  high: 'bg-[var(--green-dim)] text-[var(--green)]',
+  medium: 'bg-[var(--amber-dim)] text-[var(--amber)]',
+  low: 'bg-[var(--red-dim)] text-[var(--red)]',
+}
+
+export function confidenceBadgeClass(confidence: number): string {
+  return TONE_BADGE_CLASS[confidenceTone(confidence)]
+}

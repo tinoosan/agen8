@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useKeyResults, useUpdateMission } from '../../hooks/useMissions'
 import { missionDetailLink } from '../../lib/routing'
+import { confidenceColor } from '../../lib/decisionDisplay'
 import MissionLifecycleActions from '../mission/MissionLifecycleActions'
 import { RelatedSection } from './RelatedSection'
 import { useRecentDecisions } from '../../hooks/useDecisions'
@@ -68,7 +69,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
       title: dec.title,
       ...(dec.confidence > 0 ? {
         badge: `${Math.round(dec.confidence * 100)}%`,
-        badgeColor: dec.confidence >= 0.8 ? 'var(--green)' : dec.confidence >= 0.6 ? 'var(--amber)' : 'var(--red)',
+        badgeColor: confidenceColor(dec.confidence),
       } : {}),
     })),
   ]
