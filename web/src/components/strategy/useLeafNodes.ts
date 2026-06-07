@@ -10,7 +10,7 @@ import type { TaskNodeData } from './TaskNode'
  *
  * Edge routing:
  *   Decision   → KR (keyResultRef) OR Mission (missionRef)  — denormalised at write time
- *   Task       → KR (keyResultRef)                          — only tasks with a KR ref shown
+ *   Task       → KR (keyResultRef) OR Mission (missionRef)  — KR preferred when both
  * Nodes without a valid parent edge are not shown to keep the graph clean.
  */
 export function useLeafNodes(projectId: string | null): {
@@ -23,8 +23,9 @@ export function useLeafNodes(projectId: string | null): {
 
 
   // Index tasks by ID so decisions can find their parent task.
-  // Only tasks with a keyResultRef are in the graph — the deepest-path rule
-  // checks membership here before preferring the task node as parent.
+  // Tasks with a keyResultRef OR a missionRef are in the graph — the
+  // deepest-path rule checks membership here before preferring the task
+  // node as parent.
   const taskMap = useMemo(() => {
     const m = new Map<string, (typeof tasks)[number]>()
     for (const t of tasks) m.set(t.id, t)
@@ -57,10 +58,14 @@ export function useLeafNodes(projectId: string | null): {
         data: taskData,
       })
       addedTaskIds.add(taskId)
-      if (task.keyResultRef) {
+      // Attach to the KR when present, otherwise straight to the mission.
+      // Either parent keeps the task reachable from a mission by the BFS
+      // cluster walk so it inherits a cluster colour.
+      const parentRef = task.keyResultRef ?? task.missionRef
+      if (parentRef) {
         edges.push({
-          id: `${nodeId}-->${task.keyResultRef}`,
-          source: task.keyResultRef,
+          id: `${nodeId}-->${parentRef}`,
+          source: parentRef,
           target: nodeId,
           type: 'statusEdge',
           animated: false,
@@ -71,10 +76,11 @@ export function useLeafNodes(projectId: string | null): {
     }
 
     // ── Tasks ───────────────────────────────────────────────────────────────
-    // Eagerly add tasks that have a keyResultRef. Tasks without one are added
-    // on-demand via ensureTaskNode when referenced by a decision.
+    // Eagerly add tasks that have a parent ref (KR or mission). Tasks with
+    // neither are added on-demand via ensureTaskNode when referenced by a
+    // decision (and stay colourless orphans).
     for (const task of tasks) {
-      if (!task.keyResultRef) continue
+      if (!task.keyResultRef && !task.missionRef) continue
       ensureTaskNode(task.id)
     }
 
@@ -84,8 +90,8 @@ export function useLeafNodes(projectId: string | null): {
     // clusterColor and its selection outline/edge highlighting falls back
     // to neutral gray:
     //
-    //   1. Task with a keyResultRef  — deepest path, decision visually sits
-    //                                  near its task, cluster via task→kr→mission
+    //   1. Task with a kr/mission ref — deepest path, decision visually sits
+    //                                  near its task, cluster via task→parent
     //   2. Direct keyResultRef       — cluster via kr→mission
     //   3. Direct missionRef         — cluster directly from mission
     //   4. Orphan task (no kr/mission) — last resort, leaf will be colourless
@@ -99,11 +105,13 @@ export function useLeafNodes(projectId: string | null): {
       keyResultRef: string | undefined,
       missionRef?: string,
     ): string | undefined => {
-      // Prefer the task only if it has a KR — otherwise the task itself is
-      // orphan and decision attached to it loses its cluster identity.
+      // Prefer the task only if it has a parent ref (KR or mission) — an
+      // orphan task has no cluster identity, so a decision attached to it
+      // would lose its colour. A mission-linked task is now reachable, so it
+      // qualifies as a structural parent too.
       if (taskRef) {
         const linkedTask = taskMap.get(taskRef)
-        if (linkedTask?.keyResultRef) {
+        if (linkedTask?.keyResultRef || linkedTask?.missionRef) {
           return ensureTaskNode(taskRef)
         }
       }
