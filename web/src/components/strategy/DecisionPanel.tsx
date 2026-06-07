@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { X } from 'lucide-react'
+import { PanelHeader } from './PanelHeader'
 import { RelatedSection } from './RelatedSection'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -70,11 +70,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Header — dark section, mirrors MissionPanel / KRPanel */}
-      <div
-        className="flex items-start gap-2 shrink-0"
-        style={{ background: 'var(--bg-app)', padding: '16px' }}
-      >
-        <div className="flex-1 min-w-0">
+      <PanelHeader onClose={onClose}>
           <p
             className="uppercase mb-1"
             style={{
@@ -99,16 +95,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
           >
             {decision.title}
           </h2>
-        </div>
-        <button
-          onClick={onClose}
-          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors mt-0.5"
-          style={{ padding: '4px', borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }}
-          aria-label="Close panel"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      </PanelHeader>
 
       {/* Body — scrollable content sections */}
       <div

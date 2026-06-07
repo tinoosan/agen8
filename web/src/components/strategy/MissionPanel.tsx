@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { X, ExternalLink, Calendar } from 'lucide-react'
+import { ExternalLink, Calendar } from 'lucide-react'
+import { PanelHeader } from './PanelHeader'
 import { useLocation } from 'wouter'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -105,11 +106,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Header — dark section */}
-      <div
-        className="flex items-start gap-2 shrink-0"
-        style={{ background: 'var(--bg-app)', padding: '16px' }}
-      >
-        <div className="flex-1 min-w-0">
+      <PanelHeader onClose={onClose}>
           <p
             className="uppercase mb-1"
             style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.33, color: 'var(--text-3)' }}
@@ -122,16 +119,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
           >
             {mission.title}
           </h2>
-        </div>
-        <button
-          onClick={onClose}
-          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors mt-0.5"
-          style={{ padding: '4px', borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }}
-          aria-label="Close panel"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      </PanelHeader>
 
       {/* Summary zone — caps at summaryHeight with scroll, shrinks to fit when content is short */}
       <div

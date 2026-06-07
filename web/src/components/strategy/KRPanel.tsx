@@ -1,4 +1,5 @@
-import { X, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
+import { PanelHeader } from './PanelHeader'
 import { useLocation } from 'wouter'
 import { Button } from '@/components/ui/button'
 import { useRecentDecisions } from '../../hooks/useDecisions'
@@ -59,11 +60,7 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Header — dark section, mirrors MissionPanel */}
-      <div
-        className="flex items-start gap-2 shrink-0"
-        style={{ background: 'var(--bg-app)', padding: '16px' }}
-      >
-        <div className="flex-1 min-w-0">
+      <PanelHeader onClose={onClose}>
           <p
             className="uppercase mb-1"
             style={{
@@ -88,16 +85,7 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
           >
             {kr.title}
           </h2>
-        </div>
-        <button
-          onClick={onClose}
-          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors mt-0.5"
-          style={{ padding: '4px', borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }}
-          aria-label="Close panel"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      </PanelHeader>
 
       {/* Body — scrollable, holds the detail content + linked decisions */}
       <div

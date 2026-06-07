@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
-import { X, Clock, Hash, AlertTriangle } from 'lucide-react'
+import { Clock, Hash, AlertTriangle } from 'lucide-react'
+import { PanelHeader } from './PanelHeader'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useResizableSummary } from './useResizableSummary'
 import { RelatedSection } from './RelatedSection'
@@ -84,11 +85,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Header — dark section */}
-      <div
-        className="flex items-start gap-2 shrink-0"
-        style={{ background: 'var(--bg-app)', padding: '16px' }}
-      >
-        <div className="flex-1 min-w-0">
+      <PanelHeader onClose={onClose}>
           <div className="flex items-center gap-2 mb-1">
             <p
               className="uppercase"
@@ -109,16 +106,7 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           >
             {displayTitle}
           </h2>
-        </div>
-        <button
-          onClick={onClose}
-          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors mt-0.5"
-          style={{ padding: '4px', borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }}
-          aria-label="Close panel"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      </PanelHeader>
 
       {/* Summary zone — user-resizable, scrolls internally */}
       <div
