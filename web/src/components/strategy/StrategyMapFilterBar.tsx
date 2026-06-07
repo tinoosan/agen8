@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { Activity, Ban, CheckCircle2, Diamond, GitBranch, Minus, Plus } from 'lucide-react'
+import { Activity, Ban, CheckCircle2, Diamond, GitBranch, Minus, Plus, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { FilterPreset } from './strategyMapFilters'
 
@@ -18,6 +18,10 @@ interface Props {
   matchCount: number
   contextDepth: number
   onContextDepthChange: (depth: number) => void
+  /** Open the node-search panel. Gives touch users (iPad, where the mobile top
+   *  bar is hidden and there's no keyboard for "/") a reachable way in, and
+   *  makes search discoverable for everyone. */
+  onOpenSearch: () => void
 }
 
 const MAX_CONTEXT_DEPTH = 3
@@ -29,6 +33,7 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
   matchCount,
   contextDepth,
   onContextDepthChange,
+  onOpenSearch,
 }: Props) {
   const buttons: FilterButton[] = [
     { key: 'in_motion', label: 'In Motion', icon: Activity, color: 'var(--blue)', visible: true },
@@ -42,6 +47,31 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
 
   return (
     <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5">
+      {/* Search node — touch-reachable entry point to the node search. Always
+          visible (the mobile top-bar search is md:hidden, so iPad/tablet have
+          no other way in without a keyboard). Mirrors the inactive-pill style. */}
+      <button
+        type="button"
+        onClick={onOpenSearch}
+        aria-label="Search nodes"
+        title="Search nodes (/)"
+        className={cn(
+          'inline-flex shrink-0 items-center justify-center transition-all duration-200',
+          'focus:outline-none focus-visible:outline-none hover:scale-[1.03]',
+        )}
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 20,
+          border: '1px solid var(--border)',
+          background: 'var(--bg-panel)',
+          color: 'var(--text-3)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+        }}
+      >
+        <Search size={13} />
+      </button>
+
       {buttons.map((btn) => {
         if (!btn.visible) return null
         const isActive = activeFilter === btn.key

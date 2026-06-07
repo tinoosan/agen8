@@ -262,6 +262,7 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
           matchCount={filterResult?.matchCount ?? 0}
           contextDepth={contextDepth}
           onContextDepthChange={setContextDepth}
+          onOpenSearch={() => setSearchOpen(true)}
         />
 
         <StrategyMapCanvas
