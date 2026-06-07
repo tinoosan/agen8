@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real-time events (SSE) — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / realtime-events</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Runtime &amp; protocol</span>
+  <h1>Real-time events over SSE</h1>
+  <p class="lede">
+    Server-Sent Events are how agen8 pushes durable state changes to every open browser without polling. A domain change is published to the in-process bus, the daemon's <code>GET /events</code> stream fans it out to connected clients for the resolved project as a JSON-RPC notification, and the React app turns notification traffic into query invalidation. The core realtime path is live for pin events with project-scoped fan-out and authenticated SSE.
+  </p>
+
+  <div class="callout">
+    <strong>Status: live core.</strong> The in-process bus and browser client were already present; the backend bridge and pin-event fan-out are now implemented. Remaining work is documented in Section&nbsp;3 as additional domains to subscribe through the existing hub.
+  </div>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#why-sse">Why SSE, not WebSockets or polling</a></li>
+      <li><a href="#shape">End-to-end shape</a></li>
+      <li><a href="#state">Current state: live vs. missing</a></li>
+      <li><a href="#envelope">Notification envelope and method convention</a></li>
+      <li><a href="#bridge">The /events bridge</a></li>
+      <li><a href="#publish">Publishing a new event (pins)</a></li>
+      <li><a href="#auth">Authenticating the stream</a></li>
+      <li><a href="#reconnect">Reconnect and delivery semantics</a></li>
+      <li><a href="#layout">Code layout</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="why-sse">1. Why SSE, not WebSockets or polling</h2>
+
+  <p>The need is one-directional: the server tells the browser "something changed, re-fetch." Writes already have a transport — every mutation goes over <code>POST /rpc</code>. There is no client&rarr;server streaming requirement, so a full-duplex WebSocket would be infrastructure the product does not use.</p>
+
+  <table>
+    <thead><tr><th>Option</th><th>Verdict</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>Polling</td><td>Rejected as the baseline</td><td>Wastes requests, adds latency equal to the interval, and scales with client count &times; poll rate. Still used as a slow safety net (see §8), not as the primary path.</td></tr>
+      <tr><td>WebSocket</td><td>Rejected</td><td>Full duplex for a one-way need. Adds connection upgrade handling, framing, and heartbeat logic with no payoff — writes already ride <code>POST /rpc</code>.</td></tr>
+      <tr><td>SSE (chosen)</td><td>Chosen</td><td>One-way server&rarr;browser over plain HTTP. <code>EventSource</code> gives automatic reconnect for free, rides the existing daemon and its auth, and degrades to a normal HTTP request on the wire.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="shape">2. End-to-end shape</h2>
+
+  <p>A change flows through five hops. The service that owns the data never knows a browser is listening — it publishes a domain event and returns. Everything downstream is decoupled through the bus.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 960 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <defs>
+      <marker id="rt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-faint)"/>
+      </marker>
+    </defs>
+
+    <rect x="24" y="40" width="912" height="220" rx="12" fill="var(--bg-elevated)" stroke="var(--border)"/>
+    <text x="480" y="72" text-anchor="middle" font-size="15" font-weight="700" fill="var(--text)">One publish, fanned out to every open browser</text>
+
+    <rect x="44" y="108" width="150" height="92" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="119" y="138" text-anchor="middle" font-weight="700" fill="var(--text)">App publisher</text>
+    <text x="119" y="158" text-anchor="middle" fill="var(--text-muted)">bus.Publish(</text>
+    <text x="119" y="174" text-anchor="middle" fill="var(--text-muted)">topic, event)</text>
+
+    <rect x="232" y="108" width="150" height="92" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="307" y="138" text-anchor="middle" font-weight="700" fill="var(--text)">Event bus</text>
+    <text x="307" y="158" text-anchor="middle" fill="var(--text-muted)">Watermill</text>
+    <text x="307" y="174" text-anchor="middle" fill="var(--text-faint)">in-process</text>
+
+    <rect x="420" y="108" width="150" height="92" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="495" y="134" text-anchor="middle" font-weight="700" fill="var(--text)">/events hub</text>
+    <text x="495" y="154" text-anchor="middle" fill="var(--text-muted)">subscribe once,</text>
+    <text x="495" y="170" text-anchor="middle" fill="var(--text-muted)">fan out by</text>
+    <text x="495" y="186" text-anchor="middle" fill="var(--text-faint)">projectId</text>
+
+    <rect x="608" y="108" width="150" height="92" rx="8" fill="var(--bg-code)" stroke="var(--border-strong)"/>
+    <text x="683" y="138" text-anchor="middle" font-weight="700" fill="var(--text)">EventSource</text>
+    <text x="683" y="158" text-anchor="middle" fill="var(--text-muted)">rpc.ts client</text>
+    <text x="683" y="174" text-anchor="middle" fill="var(--text-faint)">auto-reconnect</text>
+
+    <rect x="796" y="108" width="140" height="92" rx="8" fill="var(--good-soft)" stroke="var(--good)"/>
+    <text x="866" y="138" text-anchor="middle" font-weight="700" fill="var(--text)">React Query</text>
+    <text x="866" y="158" text-anchor="middle" fill="var(--text-muted)">invalidate &amp;</text>
+    <text x="866" y="174" text-anchor="middle" fill="var(--text-faint)">refetch</text>
+
+    <line x1="194" y1="154" x2="232" y2="154" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#rt-arrow)"/>
+    <line x1="382" y1="154" x2="420" y2="154" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#rt-arrow)"/>
+    <line x1="570" y1="154" x2="608" y2="154" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#rt-arrow)"/>
+    <line x1="758" y1="154" x2="796" y2="154" stroke="var(--text-faint)" stroke-width="1.5" marker-end="url(#rt-arrow)"/>
+
+    <text x="213" y="230" text-anchor="middle" fill="var(--text-faint)">domain event</text>
+    <text x="401" y="230" text-anchor="middle" fill="var(--text-faint)">channel</text>
+    <text x="589" y="230" text-anchor="middle" fill="var(--text-faint)">SSE frame</text>
+    <text x="777" y="230" text-anchor="middle" fill="var(--text-faint)">notification</text>
+  </svg>
+  </div>
+
+  <div class="layers">
+    <div class="layer service">
+      <div class="label">Publisher (app layer)</div>
+      <div class="role">A service mutation finishes, then the app-layer publisher calls <code>bus.Publish(topic, event)</code>. Publishing lives <em>outside</em> the domain service so services with a no-side-effects invariant (the pin service) stay pure — the publisher wraps them.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">internal/eventbus</div>
+      <div class="role">In-process Watermill <code>GoChannel</code>. Serializes the event to JSON and delivers it to subscribers of the topic. No network, no broker, no persistence.</div>
+    </div>
+    <div class="layer handler">
+      <div class="label">GET /events hub (daemon)</div>
+      <div class="role">Subscribes to the relevant topics once, holds the set of connected clients, filters each event by <code>projectId</code>, translates the domain event into a JSON-RPC notification, and writes an SSE frame to every matching client.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">EventSource client + React Query</div>
+      <div class="role"><code>web/src/lib/rpc.ts</code> parses each frame, dispatches by method to handlers registered with <code>onNotification</code>; hooks map the event to <code>queryClient.invalidateQueries(...)</code> so the affected view refetches.</div>
+    </div>
+  </div>
+
+  <h2 id="state">3. Current state: live vs. pending</h2>
+
+  <p>The bridge and pin publisher are implemented. Remaining backlog is explicit in the scope row below.</p>
+
+  <table>
+    <thead><tr><th>Piece</th><th>State</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>In-process bus (publish / subscribe / typed events)</td><td>Live</td><td><code>internal/eventbus/bus.go</code>, <code>events.go</code></td></tr>
+      <tr><td>Mission / KR publishers onto the bus</td><td>Live</td><td><code>internal/services/mission/app</code>, app-level publishers</td></tr>
+      <tr><td>Browser <code>EventSource('/events')</code> client, dispatch, reconnect</td><td>Live</td><td><code>web/src/lib/rpc.ts</code></td></tr>
+      <tr><td>A real consumer (board refetch on <code>event.append</code>)</td><td>Live</td><td><code>web/src/hooks/useProjectTasks.ts</code> (<code>useProjectTasksSSE</code>)</td></tr>
+      <tr><td>Pin consumer (live cross-device pin sync)</td><td>Live</td><td><code>web/src/hooks/usePins.ts</code> — invalidates on <code>pin.*</code>, 60s poll backstop</td></tr>
+      <tr><td><code>GET /events</code> subscribes to the bus and pushes frames</td><td>Live</td><td><code>internal/daemon/daemon.go</code> (<code>handleEvents</code>)</td></tr>
+      <tr><td>Per-project fan-out hub (one subscription &rarr; N clients)</td><td>Live</td><td><code>internal/daemon/events_hub.go</code></td></tr>
+      <tr><td>Stream authentication for <code>EventSource</code></td><td>Live</td><td><code>internal/daemon/daemon.go</code> + cookie write path in <code>web/src/lib/rpc.ts</code></td></tr>
+      <tr><td>Pin events on the bus</td><td>Live</td><td><code>internal/services/pin/app/service.go</code></td></tr>
+      <tr><td>Additional event-domain subscriptions</td><td>Pending</td><td>hub currently subscribes only to <code>TopicPinLifecycle</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="envelope">4. Notification envelope and method convention</h2>
+
+  <p>The wire contract is fixed by the client that already exists. <code>rpc.ts</code> reads <code>e.data</code> as one JSON object per SSE <code>message</code> frame, requires a <code>method</code> field, and dispatches to every handler registered for that method (plus a <code>*</code> wildcard). The daemon must produce exactly this shape.</p>
+
+<pre><code class="lang-json">{
+  "jsonrpc": "2.0",
+  "method": "event.append",
+  "event": { "type": "pin.added", "projectId": "...", "nodeRef": "..." }
+}</code></pre>
+
+  <p>The house convention is a <em>single</em> notification method, not one method per domain. The live task consumer subscribes to <code>event.append</code> and then filters on the event's <code>type</code> prefix:</p>
+
+<pre><code class="lang-ts"><span class="tok-comment">// useProjectTasks.ts — the established pattern</span>
+onNotification(<span class="tok-string">'event.append'</span>, (notif) =&gt; {
+  <span class="tok-kw">const</span> type = (notif?.event <span class="tok-kw">as</span> any)?.type ?? <span class="tok-string">''</span>
+  <span class="tok-kw">if</span> (type.startsWith(<span class="tok-string">'task.'</span>)) {
+    queryClient.invalidateQueries({ queryKey: qk.tasksBoardAll })
+  }
+})</code></pre>
+
+  <p>So new domains ride the same rail. Pins emit <code>event.append</code> notifications whose <code>event.type</code> is <code>pin.added</code> / <code>pin.removed</code>. Do not introduce a bespoke <code>pin.changed</code> method — that would fork the contract and force every consumer to learn a second dispatch scheme.</p>
+
+  <div class="callout">
+    <strong>Why type-prefix filtering, not per-method routing.</strong> One method keeps the client dispatch table flat and the reconnect logic single-path. Consumers opt in to the slices they care about by prefix, and the daemon never has to know the React Query key space. The cost — every client wakes for every event and discards most — is negligible at single-daemon scale and is the right trade for a uniform contract.
+  </div>
+
+  <h2 id="bridge">5. The /events bridge</h2>
+
+  <p>The SSE handler now implements all five responsibilities end-to-end: auth, project resolution, hub registration, stream loop, heartbeat, and teardown.</p>
+
+  <ol>
+    <li><strong>Authenticate</strong> the request and resolve the caller's <code>projectId</code> from query and referer fallback.</li>
+    <li><strong>Register</strong> the connection with the fan-out hub under that <code>projectId</code>, receiving a per-client channel.</li>
+    <li><strong>Stream</strong> — loop on the client channel, write each notification as an SSE <code>data:</code> frame, and <code>Flush</code> after every write.</li>
+    <li><strong>Heartbeat</strong> — emit a comment frame on an interval so idle connections and intermediaries do not time out.</li>
+    <li><strong>Clean up</strong> — on <code>ctx.Done()</code> (client navigated away or reconnected), deregister from the hub so the channel is not leaked.</li>
+  </ol>
+
+  <p>The <strong>fan-out hub</strong> is the daemon-side component. The bus delivers events into the process, then the hub keeps connected clients grouped by <code>projectId</code> and writes events only to matching clients. This keeps processing stable as browser tabs scale.</p>
+
+<pre><code class="lang-go"><span class="tok-comment">// Shape of the hub — one bus subscription, many client fan-outs.</span>
+<span class="tok-kw">type</span> <span class="tok-type">eventsHub</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">mu</span>      sync.RWMutex
+    <span class="tok-field">clients</span> map[string]map[*eventClient]struct{} <span class="tok-comment">// projectId -&gt; set</span>
+}
+
+<span class="tok-comment">// Register returns a channel of ready-to-write notifications and an</span>
+<span class="tok-comment">// unregister func the handler defers. Filtering by projectId happens</span>
+<span class="tok-comment">// in the hub's bus callback, before the notification reaches a client.</span>
+<span class="tok-kw">func</span> (h *<span class="tok-type">eventsHub</span>) <span class="tok-fn">Register</span>(projectID string) (&lt;-<span class="tok-kw">chan</span> []byte, func()) { <span class="tok-comment">/* ... */</span> }</code></pre>
+
+  <p>The handler stays thin; the hub holds the concurrency. Because the bus is in-process, an event published anywhere in the daemon reaches the hub synchronously — there is no cross-process delivery to reason about at the single-daemon baseline.</p>
+
+  <h2 id="publish">6. Publishing a new event (pins)</h2>
+
+  <p>The pin service holds a hard invariant: <em>pinning has no side effects and emits no events</em> (see the <a href="./pin-service.html">Pin Service</a> doc). That invariant stays. The publisher is added <strong>around</strong> the service at the app layer — the same place the mission and KR publishers already live — not inside the pin domain.</p>
+
+  <p>Publishing is implemented end-to-end for pin events:</p>
+
+  <ol>
+    <li>A topic constant and typed event in <code>internal/eventbus/events.go</code>, alongside the existing five topics:
+<pre><code class="lang-go"><span class="tok-kw">const</span> <span class="tok-name">TopicPinLifecycle</span> = <span class="tok-string">"pin.lifecycle"</span>
+
+<span class="tok-kw">type</span> <span class="tok-type">PinLifecycleEvent</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> string    <span class="tok-string">`json:"projectId"`</span>
+    <span class="tok-field">NodeRef</span>   string    <span class="tok-string">`json:"nodeRef"`</span>
+    <span class="tok-field">NodeType</span>  string    <span class="tok-string">`json:"nodeType,omitempty"`</span>
+    <span class="tok-field">EventType</span> string    <span class="tok-string">`json:"eventType"`</span> <span class="tok-comment">// "pin.added" | "pin.removed"</span>
+    <span class="tok-field">Timestamp</span> time.Time <span class="tok-string">`json:"timestamp"`</span>
+}</code></pre>
+    </li>
+    <li>An app-layer publisher that wraps <code>PinSvc.Pin</code> / <code>Unpin</code>: on success it publishes pin events with <code>projectId</code> for hub filtering.</li>
+    <li>The bridge maps <code>TopicPinLifecycle</code> &rarr; an <code>event.append</code> notification whose <code>event.type</code> is the event's <code>EventType</code>.</li>
+  </ol>
+
+  <div class="callout">
+    <strong>Idempotency note.</strong> A re-pin is a no-op that preserves <code>CreatedAt</code>. The publisher should only emit when the pin set actually changed, so a redundant pin does not flood every client with a refetch. The service already returns enough to distinguish a real change from a no-op.
+  </div>
+
+  <h2 id="auth">7. Authenticating the stream</h2>
+
+  <p><code>EventSource</code> cannot set custom headers, so SSE is currently authenticated through a session-cookie path.</p>
+
+  <ol>
+    <li><strong>POST transport:</strong> <code>POST /rpc</code> requests remain bearer-based via <code>Authorization: Bearer &lt;token&gt;</code>.</li>
+    <li><strong>Cookie sync:</strong> <code>web/src/lib/rpc.ts</code> mirrors <code>localStorage['agen8.sessionToken']</code> into <code>document.cookie</code>.</li>
+    <li><strong>Auth gate:</strong> <code>GET /events</code> validates <code>sessionCookieName</code> in <code>httpIdentityFromSessionCookie</code> before streaming.</li>
+    <li><strong>Project scope:</strong> <code>eventProjectID</code> resolves from <code>projectId</code> query first, with Referer fallback.</li>
+  </ol>
+
+  <p>The mirror cookie is written client-side as <code>SameSite=Lax</code>, <code>path=/</code>. That keeps the read-only stream safe: the cookie is not sent on cross-site subresource requests, and <code>/rpc</code> still authenticates only via the <code>Authorization</code> header, so no cross-site request can drive a state change with it.</p>
+
+  <div class="callout">
+    <strong>Residual hardening (tracked, not blocking).</strong> Two gaps are acceptable under the current single-user, single-daemon model and must close before multi-user or hosted deployment:
+    <ul>
+      <li><strong>No <code>Secure</code> flag.</strong> The cookie is fine over localhost HTTP but must be marked <code>Secure</code> once served over HTTPS, so it is never sent in clear text.</li>
+      <li><strong>Login-scoped, not membership-scoped.</strong> <code>/events</code> verifies the caller is an authenticated user, but does not check that the user is a <em>member</em> of the requested <code>projectId</code>. Harmless today — one account owns every project — but a real authorization gap the moment projects can belong to different users.</li>
+    </ul>
+  </div>
+
+  <h2 id="reconnect">8. Reconnect and delivery semantics</h2>
+
+  <p><code>EventSource</code> reconnects on its own, and <code>rpc.ts</code> adds an explicit 2-second retry on <code>onerror</code>. The contract the daemon must honor:</p>
+
+  <table>
+    <thead><tr><th>Property</th><th>Guarantee</th><th>Consequence</th></tr></thead>
+    <tbody>
+      <tr><td>Delivery</td><td>At-most-once, best-effort</td><td>Events are signals to refetch, not data. A dropped event is recovered by the next event or the polling safety net — never trust the payload as the source of truth.</td></tr>
+      <tr><td>Ordering</td><td>Per-connection FIFO; no cross-event guarantee after a reconnect</td><td>Consumers must be idempotent: invalidate-and-refetch is naturally so.</td></tr>
+      <tr><td>Reconnect gap</td><td>Events during a disconnect are lost (the bus is not persistent)</td><td>Hooks keep a slow polling interval (e.g. tasks drop from 3s to 10s when SSE is healthy) so a missed event self-heals within one slow tick.</td></tr>
+    </tbody>
+  </table>
+
+  <p>This "SSE accelerates, polling backstops" model is why the consumer treats the notification as a hint, not a record. It also means the bridge never needs replay, acknowledgements, or a durable log — deliberately, to keep the single-daemon path simple.</p>
+
+  <h2 id="layout">9. Code layout</h2>
+
+  <div class="tree"><pre>internal/
+  eventbus/
+    bus.go                 # Watermill GoChannel: Publish / Subscribe / AddHandler / Run
+    events.go              # topic constants + typed domain events
+
+  daemon/
+    daemon.go              # handleEvents (authenticated, hub-backed bridge)
+    events_hub.go          # per-project fan-out hub
+
+  app/
+    application.go         # mission/KR publishers wired here
+
+web/
+  src/lib/
+    rpc.ts                 # EventSource client, onNotification dispatch, 2s reconnect; mirrors the session token into a cookie for /events auth (live)
+  src/hooks/
+    useProjectTasks.ts     # useProjectTasksSSE — reference consumer (live)
+    usePins.ts             # subscribes to event.append, invalidates on pin.* events; 60s poll backstop (live)</pre></div>
+
+  <h2 id="invariants">10. Invariants</h2>
+
+  <ul>
+    <li><strong>Services do not know about browsers.</strong> A mutation publishes a domain event and returns. The bus, hub, and SSE layer are all downstream and removable without touching domain logic.</li>
+    <li><strong>The pin service stays side-effect-free.</strong> Pin events are published by an app-layer wrapper, never from inside the pin domain. The no-events invariant in the pin service is preserved verbatim.</li>
+    <li><strong>One notification method.</strong> Everything arrives as <code>event.append</code>; consumers filter on <code>event.type</code> prefixes. No per-domain methods.</li>
+    <li><strong>Notifications are hints, not data.</strong> Consumers invalidate-and-refetch; they never render the event payload as state. This keeps delivery best-effort and the bridge replay-free.</li>
+    <li><strong>Every stream is project-scoped.</strong> A client only ever receives events for its resolved <code>projectId</code>; cross-project leakage is structurally impossible in the hub.</li>
+    <li><strong>No secrets in the URL.</strong> Stream auth uses a session cookie and no token-in-query strategy.</li>
+  </ul>
+
+  <p class="footnote">
+    Architecture · agen8 · This document reflects current live SSE behavior. Update it as soon as additional event domains are added to <code>events_hub.go</code> or new consumers are introduced.
+  </p>
+
+</div>
+</body>
+</html>

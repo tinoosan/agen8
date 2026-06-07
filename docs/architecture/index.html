@@ -171,6 +171,12 @@
           <div class="meta">Shared caller context contract for RPC, MCP, and service authorization.</div>
           <span class="path">internal/caller</span>
         </a>
+        <a class="card" href="./realtime-events.html">
+          <div class="label">Realtime</div>
+          <div class="title">Real-time Events (SSE)</div>
+          <div class="meta">Target design: domain change &rarr; in-process bus &rarr; <code>/events</code> fan-out hub &rarr; <code>EventSource</code> &rarr; query invalidation. One <code>event.append</code> method, project-scoped, no polling.</div>
+          <span class="path">internal/daemon · internal/eventbus</span>
+        </a>
         <a class="card" href="./project-workspace-binding.html">
           <div class="label">Planned</div>
           <div class="title">Projects, Workspaces &amp; Link Tokens</div>
