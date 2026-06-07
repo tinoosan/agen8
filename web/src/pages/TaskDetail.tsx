@@ -101,7 +101,14 @@ export default function TaskDetail() {
   const kr = task.keyResultRef
     ? directKrQuery.data ?? krsQuery.data?.get(task.keyResultRef)
     : undefined
-  const mission = kr ? (missionsQuery.data ?? []).find((m) => m.id === kr.missionId) : undefined
+  // Resolve the related mission through the KR when there is one; otherwise fall
+  // back to the task's own missionRef. Tasks created with a direct mission_ref
+  // (no KR) are valid — without this fallback their Related section is empty.
+  const mission = kr
+    ? (missionsQuery.data ?? []).find((m) => m.id === kr.missionId)
+    : task.missionRef
+      ? (missionsQuery.data ?? []).find((m) => m.id === task.missionRef)
+      : undefined
   const related: RelatedItem[] = []
   if (mission) {
     related.push({ key: 'mission', label: 'Mission', title: mission.title, to: missionDetailLink(projectId, mission.id) })
