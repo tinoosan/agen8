@@ -245,7 +245,13 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal member.get result: %v", err)
 	}
-	for _, forbidden := range []string{"harnessKind", "model", "effort", "harnessPermissionMode", "harnessConfigRef"} {
+	// harnessKind is auto-determined server-side and is exposed on purpose (roster +
+	// harness leaderboard). model/effort and the runtime-config fields stay hidden:
+	// they are not auto-determined, so surfacing them would leak fabricated/stale data.
+	if !strings.Contains(string(encodedMemberGet), `"harnessKind":"codex"`) {
+		t.Fatalf("member.get should expose harnessKind, got %s", encodedMemberGet)
+	}
+	for _, forbidden := range []string{"model", "effort", "harnessPermissionMode", "harnessConfigRef"} {
 		if strings.Contains(string(encodedMemberGet), forbidden) {
 			t.Fatalf("member.get leaked %s in %s", forbidden, encodedMemberGet)
 		}
@@ -275,7 +281,10 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal member.list result: %v", err)
 	}
-	for _, forbidden := range []string{"harnessKind", "model", "effort", "harnessPermissionMode", "harnessConfigRef"} {
+	if !strings.Contains(string(encodedMemberList), `"harnessKind":"codex"`) {
+		t.Fatalf("member.list should expose harnessKind, got %s", encodedMemberList)
+	}
+	for _, forbidden := range []string{"model", "effort", "harnessPermissionMode", "harnessConfigRef"} {
 		if strings.Contains(string(encodedMemberList), forbidden) {
 			t.Fatalf("member.list leaked %s in %s", forbidden, encodedMemberList)
 		}

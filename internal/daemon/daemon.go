@@ -447,6 +447,18 @@ func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header htt
 	if sessionID == "" && threadID == "" {
 		sessionID, threadID = mcp.SessionRefsFromHTTPHeader(header)
 	}
+	// Auto-detect the calling harness from the registration fingerprint when the
+	// session carries none yet (a fresh, not-yet-resolved registration). The agent
+	// never enters this; it is read from how the client self-identifies in the body.
+	// An existing member's persisted HarnessKind is authoritative and is restored
+	// onto the session below, overriding this best-effort detection.
+	if strings.TrimSpace(session.HarnessKind) == "" {
+		nativeRef := sessionID
+		if nativeRef == "" {
+			nativeRef = threadID
+		}
+		session.HarnessKind = mcp.HarnessFromJSONRPCBody(body, nativeRef)
+	}
 	if sessionID == "" && threadID == "" {
 		return session, nil
 	}

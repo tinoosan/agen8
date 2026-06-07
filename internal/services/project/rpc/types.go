@@ -109,6 +109,7 @@ type MemberView struct {
 	ChannelID        string     `json:"channelId,omitempty"`
 	DisplayName      string     `json:"displayName,omitempty"`
 	MemberType       string     `json:"memberType"`
+	HarnessKind      string     `json:"harnessKind,omitempty"`
 	LifecycleState   string     `json:"lifecycleState"`
 	RegisteredAt     time.Time  `json:"registeredAt,omitempty"`
 	UpdatedAt        time.Time  `json:"updatedAt,omitempty"`
@@ -124,6 +125,7 @@ func NewMemberView(m member.Record) MemberView {
 		ChannelID:        string(m.ChannelID),
 		DisplayName:      m.DisplayName,
 		MemberType:       m.MemberType,
+		HarnessKind:      m.HarnessKind,
 		LifecycleState:   m.LifecycleState,
 		RegisteredAt:     m.RegisteredAt,
 		UpdatedAt:        m.UpdatedAt,

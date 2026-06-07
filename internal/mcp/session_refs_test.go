@@ -128,6 +128,71 @@ func TestSessionRequestContextOnInvalidBody(t *testing.T) {
 	}
 }
 
+// HarnessFromJSONRPCBody is how the daemon auto-determines a member's harness at
+// registration without the agent ever entering it. The signal is the same
+// self-identification each client already stamps into the body. These tests pin
+// each fingerprint and the honest "" (→ "unknown") fallback so no client gets
+// silently mislabeled.
+func TestHarnessFromJSONRPCBody(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		body      string
+		nativeRef string
+		want      string
+	}{
+		{
+			name:      "bridge native ref wins",
+			body:      `{"method":"tools/call","params":{"name":"project","arguments":{"action":"register","session_id":"s"}}}`,
+			nativeRef: "bridge-deadbeef",
+			want:      "bridge",
+		},
+		{
+			name: "codex via x-codex-turn-metadata",
+			body: `{"method":"tools/call","params":{"name":"project","_meta":{"x-codex-turn-metadata":{"session_id":"cs"}},"arguments":{"action":"register"}}}`,
+			want: "codex",
+		},
+		{
+			name: "codex via _meta camelCase refs",
+			body: `{"method":"tools/call","params":{"name":"project","_meta":{"sessionId":"cs","threadId":"ct"},"arguments":{"action":"register"}}}`,
+			want: "codex",
+		},
+		{
+			name: "claude-code via arguments.session_id",
+			body: `{"method":"tools/call","params":{"name":"project","arguments":{"action":"register","session_id":"claude-sess"}}}`,
+			want: "claude-code",
+		},
+		{
+			name: "codex _meta outranks claude arguments",
+			body: `{"method":"tools/call","params":{"name":"project","_meta":{"sessionId":"cs"},"arguments":{"action":"register","session_id":"args-sess"}}}`,
+			want: "codex",
+		},
+		{
+			name: "no signal yields empty (caller records unknown)",
+			body: `{"method":"tools/call","params":{"name":"project","arguments":{"action":"register","project_root":"/repo"}}}`,
+			want: "",
+		},
+		{
+			name: "arguments ignored outside tools/call",
+			body: `{"method":"initialize","params":{"arguments":{"session_id":"x"}}}`,
+			want: "",
+		},
+		{
+			name: "malformed body fails closed to empty",
+			body: `not json`,
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := HarnessFromJSONRPCBody([]byte(tt.body), tt.nativeRef); got != tt.want {
+				t.Fatalf("HarnessFromJSONRPCBody=%q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // stripAmbientSessionRefs removes the hook-injected refs before a tool handler
 // decodes arguments. The handlers use DisallowUnknownFields with per-action
 // whitelists, so any leftover session_id/thread_id on a verb that does not list

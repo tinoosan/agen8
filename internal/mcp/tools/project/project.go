@@ -391,6 +391,7 @@ type memberEntry struct {
 	ChannelID        string     `json:"channelId,omitempty"`
 	DisplayName      string     `json:"displayName,omitempty"`
 	MemberType       string     `json:"memberType,omitempty"`
+	HarnessKind      string     `json:"harnessKind,omitempty"`
 	LifecycleState   string     `json:"lifecycleState,omitempty"`
 	RegisteredAt     time.Time  `json:"registeredAt,omitempty"`
 	UpdatedAt        time.Time  `json:"updatedAt,omitempty"`
@@ -598,6 +599,7 @@ func toMemberEntry(item member.Record) memberEntry {
 		ChannelID:        strings.TrimSpace(item.ChannelID),
 		DisplayName:      strings.TrimSpace(item.DisplayName),
 		MemberType:       strings.TrimSpace(item.MemberType),
+		HarnessKind:      strings.TrimSpace(item.HarnessKind),
 		LifecycleState:   strings.TrimSpace(item.LifecycleState),
 		RegisteredAt:     item.RegisteredAt,
 		UpdatedAt:        item.UpdatedAt,
@@ -617,11 +619,15 @@ func registerGuidance(result RegisterContextResult) string {
 	return "You are registered. Use display_name on project.register only for the name the human should see in the graph. Agen8 derives session, harness, model, and runtime details."
 }
 
+// defaultHarnessKind returns the harness the daemon detected for this session
+// (see mcp.HarnessFromJSONRPCBody) and falls back to "unknown" when no signal
+// identified it. Honest-MVP: we never label an undetected harness with a made-up
+// value like "agent" — "unknown" says exactly what we know.
 func defaultHarnessKind(call CallContext) string {
 	if harnessKind := strings.TrimSpace(call.HarnessKind); harnessKind != "" {
 		return harnessKind
 	}
-	return "agent"
+	return "unknown"
 }
 
 func encodeText(value any) (string, error) {

@@ -835,6 +835,58 @@ func SessionRequestContextFromJSONRPCBody(body []byte) SessionRequestContext {
 	}
 }
 
+// HarnessFromJSONRPCBody infers the calling harness from the self-identifying
+// signals a client stamps into a tools/call body at registration. In stateless
+// mode this is the only honest harness signal available: the MCP initialize
+// handshake (which carries clientInfo.name) is a separate request the stateless
+// handler does not retain, so it is gone by the time register runs.
+//
+// The fingerprints, in priority order:
+//
+//   - bridge-<hex> native ref → the in-session agen8 bridge.
+//   - params._meta codex keys → Codex. It self-identifies through _meta
+//     (x-codex-turn-metadata, or sessionId/threadId/turnId); Claude Code's hook
+//     cannot reach _meta, so any recognised _meta ref key means Codex.
+//   - arguments.session_id / thread_id → Claude Code. Its PreToolUse hook stamps
+//     these into the call arguments because it has no _meta channel.
+//
+// Returns "" when nothing identifies the harness so the caller can record an
+// honest "unknown" rather than guess. It never fabricates a specific harness.
+func HarnessFromJSONRPCBody(body []byte, nativeRef string) string {
+	if strings.HasPrefix(strings.TrimSpace(nativeRef), "bridge-") {
+		return "bridge"
+	}
+	var envelope struct {
+		Method string `json:"method"`
+		Params struct {
+			Meta      map[string]any `json:"_meta,omitempty"`
+			Arguments struct {
+				SessionID string `json:"session_id"`
+				ThreadID  string `json:"thread_id"`
+			} `json:"arguments,omitempty"`
+		} `json:"params,omitempty"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(body), &envelope); err != nil {
+		return ""
+	}
+	meta := envelope.Params.Meta
+	if _, ok := meta["x-codex-turn-metadata"]; ok {
+		return "codex"
+	}
+	for _, key := range []string{"sessionId", "session_id", "threadId", "thread_id", "turnId", "turn_id"} {
+		if _, ok := meta[key]; ok {
+			return "codex"
+		}
+	}
+	if strings.TrimSpace(envelope.Method) == "tools/call" {
+		if strings.TrimSpace(envelope.Params.Arguments.SessionID) != "" ||
+			strings.TrimSpace(envelope.Params.Arguments.ThreadID) != "" {
+			return "claude-code"
+		}
+	}
+	return ""
+}
+
 func SessionRefsFromHTTPHeader(header http.Header) (sessionID, threadID string) {
 	if len(header) == 0 {
 		return "", ""

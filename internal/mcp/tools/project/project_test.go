@@ -326,7 +326,13 @@ func TestHandleMemberListUsesProjectScopedDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal structured: %v", err)
 	}
-	for _, forbidden := range []string{"harnessKind", "model", "effort"} {
+	// harnessKind is auto-determined server-side and is meant to be visible (it
+	// drives the roster + harness leaderboard). model/effort stay hidden: they are
+	// not auto-determined, so exposing them would surface fabricated or stale data.
+	if !strings.Contains(string(encoded), `"harnessKind":"codex"`) {
+		t.Fatalf("member_list should expose harnessKind, got %s", encoded)
+	}
+	for _, forbidden := range []string{"model", "effort"} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("member_list leaked %s in %s", forbidden, encoded)
 		}
