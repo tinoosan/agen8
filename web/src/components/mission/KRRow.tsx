@@ -1,13 +1,16 @@
 import { useState } from 'react'
+import { useLocation } from 'wouter'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
   ChevronRight,
   ChevronDown,
+  Network,
   Pencil,
   Trash2,
   BarChart2,
 } from 'lucide-react'
+import { strategyMapLink, mapNodeId } from '../../lib/routing'
 import { useUpdateKeyResult, useDeleteKeyResult } from '../../hooks/useMissions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,14 +39,16 @@ import type { KeyResultView } from '../../lib/types'
 /* ── KR row ─────────────────────────────────────────────── */
 
 export function KRRow({
-  kr, missionId,
+  kr, missionId, projectId,
   expanded: expandedProp, onExpandedChange,
 }: {
   kr: KeyResultView
   missionId: string
+  projectId: string
   expanded?: boolean
   onExpandedChange?: (v: boolean) => void
 }) {
+  const [, navigate] = useLocation()
   const [internalExpanded, setInternalExpanded] = useState(false)
   const expanded = expandedProp !== undefined ? expandedProp : internalExpanded
   const setExpanded = (v: boolean) => {
@@ -200,6 +205,16 @@ export function KRRow({
           // phones) there's no hover, so controls stay visible; focus-within
           // keeps them up for keyboard users.
           <div className="flex items-center gap-0.5 transition-opacity shrink-0 focus-within:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 w-6 p-0"
+              onClick={() => navigate(strategyMapLink(projectId, mapNodeId('keyResult', kr.id)))}
+              title="View in Context Map"
+              aria-label="View in Context Map"
+            >
+              <Network size={11} />
+            </Button>
             <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-[var(--accent)]" onClick={() => { setExpanded(true); setReporting(true) }} title="Report progress">
               <BarChart2 size={11} />
             </Button>

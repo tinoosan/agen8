@@ -94,6 +94,25 @@ export function strategyMapLink(projectId: string, focusNodeId?: string): string
   return focusNodeId ? `${base}?focus=${encodeURIComponent(focusNodeId)}` : base
 }
 
+export type MapNodeKind = 'mission' | 'keyResult' | 'task' | 'decision'
+
+// Build the strategy-map node id for an entity. Missions and key results are
+// keyed by their raw id in the map; tasks and decisions are prefixed. Keeping
+// this mapping in one place means the detail-page "view in context map"
+// affordances and the map's node-building code (useLeafNodes / useMissionKRNodes)
+// can't quietly drift apart.
+export function mapNodeId(kind: MapNodeKind, id: string): string {
+  switch (kind) {
+    case 'task':
+      return `task:${id}`
+    case 'decision':
+      return `decision:${id}`
+    case 'mission':
+    case 'keyResult':
+      return id
+  }
+}
+
 export function projectDefaultViewLink(projectId: string, view: DefaultProjectView): string {
   switch (view) {
     case 'strategy':

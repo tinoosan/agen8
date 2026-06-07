@@ -3,6 +3,7 @@ import { useRoute, useLocation } from 'wouter'
 import { toast } from 'sonner'
 import {
   Clock,
+  Network,
   Trash2,
   Tag,
   Pin,
@@ -18,6 +19,7 @@ import {
   missionDetailLink,
   taskDetailLink,
   strategyMapLink,
+  mapNodeId,
 } from '../lib/routing'
 import { sanitizeDecisionTitle, safeReferenceLabel } from '../lib/displaySanitizers'
 import { decisionActorDisplay } from '../lib/decisionDisplay'
@@ -201,6 +203,18 @@ export default function DecisionDetail() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(strategyMapLink(projectId!, mapNodeId('decision', decisionId)))}
+                className="dashboard-action-button"
+                style={{ letterSpacing: '-0.12px' }}
+                title="View in Context Map"
+                aria-label="View in Context Map"
+              >
+                <Network size={12} className="mr-1" />
+                Map
+              </Button>
               <Button
                 variant="outline"
                 size="sm"

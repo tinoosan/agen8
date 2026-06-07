@@ -8,7 +8,7 @@ import { useKeyResults, useUpdateMission, useDeleteMission, useHardDeleteMission
 import { useProjectTasks } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
 import { entityDisplayTitle } from '../lib/displaySanitizers'
-import { missionsPanelLink, taskDetailLink, decisionDetailLink } from '../lib/routing'
+import { missionsPanelLink, taskDetailLink, decisionDetailLink, strategyMapLink, mapNodeId } from '../lib/routing'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
@@ -36,7 +36,7 @@ import {
 import { formatDate } from '@/lib/format'
 import { confidenceColor } from '@/lib/decisionDisplay'
 import { format, parseISO } from 'date-fns'
-import { Calendar, Check, ChevronsUpDown, Pencil, Trash2, X } from 'lucide-react'
+import { Calendar, Check, ChevronsUpDown, Network, Pencil, Trash2, X } from 'lucide-react'
 import type { MissionView, MissionStatus } from '../lib/types'
 
 // Mission dates arrive as ISO datetimes; the date fields work in 'yyyy-MM-dd'.
@@ -312,6 +312,16 @@ export default function MissionDetail() {
               </>
             ) : (
               <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate(strategyMapLink(projectIdValue, mapNodeId('mission', missionId_)))}
+                  title="View in Context Map"
+                  aria-label="View in Context Map"
+                >
+                  <Network size={12} className="mr-1" />
+                  Map
+                </Button>
                 {mission.status !== 'archived' && (
                   <MissionLifecycleActions
                     mission={mission}
@@ -492,6 +502,7 @@ export default function MissionDetail() {
                 key={kr.id}
                 kr={kr}
                 missionId={missionId}
+                projectId={projectId}
                 expanded={!!expandedKrIds[kr.id]}
                 onExpandedChange={(v) => setExpandedKrIds(prev => ({ ...prev, [kr.id]: v }))}
               />

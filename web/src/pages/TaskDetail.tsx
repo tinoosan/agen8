@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { useRoute } from 'wouter'
+import { useRoute, useLocation } from 'wouter'
 import {
   AlertTriangle,
   Clock,
   Hash,
+  Network,
   Pencil,
   Ban,
 } from 'lucide-react'
@@ -23,7 +24,7 @@ import {
   taskDuration,
   parseRetryTask,
 } from './boardHelpers'
-import { tasksPanelLink, missionDetailLink, decisionsLink } from '../lib/routing'
+import { tasksPanelLink, missionDetailLink, decisionsLink, strategyMapLink, mapNodeId } from '../lib/routing'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { StatItem } from '../components/detail/StatItem'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
@@ -57,6 +58,7 @@ function TaskDetailSkeleton() {
 
 export default function TaskDetail() {
   const [, params] = useRoute('/project/:projectId/tasks/:taskId')
+  const [, navigate] = useLocation()
   const projectId = params?.projectId ? decodeURIComponent(params.projectId) : null
   const taskId = params?.taskId ? decodeURIComponent(params.taskId) : null
 
@@ -174,6 +176,18 @@ export default function TaskDetail() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(strategyMapLink(projectId, mapNodeId('task', task.id)))}
+                className="dashboard-action-button dashboard-action-button-neutral"
+                style={{ letterSpacing: '-0.12px' }}
+                title="View in Context Map"
+                aria-label="View in Context Map"
+              >
+                <Network size={12} className="mr-1" />
+                Map
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
