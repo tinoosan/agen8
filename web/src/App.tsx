@@ -8,6 +8,7 @@ import { useAuth } from './hooks/useAuth'
 import { useRealtimeInvalidation } from './hooks/useRealtimeSync'
 import { lazyWithRetry } from './lib/lazyWithRetry'
 import Sidebar from './components/Sidebar'
+import NotificationInbox from './components/notifications/NotificationInbox'
 import { Toaster } from './components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { SidebarProvider, useSidebar } from '@/components/ui/sidebar'
@@ -25,6 +26,8 @@ const DecisionDetail = lazyWithRetry(() => import('./pages/DecisionDetail'), 'pa
 const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/StrategyMap')
 const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisions')
 const Members = lazyWithRetry(() => import('./pages/Members'), 'pages/Members')
+const Activity = lazyWithRetry(() => import('./pages/Activity'), 'pages/Activity')
+const Metrics = lazyWithRetry(() => import('./pages/Metrics'), 'pages/Metrics')
 
 function MissionsRouteRedirect({ params }: { params: { projectId: string } }) {
   return <Redirect to={missionsPanelLink(params.projectId)} />
@@ -43,6 +46,7 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   decisions: 'Decision Log',
   strategy: 'Context Map',
   members: 'Members',
+  metrics: 'Metrics',
 }
 
 /** Mobile-only top bar: hamburger (opens the sidebar drawer) + app icon +
@@ -53,7 +57,7 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
  *  Must live inside SidebarProvider so useSidebar() resolves. */
 function MobileTopBar() {
   const { toggleSidebar } = useSidebar()
-  const { activeView } = useNavigation()
+  const { activeView, projectId } = useNavigation()
   const [location] = useLocation()
   const theme = useStore((s) => s.theme)
 
@@ -84,6 +88,7 @@ function MobileTopBar() {
       <span className="flex-1 min-w-0 truncate text-[0.9375rem] font-semibold tracking-[-0.02em] text-[var(--text-1)]">
         {title}
       </span>
+      {projectId && <NotificationInbox projectId={projectId} />}
       {/* Search button — the one search worth a touch entry point is the
           context map's node search (the same panel the "/" shortcut opens).
           It opens in place: the strategy map and the dashboard each render the
@@ -224,10 +229,11 @@ export default function App() {
                   <Route path="/project/:projectId/strategy">{(params) => <StrategyMap projectId={params.projectId} />}</Route>
                   <Route path="/project/:projectId/decisions" component={Decisions} />
                   <Route path="/project/:projectId/members" component={Members} />
+                  <Route path="/project/:projectId/activity" component={Activity} />
                   <Route path="/project/:projectId/builder">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/roles">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/dashboard" component={Dashboard} />
-                  <Route path="/project/:projectId/metrics">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
+                  <Route path="/project/:projectId/metrics" component={Metrics} />
                   <Route path="/project/:projectId" component={Dashboard} />
                   <Route path="/account" component={Account} />
                   <Route path="/credentials" component={Credentials} />

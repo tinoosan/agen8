@@ -24,6 +24,10 @@ vi.mock('./pages/Dashboard', () => ({
   default: () => <div>Dashboard Page</div>,
 }))
 
+vi.mock('./pages/Metrics', () => ({
+  default: () => <div>Metrics Page</div>,
+}))
+
 vi.mock('./pages/StrategyMap', () => ({
   default: () => {
     throw new Error('strategy-map-route-crash')
@@ -92,9 +96,9 @@ describe('App', () => {
     expect(await screen.findByText('Project Page')).toBeInTheDocument()
   })
 
-  it('redirects removed metrics route to the dashboard', async () => {
+  it('renders the metrics page at the metrics route', async () => {
     renderWithRouter('/project/myapp/metrics')
-    expect(await screen.findByText('Dashboard Page')).toBeInTheDocument()
+    expect(await screen.findByText('Metrics Page')).toBeInTheDocument()
   })
 
   it('shows page crash fallback when a route component throws', async () => {

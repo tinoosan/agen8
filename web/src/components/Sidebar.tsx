@@ -14,13 +14,14 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
 import {
-  BarChart3, Network, Plus, PanelLeft, Users,
+  BarChart3, Network, Plus, PanelLeft, Users, Activity, Gauge,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNavigation, dashboardLink } from '../lib/routing'
 import { useStore } from '../lib/store'
 import { brandIconFor } from '../lib/brandIcon'
 import CreateMissionDialog from './mission/CreateMissionDialog'
+import NotificationInbox from './notifications/NotificationInbox'
 import { AccountChip, MissionsSidebarSection, GlobalSidebarContent } from './sidebar-parts'
 import {
   Sidebar as ShadcnSidebar,
@@ -152,6 +153,7 @@ export default function Sidebar() {
           >
             <Plus size={15} />
           </button>
+          {hasProject && <NotificationInbox projectId={projectId} />}
           <SidebarCollapseToggle />
         </div>
       </SidebarHeader>
@@ -182,6 +184,28 @@ export default function Sidebar() {
                   >
                     <Network size={15} className="shrink-0" />
                     <span>Context Map</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeView === 'activity'}
+                    onClick={() => setActiveView('activity')}
+                    className={cn(ROW_BASE, activeView === 'activity' ? ROW_ACTIVE : ROW_IDLE)}
+                    style={ROW_STYLE}
+                  >
+                    <Activity size={15} className="shrink-0" />
+                    <span>Activity</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeView === 'metrics'}
+                    onClick={() => setActiveView('metrics')}
+                    className={cn(ROW_BASE, activeView === 'metrics' ? ROW_ACTIVE : ROW_IDLE)}
+                    style={ROW_STYLE}
+                  >
+                    <Gauge size={15} className="shrink-0" />
+                    <span>Metrics</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

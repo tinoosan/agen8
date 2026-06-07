@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agen8 — Metrics MVP mockup</title>
+<style>
+  :root {
+    --bg-app:#1a1a1c; --bg-panel:#1f1f22; --bg-surface:#26262a; --bg-elevated:#2e2e33;
+    --bg-hover:rgba(255,255,255,0.05);
+    --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.16);
+    --text-1:#f0f0f4; --text-2:#9898a8; --text-3:#636378;
+    --accent:#3B82F6;
+    --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --blue:#60a5fa; --purple:#a78bfa;
+    --r-sm:8px; --r-md:12px; --r-lg:16px;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:var(--bg-app); color:var(--text-1);
+    font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+    -webkit-font-smoothing:antialiased; }
+  body { padding:32px 40px 80px; }
+  .wrap { max-width:880px; margin:0 auto; display:flex; flex-direction:column; gap:28px; }
+  .page-head h1 { font-size:24px; font-weight:700; letter-spacing:-0.02em; }
+  .page-head p  { font-size:13px; color:var(--text-3); margin-top:6px; line-height:1.55; max-width:62ch; }
+
+  /* section heading (mirrors .dashboard-section-heading) */
+  .sec-title { font-size:13px; font-weight:650; letter-spacing:-0.01em; display:flex; align-items:center; gap:8px; margin-bottom:2px; }
+  .sec-title svg { width:14px; height:14px; color:var(--accent); }
+  .sec-caption { font-size:12px; color:var(--text-3); margin-bottom:14px; }
+
+  /* stat tiles */
+  .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  @media (max-width:760px){ .tiles { grid-template-columns:repeat(2,1fr); } }
+  .tile { background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--r-md); padding:14px 16px; }
+  .tile .label { font-size:0.625rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-3); }
+  .tile .value { margin-top:6px; font-size:1.55rem; font-weight:680; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; }
+  .tile .sub { margin-top:3px; font-size:0.6875rem; color:var(--text-3); }
+  .tile .value.amber { color:var(--amber); } .tile .value.green { color:var(--green); }
+
+  /* leaderboard table */
+  .board { border:1px solid var(--border); border-radius:var(--r-lg); background:var(--bg-surface); overflow:hidden; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font-size:0.625rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em;
+    color:var(--text-3); padding:10px 16px; border-bottom:1px solid var(--border); }
+  th.num, td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  td { padding:12px 16px; font-size:0.8125rem; color:var(--text-2); border-bottom:1px solid var(--border); }
+  tr:last-child td { border-bottom:none; }
+  tr:hover td { background:var(--bg-hover); }
+  .rank { color:var(--text-3); width:1%; padding-right:0; font-variant-numeric:tabular-nums; }
+  .name { color:var(--text-1); font-weight:550; }
+  .barcell { width:120px; }
+  .bar { height:6px; border-radius:999px; background:var(--bg-elevated); overflow:hidden; }
+  .bar > span { display:block; height:100%; border-radius:999px; background:var(--accent); }
+  .pill { display:inline-block; font-size:0.6875rem; font-weight:600; padding:1px 7px; border-radius:6px;
+    background:color-mix(in srgb, var(--c) 16%, transparent); color:var(--c); font-variant-numeric:tabular-nums; }
+  .muted { color:var(--text-3); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="page-head">
+      <h1>Metrics</h1>
+      <p>A few high-value numbers so you can see how the work is going — derived from
+         tasks and the member roster already loaded (no new table, no migration). Pickup
+         latency is "time to awareness" (queued → claimed); work time is in-progress
+         duration (claimed → done). Leaderboards attribute completed tasks to the model
+         and harness that did them.</p>
+    </div>
+
+    <!-- Throughput tiles -->
+    <section>
+      <div class="sec-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
+        Throughput
+      </div>
+      <div class="sec-caption">Backlog now, and average times across recent work.</div>
+      <div class="tiles">
+        <div class="tile"><div class="label">Backlog</div><div class="value amber">12</div><div class="sub">queued, awaiting pickup</div></div>
+        <div class="tile"><div class="label">Avg pickup latency</div><div class="value">4m 12s</div><div class="sub">queued → claimed</div></div>
+        <div class="tile"><div class="label">Avg work time</div><div class="value">23m 40s</div><div class="sub">claimed → done</div></div>
+        <div class="tile"><div class="label">Completed</div><div class="value green">38</div><div class="sub">of 54 total tasks</div></div>
+      </div>
+    </section>
+
+    <!-- Model leaderboard -->
+    <section>
+      <div class="sec-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>
+        Model leaderboard
+      </div>
+      <div class="sec-caption">Which model is doing the most, and how reliably.</div>
+      <div class="board">
+        <table>
+          <thead><tr><th class="rank">#</th><th>Model</th><th class="num">Done</th><th class="num">Success</th><th class="num">Avg work time</th><th class="barcell">Share</th></tr></thead>
+          <tbody>
+            <tr><td class="rank">1</td><td class="name">claude-opus-4.7</td><td class="num">18</td><td class="num"><span class="pill" style="--c:var(--green)">94%</span></td><td class="num">19m 02s</td><td class="barcell"><div class="bar"><span style="width:100%"></span></div></td></tr>
+            <tr><td class="rank">2</td><td class="name">claude-sonnet-4.5</td><td class="num">12</td><td class="num"><span class="pill" style="--c:var(--green)">92%</span></td><td class="num">26m 15s</td><td class="barcell"><div class="bar"><span style="width:67%"></span></div></td></tr>
+            <tr><td class="rank">3</td><td class="name">gpt-5.1-codex</td><td class="num">8</td><td class="num"><span class="pill" style="--c:var(--amber)">75%</span></td><td class="num">31m 48s</td><td class="barcell"><div class="bar"><span style="width:44%"></span></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Harness leaderboard -->
+    <section>
+      <div class="sec-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Harness leaderboard
+      </div>
+      <div class="sec-caption">Which harness performs best for this project's work.</div>
+      <div class="board">
+        <table>
+          <thead><tr><th class="rank">#</th><th>Harness</th><th class="num">Done</th><th class="num">Success</th><th class="num">Avg work time</th><th class="barcell">Share</th></tr></thead>
+          <tbody>
+            <tr><td class="rank">1</td><td class="name">claude-code</td><td class="num">26</td><td class="num"><span class="pill" style="--c:var(--green)">96%</span></td><td class="num">21m 30s</td><td class="barcell"><div class="bar"><span style="width:100%"></span></div></td></tr>
+            <tr><td class="rank">2</td><td class="name">codex-cli</td><td class="num">12</td><td class="num"><span class="pill" style="--c:var(--amber)">83%</span></td><td class="num">28m 05s</td><td class="barcell"><div class="bar"><span style="width:46%"></span></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

@@ -3,7 +3,12 @@ import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useNavigation } from '../lib/routing'
 import { useProjectMembers, useRemoveMember } from '../hooks/useProjectMembers'
+import { useProjectTasks } from '../hooks/useProjectTasks'
 import { memberDisplayName } from '../lib/memberDisplay'
+import { computeMemberPerformance, type MemberPerformance } from '../lib/metrics'
+import { formatCoarseDuration } from '../lib/taskTiming'
+import { ShareBar, SuccessPill } from '../components/metrics/leaderboardBits'
+import Sparkline from '../components/charts/Sparkline'
 import { cn } from '@/lib/utils'
 import { formatRelative } from '@/lib/format'
 import { isUuid } from '@/lib/displaySanitizers'
@@ -78,6 +83,15 @@ export default function Members() {
   const { data, isLoading, isError } = useProjectMembers(projectId)
   const members = useMemo(() => data ?? [], [data])
 
+  // Per-member performance is a client-side projection over the same task list
+  // the dashboard/metrics already fetch — no new query of its own. Keyed by
+  // member id so each roster row can look up its own recent output inline.
+  const tasksQuery = useProjectTasks(projectId)
+  const perfById = useMemo(
+    () => computeMemberPerformance({ tasks: tasksQuery.data, members }),
+    [tasksQuery.data, members],
+  )
+
   const active = useMemo(
     () => members.filter((m) => m.lifecycleState === 'active'),
     [members],
@@ -141,7 +155,7 @@ export default function Members() {
                       tone="warning"
                     />
                   </div>
-                  <MemberRoster members={active} dupeIds={dupeIds} />
+                  <MemberRoster members={active} dupeIds={dupeIds} perfById={perfById} />
                 </div>
               )}
             </TabsContent>
@@ -150,7 +164,7 @@ export default function Members() {
               {removed.length === 0 ? (
                 <EmptyState text="No removed members." />
               ) : (
-                <MemberRoster members={removed} dupeIds={EMPTY_IDS} removed />
+                <MemberRoster members={removed} dupeIds={EMPTY_IDS} perfById={perfById} removed />
               )}
             </TabsContent>
           </Tabs>
@@ -163,19 +177,31 @@ export default function Members() {
 const EMPTY_IDS: Set<string> = new Set()
 
 /* ── Roster (responsive) ─────────────────────────────────
- * A data table can't reflow its seven columns, so narrow widths get the same
- * roster as stacked cards and only wide widths get the table. The switch is a
- * CONTAINER query, not a viewport one: the inline sidebar eats ~272px, so an
- * iPad-width *viewport* still leaves the roster far less room than its pixel
- * count implies. Querying the roster's own width (≥720px ⇒ the 7-col table fits
- * with breathing room) keeps that decision honest — and makes the table return
- * on its own if the sidebar is collapsed to its icon rail. */
+ * A data table can't reflow its columns, so narrow widths get the same roster as
+ * stacked cards and only wide widths get the table. The switch is a CONTAINER
+ * query, not a viewport one: the inline sidebar eats ~272px, so an iPad-width
+ * *viewport* still leaves the roster far less room than its pixel count implies.
+ * The simplified table (Member · Performance · Session ref · Registered) fits at
+ * ≥720px; below that it falls back to stacked cards. The table also returns on
+ * its own if the sidebar collapses to its icon rail. */
 
+// Share normalizes each member's completed count against the busiest member in
+// the set, so the bar shows relative contribution (the same convention the
+// leaderboards use). Done elsewhere it'd be recomputed per row; doing it once
+// here keeps the denominator stable across cards and the table.
 function MemberRoster(props: {
   members: ProjectMember[]
   dupeIds: Set<string>
+  perfById: Map<string, MemberPerformance>
   removed?: boolean
 }) {
+  const maxDone = props.members.reduce(
+    (m, member) => Math.max(m, props.perfById.get(member.id)?.done ?? 0),
+    0,
+  )
+  const shareOf = (id: string) =>
+    maxDone > 0 ? ((props.perfById.get(id)?.done ?? 0) / maxDone) * 100 : 0
+
   return (
     <div className="@container">
       <div className="flex flex-col gap-3 @min-[720px]:hidden">
@@ -184,11 +210,52 @@ function MemberRoster(props: {
             key={m.id}
             m={m}
             isDupe={props.dupeIds.has(m.id)}
+            perf={props.perfById.get(m.id)}
+            share={shareOf(m.id)}
             removed={props.removed}
           />
         ))}
       </div>
-      <MemberTable {...props} />
+      <MemberTable {...props} shareOf={shareOf} />
+    </div>
+  )
+}
+
+/* ── Performance cell (shared by card + table) ──────────── */
+
+function PerformanceCell({
+  perf,
+  share,
+}: {
+  perf?: MemberPerformance
+  share: number
+}) {
+  const hasActivity =
+    !!perf && (perf.done > 0 || perf.failed > 0 || perf.inProgress > 0)
+  if (!hasActivity) {
+    return <span className="text-[0.75rem] text-[var(--text-3)]">No tasks yet</span>
+  }
+  const windowDays = perf.daily.length
+  return (
+    <div className="flex min-w-[150px] flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <Sparkline
+          data={perf.daily.map((d) => d.done)}
+          label={`${perf.done} completed in the last ${windowDays} days`}
+        />
+        <SuccessPill rate={perf.successRate} />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.6875rem] tabular-nums text-[var(--text-3)]">
+        <span><span className="text-[var(--text-2)]">{perf.done}</span> done</span>
+        {perf.failed > 0 && (
+          <span><span className="text-[var(--text-2)]">{perf.failed}</span> failed</span>
+        )}
+        {perf.inProgress > 0 && (
+          <span><span className="text-[var(--text-2)]">{perf.inProgress}</span> active</span>
+        )}
+        <span>{formatCoarseDuration(perf.avgWorkTimeMs) ?? '—'} avg</span>
+      </div>
+      <ShareBar value={share} />
     </div>
   )
 }
@@ -198,10 +265,14 @@ function MemberRoster(props: {
 function MemberCard({
   m,
   isDupe,
+  perf,
+  share,
   removed,
 }: {
   m: ProjectMember
   isDupe: boolean
+  perf?: MemberPerformance
+  share: number
   removed?: boolean
 }) {
   const name = memberDisplayName(m.displayName, m.id) ?? m.id
@@ -228,6 +299,10 @@ function MemberCard({
           title={absTime(m.registeredAt)}
         />
       </dl>
+      <div className="flex flex-col gap-1.5">
+        <CardLabel>Performance</CardLabel>
+        <PerformanceCell perf={perf} share={share} />
+      </div>
       <div className="flex flex-col gap-1">
         <CardLabel>Session ref</CardLabel>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -273,10 +348,14 @@ function CardField({
 function MemberTable({
   members,
   dupeIds,
+  perfById,
+  shareOf,
   removed,
 }: {
   members: ProjectMember[]
   dupeIds: Set<string>
+  perfById: Map<string, MemberPerformance>
+  shareOf: (id: string) => number
   removed?: boolean
 }) {
   return (
@@ -285,6 +364,7 @@ function MemberTable({
         <TableHeader>
           <TableRow className="border-[var(--border)] hover:bg-transparent">
             <Th>Member</Th>
+            <Th>Performance</Th>
             <Th>Session ref</Th>
             <Th>Registered</Th>
             {!removed && (
@@ -300,6 +380,8 @@ function MemberTable({
               key={m.id}
               m={m}
               isDupe={dupeIds.has(m.id)}
+              perf={perfById.get(m.id)}
+              share={shareOf(m.id)}
               removed={removed}
             />
           ))}
@@ -320,10 +402,14 @@ function Th({ children }: { children: ReactNode }) {
 function MemberRow({
   m,
   isDupe,
+  perf,
+  share,
   removed,
 }: {
   m: ProjectMember
   isDupe: boolean
+  perf?: MemberPerformance
+  share: number
   removed?: boolean
 }) {
   const name = memberDisplayName(m.displayName, m.id) ?? m.id
@@ -341,6 +427,9 @@ function MemberRow({
           <span className="font-medium text-[var(--text-1)]">{name}</span>
           {isDupe && <DupeBadge />}
         </div>
+      </TableCell>
+      <TableCell className="px-4 py-3">
+        <PerformanceCell perf={perf} share={share} />
       </TableCell>
       <TableCell className="px-4 py-3">
         <div className="flex items-center gap-1.5">
