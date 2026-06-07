@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { projectDisplayName } from './spaceHelpers'
+import { projectDisplayName } from './projectHelpers'
 import type { Project } from './types'
 
 function makeProject(overrides: Partial<Project>): Project {

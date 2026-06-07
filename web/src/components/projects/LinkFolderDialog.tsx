@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, Copy, FolderDown, KeyRound, Link, TriangleAlert } from 'lucide-react'
 import type { Project } from '../../lib/types'
-import { projectDisplayName } from '../../lib/spaceHelpers'
+import { projectDisplayName } from '../../lib/projectHelpers'
 import { copyText } from '../../lib/utils'
 import { createLinkToken, type LinkTokenResult } from '../../lib/projectClient'
 import {

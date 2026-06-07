@@ -38,7 +38,7 @@ describe('lazyWithRetry helpers', () => {
 
   it('retries at most once per import key', () => {
     const storage = new MemoryStorage()
-    const importKey = 'pages/SpaceFocus'
+    const importKey = 'pages/StrategyMap'
     const err = new Error('Failed to fetch dynamically imported module')
 
     expect(shouldReloadAfterImportError(importKey, err, storage)).toBe(true)
@@ -48,7 +48,7 @@ describe('lazyWithRetry helpers', () => {
 
   it('clears retry marker after successful import', () => {
     const storage = new MemoryStorage()
-    const importKey = 'pages/SpaceFocus'
+    const importKey = 'pages/StrategyMap'
     storage.setItem('agen8:lazy-retry:' + importKey, '1')
     clearLazyRetryMarker(importKey, storage)
     expect(storage.getItem('agen8:lazy-retry:' + importKey)).toBeNull()

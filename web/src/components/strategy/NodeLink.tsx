@@ -11,8 +11,9 @@ interface Props {
 /**
  * Clickable inline element that navigates to a node.
  *
- * When inside a PanelNavigationContext (e.g., space context panel),
- * clicks push onto the local panel stack for drill-down navigation.
+ * When inside a PanelNavigationContext (e.g., a context panel with its
+ * own drill-down history), clicks push onto the local panel stack for
+ * drill-down navigation.
  * Otherwise, falls back to setting pendingFocusNodeId to navigate
  * on the strategy map.
  */

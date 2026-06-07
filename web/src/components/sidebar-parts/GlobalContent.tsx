@@ -10,7 +10,7 @@ import { rpcCall } from '../../lib/rpc'
 import { dashboardLink, missionDetailLink } from '../../lib/routing'
 import { useProjects } from '../../hooks/useProjects'
 import type { MissionView } from '../../lib/types'
-import { projectDisplayName } from '../../lib/spaceHelpers'
+import { projectDisplayName } from '../../lib/projectHelpers'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /* ── Mission status icon (mirrors MissionSection) ────── */

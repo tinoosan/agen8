@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
 import { formatDate, formatRelative } from '@/lib/format'
-import { projectDisplayName } from '@/lib/spaceHelpers'
+import { projectDisplayName } from '@/lib/projectHelpers'
 import {
   Archive, Check, ChevronLeft, ChevronRight, FolderOpen,
   HardDrive, Link as LinkIcon, MoreHorizontal, Plus, Search, Server, Trash2,

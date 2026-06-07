@@ -2,7 +2,7 @@
  * Shared status label mapping for consistent terminology across all views.
  *
  * Internal statuses (from backend) map to a single set of human-readable labels
- * so that Board, Dashboard, SpaceCard, and all other views speak the same language.
+ * so that Board, Dashboard, and all other views speak the same language.
  */
 
 /* ── Task-level status labels ──────────────────── */
