@@ -5,6 +5,13 @@ export type FilterPreset = 'in_motion' | 'blocked' | 'done' | 'decisions' | 'tra
 export interface FilterResult {
   nodeIds: ReadonlySet<string>
   edgeIds: ReadonlySet<string>
+  /** Subset of edgeIds to render as "direct" (bold path). Only the trace lens
+   *  sets this — and only with STRUCTURAL edges, never context links. Context
+   *  links rendered "direct" each spawn a label portal + an infinite dash
+   *  animation; lighting many at once kills the browser render process
+   *  (the Safari "a problem repeatedly occurred" crash). Leaving this undefined
+   *  means "no direct edges" (set filters highlight via opacity only). */
+  directEdgeIds?: ReadonlySet<string>
   /** Count of directly matched nodes (excludes context parents). */
   matchCount: number
 }
@@ -159,65 +166,108 @@ export function computeDoneFilter(nodes: Node[], edges: Edge[]): FilterResult {
   return { nodeIds: matchedIds, edgeIds: connectedEdges(matchedIds, edges), matchCount }
 }
 
-// ── Path trace filter (progressive rings) ────────────────────────────────
+// ── Path trace filter (progressive rings: structural ↔ context) ──────────
 
-/** Trace-path depth bounds. The trace lens reveals the graph one BFS ring at a
- *  time, so the stepper drives a hop radius rather than a context-only expansion.
- *  Depth 0 (just the selected node) is useless on screen, so the floor is 1 —
- *  selecting a node always shows at least its immediate neighbours. */
+/** Trace-path step bounds. Each press of the stepper is one reveal phase, and
+ *  the phases ALTERNATE: odd steps grow the structural skeleton by one hop, even
+ *  steps layer in the context links off everything shown so far. Step 0 (just
+ *  the selected node) is useless on screen, so the floor is 1 — selecting a node
+ *  always shows at least its immediate structural neighbours. The ceiling allows
+ *  three structural rings interleaved with three context passes. */
 export const TRACE_MIN_DEPTH = 1
-export const TRACE_MAX_DEPTH = 5
-/** Depth applied the moment trace is enabled: light the first ring. */
+export const TRACE_MAX_DEPTH = 6
+/** Step applied the moment trace is enabled: the first structural ring. */
 export const TRACE_INITIAL_DEPTH = 1
 
-/** Progressive ring trace: an undirected BFS outward from the selected node over
- *  the COMBINED graph (structural lineage `statusEdge` + context links
- *  `contextEdge`), revealing every node within `depth` hops. Each +/- step grows
- *  or shrinks the ring by one hop, so a selection lights its immediate
- *  neighbours first and the user walks outward — instead of the entire connected
- *  component lighting up at once (the old "select a mission → whole tree
- *  explodes" behaviour).
+/** Progressive trace, alternating structural ↔ context.
  *
- *  Traversal is symmetric and edge-type-agnostic: ancestors, descendants, and
- *  context-linked siblings all appear by hop distance. The visual weight split
- *  (direct/bold vs ambient) is applied downstream in useStrategyMapLenses, not
- *  here. Because the ring is bounded by `depth`, the "direct edges" set stays
- *  small — preserving the Safari label-portal/animation budget. */
+ *  Selecting a node and stepping outward reveals its neighbourhood one phase at
+ *  a time instead of lighting the whole connected component at once (the old
+ *  "select a mission → everything explodes" behaviour):
+ *
+ *    step 1  structural ring 1  — straight lineage edges to immediate neighbours
+ *    step 2  context pass 1     — context links off everything shown so far
+ *    step 3  structural ring 2  — the next hop of straight lineage
+ *    step 4  context pass 2     — context links off everything shown so far
+ *    …                            (odd = structural hop, even = context pass)
+ *
+ *  Both adjacencies are undirected, so the structural skeleton grows
+ *  symmetrically (ancestors AND descendants) and context chains expand from the
+ *  whole visible set. The structural frontier advances ONLY on structural
+ *  edges — context-added nodes (e.g. decisions) don't pull their own lineage
+ *  back into the skeleton, so "structural ring 2" stays literally two structural
+ *  hops from the selection.
+ *
+ *  Edge weighting (returned, applied downstream): only STRUCTURAL edges within
+ *  the revealed set are "direct" (bold). Context links stay ambient — a direct
+ *  context link spawns a label portal + an infinite dash animation, and lighting
+ *  many at once crashes the browser render process. Keeping context ambient is
+ *  what makes the trace safe on a high-degree node. */
 export function computeTraceFilter(
   selectedNodeId: string,
   allEdges: Edge[],
   depth: number,
 ): FilterResult {
-  // Undirected adjacency over every edge type.
-  const adj = new Map<string, string[]>()
-  const link = (a: string, b: string) => {
-    if (!adj.has(a)) adj.set(a, [])
-    adj.get(a)!.push(b)
-  }
+  // Separate undirected adjacencies so structural and context reveal on
+  // different phases.
+  const structuralAdj = new Map<string, string[]>()
+  const contextAdj = new Map<string, string[]>()
   for (const edge of allEdges) {
-    link(edge.source, edge.target)
-    link(edge.target, edge.source)
+    const adj = edge.type === 'statusEdge' ? structuralAdj
+      : edge.type === 'contextEdge' ? contextAdj
+      : null
+    if (!adj) continue
+    if (!adj.has(edge.source)) adj.set(edge.source, [])
+    if (!adj.has(edge.target)) adj.set(edge.target, [])
+    adj.get(edge.source)!.push(edge.target)
+    adj.get(edge.target)!.push(edge.source)
   }
 
-  // BFS rings outward, bounded by `depth` hops.
   const visited = new Set<string>([selectedNodeId])
-  let frontier = [selectedNodeId]
-  for (let hop = 0; hop < depth; hop++) {
-    const next: string[] = []
-    for (const id of frontier) {
-      const neighbors = adj.get(id)
-      if (!neighbors) continue
-      for (const neighbor of neighbors) {
-        if (!visited.has(neighbor)) {
-          visited.add(neighbor)
-          next.push(neighbor)
+  // The structural BFS frontier — advanced only by structural rings, so the
+  // skeleton stays pure (context-added nodes are leaves, not new roots).
+  let structuralFrontier = [selectedNodeId]
+
+  for (let step = 1; step <= depth; step++) {
+    if (step % 2 === 1) {
+      // Structural ring: one more hop along the lineage skeleton.
+      const next: string[] = []
+      for (const id of structuralFrontier) {
+        const neighbors = structuralAdj.get(id)
+        if (!neighbors) continue
+        for (const neighbor of neighbors) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor)
+            next.push(neighbor)
+          }
+        }
+      }
+      structuralFrontier = next
+    } else {
+      // Context pass: pull in context links off everything visible so far
+      // (including nodes added by earlier context passes, so context chains
+      // unfold progressively).
+      const snapshot = [...visited]
+      for (const id of snapshot) {
+        const neighbors = contextAdj.get(id)
+        if (!neighbors) continue
+        for (const neighbor of neighbors) {
+          if (!visited.has(neighbor)) visited.add(neighbor)
         }
       }
     }
-    frontier = next
-    if (frontier.length === 0) break
   }
 
-  // Include edges (structural + context) where both endpoints are within the ring.
-  return { nodeIds: visited, edgeIds: connectedEdges(visited, allEdges), matchCount: visited.size }
+  // All edges within the revealed set drive dimming (cluster); only the
+  // structural ones are "direct" (bold). Context links stay ambient.
+  const edgeIds = new Set<string>()
+  const directEdgeIds = new Set<string>()
+  for (const edge of allEdges) {
+    if (visited.has(edge.source) && visited.has(edge.target)) {
+      edgeIds.add(edge.id)
+      if (edge.type === 'statusEdge') directEdgeIds.add(edge.id)
+    }
+  }
+
+  return { nodeIds: visited, edgeIds, directEdgeIds, matchCount: visited.size }
 }

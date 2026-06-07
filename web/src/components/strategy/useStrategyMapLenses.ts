@@ -68,15 +68,21 @@ export function useStrategyMapLenses({
     if (filterResult) {
       // "Direct" edges get the heavy per-edge treatment: a label portal plus,
       // for context links, an infinite dash-flow animation. That's fine for a
-      // node focus (a handful of edges) and for the trace path (a deliberate
-      // lineage). But a SET-highlight filter (in_motion / blocked / done /
-      // decisions) can match the entire decision web at once — flagging every
-      // matched edge as direct sprays hundreds of label portals and infinite
-      // animations and crashes the browser's render process (Safari shows
-      // "a problem repeatedly occurred"). For those filters we highlight via
-      // opacity contrast only: matched edges stay in clusterEdgeIds (ambient),
-      // nothing is "direct". Trace keeps its direct edges.
-      const directEdgeIds = activeFilter === 'trace' ? filterResult.edgeIds : NO_DIRECT_EDGES
+      // node focus (a handful of edges). But a SET-highlight filter (in_motion /
+      // blocked / done / decisions) can match the entire decision web at once —
+      // flagging every matched edge as direct sprays hundreds of label portals
+      // and infinite animations and crashes the browser's render process
+      // (Safari shows "a problem repeatedly occurred"). For those filters we
+      // highlight via opacity contrast only: matched edges stay in
+      // clusterEdgeIds (ambient), nothing is "direct".
+      //
+      // Trace keeps direct edges, but only the STRUCTURAL ones it nominates
+      // (computeTraceFilter excludes context links from directEdgeIds for the
+      // same crash reason — a high-degree node has far too many context links to
+      // animate). Context links revealed by trace stay ambient via edgeIds.
+      const directEdgeIds = activeFilter === 'trace'
+        ? (filterResult.directEdgeIds ?? NO_DIRECT_EDGES)
+        : NO_DIRECT_EDGES
       return {
         directEdgeIds,
         clusterNodeIds: filterResult.nodeIds,
