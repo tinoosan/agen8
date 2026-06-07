@@ -9,6 +9,7 @@ import (
 
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
 	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
@@ -23,6 +24,7 @@ type Service struct {
 	projects ProjectLoader
 	links    GraphLinkWriter
 	missions KeyResultMissionReader
+	events   EventPublisher
 	logger   *slog.Logger
 }
 
@@ -42,6 +44,14 @@ type GraphLinkWriter interface {
 
 type KeyResultMissionReader interface {
 	KeyResultMission(ctx context.Context, keyResultID string) (string, error)
+}
+
+// EventPublisher fans task lifecycle transitions onto the in-process event bus
+// so the SSE hub can stream them to the browser. It is optional: a nil publisher
+// (the zero value) silently disables streaming, keeping the service usable in
+// tests and CLI paths that don't wire a bus.
+type EventPublisher interface {
+	Publish(topic string, event any) error
 }
 
 type CreateTaskParams struct {
@@ -123,6 +133,13 @@ func (s *Service) SetGraphLinkWriter(links GraphLinkWriter) {
 
 func (s *Service) SetKeyResultMissionReader(missions KeyResultMissionReader) {
 	s.missions = missions
+}
+
+// SetEventPublisher wires the bus the service publishes lifecycle transitions to.
+// Mirrors SetGraphLinkWriter: optional dependency injected post-construction so
+// NewService's signature stays stable.
+func (s *Service) SetEventPublisher(events EventPublisher) {
+	s.events = events
 }
 
 func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.Task, error) {
@@ -809,6 +826,25 @@ func (s *Service) requireUnblockCaller(ctx context.Context, task domain.Task, me
 	return s.requireCoordinator(ctx, memberID, task.ProjectID)
 }
 
+// taskEventTypes maps each internal transition action to the public
+// `task.*` event type the browser consumes. The frontend SSE hook filters on
+// the "task." prefix, so every value here must keep it. Actions absent from the
+// map (none today) would simply not stream.
+var taskEventTypes = map[string]string{
+	"create":         "task.created",
+	"update":         "task.updated",
+	"claim":          "task.claimed",
+	"assign":         "task.assigned",
+	"complete":       "task.submitted",
+	"approve_review": "task.completed",
+	"retry_review":   "task.retried",
+	"fail_review":    "task.failed",
+	"block":          "task.blocked",
+	"unblock":        "task.unblocked",
+	"release":        "task.released",
+	"cancel":         "task.canceled",
+}
+
 func (s *Service) logTaskTransition(action string, task domain.Task, caller Caller) {
 	s.logger.Info("task transition",
 		"action", action,
@@ -820,6 +856,50 @@ func (s *Service) logTaskTransition(action string, task domain.Task, caller Call
 		"caller_user_id", caller.UserID,
 		"caller_member_id", string(caller.MemberID),
 	)
+	s.publishTaskEvent(action, task)
+}
+
+// publishTaskEvent fans a single transition onto the bus. It is best-effort:
+// no publisher wired, no project, or an unmapped action all no-op silently so a
+// streaming failure can never break the state transition that already persisted.
+func (s *Service) publishTaskEvent(action string, task domain.Task) {
+	if s.events == nil || task.ProjectID == "" {
+		return
+	}
+	eventType, ok := taskEventTypes[action]
+	if !ok {
+		return
+	}
+	values := map[string]string{}
+	if task.Title != "" {
+		values["title"] = task.Title
+	}
+	if task.AssignedTo != "" {
+		values["assignedTo"] = string(task.AssignedTo)
+	}
+	if task.AssignedToLabel != "" {
+		values["assignedToLabel"] = task.AssignedToLabel
+	}
+	if task.ClaimedByMemberID != "" {
+		values["claimedByMemberId"] = string(task.ClaimedByMemberID)
+	}
+	if task.ClaimedByMemberLabel != "" {
+		values["claimedByMemberLabel"] = task.ClaimedByMemberLabel
+	}
+	if len(values) == 0 {
+		values = nil
+	}
+	event := eventbus.TaskLifecycleEvent{
+		ProjectID: string(task.ProjectID),
+		TaskID:    string(task.ID),
+		EventType: eventType,
+		Status:    string(task.Status),
+		Values:    values,
+		Timestamp: s.clock.Now().UTC(),
+	}
+	if err := s.events.Publish(eventbus.TopicTaskLifecycle, event); err != nil {
+		s.logger.Warn("publish task lifecycle event", "action", action, "task_id", string(task.ID), "error", err)
+	}
 }
 
 func trimTaskID(taskID domain.TaskID) domain.TaskID {

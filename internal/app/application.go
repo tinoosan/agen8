@@ -231,6 +231,7 @@ func NewApplication(cfg Config) (*Application, error) {
 	graphLinks := &graphServiceLinkPort{}
 	taskSvc.SetGraphLinkWriter(graphLinks)
 	taskSvc.SetKeyResultMissionReader(missionRefResolver{missions: missionSvc})
+	taskSvc.SetEventPublisher(bus)
 
 	decisionRepo := decisioninfra.NewSQLiteRepository(handle)
 	decisionSvc, err := decisionapp.NewService(
