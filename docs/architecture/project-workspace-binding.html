@@ -122,8 +122,8 @@
       <text x="124" y="138" text-anchor="middle" fill="var(--text)" font-size="11" font-weight="700">.agen8/ marker</text>
 
       <rect x="270" y="70" width="200" height="78" rx="9" fill="var(--bg-elevated)" stroke="var(--teal)"/>
-      <text x="370" y="100" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">agen8 mcp serve</text>
-      <text x="370" y="121" text-anchor="middle" fill="var(--text-muted)" font-size="11">stdio &#8596; http shim</text>
+      <text x="370" y="100" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">agen8-mcp daemon start</text>
+      <text x="370" y="121" text-anchor="middle" fill="var(--text-muted)" font-size="11">marker lookup + HTTP MCP</text>
       <text x="370" y="138" text-anchor="middle" fill="var(--text-muted)" font-size="11">reads marker · sends token</text>
 
       <rect x="516" y="70" width="200" height="78" rx="9" fill="var(--bg-elevated)" stroke="var(--teal)"/>
@@ -240,7 +240,7 @@ wlt_8c1f2a...9b
   <div class="layers">
     <div class="layer handler">
       <div class="label">Harness side</div>
-      <div class="role">The harness (Codex / Claude Code desktop or terminal) launches <code>agen8 mcp serve</code> as a stdio MCP server. No <code>claude -p</code>, no terminal-only assumption.</div>
+      <div class="role">The harness (Codex / Claude Code desktop or terminal) connects to a local daemon. Start it with <code>agen8-mcp daemon start</code> in this workspace.</div>
     </div>
     <div class="layer service">
       <div class="label">Marker read</div>
@@ -344,7 +344,7 @@ _, err = s.workspaces.<span class="tok-fn">Upsert</span>(ctx, workspace.Record{
     <div class="step"><span class="marker">1</span><span class="body">In the Agen8 web UI, the user <strong>creates or selects a Project</strong>.</span></div>
     <div class="step"><span class="marker">2</span><span class="body">They click <strong>&ldquo;link this folder&rdquo;</strong> for a local path. The UI mints a <code>wlt_</code> link token for that user + project.</span></div>
     <div class="step"><span class="marker">3</span><span class="body">The marker is written: <code>./.agen8/workspace.json</code> (committed), <code>./.agen8/token</code> (gitignored), and <code>./.agen8/.gitignore</code>.</span></div>
-    <div class="step"><span class="marker">4</span><span class="body"><code>agen8 mcp serve</code> reads the marker and connects. The harness session registers into the bound project.</span></div>
+    <div class="step"><span class="marker">4</span><span class="body"><code>agen8-mcp daemon start</code> reads the marker and connects. The harness session registers into the bound project.</span></div>
   </div>
 
   <h2 id="invariants">10. Invariants</h2>
@@ -395,7 +395,7 @@ _, err = s.workspaces.<span class="tok-fn">Upsert</span>(ctx, workspace.Record{
 <span class="dir">internal/mcp/</span>
   <span class="file">server.go</span><span class="note">edit — Session gains ProjectID</span>
 <span class="dir">cmd/agen8-mcp/</span>
-  <span class="file">main.go</span><span class="note">edit — `mcp serve` subcommand</span>
+  <span class="file">main.go</span><span class="note">edit — `daemon start` command</span>
 
 <span class="dir">internal/app/</span>
   <span class="file">application.go</span><span class="note">edit — wire LinkTokens + Workspaces</span>
