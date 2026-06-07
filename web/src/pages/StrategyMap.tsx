@@ -202,6 +202,7 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
     handlePaneDoubleClick,
   } = useStrategyMapNodeHandlers({
     effectiveFocusNodeId,
+    selectedNodeId,
     nodeById,
     setCenter,
     getZoom,
@@ -304,8 +305,10 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
               projectId={projectId}
               projectRoot={projectRoot}
               onClose={() => {
+                // Close the panel but keep the focus cursor so traversal can
+                // continue with the panel closed. A second Escape (handled in
+                // the keyboard hook) clears the cursor.
                 setSelectedNodeId(null)
-                setFocusNodeId(null)
               }}
             />
           )}

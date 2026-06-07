@@ -31,7 +31,9 @@ export const MissionNode = memo(function MissionNode({ data, selected, id }: Nod
   const isDimmed = useStrategyMapStore((s) =>
     s.clusterNodeIds ? !s.clusterNodeIds.has(id) : false,
   )
-  const isActiveFromStore = useStrategyMapStore((s) => s.selectedNodeId === id)
+  // Active glow follows the traversal cursor (focusNodeId), not the panel
+  // (selectedNodeId), so the focused node stays lit while the panel is closed.
+  const isActiveFromStore = useStrategyMapStore((s) => s.focusNodeId === id)
   const orbit = displayMode.missionKR === 'orbit'
   const isActive = selected || isActiveFromStore
   const inactiveClass = isInteracting

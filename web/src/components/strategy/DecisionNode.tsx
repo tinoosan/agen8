@@ -65,7 +65,9 @@ export const DecisionNode = memo(function DecisionNode({ data, selected, id }: N
   const isDimmed = useStrategyMapStore((s) =>
     s.clusterNodeIds ? !s.clusterNodeIds.has(id) : false,
   )
-  const isActiveFromStore = useStrategyMapStore((s) => s.selectedNodeId === id)
+  // Active glow follows the traversal cursor (focusNodeId), not the panel
+  // (selectedNodeId), so the focused node stays lit while the panel is closed.
+  const isActiveFromStore = useStrategyMapStore((s) => s.focusNodeId === id)
   const isActive = selected || isActiveFromStore
   const isTraced = useStrategyMapStore((s) => s.activeFilter === 'trace') && !isDimmed
   const showNebula = isActive || isTraced

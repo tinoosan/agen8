@@ -60,6 +60,25 @@ export function useStrategyMapKeyboardNav({
   setContextDepth: Dispatch<SetStateAction<number>>
 }) {
   useEffect(() => {
+    // Move the focus cursor to a node and recenter it. Traversal moves focus
+    // only; the panel (selectedNodeId) follows along just when it's already
+    // open (sticky-follow), so you can keyboard-traverse with the panel closed.
+    // The +110 offset leaves room for the panel slide-over — dropped when the
+    // panel is closed so the node lands dead-center.
+    const moveFocus = (node: Node) => {
+      const panelOpen = selectedNodeId !== null
+      setFocusNodeId(node.id)
+      if (panelOpen) setSelectedNodeId(node.id)
+      markInteraction(450)
+      if (node.position?.x !== undefined && node.position?.y !== undefined) {
+        const xOffset = panelOpen ? 110 : 0
+        setCenter(node.position.x + xOffset, node.position.y, {
+          duration: 400,
+          zoom: Math.max(getZoom(), 0.8),
+        })
+      }
+    }
+
     const handler = (e: KeyboardEvent) => {
       if (
         document.activeElement?.tagName === 'INPUT' ||
@@ -74,11 +93,9 @@ export function useStrategyMapKeyboardNav({
       // shortcuts while the modal owns focus.
       if (helpOpen || searchOpen) return
 
-      if (e.key === 'Escape') {
-        setSelectedNodeId(null)
-        setFocusNodeId(null)
-        return
-      }
+      // Escape is owned by the capture-phase handler below (progressive
+      // dismiss: filter → panel → focus cursor), so it can stopPropagation
+      // before ReactFlow sees it. Nothing to do here.
 
       // ? opens the keyboard-shortcut help overlay.
       if (e.key === '?') {
@@ -201,16 +218,7 @@ export function useStrategyMapKeyboardNav({
         ) {
           e.preventDefault()
           if (missionsSorted.length > 0) {
-            const first = missionsSorted[0]
-            setFocusNodeId(first.id)
-            setSelectedNodeId(first.id)
-            markInteraction(450)
-            if (first.position?.x !== undefined && first.position?.y !== undefined) {
-              setCenter(first.position.x + 110, first.position.y, {
-                duration: 400,
-                zoom: Math.max(getZoom(), 0.8),
-              })
-            }
+            moveFocus(missionsSorted[0])
           }
         }
         return
@@ -236,15 +244,7 @@ export function useStrategyMapKeyboardNav({
           : (currentMissionIdx + step + missionsSorted.length) % missionsSorted.length
         const nextMission = missionsSorted[nextIdx]
 
-        setFocusNodeId(nextMission.id)
-        setSelectedNodeId(nextMission.id)
-        markInteraction(450)
-        if (nextMission.position?.x !== undefined && nextMission.position?.y !== undefined) {
-          setCenter(nextMission.position.x + 110, nextMission.position.y, {
-            duration: 400,
-            zoom: Math.max(getZoom(), 0.8),
-          })
-        }
+        moveFocus(nextMission)
         return
       }
 
@@ -325,18 +325,7 @@ export function useStrategyMapKeyboardNav({
 
         if (bestId) {
           const nextNode = nodeById.get(bestId)
-          if (nextNode) {
-            setFocusNodeId(bestId)
-            setSelectedNodeId(bestId)
-            markInteraction(450)
-
-            if (nextNode.position?.x !== undefined && nextNode.position?.y !== undefined) {
-              setCenter(nextNode.position.x + 110, nextNode.position.y, {
-                duration: 400,
-                zoom: Math.max(getZoom(), 0.8),
-              })
-            }
-          }
+          if (nextNode) moveFocus(nextNode)
         }
       }
     }
@@ -351,14 +340,23 @@ export function useStrategyMapKeyboardNav({
       if (helpOpen || searchOpen) return
 
       if (e.key === 'Escape') {
+        // Progressive dismiss, one concern per press:
+        //   1. an active filter, then
+        //   2. the open panel (but keep the focus cursor so you can keep
+        //      traversing with the panel closed), then
+        //   3. the focus cursor itself.
         if (activeFilter) {
           e.stopPropagation()
           setActiveFilter(null)
           return
         }
-        if (selectedNodeId || focusNodeId) {
+        if (selectedNodeId) {
           e.stopPropagation()
           setSelectedNodeId(null)
+          return
+        }
+        if (focusNodeId) {
+          e.stopPropagation()
           setFocusNodeId(null)
         }
         return
