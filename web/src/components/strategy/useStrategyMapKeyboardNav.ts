@@ -53,7 +53,9 @@ export function useStrategyMapKeyboardNav({
   setSelectedNodeId: Dispatch<SetStateAction<string | null>>
   setFocusNodeId: Dispatch<SetStateAction<string | null>>
   setHelpOpen: Dispatch<SetStateAction<boolean>>
-  setSearchOpen: Dispatch<SetStateAction<boolean>>
+  // Store-backed action (open the node search), so it is a plain setter rather
+  // than a React state dispatcher — the hook only ever calls it with a boolean.
+  setSearchOpen: (open: boolean) => void
   setActiveFilter: Dispatch<SetStateAction<FilterPreset | null>>
   setContextDepth: Dispatch<SetStateAction<number>>
 }) {

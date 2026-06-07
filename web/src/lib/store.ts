@@ -64,6 +64,13 @@ interface AppStore {
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
 
+  /** Context-map node search ("/" inside the map). Lifted into the store so the
+   *  global mobile top-bar search button can open the same panel the keyboard
+   *  shortcut does, even though the panel itself lives inside the StrategyMap
+   *  page. Only meaningful while that page is mounted. */
+  strategySearchOpen: boolean
+  setStrategySearchOpen: (open: boolean) => void
+
   theme: Theme
   setTheme: (theme: Theme) => void
 
@@ -167,6 +174,9 @@ export const useStore = create<AppStore>((set, get) => ({
   paletteOpen: false,
   setPaletteOpen: (open) => set({ paletteOpen: open }),
 
+  strategySearchOpen: false,
+  setStrategySearchOpen: (open) => set({ strategySearchOpen: open }),
+
   theme: loadTheme(),
   lastDarkTheme: loadModeTheme('agen8-theme-dark', loadTheme(), false),
   lastLightTheme: loadModeTheme('agen8-theme-light', loadTheme(), true),
@@ -215,5 +225,6 @@ export const useStore = create<AppStore>((set, get) => ({
 
   resetEphemeral: () => set({
     artifactsOpen: false,
+    strategySearchOpen: false,
   }),
 }))

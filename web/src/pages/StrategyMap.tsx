@@ -10,6 +10,7 @@ import {
 import { Network, GitBranch } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { missionsPanelLink, useNavigation } from '../lib/routing'
+import { useStore } from '../lib/store'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useStrategyGraph } from '../components/strategy/useStrategyGraph'
@@ -50,7 +51,13 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
   const [activeFilter, setActiveFilter] = useState<FilterPreset | null>(null)
   const [contextDepth, setContextDepth] = useState(0)
   const [helpOpen, setHelpOpen] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
+  // Search-open lives in the global store so the mobile top-bar search button
+  // (rendered in App.tsx, outside this page) can open the same node-search
+  // panel that the "/" shortcut does. Reset on unmount so leaving and
+  // returning to the map never lands on a stale-open search.
+  const searchOpen = useStore((s) => s.strategySearchOpen)
+  const setSearchOpen = useStore((s) => s.setStrategySearchOpen)
+  useEffect(() => () => setSearchOpen(false), [setSearchOpen])
   const { fitView, setCenter, getZoom, zoomIn, zoomOut, setViewport } = useReactFlow()
 
   const interactionReleaseTimerRef = useRef<number | null>(null)

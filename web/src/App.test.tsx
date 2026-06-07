@@ -55,6 +55,7 @@ function resetStore() {
     useStore.setState({
       artifactsOpen: false,
       paletteOpen: false,
+      strategySearchOpen: false,
       theme: 'dark',
     })
   })
@@ -129,6 +130,33 @@ describe('App', () => {
 
     fireEvent.keyDown(window, { ctrlKey: true, shiftKey: true, key: 'P' })
     expect(await screen.findByText('Command Palette')).toBeInTheDocument()
+  })
+
+  it('mobile search button opens the command palette off the context map', async () => {
+    renderWithRouter('/')
+
+    fireEvent.click(await screen.findByLabelText('Open search'))
+    expect(await screen.findByText('Command Palette')).toBeInTheDocument()
+    // The context-map node search is a different panel — it must stay shut.
+    expect(useStore.getState().strategySearchOpen).toBe(false)
+  })
+
+  it('mobile search button opens the context-map node search on the strategy route', async () => {
+    // The StrategyMap page mock throws (see top of file), so the route renders
+    // the crash boundary — but the mobile top bar lives outside it and the
+    // button only depends on the resolved view being "strategy".
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      renderWithRouter('/project/myapp/strategy')
+
+      fireEvent.click(await screen.findByLabelText('Open search'))
+      expect(useStore.getState().strategySearchOpen).toBe(true)
+      // It opens the node search, NOT the global command palette.
+      expect(useStore.getState().paletteOpen).toBe(false)
+      expect(screen.queryByText('Command Palette')).not.toBeInTheDocument()
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 
   it('applies the selected theme to the document root', async () => {
