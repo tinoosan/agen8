@@ -3,7 +3,7 @@ import { Redirect, Route, Switch, useLocation } from 'wouter'
 import { Menu, Search } from 'lucide-react'
 import { useStore } from './lib/store'
 import { brandIconFor } from './lib/brandIcon'
-import { missionsPanelLink, useNavigation, type ActiveView } from './lib/routing'
+import { missionsPanelLink, strategyMapLink, useNavigation, type ActiveView } from './lib/routing'
 import { useAuth } from './hooks/useAuth'
 import { useRealtimeInvalidation } from './hooks/useRealtimeSync'
 import { lazyWithRetry } from './lib/lazyWithRetry'
@@ -53,8 +53,8 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
  *  Must live inside SidebarProvider so useSidebar() resolves. */
 function MobileTopBar() {
   const { toggleSidebar } = useSidebar()
-  const { activeView } = useNavigation()
-  const [location] = useLocation()
+  const { activeView, projectId } = useNavigation()
+  const [location, navigate] = useLocation()
   const theme = useStore((s) => s.theme)
 
   const title = location.startsWith('/credentials')
@@ -84,14 +84,18 @@ function MobileTopBar() {
       <span className="flex-1 min-w-0 truncate text-[0.9375rem] font-semibold tracking-[-0.02em] text-[var(--text-1)]">
         {title}
       </span>
-      {/* Search button only on the context map — it opens that page's node
-          search (the same panel the "/" shortcut opens), the one search worth
-          a touch entry point. Off the map there's no global search to open, so
-          the button isn't shown. */}
-      {activeView === 'strategy' && (
+      {/* Search button — the one search worth a touch entry point is the
+          context map's node search (the same panel the "/" shortcut opens).
+          On the map it opens that panel directly; on the dashboard it routes
+          to the map first, then opens it. Both are the strategy node search,
+          so the button isn't shown on pages without one. */}
+      {(activeView === 'strategy' || activeView === 'dashboard') && (
         <button
           type="button"
-          onClick={() => useStore.getState().setStrategySearchOpen(true)}
+          onClick={() => {
+            useStore.getState().setStrategySearchOpen(true)
+            if (activeView !== 'strategy' && projectId) navigate(strategyMapLink(projectId))
+          }}
           aria-label="Open search"
           className="h-9 w-9 flex items-center justify-center rounded-[8px] border-none bg-transparent cursor-pointer text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors shrink-0"
         >

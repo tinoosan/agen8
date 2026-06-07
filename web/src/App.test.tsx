@@ -132,6 +132,16 @@ describe('App', () => {
     }
   })
 
+  it('mobile search button on the dashboard routes to the context map and opens node search', async () => {
+    // On the dashboard there's no node search inline, so the button first
+    // routes to the context map, then opens the same panel the "/" shortcut does.
+    const { history } = renderWithRouter('/project/myapp/dashboard')
+
+    fireEvent.click(await screen.findByLabelText('Open search'))
+    expect(useStore.getState().strategySearchOpen).toBe(true)
+    expect(history.at(-1)).toBe('/project/myapp/strategy')
+  })
+
   it('applies the selected theme to the document root', async () => {
     act(() => {
       useStore.setState({ theme: 'dim' })

@@ -1,11 +1,12 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { qk } from '../lib/queryKeys'
-import { useNavigation, type DashboardPanel } from '../lib/routing'
+import { useNavigation, strategyMapLink, type DashboardPanel } from '../lib/routing'
 import { useLocation, useSearch } from 'wouter'
 import { useMissions } from '../hooks/useMissions'
-import { RefreshCw, PanelRight } from 'lucide-react'
+import { RefreshCw, PanelRight, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useStore } from '../lib/store'
 import { cn } from '@/lib/utils'
 import DecisionFeed from '../components/dashboard/DecisionFeed'
 import MissionSummary from '../components/dashboard/MissionSummary'
@@ -160,6 +161,21 @@ export default function Dashboard() {
       <div className="dashboard-shell-tabs w-full">
       <div className="dashboard-shell-toolbar mb-5 flex items-center justify-end gap-4">
         <div className="dashboard-hero-actions flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            title="Search the context map"
+            aria-label="Search the context map"
+            data-testid="dashboard-map-search"
+            onClick={() => {
+              useStore.getState().setStrategySearchOpen(true)
+              if (projectId) navigate(strategyMapLink(projectId))
+            }}
+            className="hidden md:inline-flex w-8 h-8 rounded-[10px] text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors"
+          >
+            <Search size={16} aria-hidden />
+          </Button>
           <Button
             variant="ghost"
             size="sm"

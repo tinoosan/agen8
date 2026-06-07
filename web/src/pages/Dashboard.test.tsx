@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Router } from 'wouter'
+import { memoryLocation } from 'wouter/memory-location'
+import { useStore } from '../lib/store'
 
 const mockUseNavigation = vi.fn()
 const mockUseMissions = vi.fn()
@@ -12,6 +15,7 @@ const mockDashboardContextPanel = vi.fn()
 
 vi.mock('../lib/routing', () => ({
   useNavigation: () => mockUseNavigation(),
+  strategyMapLink: (projectId: string) => `/project/${encodeURIComponent(projectId)}/strategy`,
 }))
 
 vi.mock('../hooks/useMissions', () => ({
@@ -60,6 +64,7 @@ describe('Dashboard page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     try { localStorage.clear() } catch { /* noop */ }
+    useStore.getState().setStrategySearchOpen(false)
     mockUseNavigation.mockReturnValue({ projectId: 'proj-1', focusedProjectRoot: '/repo' })
     mockUseMissions.mockReturnValue({ data: [], isLoading: false })
     mockUseAuth.mockReturnValue({ user: { name: 'Ada Lovelace', email: 'ada@example.com' } })
@@ -110,6 +115,23 @@ describe('Dashboard page', () => {
       'project.tasks.board',
       'task.get',
     ]))
+  })
+
+  it('header search jumps to the context map and opens its node search', async () => {
+    const location = memoryLocation({ path: '/project/proj-1/dashboard', record: true })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <Router hook={location.hook}>
+          <Dashboard />
+        </Router>
+      </QueryClientProvider>,
+    )
+
+    await userEvent.click(screen.getByLabelText('Search the context map'))
+
+    expect(useStore.getState().strategySearchOpen).toBe(true)
+    expect(location.history.at(-1)).toBe('/project/proj-1/strategy')
   })
 
   it('prompts for a project when none is focused', () => {
