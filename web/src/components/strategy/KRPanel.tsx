@@ -6,6 +6,7 @@ import { useMissions } from '../../hooks/useMissions'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import { missionDetailLink } from '../../lib/routing'
 import { confidenceColor } from '../../lib/decisionDisplay'
+import { entityDisplayTitle } from '../../lib/displaySanitizers'
 import { RelatedSection } from './RelatedSection'
 import KRDetailBody from './KRDetailBody'
 import type { KRNodeData } from './KRNode'
@@ -38,11 +39,11 @@ export function KRPanel({ data, projectId, onClose }: NodePanelProps) {
   const linkedTasks = (tasksQuery.data ?? []).filter(t => t.keyResultRef === kr.id)
 
   const relatedItems = [
-    { nodeId: kr.missionId, type: 'Mission' as const, title: missionTitle ?? kr.missionId.slice(0, 12) },
+    { nodeId: kr.missionId, type: 'Mission' as const, title: entityDisplayTitle(kr.missionId, missionTitle) },
     ...linkedTasks.map(t => ({
       nodeId: `task:${t.id}`,
       type: 'Task' as const,
-      title: t.title ?? t.description ?? t.id.slice(0, 12),
+      title: entityDisplayTitle(t.id, t.title, t.description),
     })),
     ...linkedDecisions.map(dec => ({
       nodeId: `decision:${dec.id}`,

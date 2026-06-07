@@ -9,7 +9,8 @@ import { Clock, CircleCheck, CircleAlert, Target, FolderOpen } from 'lucide-reac
 import { rpcCall } from '../../lib/rpc'
 import { dashboardLink, missionDetailLink } from '../../lib/routing'
 import { useProjects } from '../../hooks/useProjects'
-import type { MissionView, Project } from '../../lib/types'
+import type { MissionView } from '../../lib/types'
+import { projectDisplayName } from '../../lib/spaceHelpers'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /* ── Mission status icon (mirrors MissionSection) ────── */
@@ -52,13 +53,6 @@ function SectionSkeleton({ rows }: { rows: number }) {
       ))}
     </div>
   )
-}
-
-function projectDisplayName(project: Project) {
-  const title = project.title?.trim()
-  if (title) return title
-  const rootName = project.root.split('/').filter(Boolean).at(-1)
-  return rootName || project.id
 }
 
 /* ── Main component ────────────────────────────────────── */

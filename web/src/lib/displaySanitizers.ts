@@ -62,3 +62,15 @@ export function safeReferenceLabel(value: string | null | undefined): string | n
   if (/^(unknown|none|null)$/i.test(text)) return null
   return text
 }
+
+// A graph node's display title: its own title or description, else a short id
+// prefix so a row is never blank. The 12-char *prefix* is a last-resort label,
+// deliberately NOT the same as taskIdShort (boardHelpers), which shows a 6-char
+// *suffix* as an explicit id chip — two intents, opposite ends of the id.
+export function entityDisplayTitle(
+  id: string,
+  title?: string | null,
+  description?: string | null,
+): string {
+  return title || description || id.slice(0, 12)
+}

@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
 import { formatDate, formatRelative } from '@/lib/format'
+import { projectDisplayName } from '@/lib/spaceHelpers'
 import {
   Archive, Check, ChevronLeft, ChevronRight, FolderOpen,
   HardDrive, Link as LinkIcon, MoreHorizontal, Plus, Search, Server, Trash2,
@@ -41,13 +42,6 @@ import { cn } from '@/lib/utils'
 import { brandIconFor } from '../lib/brandIcon'
 
 /* ── Utility helpers ─────────────────────────────── */
-
-function projectName(project: Project): string {
-  if (project.title?.trim()) return project.title.trim()
-  if (project.id) return project.id
-  const segments = project.root.split('/')
-  return segments[segments.length - 1] || project.root
-}
 
 function shortenPath(path: string): string {
   const parts = path.split('/')
@@ -467,7 +461,7 @@ function ProjectTableRow({
             'truncate text-[0.8125rem] font-semibold leading-tight',
             archived ? 'text-[var(--text-3)]' : 'text-[var(--text-1)]',
           )}>
-            {projectName(project)}
+            {projectDisplayName(project)}
           </div>
           <div
             className="mt-0.5 truncate font-mono text-[0.6875rem] leading-tight text-[var(--text-3)]"
@@ -584,7 +578,7 @@ function RemoveProjectDialog({
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="text-[0.8125rem] text-[var(--text-2)] leading-[1.6]">
-              {deleting ? 'Delete' : 'Archive'} <span className="font-semibold text-[var(--text-1)]">{projectName(project)}</span>? {deleting ? 'This removes the project record. Project files on disk are not deleted.' : 'It will leave active project views immediately.'}
+              {deleting ? 'Delete' : 'Archive'} <span className="font-semibold text-[var(--text-1)]">{projectDisplayName(project)}</span>? {deleting ? 'This removes the project record. Project files on disk are not deleted.' : 'It will leave active project views immediately.'}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -658,7 +652,7 @@ export default function ProjectPage() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim()
       list = list.filter(p =>
-        projectName(p).toLowerCase().includes(q) ||
+        projectDisplayName(p).toLowerCase().includes(q) ||
         p.root.toLowerCase().includes(q)
       )
     }
@@ -675,7 +669,7 @@ export default function ProjectPage() {
 
   const handleCreateSuccess = (project: Project) => {
     queryClient.invalidateQueries({ queryKey: ['project.list'] })
-    toast.success(`Project "${projectName(project)}" created`)
+    toast.success(`Project "${projectDisplayName(project)}" created`)
     if (project.id) {
       navigate(`/project/${encodeURIComponent(project.id)}`)
     }
@@ -858,7 +852,7 @@ export default function ProjectPage() {
               const removed = removeTarget
               setRemoveTarget(null)
               queryClient.invalidateQueries({ queryKey: ['project.list'] })
-              toast.success(`Project "${projectName(removed.project)}" ${removed.action === 'delete' ? 'deleted' : 'archived'}`)
+              toast.success(`Project "${projectDisplayName(removed.project)}" ${removed.action === 'delete' ? 'deleted' : 'archived'}`)
             }}
           />
         )}

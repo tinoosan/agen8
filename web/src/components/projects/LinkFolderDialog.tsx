@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, Copy, FolderDown, KeyRound, Link, TriangleAlert } from 'lucide-react'
 import type { Project } from '../../lib/types'
+import { projectDisplayName } from '../../lib/spaceHelpers'
 import { createLinkToken, type LinkTokenResult } from '../../lib/projectClient'
 import {
   buildMarkerFiles, MARKER_DIR, supportsDirectoryPicker, writeMarkerToDirectory, type MarkerFile,
@@ -10,12 +11,6 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-
-function projectLabel(project: Project): string {
-  if (project.title?.trim()) return project.title.trim()
-  if (project.id) return project.id
-  return project.root
-}
 
 async function copyText(text: string): Promise<void> {
   if (typeof navigator === 'undefined' || !navigator.clipboard) {
@@ -129,7 +124,7 @@ export default function LinkFolderDialog({
           </DialogTitle>
           <DialogDescription className="text-[0.75rem] text-[var(--text-3)]">
             Bind a folder on disk to{' '}
-            <span className="font-semibold text-[var(--text-2)]">{projectLabel(project)}</span>{' '}
+            <span className="font-semibold text-[var(--text-2)]">{projectDisplayName(project)}</span>{' '}
             by placing an <span className="font-mono">{MARKER_DIR}/</span> marker inside it.
           </DialogDescription>
         </DialogHeader>

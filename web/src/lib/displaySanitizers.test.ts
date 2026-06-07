@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPrefixedId, isUuid, looksLikeOpaqueId, safeReferenceLabel, sanitizeDecisionTitle, sanitizeDisplayTitle } from './displaySanitizers'
+import { entityDisplayTitle, isPrefixedId, isUuid, looksLikeOpaqueId, safeReferenceLabel, sanitizeDecisionTitle, sanitizeDisplayTitle } from './displaySanitizers'
 
 describe('displaySanitizers', () => {
   it('drops opaque runtime identifiers from display titles', () => {
@@ -59,5 +59,23 @@ describe('isPrefixedId', () => {
 describe('looksLikeOpaqueId loose-uuid regression', () => {
   it('now catches a non-RFC-strict uuid that the old strict regex missed', () => {
     expect(looksLikeOpaqueId('07f5f6ee-06a7-0399-77b9-6ced1c165a78')).toBe(true)
+  })
+})
+
+describe('entityDisplayTitle', () => {
+  it('prefers the title', () => {
+    expect(entityDisplayTitle('task-abcdef123456', 'Write spec', 'a description')).toBe('Write spec')
+  })
+
+  it('falls back to the description when there is no title', () => {
+    expect(entityDisplayTitle('task-abcdef123456', undefined, 'a description')).toBe('a description')
+  })
+
+  it('falls back to a 12-char id prefix when there is neither title nor description', () => {
+    expect(entityDisplayTitle('task-abcdef123456', null, null)).toBe('task-abcdef1')
+  })
+
+  it('treats an empty-string title as absent (|| not ??)', () => {
+    expect(entityDisplayTitle('task-abcdef123456', '', 'a description')).toBe('a description')
   })
 })

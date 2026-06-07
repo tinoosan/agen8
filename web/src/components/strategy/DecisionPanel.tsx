@@ -9,6 +9,7 @@ import { useKeyResult, useProjectKRs, useMissions } from '../../hooks/useMission
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import type { NodePanelProps } from './types'
 import { decisionActorDisplay } from '../../lib/decisionDisplay'
+import { entityDisplayTitle } from '../../lib/displaySanitizers'
 import { PANEL_FONT } from './panelTypography'
 
 const SOURCE_DOT: Record<DecisionSource, string> = {
@@ -47,7 +48,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
   // Fetch titles for related entities
   const tasksQuery = useProjectTasks(projectId)
   const taskTitle = decision.taskRef
-    ? (tasksQuery.data ?? []).find(t => t.id === decision.taskRef)?.title ?? decision.taskRef.slice(0, 12)
+    ? entityDisplayTitle(decision.taskRef, (tasksQuery.data ?? []).find(t => t.id === decision.taskRef)?.title)
     : null
   const krsQuery = useProjectKRs(projectId)
   const directKrQuery = useKeyResult(decision.keyResultRef ?? null)
@@ -59,7 +60,7 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
     : null
   const missionsQuery = useMissions(projectId)
   const missionTitle = decision.missionRef
-    ? (missionsQuery.data ?? []).find(m => m.id === decision.missionRef)?.title ?? decision.missionRef.slice(0, 12)
+    ? entityDisplayTitle(decision.missionRef, (missionsQuery.data ?? []).find(m => m.id === decision.missionRef)?.title)
     : null
 
   const confidencePercent = Math.round((decision.confidence ?? 0) * 100)

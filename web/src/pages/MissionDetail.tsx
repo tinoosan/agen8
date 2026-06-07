@@ -12,6 +12,7 @@ import {
 import { useProjectTasks } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
 import { formatKRProgress } from '../lib/missionUtils'
+import { entityDisplayTitle } from '../lib/displaySanitizers'
 import { missionsPanelLink, taskDetailLink, decisionDetailLink } from '../lib/routing'
 import ProgressHistory from '../components/mission/ProgressHistory'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
@@ -584,7 +585,7 @@ export default function MissionDetail() {
     related.push({
       key: t.id,
       label: 'Task',
-      title: t.title || t.description || t.id.slice(0, 12),
+      title: entityDisplayTitle(t.id, t.title, t.description),
       to: taskDetailLink(projectId, t.id),
     })
   }

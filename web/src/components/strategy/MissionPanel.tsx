@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useKeyResults, useUpdateMission } from '../../hooks/useMissions'
 import { missionDetailLink } from '../../lib/routing'
 import { confidenceColor } from '../../lib/decisionDisplay'
+import { entityDisplayTitle } from '../../lib/displaySanitizers'
 import MissionLifecycleActions from '../mission/MissionLifecycleActions'
 import { RelatedSection } from './RelatedSection'
 import { useRecentDecisions } from '../../hooks/useDecisions'
@@ -61,7 +62,7 @@ export function MissionPanel({ data, projectId, onClose }: NodePanelProps) {
     ...tasks.map(t => ({
       nodeId: `task:${t.id}`,
       type: 'Task' as const,
-      title: t.title ?? t.description ?? t.id.slice(0, 12),
+      title: entityDisplayTitle(t.id, t.title, t.description),
     })),
     ...decisions.map(dec => ({
       nodeId: `decision:${dec.id}`,
