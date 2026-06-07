@@ -6,12 +6,14 @@
 // …) so every "{ <field>: T[] }" RPC shape is described one way.
 export type RpcList<K extends string, T> = { [P in K]: T[] };
 
+export type ProjectStatus = "open" | "archived";
+
 export interface Project {
   id: string;
   locationId: string;
   root: string;
   title?: string;
-  status: "open" | "archived" | string;
+  status: ProjectStatus;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -22,13 +24,19 @@ export interface LocationAddress {
   username?: string;
 }
 
+// Outcome of a single location capability check or probe. Shared by
+// LocationCapability and LocationProbe — same three-state result.
+export type LocationCheckStatus = "passed" | "failed" | "unknown";
+export type LocationKind = "local" | "ssh" | "managed";
+export type LocationStatus = "online" | "offline" | "not_ready";
+
 export interface LocationCapability {
   name: string;
-  status: "passed" | "failed" | "unknown" | string;
+  status: LocationCheckStatus;
 }
 
 export interface LocationProbe {
-  status?: "passed" | "failed" | "unknown" | string;
+  status?: LocationCheckStatus;
   failureCode?: string;
   message?: string;
   probedAt?: string;
@@ -36,10 +44,10 @@ export interface LocationProbe {
 
 export interface ExecutionLocation {
   id: string;
-  kind: "local" | "ssh" | "managed" | string;
+  kind: LocationKind;
   label: string;
   address?: LocationAddress;
-  status: "online" | "offline" | "not_ready" | string;
+  status: LocationStatus;
   ready: boolean;
   capabilities?: LocationCapability[];
   auth?: {
