@@ -120,6 +120,25 @@ export function useDeleteMission() {
   })
 }
 
+// useHardDeleteMission permanently purges a mission and everything beneath it
+// (key results, progress entries, lifecycle events). Unlike useDeleteMission,
+// which only archives, this cannot be undone. We also clear the per-mission KR
+// caches since those rows no longer exist.
+export function useHardDeleteMission() {
+  const queryClient = useQueryClient()
+  return useMutation<{ mission: MissionView }, Error, { missionId: string }>({
+    mutationFn: (params) => rpcCall<{ mission: MissionView }>('mission.purge', params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.missionsAll })
+      queryClient.invalidateQueries({ queryKey: qk.sidebarGlobalMissionsRoot })
+      queryClient.invalidateQueries({ queryKey: qk.missionGetAll })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsListAllRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsByMissionSetRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultGetAll })
+    },
+  })
+}
+
 /* ── Key Result mutation hooks ───────────────────────── */
 
 export function useCreateKeyResult() {

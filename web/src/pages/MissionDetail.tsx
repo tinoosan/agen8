@@ -4,7 +4,7 @@ import { useRoute, useLocation, Link } from 'wouter'
 import { toast } from 'sonner'
 import { rpcUnwrap } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-import { useKeyResults, useUpdateMission, useDeleteMission } from '../hooks/useMissions'
+import { useKeyResults, useUpdateMission, useDeleteMission, useHardDeleteMission } from '../hooks/useMissions'
 import { useProjectTasks } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
 import { entityDisplayTitle } from '../lib/displaySanitizers'
@@ -77,6 +77,7 @@ export default function MissionDetail() {
   const [, navigate] = useLocation()
   const updateMission = useUpdateMission()
   const deleteMission = useDeleteMission()
+  const purgeMission = useHardDeleteMission()
 
   const { data: mission, isLoading: missionLoading, isError: missionError, error: missionErr } =
     useQuery<MissionView>({
@@ -163,7 +164,17 @@ export default function MissionDetail() {
   async function handleDelete() {
     try {
       await deleteMission.mutateAsync({ missionId: missionId_ })
-      toast.success('Mission deleted')
+      toast.success('Mission archived')
+      navigate(missionsPanelLink(projectIdValue))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to archive mission')
+    }
+  }
+
+  async function handlePurge() {
+    try {
+      await purgeMission.mutateAsync({ missionId: missionId_ })
+      toast.success('Mission permanently deleted')
       navigate(missionsPanelLink(projectIdValue))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete mission')
@@ -249,16 +260,36 @@ export default function MissionDetail() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete mission</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This archives "{mission.title}" and removes it from your active missions.
+                    {mission.status !== 'archived' ? (
+                      <>
+                        <strong>Archive</strong> keeps "{mission.title}" and its key results
+                        but hides it from active missions — you can reopen it later.{' '}
+                        <strong>Delete permanently</strong> erases the mission and all of its
+                        key results and history for good. This can't be undone.
+                      </>
+                    ) : (
+                      <>
+                        This permanently erases "{mission.title}" and all of its key results
+                        and history. This can't be undone.
+                      </>
+                    )}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  {mission.status !== 'archived' && (
+                    <AlertDialogAction
+                      onClick={handleDelete}
+                      className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                    >
+                      {deleteMission.isPending ? 'Archiving…' : 'Archive'}
+                    </AlertDialogAction>
+                  )}
                   <AlertDialogAction
-                    onClick={handleDelete}
+                    onClick={handlePurge}
                     className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   >
-                    {deleteMission.isPending ? 'Deleting…' : 'Delete'}
+                    {purgeMission.isPending ? 'Deleting…' : 'Delete permanently'}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

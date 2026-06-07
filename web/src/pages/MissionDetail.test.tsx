@@ -13,6 +13,7 @@ const mockUseRecentDecisions = vi.fn()
 const mockMutation = { mutateAsync: vi.fn(), isPending: false }
 const mockUpdateMission = { mutateAsync: vi.fn(), isPending: false }
 const mockDeleteMission = { mutateAsync: vi.fn(), isPending: false }
+const mockHardDeleteMission = { mutateAsync: vi.fn(), isPending: false }
 
 vi.mock('../lib/rpc', () => ({
   rpcCall: (...args: unknown[]) => mockRpcCall(...args),
@@ -33,6 +34,7 @@ vi.mock('../hooks/useMissions', () => ({
   useDeleteKeyResult: () => mockMutation,
   useUpdateMission: () => mockUpdateMission,
   useDeleteMission: () => mockDeleteMission,
+  useHardDeleteMission: () => mockHardDeleteMission,
 }))
 
 vi.mock('../hooks/useProjectTasks', () => ({
@@ -98,6 +100,7 @@ describe('MissionDetail page', () => {
     vi.clearAllMocks()
     mockUpdateMission.mutateAsync.mockResolvedValue({ mission: MISSION })
     mockDeleteMission.mutateAsync.mockResolvedValue({ mission: MISSION })
+    mockHardDeleteMission.mutateAsync.mockResolvedValue({ mission: MISSION })
     mockRpcCall.mockResolvedValue({ mission: MISSION })
     mockUseKeyResults.mockReturnValue({ data: KEY_RESULTS, isLoading: false, isError: false, error: null })
     mockUseProjectTasks.mockReturnValue({
@@ -158,21 +161,40 @@ describe('MissionDetail page', () => {
     })
   })
 
-  it('deletes the mission through a confirm dialog wired to mission.delete', async () => {
+  it('archives the mission through the confirm dialog wired to mission.delete', async () => {
     const user = userEvent.setup()
     renderDetail()
 
     await screen.findByRole('heading', { name: 'Stabilize public baseline' })
 
-    // The header trigger opens the confirm; the destructive action lives inside it.
+    // The header trigger opens the confirm; archive (soft delete) lives inside it.
     const actions = screen.getByRole('group', { name: /mission actions/i })
     await user.click(within(actions).getByRole('button', { name: /^delete$/i }))
     const confirm = await screen.findByRole('alertdialog')
-    await user.click(within(confirm).getByRole('button', { name: /^delete$/i }))
+    await user.click(within(confirm).getByRole('button', { name: /^archive$/i }))
 
     await waitFor(() => {
       expect(mockDeleteMission.mutateAsync).toHaveBeenCalledWith({ missionId: 'mission-1' })
     })
+    expect(mockHardDeleteMission.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('permanently deletes the mission through the confirm dialog wired to mission.purge', async () => {
+    const user = userEvent.setup()
+    renderDetail()
+
+    await screen.findByRole('heading', { name: 'Stabilize public baseline' })
+
+    // The same confirm offers an explicit, irreversible hard delete.
+    const actions = screen.getByRole('group', { name: /mission actions/i })
+    await user.click(within(actions).getByRole('button', { name: /^delete$/i }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: /delete permanently/i }))
+
+    await waitFor(() => {
+      expect(mockHardDeleteMission.mutateAsync).toHaveBeenCalledWith({ missionId: 'mission-1' })
+    })
+    expect(mockDeleteMission.mutateAsync).not.toHaveBeenCalled()
   })
 
   it('exposes lifecycle transitions for an active mission', async () => {
