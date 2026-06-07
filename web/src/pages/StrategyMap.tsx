@@ -20,6 +20,7 @@ import { StrategyMapHelp } from '../components/strategy/StrategyMapHelp'
 import { StrategyMapSearch } from '../components/strategy/StrategyMapSearch'
 import { StrategyMapFilterBar } from '../components/strategy/StrategyMapFilterBar'
 import { StrategyMapLegend } from '../components/strategy/StrategyMapLegend'
+import { StrategyMapZoomControls } from '../components/strategy/StrategyMapZoomControls'
 import { StrategyMapCanvas } from '../components/strategy/StrategyMapCanvas'
 import { type FilterPreset } from '../components/strategy/strategyMapFilters'
 import {
@@ -288,6 +289,7 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
         )}
 
         <StrategyMapLegend />
+        <StrategyMapZoomControls />
         <AnimatePresence>
           {selectedNode && (
             <DetailPanel
