@@ -282,9 +282,13 @@ func TestRegisterMissionActivationPreconditionIsInvalidParams(t *testing.T) {
 		}
 		return decodeRPCResponse(t, rawResp)
 	}
+	// Activation requires at least one non-dropped key result. A mission with no
+	// key results must therefore fail the precondition. (The former KR->owner
+	// project requirement was removed, so a mission with a KR now activates
+	// cleanly — this test deliberately creates none to exercise the gate.)
 	createResp := request(MethodMissionCreate, map[string]any{
 		"projectId": "project-1",
-		"title":     "Needs owner space",
+		"title":     "Needs a key result",
 	})
 	var createResult struct {
 		Mission struct {
@@ -293,16 +297,6 @@ func TestRegisterMissionActivationPreconditionIsInvalidParams(t *testing.T) {
 	}
 	if err := json.Unmarshal(createResp.Result, &createResult); err != nil {
 		t.Fatalf("unmarshal create result: %v", err)
-	}
-	krResp := request(MethodMissionKRCreate, map[string]any{
-		"missionId":       createResult.Mission.ID,
-		"title":           "Unassigned KR",
-		"measurementType": "number",
-		"direction":       "increase",
-		"targetValue":     100,
-	})
-	if krResp.Error != nil {
-		t.Fatalf("create KR error=%+v", krResp.Error)
 	}
 
 	resp := request(MethodMissionUpdate, map[string]any{
