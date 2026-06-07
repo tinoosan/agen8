@@ -140,7 +140,7 @@ describe('MissionDetail page', () => {
     expect(screen.queryByText('Unrelated decision')).not.toBeInTheDocument()
   })
 
-  it('opens the edit dialog and saves through mission.update', async () => {
+  it('edits the mission inline (no modal) and saves through mission.update', async () => {
     const user = userEvent.setup()
     renderDetail()
 
@@ -149,10 +149,12 @@ describe('MissionDetail page', () => {
     const actions = screen.getByRole('group', { name: /mission actions/i })
     await user.click(within(actions).getByRole('button', { name: /^edit$/i }))
 
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('Edit mission')).toBeInTheDocument()
+    // Inline edit: the title turns into an input in place, no dialog opens.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    const titleInput = await screen.findByRole('textbox', { name: /mission title/i })
+    expect(titleInput).toHaveValue('Stabilize public baseline')
 
-    await user.click(within(dialog).getByRole('button', { name: /save changes/i }))
+    await user.click(within(actions).getByRole('button', { name: /save changes/i }))
 
     await waitFor(() => {
       expect(mockUpdateMission.mutateAsync).toHaveBeenCalledWith(

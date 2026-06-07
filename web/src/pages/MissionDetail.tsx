@@ -15,9 +15,12 @@ import { DetailHeader } from '../components/detail/DetailHeader'
 import { RelatedList } from '../components/detail/RelatedList'
 import { KRRow } from '../components/mission/KRRow'
 import MissionLifecycleActions from '../components/mission/MissionLifecycleActions'
-import EditMissionDialog from '../components/mission/EditMissionDialog'
+import { MissionDateField } from '../components/mission/CreateMissionDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   AlertDialog,
@@ -32,8 +35,14 @@ import {
 } from '@/components/ui/alert-dialog'
 import { formatDate } from '@/lib/format'
 import { confidenceColor } from '@/lib/decisionDisplay'
-import { Calendar, ChevronsUpDown, Pencil, Trash2 } from 'lucide-react'
+import { format, parseISO } from 'date-fns'
+import { Calendar, Check, ChevronsUpDown, Pencil, Trash2, X } from 'lucide-react'
 import type { MissionView, MissionStatus } from '../lib/types'
+
+// Mission dates arrive as ISO datetimes; the date fields work in 'yyyy-MM-dd'.
+function toDayString(value?: string): string {
+  return value ? value.slice(0, 10) : ''
+}
 
 /* ── Status helper ──────────────────────────────────────── */
 
@@ -73,7 +82,16 @@ export default function MissionDetail() {
   const projectId  = params?.projectId  ? decodeURIComponent(params.projectId)  : null
   const missionId  = params?.missionId  ? decodeURIComponent(params.missionId)  : null
   const [expandedKrIds, setExpandedKrIds] = useState<Record<string, boolean>>({})
-  const [editOpen, setEditOpen] = useState(false)
+  // Inline edit state. Edit happens in place on the page (no modal): the title
+  // turns into an input in the header and the description/dates become fields in
+  // the body, with Save/Cancel living in the action bar.
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editStartDate, setEditStartDate] = useState('')
+  const [editEndDate, setEditEndDate] = useState('')
+  const [startMonth, setStartMonth] = useState<Date>(() => new Date())
+  const [endMonth, setEndMonth] = useState<Date>(() => new Date())
   const [, navigate] = useLocation()
   const updateMission = useUpdateMission()
   const deleteMission = useDeleteMission()
@@ -151,6 +169,10 @@ export default function MissionDetail() {
   // so bind concrete consts here.
   const missionId_ = mission.id
   const projectIdValue = projectId
+  const missionTitle = mission.title
+  const missionDescription = mission.description ?? ''
+  const missionStartDate = mission.startDate
+  const missionEndDate = mission.endDate
 
   async function handleStatusChange(status: MissionStatus) {
     try {
@@ -181,6 +203,40 @@ export default function MissionDetail() {
     }
   }
 
+  // Seed the inline edit fields from the current mission and switch to edit mode.
+  function beginEdit() {
+    const start = toDayString(missionStartDate)
+    const end = toDayString(missionEndDate)
+    setEditTitle(missionTitle)
+    setEditDescription(missionDescription)
+    setEditStartDate(start)
+    setEditEndDate(end)
+    setStartMonth(start ? parseISO(start) : new Date())
+    setEndMonth(end ? parseISO(end) : new Date())
+    setEditing(true)
+  }
+
+  async function handleSaveEdit() {
+    const trimmedTitle = editTitle.trim()
+    if (!trimmedTitle) {
+      toast.error('Mission title is required')
+      return
+    }
+    try {
+      await updateMission.mutateAsync({
+        missionId: missionId_,
+        title: trimmedTitle,
+        description: editDescription.trim(),
+        startDate: editStartDate || undefined,
+        endDate: editEndDate || undefined,
+      })
+      toast.success('Mission updated')
+      setEditing(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update mission')
+    }
+  }
+
   const statusBadge = missionStatusBadge(mission.status)
   const overallProgress = keyResults && keyResults.length > 0
     ? keyResults.reduce((sum, kr) => sum + kr.progressPercent, 0) / keyResults.length
@@ -190,14 +246,35 @@ export default function MissionDetail() {
       {/* Sticky header — full-width outer for background coverage, max-w inner for centering */}
       <DetailHeader backTo={missionsPanelLink(projectId)} backLabel="Missions">
 
-          {/* Title row */}
+          {/* Title row — only the compact identity lives in the sticky header
+              (title, status, progress). The description and metadata render in
+              the scrollable body below, so a long description can never grow the
+              sticky header past the viewport and hide the key results. */}
           <div className="flex items-center gap-2.5 mb-1">
-            <h1
-              className="m-0 text-[var(--text-1)] flex-1 min-w-0"
-              style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.56px', lineHeight: 1.14 }}
-            >
-              {mission.title}
-            </h1>
+            {editing ? (
+              <Input
+                aria-label="Mission title"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSaveEdit()
+                  } else if (e.key === 'Escape') {
+                    setEditing(false)
+                  }
+                }}
+                autoFocus
+                className="flex-1 min-w-0 h-auto py-1 text-[1.75rem] font-bold tracking-[-0.56px] leading-[1.14]"
+              />
+            ) : (
+              <h1
+                className="m-0 text-[var(--text-1)] flex-1 min-w-0"
+                style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.56px', lineHeight: 1.14 }}
+              >
+                {mission.title}
+              </h1>
+            )}
             <Badge variant={statusBadge.variant} className="shrink-0">
               {statusBadge.label}
             </Badge>
@@ -208,48 +285,41 @@ export default function MissionDetail() {
             )}
           </div>
 
-          {/* Description */}
-          {mission.description && (
-            <p className="mt-2 mb-0 text-[var(--text-3)] ml-[18px]" style={{ fontSize: '0.875rem', letterSpacing: '-0.14px', lineHeight: 1.5 }}>
-              {mission.description}
-            </p>
-          )}
-
-          {/* Metadata */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2.5 ml-[18px]">
-            {(mission.startDate || mission.endDate) && (
-              <span className="inline-flex items-center gap-1 text-[var(--text-3)]" style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}>
-                <Calendar size={11} />
-                {mission.startDate && mission.endDate
-                  ? `${formatDate(mission.startDate, { style: 'numeric' })} – ${formatDate(mission.endDate, { style: 'numeric' })}`
-                  : mission.endDate
-                    ? `Due ${formatDate(mission.endDate, { style: 'numeric' })}`
-                    : 'No deadline'}
-              </span>
-            )}
-            {keyResults && keyResults.length > 0 && (
-              <span className="text-[var(--text-3)]" style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}>
-                {keyResults.length} KR{keyResults.length !== 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
-
-          {/* Mission actions — lifecycle + edit + delete. flex-wrap keeps the row
-              from overflowing the header at mobile/iPad widths (no viewport
-              breakpoints needed; wrapping is intrinsic). */}
+          {/* Mission actions — lifecycle + edit + delete in read mode; save +
+              cancel in edit mode. flex-wrap keeps the row from overflowing the
+              header at mobile/iPad widths (no viewport breakpoints needed;
+              wrapping is intrinsic). */}
           <div role="group" aria-label="Mission actions" className="flex flex-wrap items-center gap-2 mt-3.5 ml-[18px]">
-            {mission.status !== 'archived' && (
-              <MissionLifecycleActions
-                mission={mission}
-                onStatusChange={handleStatusChange}
-                isPending={updateMission.isPending}
-              />
-            )}
-            <Button size="sm" variant="secondary" onClick={() => setEditOpen(true)}>
-              <Pencil size={12} className="mr-1" />
-              Edit
-            </Button>
-            <AlertDialog>
+            {editing ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleSaveEdit}
+                  disabled={updateMission.isPending || !editTitle.trim()}
+                >
+                  <Check size={12} className="mr-1" />
+                  {updateMission.isPending ? 'Saving…' : 'Save changes'}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                  <X size={12} className="mr-1" />
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                {mission.status !== 'archived' && (
+                  <MissionLifecycleActions
+                    mission={mission}
+                    onStatusChange={handleStatusChange}
+                    isPending={updateMission.isPending}
+                  />
+                )}
+                <Button size="sm" variant="secondary" onClick={beginEdit}>
+                  <Pencil size={12} className="mr-1" />
+                  Edit
+                </Button>
+                <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button size="sm" variant="ghost" className="text-[var(--red)] hover:text-[var(--red)]">
                   <Trash2 size={12} className="mr-1" />
@@ -294,14 +364,84 @@ export default function MissionDetail() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+              </>
+            )}
           </div>
 
       </DetailHeader>
 
-      <EditMissionDialog mission={mission} open={editOpen} onOpenChange={setEditOpen} />
+      {/* Mission summary — description + dates. Lives in the scrollable body (not
+          the sticky header) and turns into inline edit fields in edit mode. */}
+      {(editing || missionDescription || mission.startDate || mission.endDate) && (
+        <div className="px-6 pt-5 pb-1 max-w-4xl mx-auto w-full flex flex-col gap-4">
+          {editing ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="edit-mission-desc" className="text-[var(--text-3)]" style={{ fontSize: '0.6875rem', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  Description
+                </Label>
+                <Textarea
+                  id="edit-mission-desc"
+                  placeholder="Describe the mission's objective and success criteria…"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  rows={3}
+                  className="min-h-[96px] resize-y"
+                />
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <Label htmlFor="edit-mission-start" className="text-[var(--text-3)]" style={{ fontSize: '0.6875rem', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                    Start date
+                  </Label>
+                  <MissionDateField
+                    id="edit-mission-start"
+                    label="Start date"
+                    value={editStartDate ? parseISO(editStartDate) : undefined}
+                    month={startMonth}
+                    onMonthChange={setStartMonth}
+                    onSelect={(date) => setEditStartDate(date ? format(date, 'yyyy-MM-dd') : '')}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <Label htmlFor="edit-mission-end" className="text-[var(--text-3)]" style={{ fontSize: '0.6875rem', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                    End date
+                  </Label>
+                  <MissionDateField
+                    id="edit-mission-end"
+                    label="End date"
+                    value={editEndDate ? parseISO(editEndDate) : undefined}
+                    month={endMonth}
+                    onMonthChange={setEndMonth}
+                    onSelect={(date) => setEditEndDate(date ? format(date, 'yyyy-MM-dd') : '')}
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {missionDescription && (
+                <p className="m-0 text-[var(--text-2)]" style={{ fontSize: '0.875rem', letterSpacing: '-0.14px', lineHeight: 1.55 }}>
+                  {missionDescription}
+                </p>
+              )}
+              {(mission.startDate || mission.endDate) && (
+                <span className="inline-flex items-center gap-1 text-[var(--text-3)]" style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}>
+                  <Calendar size={11} />
+                  {mission.startDate && mission.endDate
+                    ? `${formatDate(mission.startDate, { style: 'numeric' })} – ${formatDate(mission.endDate, { style: 'numeric' })}`
+                    : mission.endDate
+                      ? `Due ${formatDate(mission.endDate, { style: 'numeric' })}`
+                      : 'No deadline'}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Scrollable KR list */}
-      <div className="px-6 py-5 max-w-4xl mx-auto w-full">
+      <div className="px-6 pt-4 pb-5 max-w-4xl mx-auto w-full">
         <div className="flex items-center gap-1.5 mb-2">
           <span className="text-[var(--text-3)]" style={{ fontSize: '0.6875rem', fontWeight: 500, letterSpacing: '-0.04px' }}>
             Key Results

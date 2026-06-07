@@ -5,6 +5,7 @@ import { useStore } from './lib/store'
 import { brandIconFor } from './lib/brandIcon'
 import { missionsPanelLink, useNavigation, type ActiveView } from './lib/routing'
 import { useAuth } from './hooks/useAuth'
+import { useRealtimeInvalidation } from './hooks/useRealtimeSync'
 import { lazyWithRetry } from './lib/lazyWithRetry'
 import Sidebar from './components/Sidebar'
 import { Toaster } from './components/ui/sonner'
@@ -137,6 +138,11 @@ export default function App() {
   const auth = useAuth()
   const [location, navigate] = useLocation()
   const isAuthRoute = location === '/login'
+
+  // One EventSource consumer for the whole app: keep every TanStack cache fresh
+  // off the live event stream. Gated on auth so we don't open /events (which
+  // would 401) before the user is signed in.
+  useRealtimeInvalidation(auth.isAuthenticated)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)

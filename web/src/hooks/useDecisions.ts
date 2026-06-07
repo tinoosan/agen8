@@ -72,7 +72,7 @@ export function useRecentDecisions(
       return rpcUnwrapList<DecisionView>('decision.list', params, 'decisions')
     },
     enabled: !!projectId,
-    refetchInterval: options?.refetchInterval ?? 15_000,
+    refetchInterval: options?.refetchInterval ?? 30_000,
   })
 }
 
@@ -84,7 +84,7 @@ export function useDecision(decisionId: string | null) {
       return rpcUnwrap<DecisionView>('decision.get', { decisionId }, 'decision')
     },
     enabled: !!decisionId,
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   })
 }
 
@@ -116,7 +116,7 @@ export function useDecisionLog(projectId: string | null, filter: DecisionLogFilt
       }
     },
     enabled: !!projectId,
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   })
 }
 
@@ -133,7 +133,7 @@ export function useDecisionStats(projectId: string | null, filter?: DecisionList
       return rpcCall<DecisionStats>('decision.stats', params)
     },
     enabled: !!projectId,
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   })
 }
 

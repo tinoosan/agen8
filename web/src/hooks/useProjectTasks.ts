@@ -1,6 +1,5 @@
-import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { rpcCall, onNotification } from '../lib/rpc'
+import { rpcCall } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
 import type { Task, AcceptanceCriterion, RpcList } from '../lib/types'
 import { normalizeTaskMembers } from '../lib/taskMembers'
@@ -18,7 +17,9 @@ export function useProjectTasks(projectId: string | null) {
       return (result.tasks ?? []).map(normalizeTaskMembers)
     },
     enabled: !!projectId,
-    refetchInterval: 10_000,
+    // SSE drives freshness (useRealtimeInvalidation in <App/>); this slow poll is
+    // only a self-healing backstop for events missed during a disconnect.
+    refetchInterval: 30_000,
     staleTime: 2000,
   })
 }
@@ -32,7 +33,8 @@ export function useTask(taskId: string | null) {
       return normalizeTaskMembers(result.task)
     },
     enabled: !!taskId,
-    refetchInterval: 10_000,
+    // SSE-backstop poll; see useProjectTasks above.
+    refetchInterval: 30_000,
   })
 }
 
@@ -94,29 +96,4 @@ export function useCancelTask() {
       queryClient.invalidateQueries({ queryKey: qk.taskGet(vars.taskId) })
     },
   })
-}
-
-// Task-related SSE event types that indicate a board state change.
-const TASK_EVENT_PREFIXES = ['task.']
-
-/**
- * Subscribes to SSE event.append notifications and invalidates the board task
- * query when a task-related event arrives. Drops polling interval from 3s to
- * 10s since SSE handles near-real-time delivery.
- *
- * Keeps project task views fresh without tying the board to spaces.
- */
-export function useProjectTasksSSE() {
-  const queryClient = useQueryClient()
-  useEffect(() => {
-    const unsub = onNotification('event.append', (notif: Record<string, unknown>) => {
-      const event = notif?.event as Record<string, unknown> | undefined
-      const type = (event?.type as string) ?? ''
-      const isTaskEvent = TASK_EVENT_PREFIXES.some(prefix => type.startsWith(prefix))
-      if (isTaskEvent) {
-        queryClient.invalidateQueries({ queryKey: qk.tasksBoardAll })
-      }
-    })
-    return unsub
-  }, [queryClient])
 }

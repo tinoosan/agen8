@@ -40,7 +40,7 @@ export function useMissions(projectId: string | null, status?: MissionStatus) {
       return rpcUnwrapList<MissionView>('mission.list', params, 'missions')
     },
     enabled: !!projectId,
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   })
 }
 
@@ -51,7 +51,7 @@ export function useKeyResults(missionId: string | null) {
       return rpcUnwrapList<KeyResultView>('mission.kr.list', { missionId: missionId ?? '' }, 'keyResults')
     },
     enabled: !!missionId,
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   })
 }
 
@@ -62,7 +62,7 @@ export function useKeyResult(keyResultId: string | null) {
       return rpcUnwrap<KeyResultView>('mission.kr.get', { keyResultId: keyResultId ?? '' }, 'keyResult')
     },
     enabled: !!keyResultId,
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   })
 }
 
@@ -273,7 +273,7 @@ export function useProjectKRs(projectId: string | null) {
       return map
     },
     enabled: missionIds.length > 0,
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   })
 }
 
@@ -309,6 +309,6 @@ export function useProgressHistory(keyResultId: string | null) {
       }))
     },
     enabled: !!keyResultId,
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   })
 }

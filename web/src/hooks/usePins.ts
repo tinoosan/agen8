@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { onNotification, rpcCall, rpcUnwrapList } from '../lib/rpc'
+import { rpcCall, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
 
 /**
@@ -46,22 +46,9 @@ export function usePins(projectId: string | null): UsePinsResult {
     refetchInterval: 60_000,
   })
 
-  // Live cross-device sync: a pin change made anywhere — another tab, another
-  // device, or an agent — arrives over SSE as an `event.append` notification
-  // carrying a `pin.*` event type. On any pin event, invalidate the shared pin
-  // root so every consumer refetches from the same source of truth the
-  // mutations write through. The /events stream is already scoped to this
-  // project server-side, so the client only needs to match the `pin.` prefix.
-  useEffect(() => {
-    if (!projectId) return
-    return onNotification('event.append', (notif: Record<string, unknown>) => {
-      const event = notif?.event as Record<string, unknown> | undefined
-      const type = (event?.type as string) ?? ''
-      if (type.startsWith('pin.')) {
-        queryClient.invalidateQueries({ queryKey: qk.pinsAll })
-      }
-    })
-  }, [projectId, queryClient])
+  // Live cross-device pin sync (another tab, device, or agent) is handled
+  // centrally by useRealtimeInvalidation in <App/>, which invalidates qk.pinsAll
+  // on any `pin.*` SSE event. The 60s poll above is the disconnect backstop.
 
   const pinnedIds = useMemo(
     () => new Set((pins ?? []).map((p) => p.nodeRef)),

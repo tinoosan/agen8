@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'wouter'
 import { Activity, ChevronRight } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useProjectTasks, useProjectTasksSSE } from '../../hooks/useProjectTasks'
+import { useProjectTasks } from '../../hooks/useProjectTasks'
 import { taskClaimedMemberLabel, taskAssignedMemberLabel } from '../../lib/taskMembers'
 import { taskStatusColor, taskStatusLabel } from '../../lib/statusLabels'
 import { taskDetailLink } from '../../lib/routing'
@@ -95,7 +95,6 @@ function WorkingRow({ projectId, task, first }: { projectId: string; task: Task;
 /* ── Main exported component ──────────────────────────── */
 
 export default function DashboardWorkingNow({ projectId }: { projectId: string | null }) {
-  useProjectTasksSSE()
   const { data: tasks, isLoading, isError } = useProjectTasks(projectId)
 
   const working = useMemo(

@@ -3,7 +3,7 @@ import { Link } from 'wouter'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AlertCircle, ListChecks, CircleDashed, CircleDot, Ban, Eye, CircleCheck } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useProjectTasks, useProjectTasksSSE } from '../../hooks/useProjectTasks'
+import { useProjectTasks } from '../../hooks/useProjectTasks'
 import { filteredTasksLink } from '../../lib/routing'
 import { taskStatusColor, taskStatusLabel } from '../../lib/statusLabels'
 import type { Task } from '../../lib/types'
@@ -77,7 +77,6 @@ function StatCell({ projectId, bucket, count }: { projectId: string; bucket: Buc
 /* ── Main exported component ──────────────────────────── */
 
 export default function TaskSummary({ projectId }: { projectId: string | null }) {
-  useProjectTasksSSE()
   const { data: tasks, isLoading, isError, error } = useProjectTasks(projectId)
 
   const counts = useMemo(() => countByBucket(tasks ?? []), [tasks])
