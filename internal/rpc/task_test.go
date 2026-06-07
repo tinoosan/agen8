@@ -51,6 +51,10 @@ func TestRegisterTaskListResolvesLegacyLabelsAfterMCPRehome(t *testing.T) {
 	if registered.MemberID != legacy.MemberID {
 		t.Fatalf("member id changed from %q to %q", legacy.MemberID, registered.MemberID)
 	}
+	_, err = projectSvc.UpdateMember(caller.ContextWithCaller(ctx, caller.Caller{UserID: "user-1"}), member.ID(registered.MemberID), "Codex backend engineer")
+	if err != nil {
+		t.Fatalf("rename registered member: %v", err)
+	}
 
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	err = taskRepo.CreateTask(ctx, taskdomain.Task{

@@ -48,39 +48,6 @@ func TestSetMemberType_Invalid_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid memberType")
 }
 
-func TestUpdateConfig_Valid(t *testing.T) {
-	now := time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC)
-	m := member.WrapMember(member.Record{Model: "old", Effort: "low", HarnessKind: "claude-cli"})
-
-	next, err := m.UpdateConfig("new-model", "high", "codex", now)
-	require.NoError(t, err)
-	assert.Equal(t, "new-model", next.Inner().Model)
-	assert.Equal(t, "high", next.Inner().Effort)
-	assert.Equal(t, "codex", next.Inner().HarnessKind)
-	assert.Equal(t, now, next.Inner().UpdatedAt)
-}
-
-func TestUpdateConfig_EmptyModel_ReturnsError(t *testing.T) {
-	m := member.WrapMember(member.Record{})
-	_, err := m.UpdateConfig("", "high", "codex", time.Now())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "model is required")
-}
-
-func TestUpdateConfig_EmptyEffort_ReturnsError(t *testing.T) {
-	m := member.WrapMember(member.Record{})
-	_, err := m.UpdateConfig("opus", "", "codex", time.Now())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "effort is required")
-}
-
-func TestUpdateConfig_EmptyHarnessKind_ReturnsError(t *testing.T) {
-	m := member.WrapMember(member.Record{})
-	_, err := m.UpdateConfig("opus", "high", "", time.Now())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "harnessKind is required")
-}
-
 func TestValidateMemberType(t *testing.T) {
 	for _, valid := range []string{member.TypeCoordinator, member.TypeWorker} {
 		require.NoError(t, member.ValidateMemberType(valid))

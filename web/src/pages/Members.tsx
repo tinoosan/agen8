@@ -52,15 +52,14 @@ function absTime(iso?: string): string {
   return Number.isNaN(d.getTime()) ? 'unknown' : d.toLocaleString()
 }
 
-// Members sharing a (displayName, harnessKind) pair within the active set are
-// likely the same operator registered more than once (dedup keys on the native
-// session ref, not the name). Returns the ids that should carry the badge.
+// Members sharing a display name within the active set are likely duplicate
+// registrations. Returns the ids that should carry the badge.
 function findDuplicateIds(members: ProjectMember[]): Set<string> {
   const groups = new Map<string, ProjectMember[]>()
   for (const m of members) {
     const name = (m.displayName ?? '').trim().toLowerCase()
     if (!name) continue
-    const key = `${name}|${(m.harnessKind ?? '').trim().toLowerCase()}`
+    const key = name
     const arr = groups.get(key) ?? []
     arr.push(m)
     groups.set(key, arr)
@@ -223,9 +222,6 @@ function MemberCard({
         {!removed && <RemoveMemberButton member={m} name={name} />}
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
-        <CardField label="Harness" value={m.harnessKind || '—'} />
-        <CardField label="Model" value={m.model || '—'} />
-        <CardField label="Effort" value={m.effort || '—'} />
         <CardField
           label="Registered"
           value={formatRelative(m.registeredAt, { seconds: true, fallback: '—' })}
@@ -289,9 +285,6 @@ function MemberTable({
         <TableHeader>
           <TableRow className="border-[var(--border)] hover:bg-transparent">
             <Th>Member</Th>
-            <Th>Harness</Th>
-            <Th>Model</Th>
-            <Th>Effort</Th>
             <Th>Session ref</Th>
             <Th>Registered</Th>
             {!removed && (
@@ -324,10 +317,6 @@ function Th({ children }: { children: ReactNode }) {
   )
 }
 
-function Td({ children }: { children: ReactNode }) {
-  return <TableCell className="px-4 py-3 text-[var(--text-2)]">{children}</TableCell>
-}
-
 function MemberRow({
   m,
   isDupe,
@@ -353,9 +342,6 @@ function MemberRow({
           {isDupe && <DupeBadge />}
         </div>
       </TableCell>
-      <Td>{m.harnessKind || '—'}</Td>
-      <Td>{m.model || '—'}</Td>
-      <Td>{m.effort || '—'}</Td>
       <TableCell className="px-4 py-3">
         <div className="flex items-center gap-1.5">
           <code className="break-all text-[0.75rem] text-[var(--text-3)]">

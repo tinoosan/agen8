@@ -38,19 +38,20 @@ type RegisterMCPContextInput struct {
 }
 
 type RegisterMCPContextResult struct {
-	ProjectID        string
-	ProjectRoot      string
-	LocationID       string
-	MemberID         string
-	DisplayName      string
-	MemberType       string
-	ChannelID        string
-	SessionID        string
-	ThreadID         string
-	NativeSessionRef string
-	Token            string
-	URL              string
-	MCPServers       []string
+	ProjectID         string
+	ProjectRoot       string
+	LocationID        string
+	MemberID          string
+	DisplayName       string
+	MemberType        string
+	ChannelID         string
+	SessionID         string
+	ThreadID          string
+	NativeSessionRef  string
+	Token             string
+	URL               string
+	MCPServers        []string
+	AlreadyRegistered bool
 }
 
 type ResolveMCPContextInput struct {
@@ -141,6 +142,7 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	if err != nil {
 		return RegisterMCPContextResult{}, err
 	}
+	reusedExisting := existing.ID != ""
 	displayName := strings.TrimSpace(input.DisplayName)
 	if existing.ID == "" {
 		memberType, err := s.nextRegisteredMemberType(ctx, string(projectID))
@@ -167,13 +169,6 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		if err != nil {
 			return RegisterMCPContextResult{}, fmt.Errorf("register member: %w", err)
 		}
-	} else if displayName != "" && displayName != strings.TrimSpace(existing.DisplayName) {
-		existing.DisplayName = displayName
-		existing.UpdatedAt = s.clock.Now().UTC()
-		if err := s.members.Update(ctx, existing); err != nil {
-			return RegisterMCPContextResult{}, fmt.Errorf("update registered member display name: %w", err)
-		}
-		existing = s.withResolvedPermissionMode(existing)
 	}
 	if existing.ID != "" && strings.TrimSpace(existing.UserID) != userID {
 		if strings.TrimSpace(existing.UserID) != "local" || userID == "local" {
@@ -187,19 +182,20 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		existing = s.withResolvedPermissionMode(existing)
 	}
 	return RegisterMCPContextResult{
-		ProjectID:        string(projectID),
-		ProjectRoot:      root,
-		LocationID:       string(locationID),
-		MemberID:         string(existing.ID),
-		DisplayName:      strings.TrimSpace(existing.DisplayName),
-		MemberType:       strings.TrimSpace(existing.MemberType),
-		ChannelID:        strings.TrimSpace(existing.ChannelID),
-		SessionID:        strings.TrimSpace(input.SessionID),
-		ThreadID:         strings.TrimSpace(input.ThreadID),
-		NativeSessionRef: nativeRef,
-		Token:            token,
-		URL:              "",
-		MCPServers:       []string{"agen8"},
+		ProjectID:         string(projectID),
+		ProjectRoot:       root,
+		LocationID:        string(locationID),
+		MemberID:          string(existing.ID),
+		DisplayName:       strings.TrimSpace(existing.DisplayName),
+		MemberType:        strings.TrimSpace(existing.MemberType),
+		ChannelID:         strings.TrimSpace(existing.ChannelID),
+		SessionID:         strings.TrimSpace(input.SessionID),
+		ThreadID:          strings.TrimSpace(input.ThreadID),
+		NativeSessionRef:  nativeRef,
+		Token:             token,
+		URL:               "",
+		MCPServers:        []string{"agen8"},
+		AlreadyRegistered: reusedExisting,
 	}, nil
 }
 

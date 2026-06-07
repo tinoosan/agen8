@@ -17,7 +17,7 @@ import (
 const Name = "project"
 const Description = "[COORDINATION] Project gateway for workspace registration and member roster CRUD. Call action=register first when the MCP session is not yet bound to a project/member."
 
-var allActions = []string{"register", "member_create", "member_get", "member_list", "member_update_config", "member_remove"}
+var allActions = []string{"register", "member_create", "member_get", "member_list", "member_update", "member_remove"}
 
 func BootstrapActionAllowed(action string) bool {
 	return strings.TrimSpace(strings.ToLower(action)) == "register"
@@ -30,7 +30,7 @@ type MemberService interface {
 
 type MemberRegistrar interface {
 	RegisterMember(ctx context.Context, rosterMember member.Record) (projectapp.RegisterMemberResult, error)
-	UpdateMemberConfig(ctx context.Context, id member.ID, model, effort, harnessKind string, permissionFields ...string) (member.Record, error)
+	UpdateMember(ctx context.Context, id member.ID, displayName string) (member.Record, error)
 	RemoveMember(ctx context.Context, id member.ID) (member.Record, error)
 }
 
@@ -58,19 +58,20 @@ type RegisterContextRequest struct {
 }
 
 type RegisterContextResult struct {
-	ProjectID        string
-	ProjectRoot      string
-	LocationID       string
-	MemberID         string
-	DisplayName      string
-	MemberType       string
-	ChannelID        string
-	SessionID        string
-	ThreadID         string
-	NativeSessionRef string
-	Token            string
-	URL              string
-	MCPServers       []string
+	ProjectID         string
+	ProjectRoot       string
+	LocationID        string
+	MemberID          string
+	DisplayName       string
+	MemberType        string
+	ChannelID         string
+	SessionID         string
+	ThreadID          string
+	NativeSessionRef  string
+	Token             string
+	URL               string
+	MCPServers        []string
+	AlreadyRegistered bool
 }
 
 type CallContext struct {
@@ -120,7 +121,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		return Result{}, err
 	}
 	projectID := strings.TrimSpace(actor.ProjectID)
-	if input.Action == "member_create" || input.Action == "member_update_config" || input.Action == "member_remove" {
+	if input.Action == "member_create" || input.Action == "member_update" || input.Action == "member_remove" {
 		if err := requireCoordinatorActor(actor, input.Action); err != nil {
 			return Result{}, err
 		}
@@ -132,8 +133,8 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		return h.memberGet(ctx, call, input.MemberID)
 	case "member_create":
 		return h.createMember(ctx, call, projectID, input)
-	case "member_update_config":
-		return h.memberUpdateConfig(ctx, call, input)
+	case "member_update":
+		return h.memberUpdate(ctx, call, input)
 	case "member_remove":
 		return h.memberRemove(ctx, call, input.MemberID)
 	default:
@@ -189,10 +190,7 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 	if token == "" {
 		return Result{}, fmt.Errorf("project: mcp token is required for action=register")
 	}
-	harnessKind := strings.TrimSpace(input.HarnessKind)
-	if harnessKind == "" {
-		harnessKind = strings.TrimSpace(call.HarnessKind)
-	}
+	harnessKind := defaultHarnessKind(call)
 	sessionID := strings.TrimSpace(input.SessionID)
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(call.SessionID)
@@ -212,10 +210,6 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 		SessionID:        sessionID,
 		ThreadID:         threadID,
 		NativeSessionRef: input.NativeSessionRef,
-		Model:            input.Model,
-		Effort:           input.Effort,
-		PermissionMode:   input.PermissionMode,
-		ConfigRef:        input.ConfigRef,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("project: register context: %w", err)
@@ -234,7 +228,10 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 		"token":       strings.TrimSpace(result.Token),
 		"url":         strings.TrimSpace(result.URL),
 		"mcpServers":  append([]string(nil), result.MCPServers...),
-		"guidance":    "Use display_name on project.register when the human asked you to adopt a role, e.g. \"backend engineer\" or \"frontend reviewer\". Pick names that make the graph readable.",
+		"guidance":    registerGuidance(result),
+	}
+	if result.AlreadyRegistered {
+		structured["alreadyRegistered"] = true
 	}
 	if strings.TrimSpace(result.SessionID) != "" {
 		structured["sessionId"] = strings.TrimSpace(result.SessionID)
@@ -324,9 +321,7 @@ func (h Handler) createMember(ctx context.Context, call CallContext, projectID s
 		ProjectID:   projectID,
 		DisplayName: input.DisplayName,
 		MemberType:  member.TypeCoordinator,
-		HarnessKind: input.HarnessKind,
-		Model:       input.Model,
-		Effort:      input.Effort,
+		HarnessKind: defaultHarnessKind(call),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("project: create member: %w", err)
@@ -346,18 +341,18 @@ func (h Handler) createMember(ctx context.Context, call CallContext, projectID s
 	return Result{Text: text, Structured: structured}, nil
 }
 
-func (h Handler) memberUpdateConfig(ctx context.Context, call CallContext, input requestInput) (Result, error) {
+func (h Handler) memberUpdate(ctx context.Context, call CallContext, input requestInput) (Result, error) {
 	if call.Registrar == nil {
 		return Result{}, fmt.Errorf("project: member registrar is not configured")
 	}
-	updated, err := call.Registrar.UpdateMemberConfig(ctx, member.ID(input.MemberID), input.Model, input.Effort, input.HarnessKind)
+	updated, err := call.Registrar.UpdateMember(ctx, member.ID(input.MemberID), input.DisplayName)
 	if err != nil {
-		return Result{}, fmt.Errorf("project: update member config: %w", err)
+		return Result{}, fmt.Errorf("project: update member: %w", err)
 	}
 	structured := map[string]any{
 		"ok":     true,
 		"tool":   Name,
-		"action": "member_update_config",
+		"action": "member_update",
 		"member": toMemberEntry(updated),
 	}
 	text, err := encodeText(structured)
@@ -397,11 +392,6 @@ type memberEntry struct {
 	DisplayName      string     `json:"displayName,omitempty"`
 	MemberType       string     `json:"memberType,omitempty"`
 	LifecycleState   string     `json:"lifecycleState,omitempty"`
-	HarnessKind      string     `json:"harnessKind,omitempty"`
-	Model            string     `json:"model,omitempty"`
-	Effort           string     `json:"effort,omitempty"`
-	PermissionMode   string     `json:"harnessPermissionMode,omitempty"`
-	ConfigRef        string     `json:"harnessConfigRef,omitempty"`
 	RegisteredAt     time.Time  `json:"registeredAt,omitempty"`
 	UpdatedAt        time.Time  `json:"updatedAt,omitempty"`
 	LastSeenAt       *time.Time `json:"lastSeenAt,omitempty"`
@@ -414,14 +404,9 @@ type request struct {
 	LocationID       *string `json:"location_id"`
 	MemberID         *string `json:"member_id"`
 	DisplayName      *string `json:"display_name"`
-	HarnessKind      *string `json:"harness_kind"`
 	SessionID        *string `json:"session_id"`
 	ThreadID         *string `json:"thread_id"`
 	NativeSessionRef *string `json:"native_session_ref"`
-	Model            *string `json:"model"`
-	Effort           *string `json:"effort"`
-	PermissionMode   *string `json:"permission_mode"`
-	ConfigRef        *string `json:"config_ref"`
 }
 
 func decode(args json.RawMessage) (requestInput, error) {
@@ -448,14 +433,9 @@ func decode(args json.RawMessage) (requestInput, error) {
 		LocationID:       strings.TrimSpace(ptrString(raw.LocationID)),
 		MemberID:         strings.TrimSpace(ptrString(raw.MemberID)),
 		DisplayName:      strings.TrimSpace(ptrString(raw.DisplayName)),
-		HarnessKind:      strings.TrimSpace(ptrString(raw.HarnessKind)),
 		SessionID:        strings.TrimSpace(ptrString(raw.SessionID)),
 		ThreadID:         strings.TrimSpace(ptrString(raw.ThreadID)),
 		NativeSessionRef: strings.TrimSpace(ptrString(raw.NativeSessionRef)),
-		Model:            strings.TrimSpace(ptrString(raw.Model)),
-		Effort:           strings.TrimSpace(ptrString(raw.Effort)),
-		PermissionMode:   strings.TrimSpace(ptrString(raw.PermissionMode)),
-		ConfigRef:        strings.TrimSpace(ptrString(raw.ConfigRef)),
 	}
 	switch action {
 	case "register":
@@ -463,35 +443,22 @@ func decode(args json.RawMessage) (requestInput, error) {
 			return requestInput{}, fmt.Errorf("project: project_root or project_id is required for action=register")
 		}
 	case "member_create":
-		if err := requireRuntimeConfig(input, "member_create"); err != nil {
-			return requestInput{}, err
+		if input.DisplayName == "" {
+			return requestInput{}, fmt.Errorf("project: display_name is required for action=member_create")
 		}
 	case "member_get", "member_remove":
 		if input.MemberID == "" {
 			return requestInput{}, fmt.Errorf("project: member_id is required for action=%s", action)
 		}
-	case "member_update_config":
+	case "member_update":
 		if input.MemberID == "" {
-			return requestInput{}, fmt.Errorf("project: member_id is required for action=member_update_config")
+			return requestInput{}, fmt.Errorf("project: member_id is required for action=member_update")
 		}
-		if err := requireRuntimeConfig(input, "member_update_config"); err != nil {
-			return requestInput{}, err
+		if input.DisplayName == "" {
+			return requestInput{}, fmt.Errorf("project: display_name is required for action=member_update")
 		}
 	}
 	return input, nil
-}
-
-func requireRuntimeConfig(input requestInput, action string) error {
-	if input.HarnessKind == "" {
-		return fmt.Errorf("project: harness_kind is required for action=%s", action)
-	}
-	if input.Model == "" {
-		return fmt.Errorf("project: model is required for action=%s", action)
-	}
-	if input.Effort == "" {
-		return fmt.Errorf("project: effort is required for action=%s", action)
-	}
-	return nil
 }
 
 func validateActionFields(args json.RawMessage) error {
@@ -527,12 +494,12 @@ func validateActionFields(args json.RawMessage) error {
 }
 
 var fieldsByAction = map[string]map[string]struct{}{
-	"register":             fieldSet("action", "project_id", "project_root", "location_id", "display_name", "harness_kind", "session_id", "thread_id", "native_session_ref", "model", "effort", "permission_mode", "config_ref"),
-	"member_create":        fieldSet("action", "display_name", "harness_kind", "model", "effort"),
-	"member_get":           fieldSet("action", "member_id"),
-	"member_list":          fieldSet("action"),
-	"member_update_config": fieldSet("action", "member_id", "harness_kind", "model", "effort"),
-	"member_remove":        fieldSet("action", "member_id"),
+	"register":      fieldSet("action", "project_id", "project_root", "location_id", "display_name", "session_id", "thread_id", "native_session_ref"),
+	"member_create": fieldSet("action", "display_name"),
+	"member_get":    fieldSet("action", "member_id"),
+	"member_list":   fieldSet("action"),
+	"member_update": fieldSet("action", "member_id", "display_name"),
+	"member_remove": fieldSet("action", "member_id"),
 }
 
 func fieldSet(fields ...string) map[string]struct{} {
@@ -554,14 +521,9 @@ type requestInput struct {
 	LocationID       string
 	MemberID         string
 	DisplayName      string
-	HarnessKind      string
 	SessionID        string
 	ThreadID         string
 	NativeSessionRef string
-	Model            string
-	Effort           string
-	PermissionMode   string
-	ConfigRef        string
 }
 
 func mustSchema(actions []string) json.RawMessage {
@@ -583,43 +545,23 @@ func mustSchema(actions []string) json.RawMessage {
 			},
 			"member_id": map[string]any{
 				"type":        "string",
-				"description": "Required for member_get, member_update_config, and member_remove.",
+				"description": "Required for member_get, member_update, and member_remove.",
 			},
 			"display_name": map[string]any{
 				"type":        "string",
-				"description": "Optional display label for action=register and action=member_create. For register, use a role-based name the human can recognize in the graph, such as backend engineer, frontend reviewer, or research analyst.",
-			},
-			"harness_kind": map[string]any{
-				"type":        "string",
-				"description": "Runtime harness kind for register, member_create, and member_update_config, such as codex or claude-cli.",
+				"description": "Display label for register, member_create, and member_update. Use a recognizable name such as 'Atlas (Backend Engineer)'.",
 			},
 			"session_id": map[string]any{
 				"type":        "string",
-				"description": "Optional stable harness session id for action=register. When supplied, Agen8 creates or reuses a member for that session.",
+				"description": "Optional stable harness session id for action=register. Most clients should omit this; Agen8 reads native session metadata when available.",
 			},
 			"thread_id": map[string]any{
 				"type":        "string",
-				"description": "Optional stable harness thread id for action=register. When supplied, Agen8 creates or reuses a member for that thread.",
+				"description": "Optional stable harness thread id for action=register. Most clients should omit this; Agen8 reads native session metadata when available.",
 			},
 			"native_session_ref": map[string]any{
 				"type":        "string",
-				"description": "Optional live native harness session reference for action=register when it differs from the stable session_id.",
-			},
-			"model": map[string]any{
-				"type":        "string",
-				"description": "Required runtime model for member_create and member_update_config.",
-			},
-			"effort": map[string]any{
-				"type":        "string",
-				"description": "Reasoning effort for register, member_create, and member_update_config. Register defaults to medium.",
-			},
-			"permission_mode": map[string]any{
-				"type":        "string",
-				"description": "Optional runtime permission mode for action=register. Defaults to the harness catalog default.",
-			},
-			"config_ref": map[string]any{
-				"type":        "string",
-				"description": "Optional runtime config reference for action=register when the selected permission mode requires it.",
+				"description": "Optional live native harness session reference for action=register. Most clients should omit this; Agen8 reads native session metadata when available.",
 			},
 		},
 		"required":             []string{"action"},
@@ -657,15 +599,29 @@ func toMemberEntry(item member.Record) memberEntry {
 		DisplayName:      strings.TrimSpace(item.DisplayName),
 		MemberType:       strings.TrimSpace(item.MemberType),
 		LifecycleState:   strings.TrimSpace(item.LifecycleState),
-		HarnessKind:      strings.TrimSpace(item.HarnessKind),
-		Model:            strings.TrimSpace(item.Model),
-		Effort:           strings.TrimSpace(item.Effort),
-		PermissionMode:   strings.TrimSpace(item.PermissionMode),
-		ConfigRef:        strings.TrimSpace(item.ConfigRef),
 		RegisteredAt:     item.RegisteredAt,
 		UpdatedAt:        item.UpdatedAt,
 		LastSeenAt:       item.LastSeenAt,
 	}
+}
+
+func registerGuidance(result RegisterContextResult) string {
+	name := strings.TrimSpace(result.DisplayName)
+	memberID := strings.TrimSpace(result.MemberID)
+	if result.AlreadyRegistered {
+		if name == "" {
+			name = "this member"
+		}
+		return fmt.Sprintf("You are already registered as %s (%s). Do not call project.register again for this session; use action=member_update with member_id and display_name to rename this registration.", name, memberID)
+	}
+	return "You are registered. Use display_name on project.register only for the name the human should see in the graph. Agen8 derives session, harness, model, and runtime details."
+}
+
+func defaultHarnessKind(call CallContext) string {
+	if harnessKind := strings.TrimSpace(call.HarnessKind); harnessKind != "" {
+		return harnessKind
+	}
+	return "agent"
 }
 
 func encodeText(value any) (string, error) {

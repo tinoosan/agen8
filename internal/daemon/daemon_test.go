@@ -305,7 +305,6 @@ func TestProjectLinkTokenCanRegisterBoundMCPContext(t *testing.T) {
 				"project_root":%q,
 				"project_id":"spoofed-project",
 				"display_name":"Link token worker",
-				"harness_kind":"codex",
 				"session_id":"test-session",
 				"thread_id":"test-thread"
 			}
@@ -636,7 +635,6 @@ func registerSessionMemberForTest(t *testing.T, handler http.Handler, linkToken,
 				"action":"register",
 				"project_root":%q,
 				"display_name":%q,
-				"harness_kind":"claude",
 				"session_id":%q
 			}
 		}

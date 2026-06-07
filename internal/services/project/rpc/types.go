@@ -110,11 +110,6 @@ type MemberView struct {
 	DisplayName      string     `json:"displayName,omitempty"`
 	MemberType       string     `json:"memberType"`
 	LifecycleState   string     `json:"lifecycleState"`
-	HarnessKind      string     `json:"harnessKind,omitempty"`
-	Model            string     `json:"model,omitempty"`
-	Effort           string     `json:"effort,omitempty"`
-	PermissionMode   string     `json:"harnessPermissionMode,omitempty"`
-	ConfigRef        string     `json:"harnessConfigRef,omitempty"`
 	RegisteredAt     time.Time  `json:"registeredAt,omitempty"`
 	UpdatedAt        time.Time  `json:"updatedAt,omitempty"`
 	LastSeenAt       *time.Time `json:"lastSeenAt,omitempty"`
@@ -130,11 +125,6 @@ func NewMemberView(m member.Record) MemberView {
 		DisplayName:      m.DisplayName,
 		MemberType:       m.MemberType,
 		LifecycleState:   m.LifecycleState,
-		HarnessKind:      m.HarnessKind,
-		Model:            m.Model,
-		Effort:           m.Effort,
-		PermissionMode:   m.PermissionMode,
-		ConfigRef:        m.ConfigRef,
 		RegisteredAt:     m.RegisteredAt,
 		UpdatedAt:        m.UpdatedAt,
 		LastSeenAt:       m.LastSeenAt,
@@ -142,14 +132,8 @@ func NewMemberView(m member.Record) MemberView {
 }
 
 type MemberRegisterParams struct {
-	ProjectID           string `json:"projectId"`
-	DisplayName         string `json:"displayName,omitempty"`
-	RequestedMemberType string `json:"requestedMemberType,omitempty"`
-	HarnessKind         string `json:"harnessKind,omitempty"`
-	Model               string `json:"model,omitempty"`
-	Effort              string `json:"effort,omitempty"`
-	PermissionMode      string `json:"harnessPermissionMode,omitempty"`
-	ConfigRef           string `json:"harnessConfigRef,omitempty"`
+	ProjectID   string `json:"projectId"`
+	DisplayName string `json:"displayName,omitempty"`
 }
 
 type MemberRegisterResult struct {
@@ -178,16 +162,12 @@ type MemberListResult struct {
 	Members []MemberView `json:"members"`
 }
 
-type MemberUpdateConfigParams struct {
-	MemberID       string `json:"memberId"`
-	Model          string `json:"model"`
-	Effort         string `json:"effort"`
-	HarnessKind    string `json:"harnessKind"`
-	PermissionMode string `json:"harnessPermissionMode,omitempty"`
-	ConfigRef      string `json:"harnessConfigRef,omitempty"`
+type MemberUpdateParams struct {
+	MemberID    string `json:"memberId"`
+	DisplayName string `json:"displayName"`
 }
 
-type MemberUpdateConfigResult struct {
+type MemberUpdateResult struct {
 	Member MemberView `json:"member"`
 }
 

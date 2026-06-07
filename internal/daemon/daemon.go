@@ -408,19 +408,20 @@ func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req 
 	}
 	mcpURL := strings.TrimRight(r.baseURL, "/") + "/mcp?token=" + result.Token
 	return projecttool.RegisterContextResult{
-		ProjectID:        result.ProjectID,
-		ProjectRoot:      result.ProjectRoot,
-		LocationID:       result.LocationID,
-		MemberID:         result.MemberID,
-		DisplayName:      result.DisplayName,
-		MemberType:       result.MemberType,
-		ChannelID:        result.ChannelID,
-		SessionID:        result.SessionID,
-		ThreadID:         result.ThreadID,
-		NativeSessionRef: result.NativeSessionRef,
-		Token:            result.Token,
-		URL:              mcpURL,
-		MCPServers:       result.MCPServers,
+		ProjectID:         result.ProjectID,
+		ProjectRoot:       result.ProjectRoot,
+		LocationID:        result.LocationID,
+		MemberID:          result.MemberID,
+		DisplayName:       result.DisplayName,
+		MemberType:        result.MemberType,
+		ChannelID:         result.ChannelID,
+		SessionID:         result.SessionID,
+		ThreadID:          result.ThreadID,
+		NativeSessionRef:  result.NativeSessionRef,
+		Token:             result.Token,
+		URL:               mcpURL,
+		MCPServers:        result.MCPServers,
+		AlreadyRegistered: result.AlreadyRegistered,
 	}, nil
 }
 

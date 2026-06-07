@@ -142,14 +142,10 @@ func (h *Handler) MemberRegister(ctx context.Context, p MemberRegisterParams) (M
 		return MemberRegisterResult{}, invalidParams("projectId is required")
 	}
 	rosterMember := member.Record{
-		ProjectID:      projectID,
-		DisplayName:    strings.TrimSpace(p.DisplayName),
-		MemberType:     strings.TrimSpace(p.RequestedMemberType),
-		HarnessKind:    strings.TrimSpace(p.HarnessKind),
-		Model:          strings.TrimSpace(p.Model),
-		Effort:         strings.TrimSpace(p.Effort),
-		PermissionMode: strings.TrimSpace(p.PermissionMode),
-		ConfigRef:      strings.TrimSpace(p.ConfigRef),
+		ProjectID:   projectID,
+		DisplayName: strings.TrimSpace(p.DisplayName),
+		MemberType:  member.TypeCoordinator,
+		HarnessKind: "web",
 	}
 	result, err := h.svc.RegisterMember(ctx, rosterMember)
 	if err != nil {
@@ -193,16 +189,20 @@ func (h *Handler) MemberList(ctx context.Context, p MemberListParams) (MemberLis
 	return MemberListResult{Members: views}, nil
 }
 
-func (h *Handler) MemberUpdateConfig(ctx context.Context, p MemberUpdateConfigParams) (MemberUpdateConfigResult, error) {
+func (h *Handler) MemberUpdate(ctx context.Context, p MemberUpdateParams) (MemberUpdateResult, error) {
 	id, err := requireMemberID(p.MemberID)
 	if err != nil {
-		return MemberUpdateConfigResult{}, err
+		return MemberUpdateResult{}, err
 	}
-	rosterMember, err := h.svc.UpdateMemberConfig(ctx, id, p.Model, p.Effort, p.HarnessKind, p.PermissionMode, p.ConfigRef)
+	displayName := strings.TrimSpace(p.DisplayName)
+	if displayName == "" {
+		return MemberUpdateResult{}, invalidParams("displayName is required")
+	}
+	rosterMember, err := h.svc.UpdateMember(ctx, id, displayName)
 	if err != nil {
-		return MemberUpdateConfigResult{}, err
+		return MemberUpdateResult{}, err
 	}
-	return MemberUpdateConfigResult{Member: NewMemberView(rosterMember)}, nil
+	return MemberUpdateResult{Member: NewMemberView(rosterMember)}, nil
 }
 
 func (h *Handler) MemberRemove(ctx context.Context, p MemberRemoveParams) (MemberRemoveResult, error) {

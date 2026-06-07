@@ -21,11 +21,11 @@ const (
 
 	MethodProjectLinkTokenCreate = "project.linkToken.create"
 
-	MethodProjectMemberRegister     = "project.member.register"
-	MethodProjectMemberGet          = "project.member.get"
-	MethodProjectMemberList         = "project.member.list"
-	MethodProjectMemberUpdateConfig = "project.member.updateConfig"
-	MethodProjectMemberRemove       = "project.member.remove"
+	MethodProjectMemberRegister = "project.member.register"
+	MethodProjectMemberGet      = "project.member.get"
+	MethodProjectMemberList     = "project.member.list"
+	MethodProjectMemberUpdate   = "project.member.update"
+	MethodProjectMemberRemove   = "project.member.remove"
 )
 
 func withProjectCaller[Params any, Result any](fn func(context.Context, Params) (Result, error)) func(context.Context, Params) (Result, error) {
@@ -81,7 +81,7 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service) error {
 			return AddBoundHandler(reg, MethodProjectMemberList, false, withProjectCaller(handler.MemberList))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectMemberUpdateConfig, false, withProjectCaller(handler.MemberUpdateConfig))
+			return AddBoundHandler(reg, MethodProjectMemberUpdate, false, withProjectCaller(handler.MemberUpdate))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectMemberRemove, false, withProjectCaller(handler.MemberRemove))

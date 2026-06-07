@@ -94,11 +94,6 @@ export interface ProjectMember {
   displayName?: string;
   memberType: string;
   lifecycleState: string;
-  harnessKind?: string;
-  model?: string;
-  effort?: string;
-  harnessPermissionMode?: string;
-  harnessConfigRef?: string;
   registeredAt?: string;
   updatedAt?: string;
   lastSeenAt?: string;

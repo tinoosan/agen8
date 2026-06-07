@@ -74,7 +74,7 @@ func (f *fakeLinkTokenIssuer) IssueLinkToken(_ context.Context, req LinkTokenReq
 	}, nil
 }
 
-func TestRegisterMCPContextUpdatesExistingMemberDisplayName(t *testing.T) {
+func TestRegisterMCPContextReusesExistingMemberWithoutRenaming(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	service := newProjectServiceForMCPContextTest(t)
@@ -109,16 +109,19 @@ func TestRegisterMCPContextUpdatesExistingMemberDisplayName(t *testing.T) {
 	if second.MemberID != first.MemberID {
 		t.Fatalf("member id changed from %q to %q", first.MemberID, second.MemberID)
 	}
-	if second.DisplayName != "backend engineer" {
-		t.Fatalf("second display=%q want backend engineer", second.DisplayName)
+	if !second.AlreadyRegistered {
+		t.Fatal("second register should report already registered")
+	}
+	if second.DisplayName != "codex" {
+		t.Fatalf("second display=%q want codex", second.DisplayName)
 	}
 
 	memberRecord, err := service.GetMember(caller.ContextWithCaller(ctx, caller.Caller{UserID: "user-1"}), member.ID(second.MemberID))
 	if err != nil {
 		t.Fatalf("get member: %v", err)
 	}
-	if memberRecord.DisplayName != "backend engineer" {
-		t.Fatalf("stored display=%q want backend engineer", memberRecord.DisplayName)
+	if memberRecord.DisplayName != "codex" {
+		t.Fatalf("stored display=%q want codex", memberRecord.DisplayName)
 	}
 }
 
@@ -170,8 +173,11 @@ func TestRegisterMCPContextRehomesLegacyLocalMemberToTokenUser(t *testing.T) {
 	if resolved.UserID != "user-1" {
 		t.Fatalf("resolved user=%q want user-1", resolved.UserID)
 	}
-	if resolved.DisplayName != "Codex backend engineer" {
-		t.Fatalf("resolved display=%q want Codex backend engineer", resolved.DisplayName)
+	if !registered.AlreadyRegistered {
+		t.Fatal("real user register should report already registered")
+	}
+	if resolved.DisplayName != "codex" {
+		t.Fatalf("resolved display=%q want codex", resolved.DisplayName)
 	}
 
 	rehomedProject, err := service.GetProject(caller.ContextWithCaller(ctx, caller.Caller{UserID: "user-1"}), types.ProjectID(resolved.ProjectID))

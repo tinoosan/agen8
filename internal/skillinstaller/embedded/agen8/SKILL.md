@@ -12,6 +12,8 @@ Use Agen8 as the durable work-context layer behind the harness. Codex, Claude Co
 1. Call `project.register` early for the current project.
    - Prefer `project_root` when working from a local project directory.
    - Set `display_name` as `Name (Role)` — a self-chosen name plus the working role — when the human gives a role or one is inferable from the request, for example `Atlas (Backend Engineer)` or `Iris (Frontend Reviewer)`. Use a bare `Name` only when the role is too ambiguous to infer. The name keeps the member recognizable in the graph; the role keeps the roster scannable.
+   - Registration is name-only from the agent's point of view. Do not supply model, harness, reasoning effort, permission mode, or runtime config fields; Agen8 derives runtime identity from the MCP connection.
+   - Once registered, do not call `project.register` again to rename yourself. Use `project` with `action=member_update`, `member_id`, and `display_name`.
    - Use the returned `projectId`, `memberId`, `channelId`, `url`, and `token` for later calls. Treat `memberType` as compatibility metadata, not as a permission model.
    - Do not invent a thread id. If the harness exposes native session metadata through MCP, Agen8 can bind it. If not, use explicit user-provided ids only.
 2. After context compaction, thread resume, handoff, or a user says to continue, inspect Agen8 before continuing.
@@ -36,7 +38,9 @@ Use Agen8 as the durable work-context layer behind the harness. Codex, Claude Co
 - `graph_query`: inspect nodes, search memory, and link decisions/tasks/KRs/missions so the work is understandable later.
 - `http`: perform real-world HTTP actions through Agen8, including credential-backed calls when configured.
 
-Call Agen8 MCP tools directly. If a wrapper or parallel call mangles the namespace, retry with a direct tool call and record the tool-surface issue if it affects work.
+Call Agen8 MCP tools directly. Use the visible Agen8 MCP namespace for Agen8 operations, such as `agen8__mcp__project`, `agen8__mcp__mission`, `agen8__mcp__task`, `agen8__mcp__decision`, and `agen8__mcp__graph_query`; some harnesses show the same tools as `mcp__agen8.project`, `mcp__agen8.mission`, `mcp__agen8.task`, `mcp__agen8.decision`, and `mcp__agen8.graph_query`. Do not use the Agen8 `http` tool to call Agen8's own RPC/API endpoints as a bypass around the MCP tools; the HTTP tool is for external HTTP actions.
+
+If a wrapper or parallel call mangles the namespace, retry with a direct tool call and record the tool-surface issue if it affects work.
 
 ## Work Loop
 
@@ -92,7 +96,7 @@ Plain notes keep the work manageable. The human can review and steer without dec
 - Agen8 is the durable work-context layer. The active harness remains the work surface.
 - Do not invent missing ids, project state, member state, task state, or decision history.
 - When a tool contract rejects fields, adapt to the schema and note the mismatch as Agen8 workflow feedback.
-- Do not create stray tasks. If no mission/KR exists, create those first or state why the tool surface made that impossible.
+- Do not create stray tasks. If no mission/KR exists, create those first or state why the tool surface made that impossible. If you claim a task, complete it, submit it, and review it before ending your turn. If you leave a follow-up, leave it as a pending task. The user cannot see whether your session is active from the Agen8 UI, so the task state matters.
 
 ## Compaction Recovery Checklist
 

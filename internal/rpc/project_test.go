@@ -238,8 +238,17 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 	if err := json.Unmarshal(resp.Result, &got); err != nil {
 		t.Fatalf("unmarshal project.member.get result: %v", err)
 	}
-	if got.Member.DisplayName != "Codex backend engineer" || got.Member.UserID != "user-1" {
+	if got.Member.DisplayName != "codex" || got.Member.UserID != "user-1" {
 		t.Fatalf("member.get result=%+v", got.Member)
+	}
+	encodedMemberGet, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal member.get result: %v", err)
+	}
+	for _, forbidden := range []string{"harnessKind", "model", "effort", "harnessPermissionMode", "harnessConfigRef"} {
+		if strings.Contains(string(encodedMemberGet), forbidden) {
+			t.Fatalf("member.get leaked %s in %s", forbidden, encodedMemberGet)
+		}
 	}
 
 	raw, err = server.Handle(rpcCtx, []byte(`{
@@ -259,8 +268,38 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 	if err := json.Unmarshal(resp.Result, &listed); err != nil {
 		t.Fatalf("unmarshal project.member.list result: %v", err)
 	}
-	if len(listed.Members) != 1 || listed.Members[0].ID != registered.MemberID || listed.Members[0].DisplayName != "Codex backend engineer" {
+	if len(listed.Members) != 1 || listed.Members[0].ID != registered.MemberID || listed.Members[0].DisplayName != "codex" {
 		t.Fatalf("member.list result=%+v", listed.Members)
+	}
+	encodedMemberList, err := json.Marshal(listed)
+	if err != nil {
+		t.Fatalf("marshal member.list result: %v", err)
+	}
+	for _, forbidden := range []string{"harnessKind", "model", "effort", "harnessPermissionMode", "harnessConfigRef"} {
+		if strings.Contains(string(encodedMemberList), forbidden) {
+			t.Fatalf("member.list leaked %s in %s", forbidden, encodedMemberList)
+		}
+	}
+
+	raw, err = server.Handle(rpcCtx, []byte(`{
+		"jsonrpc": "2.0",
+		"id": "member-update",
+		"method": "project.member.update",
+		"params": { "memberId": "`+registered.MemberID+`", "displayName": "Kepler (Backend Engineer)" }
+	}`))
+	if err != nil {
+		t.Fatalf("Handle project.member.update returned error: %v", err)
+	}
+	resp = decodeRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("project.member.update response error=%+v", resp.Error)
+	}
+	var updated projectrpc.MemberUpdateResult
+	if err := json.Unmarshal(resp.Result, &updated); err != nil {
+		t.Fatalf("unmarshal project.member.update result: %v", err)
+	}
+	if updated.Member.ID != registered.MemberID || updated.Member.DisplayName != "Kepler (Backend Engineer)" {
+		t.Fatalf("member.update result=%+v", updated.Member)
 	}
 }
 

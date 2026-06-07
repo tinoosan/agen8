@@ -74,37 +74,6 @@ func (a Member) SetMemberType(memberType string, now time.Time) (Member, error) 
 	return Member{inner: next}, nil
 }
 
-func (a Member) UpdateConfig(model, effort, harnessKind string, now time.Time) (Member, error) {
-	permissionMode := strings.TrimSpace(a.inner.PermissionMode)
-	if permissionMode == "" {
-		permissionMode = strings.TrimSpace(harnessKind) + "/default"
-	}
-	return a.UpdateRuntimeConfig(model, effort, harnessKind, permissionMode, a.inner.ConfigRef, now)
-}
-
-func (a Member) UpdateRuntimeConfig(model, effort, harnessKind, permissionMode, configRef string, now time.Time) (Member, error) {
-	if strings.TrimSpace(model) == "" {
-		return Member{}, fmt.Errorf("model is required")
-	}
-	if strings.TrimSpace(effort) == "" {
-		return Member{}, fmt.Errorf("effort is required")
-	}
-	if strings.TrimSpace(harnessKind) == "" {
-		return Member{}, fmt.Errorf("harnessKind is required")
-	}
-	if strings.TrimSpace(permissionMode) == "" {
-		return Member{}, fmt.Errorf("harnessPermissionMode is required")
-	}
-	next := a.inner
-	next.Model = strings.TrimSpace(model)
-	next.Effort = strings.TrimSpace(effort)
-	next.HarnessKind = strings.TrimSpace(harnessKind)
-	next.PermissionMode = strings.TrimSpace(permissionMode)
-	next.ConfigRef = strings.TrimSpace(configRef)
-	next.UpdatedAt = now.UTC()
-	return Member{inner: next}, nil
-}
-
 func ValidateMemberType(v string) error {
 	switch v {
 	case TypeCoordinator, TypeWorker:

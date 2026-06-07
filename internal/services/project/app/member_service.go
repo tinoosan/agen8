@@ -196,39 +196,25 @@ func (s *Service) DisplayName(ctx context.Context, id member.ID) (string, error)
 	return strings.TrimSpace(rosterMember.DisplayName), nil
 }
 
-func (s *Service) UpdateMemberConfig(ctx context.Context, id member.ID, model, effort, harnessKind string, permissionFields ...string) (member.Record, error) {
-	permissionMode := ""
-	configRef := ""
-	if len(permissionFields) > 0 {
-		permissionMode = permissionFields[0]
-	}
-	if len(permissionFields) > 1 {
-		configRef = permissionFields[1]
-	}
-	if strings.TrimSpace(permissionMode) == "" {
-		permissionMode = s.defaultPermissionMode(harnessKind)
-	}
-	if err := s.validateRuntimeConfig(harnessKind, model, effort, permissionMode, configRef); err != nil {
-		return member.Record{}, err
+func (s *Service) UpdateMember(ctx context.Context, id member.ID, displayName string) (member.Record, error) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return member.Record{}, fmt.Errorf("displayName is required")
 	}
 	loaded, err := s.GetMember(ctx, id)
 	if err != nil {
 		return member.Record{}, err
 	}
-	agg := member.WrapMember(loaded)
-	updated, err := agg.UpdateRuntimeConfig(model, effort, harnessKind, permissionMode, configRef, s.clock.Now())
-	if err != nil {
-		return member.Record{}, err
+	loaded.DisplayName = displayName
+	loaded.UpdatedAt = s.clock.Now().UTC()
+	if err := s.members.Update(ctx, loaded); err != nil {
+		return member.Record{}, fmt.Errorf("update project member: %w", err)
 	}
-	inner := updated.Inner()
-	if err := s.members.Update(ctx, inner); err != nil {
-		return member.Record{}, fmt.Errorf("update project member config: %w", err)
+	if err := s.publishMemberLifecycle(eventbus.SpaceMemberEventIdentityChanged, loaded); err != nil {
+		return member.Record{}, fmt.Errorf("publish project member identity changed: %w", err)
 	}
-	if err := s.publishMemberLifecycle(eventbus.SpaceMemberEventConfigChanged, inner); err != nil {
-		return member.Record{}, fmt.Errorf("publish project member config changed: %w", err)
-	}
-	s.logger.InfoContext(ctx, "project member config updated", "project_id", inner.ProjectID, "member_id", inner.ID)
-	return inner, nil
+	s.logger.InfoContext(ctx, "project member updated", "project_id", loaded.ProjectID, "member_id", loaded.ID)
+	return loaded, nil
 }
 
 func (s *Service) ListMembers(ctx context.Context, filter member.Filter) ([]member.Record, error) {

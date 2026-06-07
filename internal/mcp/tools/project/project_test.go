@@ -38,9 +38,9 @@ func (s stubMemberDirectory) ListMembers(ctx context.Context, filter member.Filt
 }
 
 type stubMemberRegistrar struct {
-	registerFn     func(context.Context, member.Record) (projectapp.RegisterMemberResult, error)
-	updateConfigFn func(context.Context, member.ID, string, string, string, ...string) (member.Record, error)
-	removeFn       func(context.Context, member.ID) (member.Record, error)
+	registerFn func(context.Context, member.Record) (projectapp.RegisterMemberResult, error)
+	updateFn   func(context.Context, member.ID, string) (member.Record, error)
+	removeFn   func(context.Context, member.ID) (member.Record, error)
 }
 
 func (s stubMemberRegistrar) RegisterMember(ctx context.Context, rosterMember member.Record) (projectapp.RegisterMemberResult, error) {
@@ -53,11 +53,11 @@ func (s stubMemberRegistrar) RegisterMember(ctx context.Context, rosterMember me
 	return projectapp.RegisterMemberResult{Member: rosterMember, GrantedMemberType: rosterMember.MemberType}, nil
 }
 
-func (s stubMemberRegistrar) UpdateMemberConfig(ctx context.Context, id member.ID, model, effort, harnessKind string, permissionFields ...string) (member.Record, error) {
-	if s.updateConfigFn != nil {
-		return s.updateConfigFn(ctx, id, model, effort, harnessKind, permissionFields...)
+func (s stubMemberRegistrar) UpdateMember(ctx context.Context, id member.ID, displayName string) (member.Record, error) {
+	if s.updateFn != nil {
+		return s.updateFn(ctx, id, displayName)
 	}
-	return member.Record{ID: id, Model: model, Effort: effort, HarnessKind: harnessKind, LifecycleState: member.LifecycleActive}, nil
+	return member.Record{ID: id, DisplayName: displayName, LifecycleState: member.LifecycleActive}, nil
 }
 
 func (s stubMemberRegistrar) RemoveMember(ctx context.Context, id member.ID) (member.Record, error) {
@@ -117,9 +117,16 @@ func TestDecodeRejectsFieldForWrongAction(t *testing.T) {
 	}
 }
 
-func TestDecodeCreateMemberRequiresRuntimeFields(t *testing.T) {
-	_, err := decode(json.RawMessage(`{"action":"member_create","harness_kind":"codex","effort":"medium"}`))
-	if err == nil || !strings.Contains(err.Error(), "model is required") {
+func TestDecodeCreateMemberRequiresDisplayName(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"member_create"}`))
+	if err == nil || !strings.Contains(err.Error(), "display_name is required") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsLegacyMemberUpdateConfig(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"member_update_config","member_id":"member-1","model":"gpt-5","effort":"high","harness_kind":"codex"}`))
+	if err == nil || !strings.Contains(err.Error(), `unsupported action "member_update_config"`) {
 		t.Fatalf("unexpected err=%v", err)
 	}
 }
@@ -164,6 +171,11 @@ func TestSchemaOmitsSpaceID(t *testing.T) {
 	if _, ok := decoded.Properties["space_id"]; ok {
 		t.Fatalf("space_id should not be present in schema")
 	}
+	for _, field := range []string{"harness_kind", "model", "effort", "permission_mode", "config_ref"} {
+		if _, ok := decoded.Properties[field]; ok {
+			t.Fatalf("%s should not be present in schema", field)
+		}
+	}
 }
 
 func TestHandleRegisterPassesDisplayNameAndReturnsGuidance(t *testing.T) {
@@ -176,6 +188,9 @@ func TestHandleRegisterPassesDisplayNameAndReturnsGuidance(t *testing.T) {
 				}
 				if req.ProjectRoot != "/repo" {
 					t.Fatalf("project root=%q want /repo", req.ProjectRoot)
+				}
+				if req.Model != "" || req.Effort != "" || req.PermissionMode != "" || req.ConfigRef != "" {
+					t.Fatalf("runtime fields should not be caller supplied: %+v", req)
 				}
 				return RegisterContextResult{
 					ProjectID:   "project-1",
@@ -202,7 +217,43 @@ func TestHandleRegisterPassesDisplayNameAndReturnsGuidance(t *testing.T) {
 		t.Fatalf("displayName=%v want backend engineer", structured["displayName"])
 	}
 	guidance, _ := structured["guidance"].(string)
-	if !strings.Contains(guidance, "display_name") || !strings.Contains(guidance, "graph") {
+	if !strings.Contains(guidance, "registered") || !strings.Contains(guidance, "Agen8 derives") {
+		t.Fatalf("guidance=%q", guidance)
+	}
+}
+
+func TestHandleRegisterReturnsAlreadyRegisteredGuidance(t *testing.T) {
+	handler := NewHandler()
+	result, err := handler.Handle(context.Background(), CallContext{
+		ContextRegistrar: stubContextRegistrar{
+			registerFn: func(_ context.Context, req RegisterContextRequest) (RegisterContextResult, error) {
+				return RegisterContextResult{
+					ProjectID:         "project-1",
+					ProjectRoot:       req.ProjectRoot,
+					LocationID:        "local",
+					MemberID:          "member-session",
+					DisplayName:       "Atlas (Backend Engineer)",
+					MemberType:        member.TypeCoordinator,
+					ChannelID:         "channel:project-1:member:member-session",
+					Token:             req.Token,
+					URL:               "http://127.0.0.1:7777/mcp?token=" + req.Token,
+					MCPServers:        []string{"agen8"},
+					AlreadyRegistered: true,
+				}, nil
+			},
+		},
+		MCPToken:    "ak_test_token",
+		HarnessKind: "codex",
+	}, json.RawMessage(`{"action":"register","project_root":"/repo","display_name":"Kepler (Backend Engineer)"}`))
+	if err != nil {
+		t.Fatalf("handle register: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	if structured["alreadyRegistered"] != true {
+		t.Fatalf("alreadyRegistered=%v want true", structured["alreadyRegistered"])
+	}
+	guidance, _ := structured["guidance"].(string)
+	if !strings.Contains(guidance, "already registered as Atlas (Backend Engineer) (member-session)") || !strings.Contains(guidance, "member_update") {
 		t.Fatalf("guidance=%q", guidance)
 	}
 }
@@ -249,6 +300,9 @@ func TestHandleMemberListUsesProjectScopedDirectory(t *testing.T) {
 					DisplayName:    "Worker",
 					MemberType:     member.TypeWorker,
 					LifecycleState: member.LifecycleActive,
+					HarnessKind:    "codex",
+					Model:          "gpt-5",
+					Effort:         "high",
 				}}, nil
 			},
 		},
@@ -267,6 +321,15 @@ func TestHandleMemberListUsesProjectScopedDirectory(t *testing.T) {
 	}
 	if structured["count"] != 1 {
 		t.Fatalf("count=%v want 1", structured["count"])
+	}
+	encoded, err := json.Marshal(structured)
+	if err != nil {
+		t.Fatalf("marshal structured: %v", err)
+	}
+	for _, forbidden := range []string{"harnessKind", "model", "effort"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("member_list leaked %s in %s", forbidden, encoded)
+		}
 	}
 }
 
@@ -311,7 +374,7 @@ func TestHandleCreateMemberUsesSessionActorAndRegistrar(t *testing.T) {
 				if rosterMember.MemberType != member.TypeCoordinator {
 					t.Fatalf("member type=%q want coordinator", rosterMember.MemberType)
 				}
-				if rosterMember.HarnessKind != "codex" || rosterMember.Model != "gpt-5" || rosterMember.Effort != "medium" {
+				if rosterMember.HarnessKind != "codex" || rosterMember.Model != "" || rosterMember.Effort != "" {
 					t.Fatalf("runtime config=%+v", rosterMember)
 				}
 				if rosterMember.PermissionMode != "" || rosterMember.ConfigRef != "" {
@@ -325,7 +388,8 @@ func TestHandleCreateMemberUsesSessionActorAndRegistrar(t *testing.T) {
 			},
 		},
 		ActorMemberID: "member-coordinator",
-	}, json.RawMessage(`{"action":"member_create","display_name":"Backend lead","harness_kind":"codex","model":"gpt-5","effort":"medium"}`))
+		HarnessKind:   "codex",
+	}, json.RawMessage(`{"action":"member_create","display_name":"Backend lead"}`))
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -373,7 +437,7 @@ func TestHandleMemberGetUsesMemberDirectory(t *testing.T) {
 	}
 }
 
-func TestHandleMemberUpdateConfigUsesRegistrar(t *testing.T) {
+func TestHandleMemberUpdateUsesRegistrar(t *testing.T) {
 	handler := NewHandler()
 	result, err := handler.Handle(context.Background(), CallContext{
 		Members: stubMemberDirectory{
@@ -382,25 +446,22 @@ func TestHandleMemberUpdateConfigUsesRegistrar(t *testing.T) {
 			},
 		},
 		Registrar: stubMemberRegistrar{
-			updateConfigFn: func(_ context.Context, id member.ID, model, effort, harnessKind string, permissionFields ...string) (member.Record, error) {
-				if id != "member-target" || model != "gpt-5" || effort != "high" || harnessKind != "codex" {
-					t.Fatalf("update args id=%q model=%q effort=%q harness=%q", id, model, effort, harnessKind)
+			updateFn: func(_ context.Context, id member.ID, displayName string) (member.Record, error) {
+				if id != "member-target" || displayName != "Target Renamed" {
+					t.Fatalf("update args id=%q displayName=%q", id, displayName)
 				}
-				if len(permissionFields) != 0 {
-					t.Fatalf("permission fields=%v", permissionFields)
-				}
-				return member.Record{ID: id, DisplayName: "Target", MemberType: member.TypeWorker, LifecycleState: member.LifecycleActive, Model: model, Effort: effort, HarnessKind: harnessKind}, nil
+				return member.Record{ID: id, DisplayName: displayName, MemberType: member.TypeWorker, LifecycleState: member.LifecycleActive}, nil
 			},
 		},
 		ProjectID:     "project-1",
 		ActorMemberID: "member-actor",
-	}, json.RawMessage(`{"action":"member_update_config","member_id":"member-target","harness_kind":"codex","model":"gpt-5","effort":"high"}`))
+	}, json.RawMessage(`{"action":"member_update","member_id":"member-target","display_name":"Target Renamed"}`))
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
 	structured := result.Structured.(map[string]any)
-	if structured["action"] != "member_update_config" {
-		t.Fatalf("action=%v want member_update_config", structured["action"])
+	if structured["action"] != "member_update" {
+		t.Fatalf("action=%v want member_update", structured["action"])
 	}
 }
 
@@ -415,7 +476,8 @@ func TestHandleMemberCreateAllowsActiveProjectMemberActor(t *testing.T) {
 		},
 		Registrar:     stubMemberRegistrar{},
 		ActorMemberID: "member-worker",
-	}, json.RawMessage(`{"action":"member_create","harness_kind":"codex","model":"gpt-5","effort":"medium"}`))
+		HarnessKind:   "codex",
+	}, json.RawMessage(`{"action":"member_create","display_name":"Peer"}`))
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
