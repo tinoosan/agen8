@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frontend Behavior — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / frontend-behavior</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture · Frontend Behavior</span>
+  <h1>Frontend Behavior and Pin Ranking</h1>
+  <p class="lede">This page captures UI behavior that is cross-file and behavior-critical: server-backed pin persistence, cache semantics, and visible ranking/ordering behavior.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#pin-lifecycle">Pin lifecycle and persistence</a></li>
+      <li><a href="#cache-semantics">Cache semantics</a></li>
+      <li><a href="#mission-list-surface">Mission list surface behavior</a></li>
+      <li><a href="#palette-search">Command palette search behavior</a></li>
+      <li><a href="#strategy-map-search">Strategy Map mobile search behavior</a></li>
+      <li><a href="#mission-lifecycle">Mission lifecycle and delete semantics</a></li>
+      <li><a href="#backend-impact">Backend impact</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="pin-lifecycle">1. Pin lifecycle and persistence</h2>
+  <p>The frontend pin surface is now server-backed and shared across sessions via <code>pin.list</code>, <code>pin.add</code>, and <code>pin.remove</code> RPC methods.</p>
+  <ul>
+    <li><code>usePins(projectId)</code> is the hook-level gateway used by mission surfaces and should be shared for future pinnable entities.</li>
+    <li>When signed in and a <code>projectId</code> exists, hook state is backed by <code>pin.list</code> and keyed as <code>qk.pins(projectId)</code>.</li>
+    <li><code>togglePin(nodeRef, nodeType)</code> calls <code>pin.add</code>/<code>pin.remove</code>; this allows mission pins plus extensibility for decisions, tasks, and key results.</li>
+  </ul>
+
+  <h2 id="cache-semantics">2. Cache semantics and consistency</h2>
+  <p>Consistency is tuned for low-latency UX with safe fallback:</p>
+  <ul>
+    <li>Pin add/remove is <strong>optimistic</strong>: the cache updates before RPC response.</li>
+    <li>On RPC failure, optimistic changes are rolled back to previous cached state.</li>
+    <li>On settle, cache invalidation runs via <code>qk.pinsAll</code> to force a fresh server read for all pin consumers.</li>
+    <li>The hook refreshes periodically (<code>refetchInterval: 30_000</code>) as an additional eventual-consistency backstop.</li>
+  </ul>
+  <p>Implementation references:</p>
+  <ul>
+    <li><a href="../web/src/hooks/usePins.ts">web/src/hooks/usePins.ts</a></li>
+    <li><a href="../web/src/lib/queryKeys.ts">web/src/lib/queryKeys.ts</a> (pin keys)</li>
+  </ul>
+
+  <h2 id="mission-list-surface">3. Mission list surfaces</h2>
+  <p>Mission list components render pin state consistently through <code>usePins()</code> and prioritize pinned rows:</p>
+  <ul>
+    <li><a href="../web/src/components/dashboard/DashboardMissionsPanel.tsx">DashboardMissionsPanel</a> sorts visible missions with pinned IDs before unpinned rows.</li>
+    <li>Pin toggles in the panel preserve existing filtering/search behavior and only alter ordering by priority.</li>
+    <li>Pin affordance remains mission-centric here; new pinnable node types flow through the same hook contract.</li>
+  </ul>
+
+  <h2 id="palette-search">4. Command palette search behavior</h2>
+  <p>Search ranking uses non-invasive pin boosting:</p>
+  <ul>
+    <li><code>pinned keyword</code> is injected into command keywords for pinned mission rows only.</li>
+    <li><code>pinnedBoostFilter</code> adds a small score bump without changing match eligibility.</li>
+    <li>Unmatched items remain hidden; pin status does not force-display nonmatching rows.</li>
+    <li>Pinned missions are visually marked with the pin glyph.</li>
+  </ul>
+  <p>Implementation reference:</p>
+  <ul>
+    <li><a href="../web/src/components/CommandPalette.tsx">web/src/components/CommandPalette.tsx</a></li>
+  </ul>
+
+  <h2 id="strategy-map-search">5. Strategy Map search behavior (desktop + mobile)</h2>
+  <p>Context-map search has two entry points that must stay aligned:</p>
+  <ul>
+    <li><strong>Keyboard</strong>: <code>/</code> focuses/open the node-search dialog inside <code>StrategyMapSearch</code>.</li>
+    <li><strong>Mobile top bar</strong>: tapping the app top-bar search icon while <code>activeView === 'strategy'</code> opens the same strategy-map node-search dialog via global store state.</li>
+    <li>For all other views, the top-bar search icon opens the command palette.</li>
+    <li>Open state is stored in <code>strategySearchOpen</code> so it can be controlled from components outside the page tree.</li>
+    <li>The map page does not force-reset this flag on unmount; the shared modal close path clears it on actual close so stale-open state is avoided without disrupting StrictMode mount/unmount cycles.</li>
+  </ul>
+  <p>This avoids the keyboard-driven touch-gap introduced by mobile devices that cannot rely on <code>/</code> reliably.</p>
+  <p>Implementation references:</p>
+  <ul>
+    <li><a href="../web/src/App.tsx">web/src/App.tsx</a> (mobile top-bar branching)</li>
+    <li><a href="../web/src/pages/StrategyMap.tsx">web/src/pages/StrategyMap.tsx</a> (store-owned open flag)</li>
+    <li><a href="../web/src/components/strategy/StrategyMapSearch.tsx">web/src/components/strategy/StrategyMapSearch.tsx</a> (search modal behavior)</li>
+  </ul>
+
+  <h2 id="mission-lifecycle">6. Mission lifecycle and delete semantics</h2>
+  <p>Frontend mission lifecycle remains soft-first:</p>
+  <ul>
+    <li><code>MissionLifecycleActions</code> only renders status transitions (activate/pause/resume/complete/archive) mapped to <code>mission.update</code>.</li>
+    <li><code>mission.delete</code> is the Archive action (reversible by un-archiving in supported flows).</li>
+    <li><code>mission.purge</code> is destructive and permanent, and is surfaced as <strong>Delete permanently</strong> in mission detail.</li>
+    <li>The same detail surface intentionally copies lifecycle texts and confirmation copy to keep status and irreversibility semantics clear to users across view states.</li>
+  </ul>
+  <p>Implementation references:</p>
+  <ul>
+    <li><a href="../web/src/components/mission/MissionLifecycleActions.tsx">web/src/components/mission/MissionLifecycleActions.tsx</a></li>
+    <li><a href="../web/src/pages/MissionDetail.tsx">web/src/pages/MissionDetail.tsx</a> (dual-path delete + hard purge)</li>
+    <li><a href="../web/src/hooks/useMissions.ts">web/src/hooks/useMissions.ts</a> (<code>useDeleteMission</code> vs <code>useHardDeleteMission</code>)</li>
+  </ul>
+
+  <h2 id="backend-impact">7. Backend impact</h2>
+  <p>Frontend ordering is user-visible, but source-of-truth ranking support comes from backend pin-aware search:</p>
+  <ul>
+    <li><code>pin</code> service provides list/add/remove endpoints used by the frontend.</li>
+    <li>Graph search routes promote pinned nodes in ranking for both query and browse paths, so pin boosts are durable and consistent across clients.</li>
+  </ul>
+  <p>Related implementation references:</p>
+  <ul>
+    <li><a href="../internal/services/pin/rpc/handler.go">internal/services/pin/rpc/handler.go</a></li>
+    <li><a href="../internal/services/graph/app/search.go">internal/services/graph/app/search.go</a></li>
+  </ul>
+</div>
+</body>
+</html>
