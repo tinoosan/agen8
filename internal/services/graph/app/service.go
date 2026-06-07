@@ -24,10 +24,18 @@ type Service struct {
 	contextLinks  contextlink.Repository
 	hydrators     map[string]domain.NodeHydrator
 	searchTimeout time.Duration
+	pinReader     PinReader
 }
 
 type Linker interface {
 	Link(ctx context.Context, req domain.GraphLinkRequest) (domain.GraphEdge, []domain.GraphWarning, error)
+}
+
+// PinReader reports which node refs are pinned in a project so pinned nodes can
+// be prioritized in search results. It is optional: a nil PinReader (or a
+// failing lookup) simply disables the boost — search still returns results.
+type PinReader interface {
+	PinnedNodeRefs(ctx context.Context, projectID string) (map[string]struct{}, error)
 }
 
 type NodeLinkDeleter interface {
@@ -60,6 +68,26 @@ func NewService(contextLinks contextlink.Repository, hydrators []domain.NodeHydr
 		hydrators:     byType,
 		searchTimeout: searchTimeout,
 	}, nil
+}
+
+// SetPinReader wires the (optional) pin lookup used to prioritize pinned nodes
+// in search. Safe to leave unset — search degrades to unboosted ordering.
+func (s *Service) SetPinReader(reader PinReader) {
+	s.pinReader = reader
+}
+
+// pinnedRefs returns the set of pinned node refs for a project. Pins are only a
+// ranking boost, so a missing reader or a lookup error degrades silently to an
+// empty set rather than failing the search.
+func (s *Service) pinnedRefs(ctx context.Context, projectID string) map[string]struct{} {
+	if s.pinReader == nil {
+		return nil
+	}
+	refs, err := s.pinReader.PinnedNodeRefs(ctx, projectID)
+	if err != nil {
+		return nil
+	}
+	return refs
 }
 
 func (s *Service) Node(ctx context.Context, projectID, nodeType, nodeID string, depth int) (domain.GraphNodeDetail, []domain.GraphWarning, error) {
@@ -340,11 +368,12 @@ func (s *Service) Search(ctx context.Context, req domain.GraphSearchRequest) ([]
 	if hasEdge != "" || missingEdge != "" || outgoingEdge != "" || incomingEdge != "" {
 		searchLimit = max(limit*5, 100)
 	}
+	pinnedRefs := s.pinnedRefs(ctx, projectID)
 	var summaries []domain.GraphNodeSummary
 	var warnings []domain.GraphWarning
 	relevanceSorted := false
 	if nodeType == domain.NodeTypeAll {
-		hits, searchWarnings, err := s.searchAll(ctx, projectID, query, searchLimit)
+		hits, searchWarnings, err := s.searchAll(ctx, projectID, query, searchLimit, pinnedRefs)
 		if err != nil {
 			return []domain.GraphNodeSummary{}, warningsOrEmpty(searchWarnings), err
 		}
@@ -375,9 +404,10 @@ func (s *Service) Search(ctx context.Context, req domain.GraphSearchRequest) ([]
 		summary.CreatedAt = createdAt.Format(time.RFC3339Nano)
 	}
 	if !relevanceSorted && query != "" {
-		sortSummariesBySearchScore(summaries, query)
+		sortSummariesBySearchScore(summaries, query, pinnedRefs)
 	} else if !relevanceSorted {
 		sortNodeSummaries(summaries)
+		promotePinned(summaries, pinnedRefs)
 	}
 	if hasEdge != "" || missingEdge != "" || outgoingEdge != "" || incomingEdge != "" {
 		filtered, err := s.filterSummariesByEdges(ctx, summaries, edgeFilter{

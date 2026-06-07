@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,16 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
 	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
 )
+
+// stubPinReader is a test double for the graph service's PinReader port.
+type stubPinReader struct {
+	refs map[string]struct{}
+	err  error
+}
+
+func (s stubPinReader) PinnedNodeRefs(_ context.Context, _ string) (map[string]struct{}, error) {
+	return s.refs, s.err
+}
 
 const contextLinkSchema = `
 CREATE TABLE IF NOT EXISTS context_links (
@@ -632,6 +643,84 @@ func TestServiceSearchAllPreservesRelevanceOrder(t *testing.T) {
 	}
 }
 
+func TestServiceSearchPrioritizesPinnedNodes(t *testing.T) {
+	now := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	// Two candidates across two node types so both enter the search pool
+	// regardless of per-hydrator limits: an unpinned exact match (highest
+	// relevance) and a pinned weaker "contains" match.
+	newService := func() *Service {
+		svc, err := NewService(noopGraphLinks{}, []domain.NodeHydrator{
+			graphTestHydrator{nodeType: domain.NodeTypeDecision, nodes: map[string]domain.GraphNodeCore{
+				"dec-exact": {ID: "dec-exact", Type: domain.NodeTypeDecision, Title: "metrics", CreatedAt: now},
+			}},
+			graphTestHydrator{nodeType: domain.NodeTypeTask, nodes: map[string]domain.GraphNodeCore{
+				"task-pinned": {ID: "task-pinned", Type: domain.NodeTypeTask, Title: "metrics rollout retro and notes", CreatedAt: now},
+			}},
+		}, time.Second)
+		if err != nil {
+			t.Fatalf("NewService: %v", err)
+		}
+		return svc
+	}
+
+	svc := newService()
+	svc.SetPinReader(stubPinReader{refs: map[string]struct{}{"task-pinned": {}}})
+
+	results, _, err := svc.Search(context.Background(), domain.GraphSearchRequest{
+		ProjectID: "proj", NodeType: domain.NodeTypeAll, Query: "metrics", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("results=%+v", results)
+	}
+	if results[0].ID != "task-pinned" {
+		t.Fatalf("first result=%s want task-pinned (a pin outranks a stronger text match)", results[0].ID)
+	}
+
+	// The pinned hit must survive result-limit truncation even though the
+	// unpinned exact match scores higher.
+	limited, _, err := svc.Search(context.Background(), domain.GraphSearchRequest{
+		ProjectID: "proj", NodeType: domain.NodeTypeAll, Query: "metrics", Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("search limit=1: %v", err)
+	}
+	if len(limited) != 1 || limited[0].ID != "task-pinned" {
+		t.Fatalf("limited=%+v want only task-pinned", limited)
+	}
+}
+
+func TestServiceSearchDegradesWhenPinLookupFails(t *testing.T) {
+	now := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	svc, err := NewService(noopGraphLinks{}, []domain.NodeHydrator{
+		graphTestHydrator{nodeType: domain.NodeTypeDecision, nodes: map[string]domain.GraphNodeCore{
+			"dec-exact": {ID: "dec-exact", Type: domain.NodeTypeDecision, Title: "metrics", CreatedAt: now},
+			"dec-weak":  {ID: "dec-weak", Type: domain.NodeTypeDecision, Title: "metrics rollout retro and notes", CreatedAt: now},
+		}},
+	}, time.Second)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	// A pin reader that errors must not break search; it falls back to plain
+	// relevance ordering.
+	svc.SetPinReader(stubPinReader{err: errors.New("pin store offline")})
+
+	results, _, err := svc.Search(context.Background(), domain.GraphSearchRequest{
+		ProjectID: "proj", NodeType: domain.NodeTypeAll, Query: "metrics", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("search must not fail when pin lookup errors: %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("results=%+v", results)
+	}
+	if results[0].ID != "dec-exact" {
+		t.Fatalf("first result=%s want dec-exact (unboosted relevance order)", results[0].ID)
+	}
+}
+
 func TestSortNodeSummariesPrioritizesLiveWorkThenRecency(t *testing.T) {
 	now := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
 	items := []domain.GraphNodeSummary{
@@ -670,7 +759,7 @@ func TestSortSummariesBySearchScoreFavorsStrongerTokenOverlap(t *testing.T) {
 		{ID: "dec-newer", Type: domain.NodeTypeDecision, Title: "Graph notes", CreatedAt: now.Format(time.RFC3339Nano)},
 		{ID: "dec-older", Type: domain.NodeTypeDecision, Title: "Graph readability controls and graph semantics", CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano)},
 	}
-	sortSummariesBySearchScore(summaries, "graph readability semantics")
+	sortSummariesBySearchScore(summaries, "graph readability semantics", nil)
 	if summaries[0].ID != "dec-older" {
 		t.Fatalf("first result=%+v want stronger token overlap", summaries[0])
 	}

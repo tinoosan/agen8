@@ -14,9 +14,10 @@ import (
 type searchHit struct {
 	summary domain.GraphNodeSummary
 	score   float64
+	pinned  bool
 }
 
-func (s *Service) searchAll(ctx context.Context, projectID, query string, limit int) ([]searchHit, []domain.GraphWarning, error) {
+func (s *Service) searchAll(ctx context.Context, projectID, query string, limit int, pinnedRefs map[string]struct{}) ([]searchHit, []domain.GraphWarning, error) {
 	if len(s.hydrators) == 0 {
 		return []searchHit{}, []domain.GraphWarning{}, nil
 	}
@@ -77,6 +78,7 @@ func (s *Service) searchAll(ctx context.Context, projectID, query string, limit 
 				hits = append(hits, searchHit{
 					summary: summary,
 					score:   searchScore(summary, normalizedQuery),
+					pinned:  isPinnedRef(pinnedRefs, summary.ID),
 				})
 			}
 			results <- result{hits: hits}
@@ -124,6 +126,11 @@ func summariesFromHits(hits []searchHit) []domain.GraphNodeSummary {
 
 func sortSearchHits(hits []searchHit) {
 	sort.Slice(hits, func(i, j int) bool {
+		// Pinned nodes are a focus marker: they resurface first, ahead of
+		// unpinned hits, while relevance/recency still orders within each group.
+		if hits[i].pinned != hits[j].pinned {
+			return hits[i].pinned
+		}
 		if hits[i].score != hits[j].score {
 			return hits[i].score > hits[j].score
 		}
@@ -141,19 +148,47 @@ func sortSearchHits(hits []searchHit) {
 	})
 }
 
-func sortSummariesBySearchScore(summaries []domain.GraphNodeSummary, query string) {
+func sortSummariesBySearchScore(summaries []domain.GraphNodeSummary, query string, pinnedRefs map[string]struct{}) {
 	normalizedQuery := strings.TrimSpace(strings.ToLower(query))
 	hits := make([]searchHit, 0, len(summaries))
 	for _, summary := range summaries {
 		hits = append(hits, searchHit{
 			summary: summary,
 			score:   searchScore(summary, normalizedQuery),
+			pinned:  isPinnedRef(pinnedRefs, summary.ID),
 		})
 	}
 	sortSearchHits(hits)
 	for idx := range hits {
 		summaries[idx] = hits[idx].summary
 	}
+}
+
+// promotePinned stably moves pinned summaries to the front while preserving the
+// existing relative order within the pinned and unpinned groups. Used on the
+// browse path (no query), where there is no relevance score to fold pins into.
+func promotePinned(summaries []domain.GraphNodeSummary, pinnedRefs map[string]struct{}) {
+	if len(pinnedRefs) == 0 {
+		return
+	}
+	sort.SliceStable(summaries, func(i, j int) bool {
+		left := isPinnedRef(pinnedRefs, summaries[i].ID)
+		right := isPinnedRef(pinnedRefs, summaries[j].ID)
+		if left != right {
+			return left
+		}
+		return false
+	})
+}
+
+// isPinnedRef reports whether a node ref is in the project's pinned set. A nil
+// or empty set (no pins, or a degraded pin lookup) means nothing is boosted.
+func isPinnedRef(pinnedRefs map[string]struct{}, nodeRef string) bool {
+	if len(pinnedRefs) == 0 {
+		return false
+	}
+	_, ok := pinnedRefs[strings.TrimSpace(nodeRef)]
+	return ok
 }
 
 func searchScore(summary domain.GraphNodeSummary, normalizedQuery string) float64 {

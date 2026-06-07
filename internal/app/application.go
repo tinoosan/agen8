@@ -266,6 +266,9 @@ func NewApplication(cfg Config) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build pin service: %w", err)
 	}
+	// Pinned nodes rank higher in graph_query search; the graph service reads
+	// the project's pinned refs through this adapter at query time.
+	graphSvc.SetPinReader(pinNodeRefReader{pins: pinSvc})
 
 	return &Application{
 		AuthSvc:       authSvc,
@@ -392,6 +395,31 @@ func (r missionRefResolver) KeyResultMission(ctx context.Context, krRef string) 
 		return "", err
 	}
 	return strings.TrimSpace(string(keyResult.MissionID)), nil
+}
+
+// pinNodeRefReader adapts the pin service to the graph service's PinReader port
+// so pinned nodes can be prioritized in graph_query search results.
+type pinNodeRefReader struct {
+	pins *pinapp.Service
+}
+
+func (r pinNodeRefReader) PinnedNodeRefs(ctx context.Context, projectID string) (map[string]struct{}, error) {
+	if r.pins == nil {
+		return nil, nil
+	}
+	pins, err := r.pins.List(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	refs := make(map[string]struct{}, len(pins))
+	for _, pin := range pins {
+		ref := strings.TrimSpace(pin.NodeRef)
+		if ref == "" {
+			continue
+		}
+		refs[ref] = struct{}{}
+	}
+	return refs, nil
 }
 
 type projectLocationChecker struct {
