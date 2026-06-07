@@ -18,6 +18,7 @@ import ProgressHistory from '../components/mission/ProgressHistory'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
+import { DetailHeader } from '../components/detail/DetailHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -38,7 +39,6 @@ import { confidenceColor } from '@/lib/decisionDisplay'
 import {
   ChevronRight,
   ChevronDown,
-  ArrowLeft,
   TrendingUp,
   TrendingDown,
   Calendar,
@@ -602,18 +602,7 @@ export default function MissionDetail() {
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Sticky header — full-width outer for background coverage, max-w inner for centering */}
-      <div className="sticky top-0 z-10 bg-[var(--bg-app)] border-b border-[var(--border)]/60 w-full">
-        <div className="px-6 pt-6 pb-4 max-w-4xl mx-auto w-full">
-
-          {/* Back link */}
-          <Link
-            to={missionsPanelLink(projectId)}
-            className="inline-flex items-center gap-1.5 text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors no-underline mb-5"
-            style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}
-          >
-            <ArrowLeft size={13} />
-            Missions
-          </Link>
+      <DetailHeader backTo={missionsPanelLink(projectId)} backLabel="Missions">
 
           {/* Title row */}
           <div className="flex items-center gap-2.5 mb-1">
@@ -659,8 +648,7 @@ export default function MissionDetail() {
             )}
           </div>
 
-        </div>
-      </div>
+      </DetailHeader>
 
       {/* Scrollable KR list */}
       <div className="px-6 py-5 max-w-4xl mx-auto w-full">

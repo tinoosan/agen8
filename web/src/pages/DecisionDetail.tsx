@@ -2,7 +2,6 @@ import { useState, type ReactNode } from 'react'
 import { useRoute, useLocation, Link } from 'wouter'
 import { toast } from 'sonner'
 import {
-  ArrowLeft,
   Clock,
   Trash2,
   ChevronRight,
@@ -25,6 +24,7 @@ import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { StatItem } from '../components/detail/StatItem'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
+import { DetailHeader } from '../components/detail/DetailHeader'
 import DecisionDetails from '../components/decision/DecisionDetails'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -165,17 +165,7 @@ export default function DecisionDetail() {
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Sticky header */}
-      <div className="sticky top-0 z-10 bg-[var(--bg-app)] border-b border-[var(--border)]/60 w-full">
-        <div className="px-6 pt-6 pb-4 max-w-4xl mx-auto w-full">
-          <Link
-            to={decisionsPanelLink(projectId)}
-            className="inline-flex items-center gap-1.5 text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors no-underline mb-5"
-            style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}
-          >
-            <ArrowLeft size={13} />
-            Decisions
-          </Link>
-
+      <DetailHeader backTo={decisionsPanelLink(projectId)} backLabel="Decisions">
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-2">
@@ -221,8 +211,7 @@ export default function DecisionDetail() {
               </Button>
             </div>
           </div>
-        </div>
-      </div>
+      </DetailHeader>
 
       {/* Content */}
       <div className="px-6 py-5 max-w-4xl mx-auto w-full flex flex-col gap-5">
