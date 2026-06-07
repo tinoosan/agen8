@@ -1402,6 +1402,32 @@ body {
   animation: pulse-subtle 2s ease-in-out infinite;
 }
 
+/* ── Live-activity feedback ───────────────────────────
+ * Layered on the SSE invalidation path (useRealtimeInvalidation): when a live
+ * refetch swaps the data, useListChangeSignals flags which rows/tiles just
+ * arrived or changed so the swap reads as motion instead of a silent jump.
+ * Colour stays on-exception — the wash only appears for ~1.2s on a real change,
+ * driven by the per-element --live-flash / --live-dot custom props.
+ */
+
+/* Status transition acknowledged — a one-shot accent wash that fades to nothing.
+ * Uses an inset box-shadow (not background) so the tint composites OVER the
+ * element's own surface and leaves it intact when the flash ends — works the
+ * same on a transparent row and on an elevated tile. */
+@keyframes live-flash {
+  from { box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--live-flash, var(--accent)) 15%, transparent); }
+  to   { box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--live-flash, var(--accent)) 0%, transparent); }
+}
+.live-flash { animation: live-flash 1.2s ease-out; }
+
+/* Active work — the status dot breathes (generalizes the timeline tl-dot-pulse
+ * to any status colour via --live-dot). */
+@keyframes live-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--live-dot, var(--accent)) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in srgb, var(--live-dot, var(--accent)) 0%, transparent); }
+}
+.live-dot-pulse { animation: live-dot-pulse 1.6s ease-in-out infinite; }
+
 /* ── Dashboard staggered entrance ────────────────── */
 @keyframes dash-enter {
   from {
@@ -2597,7 +2623,9 @@ body {
   .animate-scale-in,
   .animate-pulse-subtle,
   .dash-stagger,
-  .animate-progress-grow {
+  .animate-progress-grow,
+  .live-flash,
+  .live-dot-pulse {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

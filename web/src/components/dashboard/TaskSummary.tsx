@@ -4,6 +4,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { AlertCircle, ListChecks, CircleDashed, CircleDot, Ban, Eye, CircleCheck } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
+import { useCountUp } from '../../hooks/useCountUp'
+import { useListChangeSignals } from '../../hooks/useListChangeSignals'
 import { filteredTasksLink } from '../../lib/routing'
 import { taskStatusColor, taskStatusLabel } from '../../lib/statusLabels'
 import type { Task } from '../../lib/types'
@@ -44,23 +46,37 @@ function countByBucket(tasks: Task[]): Record<string, number> {
 
 /* ── Stat cell ────────────────────────────────────────── */
 
-function StatCell({ projectId, bucket, count }: { projectId: string; bucket: Bucket; count: number }) {
+function StatCell({
+  projectId,
+  bucket,
+  count,
+  changed,
+}: {
+  projectId: string
+  bucket: Bucket
+  count: number
+  changed: boolean
+}) {
   const hasCount = count > 0
   // Number and icon share the status accent; an empty bucket recedes to grey
   // so a busy column reads first. Colour comes from the shared helper.
   const accent = hasCount ? taskStatusColor(bucket.key) : 'var(--text-3)'
   const Icon = bucket.Icon
+  // The digit counts up to its new value when a live refetch moves it, so the
+  // number visibly settles rather than snapping (reduced-motion safe in-hook).
+  const display = useCountUp(count)
   return (
     <Link
       to={filteredTasksLink(projectId, bucket.key)}
       aria-label={`${count} ${taskStatusLabel(bucket.key)} — open filtered Tasks list`}
-      className="flex flex-col gap-1.5 rounded-[16px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-4 no-underline transition-colors hover:bg-[var(--bg-hover)]"
+      className={`flex flex-col gap-1.5 rounded-[16px] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-4 no-underline transition-colors hover:bg-[var(--bg-hover)]${changed ? ' live-flash' : ''}`}
+      style={changed ? ({ '--live-flash': taskStatusColor(bucket.key) } as React.CSSProperties) : undefined}
     >
       <span
         className="text-[1.75rem] font-semibold leading-none tracking-[-0.02em] tabular-nums"
         style={{ color: accent }}
       >
-        {count}
+        {display}
       </span>
       {/* icon decorates the label rather than floating above the digit;
           rem sizing keeps both in step with the user's font scale */}
@@ -80,6 +96,19 @@ export default function TaskSummary({ projectId }: { projectId: string | null })
   const { data: tasks, isLoading, isError, error } = useProjectTasks(projectId)
 
   const counts = useMemo(() => countByBucket(tasks ?? []), [tasks])
+
+  // Flash the tile whose count changed on a live refetch. Buckets are modelled
+  // as items keyed by bucket, signalled by their count, so a changed count =
+  // a changed signal. (Hook runs every render; gated internally.)
+  const bucketItems = useMemo(
+    () => BUCKETS.map((b) => ({ key: b.key, count: counts[b.key] })),
+    [counts],
+  )
+  const { changedIds } = useListChangeSignals(
+    bucketItems,
+    (b) => b.key,
+    (b) => String(b.count),
+  )
 
   if (!projectId) return null
 
@@ -121,7 +150,13 @@ export default function TaskSummary({ projectId }: { projectId: string | null })
       </div>
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5 max-w-[560px]">
         {BUCKETS.map((bucket) => (
-          <StatCell key={bucket.key} projectId={projectId} bucket={bucket} count={counts[bucket.key]} />
+          <StatCell
+            key={bucket.key}
+            projectId={projectId}
+            bucket={bucket}
+            count={counts[bucket.key]}
+            changed={changedIds.has(bucket.key)}
+          />
         ))}
       </div>
     </section>

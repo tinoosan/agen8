@@ -3,6 +3,7 @@ import { Link } from 'wouter'
 import { Activity, ChevronRight } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
+import { useListChangeSignals } from '../../hooks/useListChangeSignals'
 import { taskClaimedMemberLabel, taskAssignedMemberLabel } from '../../lib/taskMembers'
 import { taskStatusColor, taskStatusLabel } from '../../lib/statusLabels'
 import { taskDetailLink } from '../../lib/routing'
@@ -44,13 +45,31 @@ function agentName(task: Task): string {
 
 /* ── Working row — monogram + agent/role + task + status/time + disclosure ── */
 
-function WorkingRow({ projectId, task, first }: { projectId: string; task: Task; first: boolean }) {
+function WorkingRow({
+  projectId,
+  task,
+  first,
+  changed,
+}: {
+  projectId: string
+  task: Task
+  first: boolean
+  changed: boolean
+}) {
   const { base, role } = parseAgent(agentName(task))
   const token = avatarToken(base)
   const color = taskStatusColor(task.status)
   const label = task.title || task.description
+  // active === an agent actively working it → the status dot breathes.
+  const isActive = task.status === 'active'
+  // Entrance is CSS-on-mount: a row is keyed by task.id, so this only plays when
+  // a task genuinely arrives (a new DOM node), not on a steady-state refetch.
+  // `changed` adds a one-shot accent wash when an existing row's status moves.
   return (
-    <div>
+    <div
+      className={`animate-fade-in${changed ? ' live-flash' : ''}`}
+      style={changed ? ({ '--live-flash': color } as React.CSSProperties) : undefined}
+    >
       {/* Hairline inset to start under the text, the way iOS Settings lists read. */}
       {!first && <div className="ml-[64px] h-px bg-[var(--border)]" />}
       <Link
@@ -79,7 +98,14 @@ function WorkingRow({ projectId, task, first }: { projectId: string; task: Task;
         </div>
         <div className="flex shrink-0 flex-col items-end gap-0.5">
           <span className="flex items-center gap-1 text-[0.75rem] font-medium" style={{ color }}>
-            <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+            <span
+              className={`h-1.5 w-1.5 rounded-full${isActive ? ' live-dot-pulse' : ''}`}
+              style={
+                isActive
+                  ? ({ background: color, '--live-dot': color } as React.CSSProperties)
+                  : { background: color }
+              }
+            />
             <span className="hidden sm:inline">{taskStatusLabel(task.status)}</span>
           </span>
           <span className="hidden text-[0.6875rem] tabular-nums text-[var(--text-3)] sm:inline">
@@ -100,6 +126,15 @@ export default function DashboardWorkingNow({ projectId }: { projectId: string |
   const working = useMemo(
     () => (tasks ?? []).filter((t) => IN_FLIGHT.has(t.status ?? '')),
     [tasks],
+  )
+
+  // Turn the silent SSE-driven data swap into motion: rows whose status changed
+  // flash once. (Arrivals animate via CSS-on-mount in WorkingRow.) The hook owns
+  // its own reduced-motion gating, so it sits above the early returns below.
+  const { changedIds } = useListChangeSignals(
+    working,
+    (t) => t.id,
+    (t) => t.status ?? '',
   )
 
   if (!projectId) return null
@@ -134,7 +169,13 @@ export default function DashboardWorkingNow({ projectId }: { projectId: string |
       ) : (
         <div className="max-w-[720px] overflow-hidden rounded-[18px] border border-[var(--border)] bg-[var(--bg-elevated)]">
           {working.map((t, i) => (
-            <WorkingRow key={t.id} projectId={projectId} task={t} first={i === 0} />
+            <WorkingRow
+              key={t.id}
+              projectId={projectId}
+              task={t}
+              first={i === 0}
+              changed={changedIds.has(t.id)}
+            />
           ))}
         </div>
       )}

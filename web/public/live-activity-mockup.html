@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agen8 — Live-activity feedback mockup</title>
+<style>
+  :root {
+    --bg-app:#1a1a1c; --bg-panel:#1f1f22; --bg-surface:#26262a; --bg-elevated:#2e2e33;
+    --bg-hover:rgba(255,255,255,0.05);
+    --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.16);
+    --text-1:#f0f0f4; --text-2:#9898a8; --text-3:#636378;
+    --accent:#3B82F6;
+    --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --blue:#60a5fa;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:var(--bg-app); color:var(--text-1);
+    font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+    -webkit-font-smoothing:antialiased; }
+  body { padding:32px 40px 80px; }
+  .page-head { max-width:760px; margin:0 auto 24px; }
+  .page-head h1 { font-size:20px; font-weight:650; letter-spacing:-0.01em; }
+  .page-head p  { font-size:13px; color:var(--text-2); margin-top:6px; line-height:1.55; }
+  .wrap { max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:34px; }
+
+  /* controls */
+  .controls { display:flex; gap:8px; flex-wrap:wrap; padding:14px 16px;
+    background:var(--bg-panel); border:1px solid var(--border); border-radius:14px; }
+  .controls button { font-size:12px; font-weight:550; color:var(--text-1);
+    background:var(--bg-elevated); border:1px solid var(--border); border-radius:9px;
+    padding:7px 12px; cursor:pointer; transition:background 120ms; }
+  .controls button:hover { background:var(--bg-hover); }
+  .controls .note { font-size:11px; color:var(--text-3); align-self:center; margin-left:auto; }
+
+  /* section heading (mirrors .dashboard-section-heading) */
+  .sec-head { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px; }
+  .sec-title { font-size:13px; font-weight:650; letter-spacing:-0.01em; }
+  .sec-caption { font-size:12px; color:var(--text-3); margin-top:2px; }
+  .sec-counter { font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+
+  /* ── Task count tiles (mirrors TaskSummary) ── */
+  .tiles { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; max-width:560px; }
+  @media (max-width:560px){ .tiles { grid-template-columns:repeat(3,1fr); } }
+  .tile { display:flex; flex-direction:column; gap:6px; border:1px solid var(--border);
+    background:var(--bg-elevated); border-radius:16px; padding:14px 12px; }
+  .tile .num { font-size:1.75rem; font-weight:600; line-height:1; letter-spacing:-0.02em;
+    font-variant-numeric:tabular-nums; }
+  .tile .lab { display:flex; align-items:center; gap:5px; color:var(--text-3);
+    font-size:0.625rem; font-weight:650; text-transform:uppercase; letter-spacing:0.06em; }
+  .tile .lab .d { width:7px; height:7px; border-radius:50%; }
+
+  /* ── Working-now rows (mirrors DashboardWorkingNow) ── */
+  .rows { border:1px solid var(--border); background:var(--bg-elevated); border-radius:18px; overflow:hidden; }
+  .row { display:flex; align-items:center; gap:12px; padding:12px 16px; position:relative; }
+  .row + .row::before { content:""; position:absolute; left:64px; right:0; top:0; height:1px; background:var(--border); }
+  .av { width:36px; height:36px; border-radius:50%; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; font-size:12px; font-weight:600; }
+  .row .main { min-width:0; flex:1; }
+  .row .name { font-size:0.9375rem; font-weight:600; letter-spacing:-0.01em; }
+  .row .name .role { margin-left:6px; font-size:0.75rem; font-weight:400; color:var(--text-3); }
+  .row .task { font-size:0.8125rem; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .meta { display:flex; flex-direction:column; align-items:flex-end; gap:2px; flex-shrink:0; }
+  .row .status { display:flex; align-items:center; gap:5px; font-size:0.75rem; font-weight:500; }
+  .row .status .d { width:6px; height:6px; border-radius:50%; }
+  .row .time { font-size:0.6875rem; color:var(--text-3); font-variant-numeric:tabular-nums; }
+
+  /* ════════════ The proposed "feel alive" primitives ════════════ */
+
+  /* 1. New row arrives — slides+fades in (existing house token reused). */
+  @keyframes la-enter {
+    from { opacity:0; transform:translateY(-8px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  .la-enter { animation: la-enter 0.32s cubic-bezier(0.22,1,0.36,1); }
+
+  /* 2. Status transition acknowledged — a one-shot wash in the status
+     accent that fades to nothing. Uses an inset box-shadow (not background)
+     so it composites OVER the element's own surface and leaves it intact —
+     identical primitive works on a transparent row and an elevated tile.
+     Color-on-exception: only appears for ~1.2s on a real change, then gone. */
+  @keyframes la-flash {
+    from { box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--flash) 15%, transparent); }
+    to   { box-shadow: inset 0 0 0 100px color-mix(in srgb, var(--flash) 0%, transparent); }
+  }
+  .la-flash { animation: la-flash 1.2s ease-out; }
+
+  /* 3. Active work — the status dot breathes (reuses the timeline
+     tl-dot-pulse idea, generalized to the status color). */
+  @keyframes la-dot-pulse {
+    0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--s) 55%, transparent); }
+    50%     { box-shadow:0 0 0 4px color-mix(in srgb, var(--s) 0%, transparent); }
+  }
+  .row.is-active .status .d { animation: la-dot-pulse 1.6s ease-in-out infinite; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .la-enter, .la-flash, .row.is-active .status .d { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <h1>Live-activity feedback — feel-alive mockup</h1>
+    <p>Layered on the SSE invalidation path (no new data). Three tells: new items
+       <b>slide in</b> as they arrive, status transitions get a one-shot
+       <b>accent wash</b>, and an actively-worked task has a <b>breathing dot</b>.
+       Use the buttons to simulate live SSE events and judge the motion against the
+       house design. Color stays on-exception — the wash is the only added color and
+       it's gone in ~1s.</p>
+  </div>
+
+  <div class="wrap">
+    <div class="controls">
+      <button onclick="addTask()">+ New task arrives</button>
+      <button onclick="advance()">→ Advance a status</button>
+      <button onclick="bump()">↑ Bump a count</button>
+      <button onclick="reset()">Reset</button>
+      <span class="note">simulates event.append frames</span>
+    </div>
+
+    <section>
+      <div class="sec-head">
+        <div>
+          <div class="sec-title">Tasks</div>
+          <div class="sec-caption">The work in flight, grouped by where it stands.</div>
+        </div>
+        <div class="sec-counter" id="total">12 total</div>
+      </div>
+      <div class="tiles" id="tiles"></div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <div>
+          <div class="sec-title">Working now</div>
+          <div class="sec-caption">Who's on what, right now.</div>
+        </div>
+        <div class="sec-counter" id="flight">3 in flight</div>
+      </div>
+      <div class="rows" id="rows"></div>
+    </section>
+  </div>
+
+<script>
+  const STATUS = {
+    pending:  { label:'Pending',   color:'var(--text-3)' },
+    active:   { label:'Active',    color:'var(--blue)'  },
+    blocked:  { label:'Blocked',   color:'var(--amber)' },
+    in_review:{ label:'In Review', color:'var(--green)' },
+    succeeded:{ label:'Succeeded', color:'var(--green)' },
+  };
+  const AV = ['--accent','--blue','--green'];
+  const tok = s => AV[[...s].reduce((h,c)=>(h*31+c.charCodeAt(0))>>>0,0)%AV.length];
+  const initials = b => b.split(/\s+/).filter(Boolean).map(p=>p[0]).slice(0,2).join('').toUpperCase();
+
+  let rows = [
+    { id:1, base:'Atlas',  role:'Backend Engineer',  task:'Wire event publisher into task service', status:'active',   time:'2m' },
+    { id:2, base:'Nova',   role:'Frontend Engineer', task:'Centralize realtime cache invalidation', status:'in_review',time:'5m' },
+    { id:3, base:'Orion',  role:'Platform',          task:'Fan out bus topics over SSE',            status:'blocked',  time:'11m' },
+  ];
+  let counts = { pending:4, active:1, blocked:1, in_review:1, succeeded:5 };
+  let nextId = 4;
+  const NAMES = [['Vega','Researcher'],['Lyra','QA'],['Sol','Designer'],['Echo','Backend Engineer']];
+  const TASKS = ['Draft metrics MVP page','Add backlog nudge notification','Compute pickup latency','Build activity feed'];
+
+  function renderTiles(flashKey){
+    const el = document.getElementById('tiles'); el.innerHTML='';
+    for (const k of ['pending','active','blocked','in_review','succeeded']){
+      const has = counts[k] > 0;
+      const c = has ? STATUS[k].color : 'var(--text-3)';
+      const d = document.createElement('div');
+      d.className = 'tile' + (k===flashKey ? ' la-flash' : '');
+      d.style.setProperty('--flash', STATUS[k].color);
+      d.innerHTML = `<span class="num" style="color:${c}">${counts[k]}</span>
+        <span class="lab"><span class="d" style="background:${c}"></span>${STATUS[k].label}</span>`;
+      el.appendChild(d);
+    }
+    const total = Object.values(counts).reduce((a,b)=>a+b,0);
+    document.getElementById('total').textContent = total + ' total';
+  }
+
+  function renderRows(enterId, flashId){
+    const el = document.getElementById('rows'); el.innerHTML='';
+    for (const r of rows){
+      const s = STATUS[r.status];
+      const t = tok(r.base);
+      const div = document.createElement('div');
+      div.className = 'row' + (r.status==='active'?' is-active':'')
+        + (r.id===enterId?' la-enter':'') + (r.id===flashId?' la-flash':'');
+      div.style.setProperty('--flash', s.color);
+      div.innerHTML = `
+        <div class="av" style="background:color-mix(in srgb, var(${t}) 20%, var(--bg-elevated)); color:var(${t})">${initials(r.base)}</div>
+        <div class="main">
+          <div class="name">${r.base}<span class="role">${r.role}</span></div>
+          <div class="task">${r.task}</div>
+        </div>
+        <div class="meta">
+          <span class="status" style="color:${s.color}"><span class="d" style="background:${s.color}"></span>${s.label}</span>
+          <span class="time">${r.time}</span>
+        </div>`;
+      el.appendChild(div);
+    }
+    document.getElementById('flight').textContent =
+      rows.filter(r=>['active','blocked','in_review'].includes(r.status)).length + ' in flight';
+  }
+
+  function addTask(){
+    const [base,role] = NAMES[Math.floor(Math.random()*NAMES.length)];
+    const task = TASKS[Math.floor(Math.random()*TASKS.length)];
+    const id = nextId++;
+    rows = [{ id, base, role, task, status:'active', time:'now' }, ...rows];
+    counts.active++;
+    renderRows(id);
+    renderTiles('active');
+  }
+  function advance(){
+    const order = ['pending','active','in_review','succeeded'];
+    const r = rows.find(x=>x.status!=='succeeded') || rows[0];
+    const i = Math.min(order.indexOf(r.status)+1, order.length-1);
+    const from = r.status; r.status = order[i] === r.status ? r.status : order[i];
+    if (counts[from]>0) counts[from]--; counts[r.status]++;
+    renderRows(null, r.id);
+    renderTiles(r.status);
+  }
+  function bump(){
+    const keys = Object.keys(counts);
+    const k = keys[Math.floor(Math.random()*keys.length)];
+    counts[k]++;
+    renderTiles(k);
+  }
+  function reset(){
+    location.reload();
+  }
+
+  renderTiles(); renderRows();
+</script>
+</body>
+</html>
