@@ -45,12 +45,34 @@ export interface ThroughputMetrics {
   avgWorkTimeMs: number | null
 }
 
+/* A leaderboard row aggregates completed/failed work for one harness. Only the
+ * harness leaderboard exists today: harness is auto-determined per member
+ * (see the Go daemon's HarnessFromJSONRPCBody), whereas model is not, so a model
+ * leaderboard would be fabricated. Add it back here only once model is real. */
+export interface LeaderboardEntry {
+  /** The harness kind this row aggregates (e.g. "claude-code", "codex"). */
+  key: string
+  /** Successfully completed tasks attributed to this key. */
+  done: number
+  /** Failed tasks attributed to this key. */
+  failed: number
+  /** done / (done + failed); null when there are no terminal outcomes yet. */
+  successRate: number | null
+  /** Mean work time over this key's completed tasks; null when none completed. */
+  avgWorkTimeMs: number | null
+}
+
 export interface ProjectMetrics {
   throughput: ThroughputMetrics
+  /** Per-harness performance, most-productive first. Only counts tasks we can
+   *  attribute to a real harness via the member who claimed them. */
+  harnessLeaderboard: LeaderboardEntry[]
 }
 
 export interface ComputeMetricsInput {
   tasks?: Task[]
+  /** Project roster — joins each claimed task to its claimant's harness. */
+  members?: ProjectMember[]
   /** Injected for deterministic tests; only affects in-flight durations. */
   now?: number
 }
@@ -61,6 +83,36 @@ function mean(values: number[]): number | null {
   let sum = 0
   for (const v of values) sum += v
   return sum / values.length
+}
+
+/* Mutable accumulator while folding tasks into a leaderboard bucket. */
+interface Bucket {
+  key: string
+  done: number
+  failed: number
+  workTimes: number[]
+}
+
+function finalizeBuckets(buckets: Map<string, Bucket>): LeaderboardEntry[] {
+  const entries: LeaderboardEntry[] = []
+  for (const b of buckets.values()) {
+    const terminal = b.done + b.failed
+    entries.push({
+      key: b.key,
+      done: b.done,
+      failed: b.failed,
+      successRate: terminal === 0 ? null : b.done / terminal,
+      avgWorkTimeMs: mean(b.workTimes),
+    })
+  }
+  // Most-productive first; tie-break on faster average, then key for stability.
+  entries.sort(
+    (a, b) =>
+      b.done - a.done ||
+      (a.avgWorkTimeMs ?? Infinity) - (b.avgWorkTimeMs ?? Infinity) ||
+      (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+  )
+  return entries
 }
 
 /** Local-time YYYY-MM-DD key for a date — the bucket unit for the daily series.
@@ -80,15 +132,40 @@ function localDateKey(d: Date): string {
  */
 export function computeMetrics({
   tasks,
+  members,
   now = Date.now(),
 }: ComputeMetricsInput): ProjectMetrics {
   const taskList = tasks ?? []
+
+  // Roster lookup: joins each claimed task back to the harness of the member who
+  // claimed it. A task we can't attribute to a real harness is simply skipped —
+  // we never bucket it under a placeholder (honest-MVP rule).
+  const harnessById = new Map<string, string>()
+  for (const m of members ?? []) {
+    const harness = m.harnessKind?.trim()
+    if (harness) harnessById.set(m.id, harness)
+  }
 
   let backlog = 0
   let inProgress = 0
   let completed = 0
   const pickupLatencies: number[] = []
   const workTimes: number[] = []
+  const harnessBuckets = new Map<string, Bucket>()
+
+  const bumpHarness = (key: string, succeeded: boolean, workMs: number | null) => {
+    let b = harnessBuckets.get(key)
+    if (!b) {
+      b = { key, done: 0, failed: 0, workTimes: [] }
+      harnessBuckets.set(key, b)
+    }
+    if (succeeded) {
+      b.done += 1
+      if (workMs !== null) b.workTimes.push(workMs)
+    } else {
+      b.failed += 1
+    }
+  }
 
   for (const task of taskList) {
     switch (task.status) {
@@ -108,9 +185,20 @@ export function computeMetrics({
     if (latency !== null) pickupLatencies.push(latency)
 
     // Work time: only completed tasks have a final, meaningful duration.
-    if (task.status === DONE_STATUS) {
-      const workMs = inProgressDurationMs(task, now)
+    const isDone = task.status === DONE_STATUS
+    const isFailed = task.status === FAILED_STATUS
+    let workMs: number | null = null
+    if (isDone) {
+      workMs = inProgressDurationMs(task, now)
       if (workMs !== null) workTimes.push(workMs)
+    }
+
+    // Leaderboard: only terminal tasks we can attribute to a real harness count.
+    if (isDone || isFailed) {
+      const harness = task.claimedByMemberId
+        ? harnessById.get(task.claimedByMemberId)
+        : undefined
+      if (harness) bumpHarness(harness, isDone, workMs)
     }
   }
 
@@ -123,6 +211,7 @@ export function computeMetrics({
       avgPickupLatencyMs: mean(pickupLatencies),
       avgWorkTimeMs: mean(workTimes),
     },
+    harnessLeaderboard: finalizeBuckets(harnessBuckets),
   }
 }
 

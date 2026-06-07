@@ -93,6 +93,9 @@ export interface ProjectMember {
   channelId?: string;
   displayName?: string;
   memberType: string;
+  /** Harness the daemon auto-detected at registration (e.g. "claude-code",
+   *  "codex", "bridge"); "unknown" when no signal identified it. */
+  harnessKind?: string;
   lifecycleState: string;
   registeredAt?: string;
   updatedAt?: string;

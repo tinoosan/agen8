@@ -82,6 +82,79 @@ describe('computeMetrics — throughput', () => {
   })
 })
 
+describe('computeMetrics — harness leaderboard', () => {
+  const members = [
+    makeMember({ id: 'm-cc', harnessKind: 'claude-code' }),
+    makeMember({ id: 'm-cx', harnessKind: 'codex' }),
+    makeMember({ id: 'm-none' }), // no harness signal → contributes nothing
+  ]
+
+  it('buckets terminal tasks by the claimant member harness', () => {
+    const { harnessLeaderboard } = computeMetrics({
+      members,
+      now: T0,
+      tasks: [
+        // claude-code: 2 done (10m, 20m), 1 failed.
+        makeTask({ id: 'a', status: 'succeeded', claimedByMemberId: 'm-cc', startedAt: at(-30 * MIN), completedAt: at(-20 * MIN) }),
+        makeTask({ id: 'b', status: 'succeeded', claimedByMemberId: 'm-cc', startedAt: at(-40 * MIN), completedAt: at(-20 * MIN) }),
+        makeTask({ id: 'c', status: 'failed', claimedByMemberId: 'm-cc' }),
+        // codex: 1 done.
+        makeTask({ id: 'd', status: 'succeeded', claimedByMemberId: 'm-cx', startedAt: at(-15 * MIN), completedAt: at(-5 * MIN) }),
+        // active task does not count toward a terminal leaderboard.
+        makeTask({ id: 'e', status: 'active', claimedByMemberId: 'm-cx' }),
+      ],
+    })
+    expect(harnessLeaderboard.map((e) => e.key)).toEqual(['claude-code', 'codex'])
+    const cc = harnessLeaderboard.find((e) => e.key === 'claude-code')!
+    expect(cc.done).toBe(2)
+    expect(cc.failed).toBe(1)
+    expect(cc.successRate).toBeCloseTo(2 / 3, 5)
+    expect(cc.avgWorkTimeMs).toBe(15 * MIN) // mean of 10m and 20m
+    const cx = harnessLeaderboard.find((e) => e.key === 'codex')!
+    expect(cx).toMatchObject({ done: 1, failed: 0, successRate: 1 })
+  })
+
+  it('skips tasks that cannot be attributed to a real harness', () => {
+    const { harnessLeaderboard } = computeMetrics({
+      members,
+      now: T0,
+      tasks: [
+        // no claiming member.
+        makeTask({ id: 'a', status: 'succeeded' }),
+        // claimed by a member with no harness signal.
+        makeTask({ id: 'b', status: 'succeeded', claimedByMemberId: 'm-none' }),
+        // claimed by an unknown member id.
+        makeTask({ id: 'c', status: 'failed', claimedByMemberId: 'ghost' }),
+      ],
+    })
+    expect(harnessLeaderboard).toEqual([])
+  })
+
+  it('returns an empty leaderboard when no roster is supplied', () => {
+    const { harnessLeaderboard } = computeMetrics({
+      tasks: [makeTask({ id: 'a', status: 'succeeded', claimedByMemberId: 'm-cc' })],
+    })
+    expect(harnessLeaderboard).toEqual([])
+  })
+
+  it('orders by most done, then faster average, then key', () => {
+    const { harnessLeaderboard } = computeMetrics({
+      members: [
+        makeMember({ id: 'm1', harnessKind: 'codex' }),
+        makeMember({ id: 'm2', harnessKind: 'claude-code' }),
+      ],
+      now: T0,
+      tasks: [
+        // claude-code gets 2 done, codex gets 1 → claude-code ranks first.
+        makeTask({ id: 'a', status: 'succeeded', claimedByMemberId: 'm2', startedAt: at(-20 * MIN), completedAt: at(-10 * MIN) }),
+        makeTask({ id: 'b', status: 'succeeded', claimedByMemberId: 'm2', startedAt: at(-30 * MIN), completedAt: at(-20 * MIN) }),
+        makeTask({ id: 'c', status: 'succeeded', claimedByMemberId: 'm1', startedAt: at(-15 * MIN), completedAt: at(-5 * MIN) }),
+      ],
+    })
+    expect(harnessLeaderboard.map((e) => e.key)).toEqual(['claude-code', 'codex'])
+  })
+})
+
 describe('computeMemberPerformance', () => {
   const members = [
     makeMember({ id: 'm1', displayName: 'Alpha' }),
