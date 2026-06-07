@@ -22,7 +22,9 @@ import { qk } from '../lib/queryKeys'
 type QueryRoot = readonly unknown[]
 
 const INVALIDATION_RULES: { prefix: string; roots: QueryRoot[] }[] = [
-  { prefix: 'task.', roots: [qk.tasksBoardAll, qk.taskGetAll] },
+  // Notifications are derived from the live task snapshot, so any task event may
+  // create/clear one — refresh the inbox on the same signal that moves the board.
+  { prefix: 'task.', roots: [qk.tasksBoardAll, qk.taskGetAll, qk.notificationsAll] },
   {
     prefix: 'decision.',
     roots: [qk.decisionsAll, qk.decisionGetAll, qk.decisionLogAll, qk.decisionStatsRoot],

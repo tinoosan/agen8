@@ -8,6 +8,7 @@ import { useAuth } from './hooks/useAuth'
 import { useRealtimeInvalidation } from './hooks/useRealtimeSync'
 import { lazyWithRetry } from './lib/lazyWithRetry'
 import Sidebar from './components/Sidebar'
+import NotificationInbox from './components/notifications/NotificationInbox'
 import { Toaster } from './components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { SidebarProvider, useSidebar } from '@/components/ui/sidebar'
@@ -58,7 +59,7 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
  *  Must live inside SidebarProvider so useSidebar() resolves. */
 function MobileTopBar() {
   const { toggleSidebar } = useSidebar()
-  const { activeView } = useNavigation()
+  const { activeView, projectId } = useNavigation()
   const [location] = useLocation()
   const theme = useStore((s) => s.theme)
 
@@ -89,6 +90,7 @@ function MobileTopBar() {
       <span className="flex-1 min-w-0 truncate text-[0.9375rem] font-semibold tracking-[-0.02em] text-[var(--text-1)]">
         {title}
       </span>
+      {projectId && <NotificationInbox projectId={projectId} />}
       <button
         type="button"
         onClick={() => {

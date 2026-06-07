@@ -248,6 +248,9 @@ export interface NotificationRule {
 
 export interface NotificationsListResult {
   notifications: NotificationItem[];
+  // The unread tally rides along with the list so the bell badge updates in the
+  // same round-trip the inbox does.
+  unreadCount: number;
 }
 
 export interface NotificationsUnreadCountResult {

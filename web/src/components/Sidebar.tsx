@@ -21,6 +21,7 @@ import { useNavigation, dashboardLink } from '../lib/routing'
 import { useStore } from '../lib/store'
 import { brandIconFor } from '../lib/brandIcon'
 import CreateMissionDialog from './mission/CreateMissionDialog'
+import NotificationInbox from './notifications/NotificationInbox'
 import { AccountChip, MissionsSidebarSection, GlobalSidebarContent } from './sidebar-parts'
 import {
   Sidebar as ShadcnSidebar,
@@ -152,6 +153,7 @@ export default function Sidebar() {
           >
             <Plus size={15} />
           </button>
+          {hasProject && <NotificationInbox projectId={projectId} />}
           <SidebarCollapseToggle />
         </div>
       </SidebarHeader>
