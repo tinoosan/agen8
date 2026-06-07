@@ -2,12 +2,34 @@ function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
+// Loose UUID shape (8-4-4-4-12 hex). Deliberately not RFC-strict on the
+// version/variant nibbles — machine refs here aren't guaranteed RFC UUIDs.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value.trim())
+}
+
+// A raw entity identifier ("member-9f3a...", "dec-...") surfacing where a human
+// label belongs. Broad prefix set: every entity kind that can appear as an
+// actor / source / member id.
+const PREFIXED_ID_RE =
+  /^(member|user|session|thread|channel|space|project|task|kr|mission|dec)-[a-z0-9-]{4,}$/i
+
+export function isPrefixedId(value: string): boolean {
+  return PREFIXED_ID_RE.test(value.trim())
+}
+
+// Title-hiding scope is intentionally NARROWER than isPrefixedId: only the
+// entity kinds that appear as auto-generated *titles* (space/run/task/kr/
+// mission). Broadening it to the full set would suppress legitimate single-
+// token titles like "user-friendly" or "session-summary", so keep it separate.
+const TITLE_ID_RE = /^(space|run|task|kr|mission)-[a-z0-9-]{4,}$/i
+
 export function looksLikeOpaqueId(value: string | null | undefined): boolean {
   const text = (value ?? '').trim()
   if (!text) return false
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)) return true
-  if (/^(space|run|task|kr|mission)-[a-z0-9-]{4,}$/i.test(text)) return true
-  return false
+  return isUuid(text) || TITLE_ID_RE.test(text)
 }
 
 export function sanitizeDisplayTitle(title: string | null | undefined): string | null {

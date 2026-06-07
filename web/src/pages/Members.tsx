@@ -6,6 +6,7 @@ import { useProjectMembers, useRemoveMember } from '../hooks/useProjectMembers'
 import { memberDisplayName } from '../lib/memberDisplay'
 import { cn } from '@/lib/utils'
 import { formatRelative } from '@/lib/format'
+import { isUuid } from '@/lib/displaySanitizers'
 import type { ProjectMember } from '../lib/types'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -33,9 +34,6 @@ import {
 
 /* ── Helpers ─────────────────────────────────────────── */
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 // A machine-issued native ref is a session UUID or a bridge-<hex> stdio ref.
 // Anything else ("claude-frontend-engineer", "dogfood-A") was typed by a human
 // at register time — a frequent source of accidental duplicate members, so the
@@ -43,7 +41,7 @@ const UUID_RE =
 function isHandTypedRef(ref?: string): boolean {
   const r = (ref ?? '').trim()
   if (!r) return false
-  if (UUID_RE.test(r)) return false
+  if (isUuid(r)) return false
   if (/^bridge-[0-9a-f]{6,}$/i.test(r)) return false
   return true
 }

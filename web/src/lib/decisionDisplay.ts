@@ -1,3 +1,5 @@
+import { isPrefixedId } from './displaySanitizers'
+
 export interface DecisionActorDisplay {
   label: string
   clusterKey: string
@@ -31,12 +33,8 @@ export function decisionActorDisplay(decision: {
 
 function readableIdentity(value: string | undefined): string {
   const text = value?.trim()
-  if (!text || isRawIdentifier(text)) return ''
+  if (!text || isPrefixedId(text)) return ''
   return text
-}
-
-function isRawIdentifier(value: string): boolean {
-  return /^(member|user|session|thread|channel|space|project|task|kr|mission|dec)-[a-z0-9-]{4,}$/i.test(value.trim())
 }
 
 export type ConfidenceTone = 'high' | 'medium' | 'low'
