@@ -196,7 +196,10 @@ export function KRRow({
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
+          // Hide-until-hover only where a pointer can hover. On touch (iPad,
+          // phones) there's no hover, so controls stay visible; focus-within
+          // keeps them up for keyboard users.
+          <div className="flex items-center gap-0.5 transition-opacity shrink-0 focus-within:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">
             <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-[var(--accent)]" onClick={() => { setExpanded(true); setReporting(true) }} title="Report progress">
               <BarChart2 size={11} />
             </Button>
