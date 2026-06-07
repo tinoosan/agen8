@@ -11,10 +11,19 @@ export interface FilterResult {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-/** Add 1-hop parent nodes so matched leaves don't float disconnected. */
-function includeParents(matchedIds: Set<string>, edges: Edge[]): void {
+/** Structural tree edges only (mission→KR→task), excluding context links.
+ *  Parent inclusion must follow the tree, never context relationships —
+ *  otherwise a decision linked `made_during`/`informed_by` a matched task gets
+ *  pulled into the match set and lights up under filters like "In Motion". */
+function structuralEdges(edges: Edge[]): Edge[] {
+  return edges.filter((e) => e.type === 'statusEdge')
+}
+
+/** Add 1-hop structural parent nodes so matched leaves don't float
+ *  disconnected. Pass structural edges only — context links are not lineage. */
+function includeParents(matchedIds: Set<string>, structural: Edge[]): void {
   const snapshot = [...matchedIds]
-  for (const edge of edges) {
+  for (const edge of structural) {
     if (snapshot.some((id) => id === edge.target)) {
       matchedIds.add(edge.source)
     }
@@ -72,7 +81,7 @@ export function computeInMotionFilter(nodes: Node[], edges: Edge[]): FilterResul
     }
   }
   const matchCount = matchedIds.size
-  if (matchCount > 0) includeParents(matchedIds, edges)
+  if (matchCount > 0) includeParents(matchedIds, structuralEdges(edges))
   return { nodeIds: matchedIds, edgeIds: connectedEdges(matchedIds, edges), matchCount }
 }
 
@@ -95,7 +104,7 @@ export function computeBlockedFilter(nodes: Node[], edges: Edge[]): FilterResult
   for (const id of contextEdgeEndpoints(edges, 'blocked_by')) matchedIds.add(id)
 
   const matchCount = matchedIds.size
-  if (matchCount > 0) includeParents(matchedIds, edges)
+  if (matchCount > 0) includeParents(matchedIds, structuralEdges(edges))
   return { nodeIds: matchedIds, edgeIds: connectedEdges(matchedIds, edges), matchCount }
 }
 
@@ -127,7 +136,7 @@ export function computeDecisionsFilter(nodes: Node[], edges: Edge[]): FilterResu
   return { nodeIds: matchedIds, edgeIds, matchCount: decisionIds.size }
 }
 
-// ── Done lens (declutter / hide) ─────────────────────────────────────────
+// ── Done lens (highlight finished work) ──────────────────────────────────
 
 const DONE_STATUS: Record<string, ReadonlySet<string>> = {
   mission: new Set(['completed', 'archived']),
@@ -135,42 +144,19 @@ const DONE_STATUS: Record<string, ReadonlySet<string>> = {
   task: new Set(['succeeded', 'canceled']),
 }
 
-/** Finished work to hide so the live map is uncluttered. Returns the set of
- *  node ids to remove. A done node is kept only if it's an ancestor of some
- *  still-live node, so hiding never orphans unfinished work below it. */
-export function computeDoneFilter(nodes: Node[], structuralEdges: Edge[]): FilterResult {
-  const doneIds = new Set<string>()
+/** Finished work: completed/archived missions, completed/dropped KRs, and
+ *  succeeded/canceled tasks. Highlights the done slice (everything else dims),
+ *  the same "show these" model as the Decisions and In Motion lenses. Adds
+ *  structural parents so a finished leaf stays connected to its tree. */
+export function computeDoneFilter(nodes: Node[], edges: Edge[]): FilterResult {
+  const matchedIds = new Set<string>()
   for (const node of nodes) {
     const status = nodeStatus(node)
-    if (node.type && status && DONE_STATUS[node.type]?.has(status)) doneIds.add(node.id)
+    if (node.type && status && DONE_STATUS[node.type]?.has(status)) matchedIds.add(node.id)
   }
-
-  // Walk up from every live node, marking ancestors that must stay visible.
-  const parentsOf = new Map<string, string[]>()
-  for (const edge of structuralEdges) {
-    if (!parentsOf.has(edge.target)) parentsOf.set(edge.target, [])
-    parentsOf.get(edge.target)!.push(edge.source)
-  }
-  const keep = new Set<string>()
-  const queue: string[] = []
-  for (const node of nodes) {
-    if (!doneIds.has(node.id)) queue.push(node.id)
-  }
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    for (const parent of parentsOf.get(current) ?? []) {
-      if (!keep.has(parent)) {
-        keep.add(parent)
-        queue.push(parent)
-      }
-    }
-  }
-
-  const hiddenIds = new Set<string>()
-  for (const id of doneIds) {
-    if (!keep.has(id)) hiddenIds.add(id)
-  }
-  return { nodeIds: hiddenIds, edgeIds: new Set(), matchCount: hiddenIds.size }
+  const matchCount = matchedIds.size
+  if (matchCount > 0) includeParents(matchedIds, structuralEdges(edges))
+  return { nodeIds: matchedIds, edgeIds: connectedEdges(matchedIds, edges), matchCount }
 }
 
 // ── Path trace filter ───────────────────────────────────────────────────

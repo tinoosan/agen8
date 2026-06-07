@@ -80,12 +80,9 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
     setViewport,
   })
 
-  // Highlight/declutter lenses + 1-hop focus-neighborhood dimming sets.
+  // Highlight lenses + 1-hop focus-neighborhood dimming sets.
   const {
     filterResult,
-    doneHidden,
-    renderNodes,
-    renderEdges,
     directEdgeIds,
     clusterNodeIds,
     clusterEdgeIds,
@@ -255,14 +252,14 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
           hasSelectedNode={!!selectedNodeId}
-          matchCount={(activeFilter === 'done' ? doneHidden?.matchCount : filterResult?.matchCount) ?? 0}
+          matchCount={filterResult?.matchCount ?? 0}
           contextDepth={contextDepth}
           onContextDepthChange={setContextDepth}
         />
 
         <StrategyMapCanvas
-          nodes={renderNodes}
-          edges={renderEdges}
+          nodes={displayNodes}
+          edges={displayEdges}
           onNodeClick={handleNodeClick}
           onNodeDoubleClick={handleNodeDoubleClick}
           onEdgeClick={handleEdgeClick}
