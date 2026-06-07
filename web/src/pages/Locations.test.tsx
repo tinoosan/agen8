@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const mockUseLocations = vi.fn()
@@ -87,7 +87,11 @@ describe('Locations page', () => {
     expect(screen.getByText('Daemon machine')).toBeInTheDocument()
     expect(screen.getByText('Work laptop')).toBeInTheDocument()
     expect(screen.getByText('santino@devbox.local:22')).toBeInTheDocument()
-    expect(screen.getAllByText('File browsing').length).toBeGreaterThan(0)
+    // The SSH location isn't ready, so its status + last-probe message surface.
+    expect(screen.getByText('not ready')).toBeInTheDocument()
+    expect(screen.getByText('not probed yet')).toBeInTheDocument()
+    // Creation is reached through a dialog trigger, not a standing form panel.
+    expect(screen.getByRole('button', { name: /add location/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /codex login/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /install claude/i })).not.toBeInTheDocument()
   })
@@ -96,11 +100,14 @@ describe('Locations page', () => {
     const user = userEvent.setup()
     render(<Locations />)
 
-    await user.type(screen.getByLabelText('Label'), 'Rack mini')
-    await user.type(screen.getByLabelText('Host'), 'rack-mini.local')
-    await user.type(screen.getByLabelText('Username'), 'santino')
-    await user.type(screen.getByLabelText('Credential reference'), 'cred-existing')
-    await user.click(screen.getByRole('button', { name: /^add location$/i }))
+    await user.click(screen.getByRole('button', { name: /add location/i }))
+    const dialog = screen.getByRole('dialog')
+
+    await user.type(within(dialog).getByLabelText('Label'), 'Rack mini')
+    await user.type(within(dialog).getByLabelText('Host'), 'rack-mini.local')
+    await user.type(within(dialog).getByLabelText('Username'), 'santino')
+    await user.type(within(dialog).getByLabelText('Credential reference'), 'cred-existing')
+    await user.click(within(dialog).getByRole('button', { name: /^add location$/i }))
 
     await waitFor(() => {
       expect(mockCreateLocation).toHaveBeenCalledWith({
@@ -117,12 +124,15 @@ describe('Locations page', () => {
     const user = userEvent.setup()
     render(<Locations />)
 
-    await user.type(screen.getByLabelText('Host'), '10.0.0.12')
-    await user.type(screen.getByLabelText('Username'), 'deploy')
-    await user.click(screen.getByRole('combobox', { name: /authentication/i }))
+    await user.click(screen.getByRole('button', { name: /add location/i }))
+    const dialog = screen.getByRole('dialog')
+
+    await user.type(within(dialog).getByLabelText('Host'), '10.0.0.12')
+    await user.type(within(dialog).getByLabelText('Username'), 'deploy')
+    await user.click(within(dialog).getByRole('combobox', { name: /authentication/i }))
     await user.click(screen.getByRole('option', { name: /create password credential/i }))
-    await user.type(screen.getByLabelText('Password'), 'secret-password')
-    await user.click(screen.getByRole('button', { name: /^add location$/i }))
+    await user.type(within(dialog).getByLabelText('Password'), 'secret-password')
+    await user.click(within(dialog).getByRole('button', { name: /^add location$/i }))
 
     await waitFor(() => {
       expect(mockCreateCredential).toHaveBeenCalledWith({
