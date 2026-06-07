@@ -140,19 +140,9 @@ func TestUpdateMissionActivationReportsPreconditionAsInvalidParams(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewMission: %v", err)
 	}
-	keyResult, err := krdomain.NewKeyResult(krdomain.NewKeyResultInput{
-		ID:              krdomain.KeyResultID("kr-1"),
-		MissionID:       mission.ID,
-		Title:           "KR",
-		MeasurementType: krdomain.MeasurementNumber,
-		Direction:       krdomain.DirectionIncrease,
-		TargetValue:     100,
-		Now:             rpcTestNow,
-	})
-	if err != nil {
-		t.Fatalf("NewKeyResult: %v", err)
-	}
-	handler := NewHandler(newServiceForTest(t, newFakeMissionRepository(mission), newFakeKeyResultRepository(keyResult)))
+	// A mission with no key results fails the only surviving activation
+	// precondition; assert it surfaces as invalid params (-32602), not a 500.
+	handler := NewHandler(newServiceForTest(t, newFakeMissionRepository(mission), newFakeKeyResultRepository()))
 	status := string(missiondomain.MissionStatusActive)
 
 	_, err = handler.Update(context.Background(), UpdateMissionParams{
@@ -163,11 +153,8 @@ func TestUpdateMissionActivationReportsPreconditionAsInvalidParams(t *testing.T)
 		t.Fatal("error is nil")
 	}
 	assertRPCCode(t, err, -32602)
-	if !strings.Contains(err.Error(), "Every key result needs an assigned open project before activation.") {
+	if !strings.Contains(err.Error(), "Add at least one key result before activating this mission.") {
 		t.Fatalf("error=%q", err.Error())
-	}
-	if strings.Contains(err.Error(), "kr-1") {
-		t.Fatalf("error exposes internal id: %q", err.Error())
 	}
 }
 
@@ -227,43 +214,6 @@ func TestUpdateKeyResultUsesMissionService(t *testing.T) {
 	if got.KeyResult.TargetValue != target {
 		t.Fatalf("TargetValue=%v want %v", got.KeyResult.TargetValue, target)
 	}
-}
-
-func TestAssignKeyResultProjectUsesMissionService(t *testing.T) {
-	keyResult, err := krdomain.NewKeyResult(krdomain.NewKeyResultInput{
-		ID:              krdomain.KeyResultID("kr-1"),
-		MissionID:       missiondomain.MissionID("mission-1"),
-		Title:           "KR",
-		MeasurementType: krdomain.MeasurementNumber,
-		Direction:       krdomain.DirectionIncrease,
-		TargetValue:     100,
-		Now:             rpcTestNow,
-	})
-	if err != nil {
-		t.Fatalf("NewKeyResult: %v", err)
-	}
-	handler := NewHandler(newServiceForTest(t, newFakeMissionRepository(), newFakeKeyResultRepository(keyResult)))
-
-	got, err := handler.AssignKeyResultProject(context.Background(), AssignKeyResultProjectParams{
-		KeyResultID: " kr-1 ",
-		ProjectID:   " project-1 ",
-	})
-	if err != nil {
-		t.Fatalf("AssignKeyResultProject: %v", err)
-	}
-	if got.KeyResult.ProjectID != "project-1" || got.KeyResult.OwnerProjectName != "Research" {
-		t.Fatalf("KeyResult=%+v", got.KeyResult)
-	}
-}
-
-func TestAssignKeyResultProjectRejectsMissingProjectID(t *testing.T) {
-	handler := NewHandler(newServiceForTest(t, newFakeMissionRepository(), newFakeKeyResultRepository()))
-
-	_, err := handler.AssignKeyResultProject(context.Background(), AssignKeyResultProjectParams{KeyResultID: "kr-1"})
-	if err == nil {
-		t.Fatal("error is nil")
-	}
-	assertRPCCode(t, err, -32602)
 }
 
 func TestDeleteKeyResultRejectsMissingID(t *testing.T) {

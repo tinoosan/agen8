@@ -26,7 +26,6 @@ const (
 	MethodMissionKRDelete   = "mission.kr.delete"
 	MethodMissionKRReopen   = "mission.kr.reopen"
 	MethodMissionKRProgress = "mission.kr.progress"
-	MethodMissionKRAssign   = "mission.kr.assignProject"
 	MethodMissionKRHistory  = "mission.kr.progressHistory"
 )
 
@@ -68,9 +67,6 @@ func RegisterMission(reg *Registry, missionSvc *missionapp.Service) error {
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodMissionKRUpdate, false, withMissionCaller(handler.UpdateKeyResult))
-		},
-		func() error {
-			return AddBoundHandler(reg, MethodMissionKRAssign, false, withMissionCaller(handler.AssignKeyResultProject))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodMissionKRDelete, false, withMissionCaller(handler.DeleteKeyResult))

@@ -139,49 +139,6 @@ func TestKeyResultReopenDropped(t *testing.T) {
 	}
 }
 
-func TestKeyResultAssignOwnerProject(t *testing.T) {
-	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
-	keyResult := newKeyResultForTest(t, now)
-
-	got, err := keyResult.AssignOwnerProject("project-1", "Research", now.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("AssignOwnerProject: %v", err)
-	}
-	if got.ProjectID != "project-1" {
-		t.Fatalf("ProjectID=%q want project-1", got.ProjectID)
-	}
-	if got.OwnerProjectName != "Research" {
-		t.Fatalf("OwnerProjectName=%q want Research", got.OwnerProjectName)
-	}
-	if got.OwnerAssignedAt == nil || !got.OwnerAssignedAt.Equal(now.Add(time.Hour)) {
-		t.Fatalf("OwnerAssignedAt=%v", got.OwnerAssignedAt)
-	}
-	if got.Status != KeyResultStatusOpen {
-		t.Fatalf("Status=%q want %q", got.Status, KeyResultStatusOpen)
-	}
-	if got.Version != keyResult.Version+1 {
-		t.Fatalf("Version=%d want %d", got.Version, keyResult.Version+1)
-	}
-}
-
-func TestKeyResultAssignOwnerProjectRejectsLockedStatuses(t *testing.T) {
-	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
-	tests := []KeyResultStatus{
-		KeyResultStatusInProgress,
-		KeyResultStatusCompleted,
-		KeyResultStatusDropped,
-	}
-	for _, status := range tests {
-		t.Run(string(status), func(t *testing.T) {
-			keyResult := newKeyResultForTest(t, now)
-			keyResult.Status = status
-			if _, err := keyResult.AssignOwnerProject("project-1", "Research", now); err == nil {
-				t.Fatal("AssignOwnerProject error is nil")
-			}
-		})
-	}
-}
-
 func newKeyResultForTest(t *testing.T, now time.Time) KeyResult {
 	t.Helper()
 	keyResult, err := NewKeyResult(NewKeyResultInput{

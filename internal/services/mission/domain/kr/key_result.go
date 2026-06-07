@@ -120,31 +120,6 @@ func (k KeyResult) startingValue() float64 {
 	return 0
 }
 
-func (k KeyResult) AssignOwnerProject(projectID string, projectName string, now time.Time) (KeyResult, error) {
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
-		return KeyResult{}, fmt.Errorf("assign key result owner: project id is required")
-	}
-	projectName = strings.TrimSpace(projectName)
-	if projectName == "" {
-		return KeyResult{}, fmt.Errorf("assign key result owner: project name is required")
-	}
-	switch k.Status {
-	case KeyResultStatusDraft, KeyResultStatusOpen:
-	default:
-		return KeyResult{}, fmt.Errorf("assign key result owner: key result %s cannot be assigned from status %s", k.ID, k.Status)
-	}
-	next := k
-	next.ProjectID = projectID
-	next.OwnerProjectName = projectName
-	assignedAt := utcOrNow(now)
-	next.OwnerAssignedAt = &assignedAt
-	next.Status = KeyResultStatusOpen
-	next.Version++
-	next.UpdatedAt = assignedAt
-	return next, nil
-}
-
 func stampUpdated(keyResult *KeyResult, now time.Time) {
 	keyResult.UpdatedAt = utcOrNow(now)
 }

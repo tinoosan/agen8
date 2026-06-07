@@ -64,8 +64,6 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		return h.krList(ctx, call, input)
 	case "kr_update":
 		return h.krUpdate(ctx, call, input)
-	case "kr_assign_project":
-		return h.krAssignProject(ctx, call, input)
 	case "kr_drop":
 		return h.krDrop(ctx, call, input)
 	case "kr_reopen":
@@ -352,25 +350,6 @@ func (h Handler) krUpdate(ctx context.Context, call CallContext, input requestIn
 		return Result{}, err
 	}
 	return keyResultResult("kr_update", keyResult)
-}
-
-func (h Handler) krAssignProject(ctx context.Context, call CallContext, input requestInput) (Result, error) {
-	if call.KeyResults == nil {
-		return Result{}, fmt.Errorf("mission: key result service is not configured")
-	}
-	id, err := requireKeyResultID(input.KeyResultID)
-	if err != nil {
-		return Result{}, err
-	}
-	projectID, err := requireString(input.ProjectID, "project_id")
-	if err != nil {
-		return Result{}, err
-	}
-	keyResult, err := call.KeyResults.AssignKeyResultProject(ctx, id, projectID)
-	if err != nil {
-		return Result{}, err
-	}
-	return keyResultResult("kr_assign_project", keyResult)
 }
 
 func (h Handler) krDrop(ctx context.Context, call CallContext, input requestInput) (Result, error) {

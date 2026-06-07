@@ -110,11 +110,6 @@ func (s *stubMissionService) UpdateKeyResult(ctx context.Context, req missionapp
 	return krdomain.KeyResult{ID: req.KeyResultID, MissionID: "mission-1", Title: "KR", MeasurementType: krdomain.MeasurementPercentage, Direction: krdomain.DirectionIncrease, TargetValue: 100, Status: krdomain.KeyResultStatusOpen, CreatedAt: missionTestTime, UpdatedAt: missionTestTime}, nil
 }
 
-func (s *stubMissionService) AssignKeyResultProject(ctx context.Context, id krdomain.KeyResultID, projectID string) (krdomain.KeyResult, error) {
-	s.capture(ctx, "kr_assign_project")
-	return krdomain.KeyResult{ID: id, MissionID: "mission-1", Title: "KR", ProjectID: projectID, MeasurementType: krdomain.MeasurementPercentage, Direction: krdomain.DirectionIncrease, TargetValue: 100, Status: krdomain.KeyResultStatusOpen, CreatedAt: missionTestTime, UpdatedAt: missionTestTime}, nil
-}
-
 func (s *stubMissionService) DeleteKeyResult(ctx context.Context, req missionapp.DeleteKeyResultParams) (krdomain.KeyResult, error) {
 	s.capture(ctx, "kr_drop")
 	s.deleteKRReq = req

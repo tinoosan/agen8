@@ -23,7 +23,6 @@ type KeyResultService interface {
 	GetKeyResult(context.Context, krdomain.KeyResultID) (krdomain.KeyResult, error)
 	ListKeyResults(context.Context, missiondomain.MissionID) ([]krdomain.KeyResult, error)
 	UpdateKeyResult(context.Context, missionapp.UpdateKeyResultParams) (krdomain.KeyResult, error)
-	AssignKeyResultProject(context.Context, krdomain.KeyResultID, string) (krdomain.KeyResult, error)
 	DeleteKeyResult(context.Context, missionapp.DeleteKeyResultParams) (krdomain.KeyResult, error)
 	ReopenKeyResult(context.Context, missionapp.ReopenKeyResultParams) (krdomain.KeyResult, error)
 }

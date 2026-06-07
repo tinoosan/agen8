@@ -135,15 +135,6 @@ type UpdateKeyResultResult struct {
 	KeyResult KeyResultView `json:"keyResult"`
 }
 
-type AssignKeyResultProjectParams struct {
-	KeyResultID string `json:"keyResultId"`
-	ProjectID   string `json:"projectId"`
-}
-
-type AssignKeyResultProjectResult struct {
-	KeyResult KeyResultView `json:"keyResult"`
-}
-
 type DeleteKeyResultParams struct {
 	KeyResultID string `json:"keyResultId"`
 	Note        string `json:"note,omitempty"`

@@ -242,22 +242,6 @@ func (h *Handler) UpdateKeyResult(ctx context.Context, params UpdateKeyResultPar
 	return UpdateKeyResultResult{KeyResult: keyResultView(kr)}, nil
 }
 
-func (h *Handler) AssignKeyResultProject(ctx context.Context, params AssignKeyResultProjectParams) (AssignKeyResultProjectResult, error) {
-	keyResultID := strings.TrimSpace(params.KeyResultID)
-	if keyResultID == "" {
-		return AssignKeyResultProjectResult{}, invalidParams("keyResultId is required")
-	}
-	projectID := strings.TrimSpace(params.ProjectID)
-	if projectID == "" {
-		return AssignKeyResultProjectResult{}, invalidParams("projectId is required")
-	}
-	kr, err := h.service.AssignKeyResultProject(ctx, krdomain.KeyResultID(keyResultID), projectID)
-	if err != nil {
-		return AssignKeyResultProjectResult{}, internalError("assign key result project", err)
-	}
-	return AssignKeyResultProjectResult{KeyResult: keyResultView(kr)}, nil
-}
-
 func (h *Handler) DeleteKeyResult(ctx context.Context, params DeleteKeyResultParams) (DeleteKeyResultResult, error) {
 	keyResultID := strings.TrimSpace(params.KeyResultID)
 	if keyResultID == "" {

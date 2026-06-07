@@ -211,17 +211,16 @@ func TestRegisterMissionDispatchesFullCRUDSurface(t *testing.T) {
 
 	call(MethodMissionKRGet, map[string]any{"keyResultId": keyResultID})
 	call(MethodMissionKRList, map[string]any{"missionId": missionID})
-	call(MethodMissionKRUpdate, map[string]any{"keyResultId": keyResultID, "title": "Updated KR"})
-	assignResult := struct {
+	updateResult := struct {
 		KeyResult struct {
 			Version int64 `json:"version"`
 		} `json:"keyResult"`
 	}{}
-	if err := json.Unmarshal(call(MethodMissionKRAssign, map[string]any{
+	if err := json.Unmarshal(call(MethodMissionKRUpdate, map[string]any{
 		"keyResultId": keyResultID,
-		"projectId":   "project-1",
-	}), &assignResult); err != nil {
-		t.Fatalf("unmarshal mission.kr.assignProject result: %v", err)
+		"title":       "Updated KR",
+	}), &updateResult); err != nil {
+		t.Fatalf("unmarshal mission.kr.update result: %v", err)
 	}
 	call(MethodMissionUpdate, map[string]any{"missionId": missionID, "status": "active"})
 
@@ -234,7 +233,7 @@ func TestRegisterMissionDispatchesFullCRUDSurface(t *testing.T) {
 		"keyResultId":     keyResultID,
 		"value":           50,
 		"note":            "halfway",
-		"expectedVersion": assignResult.KeyResult.Version,
+		"expectedVersion": updateResult.KeyResult.Version,
 	}), &progressResult); err != nil {
 		t.Fatalf("unmarshal mission.kr.progress result: %v", err)
 	}

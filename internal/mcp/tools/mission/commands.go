@@ -115,7 +115,6 @@ var fieldsByAction = map[string]map[string]struct{}{
 	"kr_get":          fieldSet("action", "key_result_id"),
 	"kr_list":         fieldSet("action", "mission_id", "limit", "offset"),
 	"kr_update":       fieldSet("action", "key_result_id", "title", "description", "measurement_type", "direction", "unit", "baseline", "target_value"),
-	"kr_assign_project": fieldSet("action", "key_result_id", "project_id"),
 	"kr_drop":         fieldSet("action", "key_result_id", "note"),
 	"kr_reopen":       fieldSet("action", "key_result_id", "note"),
 	"kr_progress":     fieldSet("action", "key_result_id", "value", "note", "expected_version"),

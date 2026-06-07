@@ -10,10 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
 )
 
@@ -463,47 +461,6 @@ func (s *Service) ReopenKeyResult(ctx context.Context, params ReopenKeyResultPar
 	return next, nil
 }
 
-func (s *Service) AssignKeyResultProject(ctx context.Context, keyResultID krdomain.KeyResultID, projectID string) (krdomain.KeyResult, error) {
-	keyResultID = krdomain.KeyResultID(strings.TrimSpace(string(keyResultID)))
-	if keyResultID == "" {
-		return krdomain.KeyResult{}, fmt.Errorf("mission service: key result id is required")
-	}
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
-		return krdomain.KeyResult{}, fmt.Errorf("mission service: project id is required")
-	}
-	keyResult, err := s.keyResults.GetKeyResult(ctx, keyResultID)
-	if err != nil {
-		return krdomain.KeyResult{}, err
-	}
-	ownerProject, err := s.projects.Get(ctx, types.ProjectID(projectID))
-	if err != nil {
-		return krdomain.KeyResult{}, fmt.Errorf("load owner project: %w", err)
-	}
-	if ownerProject.Status() != projectdomain.StatusOpen {
-		return krdomain.KeyResult{}, fmt.Errorf("mission service: owner project %s is not open", projectID)
-	}
-	ownerName := strings.TrimSpace(ownerProject.Title())
-	if ownerName == "" {
-		ownerName = strings.TrimSpace(ownerProject.Root())
-	}
-	if ownerName == "" {
-		ownerName = projectID
-	}
-	keyResult, err = keyResult.AssignOwnerProject(projectID, ownerName, s.clock.Now())
-	if err != nil {
-		return krdomain.KeyResult{}, err
-	}
-	if err := s.keyResults.UpdateKeyResult(ctx, keyResult); err != nil {
-		return krdomain.KeyResult{}, err
-	}
-	if err := s.publishKREvent(ctx, KREventOwnerAssigned, keyResult); err != nil {
-		return krdomain.KeyResult{}, err
-	}
-	s.logKeyResultTransition("assign_owner", keyResult)
-	return keyResult, nil
-}
-
 func (s *Service) UpdateProgress(ctx context.Context, params UpdateProgressParams) (krdomain.KeyResult, error) {
 	keyResultID := krdomain.KeyResultID(strings.TrimSpace(string(params.KeyResultID)))
 	if keyResultID == "" {
@@ -664,17 +621,6 @@ func (s *Service) validateMissionActivation(ctx context.Context, missionID missi
 			continue
 		}
 		liveCount++
-		projectID := strings.TrimSpace(keyResult.ProjectID)
-		if projectID == "" {
-			return validationError("Every key result needs an assigned open project before activation.")
-		}
-		ownerProject, err := s.projects.Get(ctx, types.ProjectID(projectID))
-		if err != nil {
-			return fmt.Errorf("load owner project: %w", err)
-		}
-		if ownerProject.Status() != projectdomain.StatusOpen {
-			return validationError("Every key result needs an assigned open project before activation.")
-		}
 	}
 	if liveCount == 0 {
 		return validationError("Add at least one key result before activating this mission.")
