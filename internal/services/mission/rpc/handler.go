@@ -149,6 +149,21 @@ func (h *Handler) Delete(ctx context.Context, params DeleteMissionParams) (Delet
 	return DeleteMissionResult{Mission: missionView(mission)}, nil
 }
 
+func (h *Handler) Purge(ctx context.Context, params PurgeMissionParams) (PurgeMissionResult, error) {
+	missionID := strings.TrimSpace(params.MissionID)
+	if missionID == "" {
+		return PurgeMissionResult{}, invalidParams("missionId is required")
+	}
+	mission, err := h.service.HardDeleteMission(ctx, missionapp.HardDeleteMissionParams{
+		MissionID: missiondomain.MissionID(missionID),
+		Note:      params.Note,
+	})
+	if err != nil {
+		return PurgeMissionResult{}, serviceError("purge mission", err)
+	}
+	return PurgeMissionResult{Mission: missionView(mission)}, nil
+}
+
 func (h *Handler) CreateKeyResult(ctx context.Context, params CreateKeyResultParams) (CreateKeyResultResult, error) {
 	missionID := strings.TrimSpace(params.MissionID)
 	if missionID == "" {

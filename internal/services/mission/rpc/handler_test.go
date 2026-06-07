@@ -158,6 +158,41 @@ func TestUpdateMissionActivationReportsPreconditionAsInvalidParams(t *testing.T)
 	}
 }
 
+func TestPurgeMissionUsesMissionService(t *testing.T) {
+	mission, err := missiondomain.NewMission(missiondomain.NewMissionInput{
+		ID:        missiondomain.MissionID("mission-1"),
+		ProjectID: "project-1",
+		Title:     "Mission",
+		Now:       rpcTestNow,
+	})
+	if err != nil {
+		t.Fatalf("NewMission: %v", err)
+	}
+	repo := newFakeMissionRepository(mission)
+	handler := NewHandler(newServiceForTest(t, repo, newFakeKeyResultRepository()))
+
+	got, err := handler.Purge(context.Background(), PurgeMissionParams{MissionID: " mission-1 "})
+	if err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if got.Mission.ID != string(mission.ID) {
+		t.Fatalf("returned mission ID=%q want %q", got.Mission.ID, mission.ID)
+	}
+	if _, ok := repo.missions["mission-1"]; ok {
+		t.Fatal("mission still present after purge")
+	}
+}
+
+func TestPurgeMissionRejectsMissingID(t *testing.T) {
+	handler := NewHandler(newServiceForTest(t, newFakeMissionRepository(), newFakeKeyResultRepository()))
+
+	_, err := handler.Purge(context.Background(), PurgeMissionParams{MissionID: "  "})
+	if err == nil {
+		t.Fatal("error is nil")
+	}
+	assertRPCCode(t, err, -32602)
+}
+
 func TestCreateKeyResultUsesMissionService(t *testing.T) {
 	mission, err := missiondomain.NewMission(missiondomain.NewMissionInput{
 		ID:        missiondomain.MissionID("mission-1"),
@@ -513,6 +548,11 @@ func (r *fakeMissionRepository) UpdateMission(_ context.Context, mission mission
 		return fmt.Errorf("mission %s not found", mission.ID)
 	}
 	r.missions[string(mission.ID)] = mission
+	return nil
+}
+
+func (r *fakeMissionRepository) DeleteMission(_ context.Context, missionID missiondomain.MissionID) error {
+	delete(r.missions, string(missionID))
 	return nil
 }
 

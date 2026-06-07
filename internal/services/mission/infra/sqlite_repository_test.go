@@ -224,6 +224,86 @@ func TestSQLiteRepositoryPersistsLifecycleEvents(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryDeleteMissionCascadesDescendants(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	ctx := context.Background()
+
+	// Two missions so we can prove the cascade only touches the target.
+	target := infraMission(t, "mission-1", "project-1")
+	bystander := infraMission(t, "mission-2", "project-1")
+	for _, m := range []mission.Mission{target, bystander} {
+		if err := repo.CreateMission(ctx, m); err != nil {
+			t.Fatalf("CreateMission %s: %v", m.ID, err)
+		}
+	}
+
+	// Give the target a KR with a progress entry and a lifecycle event.
+	keyResult := infraKeyResult(t, "kr-1", target.ID)
+	if err := repo.CreateKeyResult(ctx, keyResult); err != nil {
+		t.Fatalf("CreateKeyResult: %v", err)
+	}
+	if err := repo.AppendProgressEntry(ctx, kr.ProgressEntry{
+		ID:              "progress-1",
+		KeyResultID:     keyResult.ID,
+		NewValue:        50,
+		ProgressPercent: 50,
+		UpdatedBy:       "member-1",
+		CreatedAt:       infraTestNow,
+	}); err != nil {
+		t.Fatalf("AppendProgressEntry: %v", err)
+	}
+	if err := repo.AppendLifecycleEvent(ctx, types.EventRecord{
+		EventID:   "event-1",
+		RunID:     types.RunID(target.ID),
+		CreatedAt: timeString(infraTestNow),
+		Type:      string(missionapp.MissionEventActivated),
+		Message:   string(missionapp.MissionEventActivated),
+		Data:      map[string]string{"missionId": string(target.ID), "status": "active"},
+	}); err != nil {
+		t.Fatalf("AppendLifecycleEvent: %v", err)
+	}
+
+	// And give the bystander its own KR so we can prove it survives.
+	bystanderKR := infraKeyResult(t, "kr-2", bystander.ID)
+	if err := repo.CreateKeyResult(ctx, bystanderKR); err != nil {
+		t.Fatalf("CreateKeyResult bystander: %v", err)
+	}
+
+	if err := repo.DeleteMission(ctx, target.ID); err != nil {
+		t.Fatalf("DeleteMission: %v", err)
+	}
+
+	// Target and all of its descendants must be gone.
+	if _, err := repo.GetMission(ctx, target.ID); err == nil {
+		t.Fatal("target mission still present after delete")
+	}
+	if krs, err := repo.ListKeyResults(ctx, target.ID); err != nil {
+		t.Fatalf("ListKeyResults target: %v", err)
+	} else if len(krs) != 0 {
+		t.Fatalf("target key results=%d want 0", len(krs))
+	}
+	if entries, err := repo.ListProgressEntries(ctx, keyResult.ID); err != nil {
+		t.Fatalf("ListProgressEntries: %v", err)
+	} else if len(entries) != 0 {
+		t.Fatalf("progress entries=%d want 0", len(entries))
+	}
+	if events, count, err := repo.ListLifecycleEvents(ctx, target.ID, missionapp.LifecycleHistoryFilter{}); err != nil {
+		t.Fatalf("ListLifecycleEvents: %v", err)
+	} else if count != 0 || len(events) != 0 {
+		t.Fatalf("lifecycle events=%d count=%d want 0", len(events), count)
+	}
+
+	// The bystander mission and its KR must be untouched.
+	if _, err := repo.GetMission(ctx, bystander.ID); err != nil {
+		t.Fatalf("bystander mission removed by cascade: %v", err)
+	}
+	if krs, err := repo.ListKeyResults(ctx, bystander.ID); err != nil {
+		t.Fatalf("ListKeyResults bystander: %v", err)
+	} else if len(krs) != 1 || krs[0].ID != bystanderKR.ID {
+		t.Fatalf("bystander key results=%+v want [%s]", krs, bystanderKR.ID)
+	}
+}
+
 func newSQLiteRepositoryForTest(t *testing.T) *SQLiteRepository {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{

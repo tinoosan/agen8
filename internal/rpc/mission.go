@@ -16,6 +16,7 @@ const (
 	MethodMissionList     = "mission.list"
 	MethodMissionUpdate   = "mission.update"
 	MethodMissionDelete   = "mission.delete"
+	MethodMissionPurge    = "mission.purge"
 	MethodMissionProgress = "mission.progress"
 	MethodMissionHistory  = "mission.history"
 
@@ -49,6 +50,9 @@ func RegisterMission(reg *Registry, missionSvc *missionapp.Service) error {
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodMissionDelete, false, withMissionCaller(handler.Delete))
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodMissionPurge, false, withMissionCaller(handler.Purge))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodMissionProgress, false, withMissionCaller(handler.Progress))

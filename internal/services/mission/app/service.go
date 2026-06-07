@@ -136,6 +136,11 @@ type DeleteMissionParams struct {
 	Note      string
 }
 
+type HardDeleteMissionParams struct {
+	MissionID missiondomain.MissionID
+	Note      string
+}
+
 type DeleteKeyResultParams struct {
 	KeyResultID krdomain.KeyResultID
 	Note        string
@@ -318,6 +323,28 @@ func (s *Service) DeleteMission(ctx context.Context, params DeleteMissionParams)
 		return missiondomain.Mission{}, err
 	}
 	s.logMissionTransition("delete", mission)
+	return mission, nil
+}
+
+// HardDeleteMission permanently removes a mission and everything beneath it
+// (key results, progress entries, lifecycle events). Unlike DeleteMission,
+// which only archives, this cannot be undone. We load the mission first so the
+// caller gets a "not found" error for a bad id and so the purge event carries
+// the real project id; then we cascade the delete in the repository and emit a
+// purge event for live subscribers. The event is published after the delete
+// succeeds so we never announce a removal that did not happen.
+func (s *Service) HardDeleteMission(ctx context.Context, params HardDeleteMissionParams) (missiondomain.Mission, error) {
+	mission, err := s.missions.GetMission(ctx, params.MissionID)
+	if err != nil {
+		return missiondomain.Mission{}, err
+	}
+	if err := s.missions.DeleteMission(ctx, mission.ID); err != nil {
+		return missiondomain.Mission{}, err
+	}
+	if err := s.publishMissionEventWithData(ctx, MissionEventPurged, mission, noteData(params.Note)); err != nil {
+		return missiondomain.Mission{}, err
+	}
+	s.logMissionTransition("purge", mission)
 	return mission, nil
 }
 

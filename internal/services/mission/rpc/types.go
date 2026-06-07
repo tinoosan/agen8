@@ -68,6 +68,15 @@ type DeleteMissionResult struct {
 	Mission MissionView `json:"mission"`
 }
 
+type PurgeMissionParams struct {
+	MissionID string `json:"missionId"`
+	Note      string `json:"note,omitempty"`
+}
+
+type PurgeMissionResult struct {
+	Mission MissionView `json:"mission"`
+}
+
 type CreateKeyResultParams struct {
 	MissionID       string   `json:"missionId"`
 	Title           string   `json:"title"`

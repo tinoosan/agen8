@@ -19,6 +19,11 @@ const (
 	MissionEventPaused    MissionEventKind = "mission.paused"
 	MissionEventCompleted MissionEventKind = "mission.completed"
 	MissionEventArchived  MissionEventKind = "mission.archived"
+	// MissionEventPurged announces a permanent hard delete. It is intentionally
+	// NOT a lifecycle-history event (see lifecycleHistoryEventTypes): the mission
+	// and its rows are gone, so persisting a history row would only orphan it.
+	// This event exists purely to notify live SSE subscribers.
+	MissionEventPurged MissionEventKind = "mission.purged"
 
 	KREventProgressUpdated MissionEventKind = "kr.progress_updated"
 	KREventMilestone       MissionEventKind = "kr.milestone"

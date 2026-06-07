@@ -22,6 +22,8 @@ var serviceTestNow = time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
 type fakeMissionRepository struct {
 	missions  map[string]missiondomain.Mission
 	updateErr error
+	deleteErr error
+	deleted   []string
 }
 
 func newFakeMissionRepository(missions ...missiondomain.Mission) *fakeMissionRepository {
@@ -64,6 +66,15 @@ func (r *fakeMissionRepository) UpdateMission(_ context.Context, mission mission
 		return fmt.Errorf("mission %s not found", mission.ID)
 	}
 	r.missions[string(mission.ID)] = mission
+	return nil
+}
+
+func (r *fakeMissionRepository) DeleteMission(_ context.Context, missionID missiondomain.MissionID) error {
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
+	delete(r.missions, string(missionID))
+	r.deleted = append(r.deleted, string(missionID))
 	return nil
 }
 
@@ -482,6 +493,87 @@ func TestDeleteMissionPublishesArchivedEventAfterPersistence(t *testing.T) {
 	}
 	if events.events[0].Type != string(MissionEventArchived) {
 		t.Fatalf("event Type=%q want %q", events.events[0].Type, MissionEventArchived)
+	}
+}
+
+func TestHardDeleteMissionRemovesMissionAndPublishesPurgedEvent(t *testing.T) {
+	mission, err := missiondomain.NewMission(missiondomain.NewMissionInput{
+		ID:        missiondomain.MissionID("mission-1"),
+		ProjectID: "project-1",
+		Title:     "Launch",
+		Now:       serviceTestNow.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("NewMission: %v", err)
+	}
+	repo := newFakeMissionRepository(mission)
+	events := &fakeEventPublisher{}
+	svc, err := NewService(
+		repo,
+		newFakeKeyResultRepository(),
+		&fakeProgressEntryRepository{},
+		&fakeLifecycleEventRepository{},
+		fakeClock{now: serviceTestNow},
+		fakeCallerResolver{},
+		fakeProjectLoader{},
+		fakeTaskLoader{},
+		&fakeLinkedTaskLoader{},
+		events,
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	got, err := svc.HardDeleteMission(context.Background(), HardDeleteMissionParams{MissionID: mission.ID})
+	if err != nil {
+		t.Fatalf("HardDeleteMission: %v", err)
+	}
+	if got.ID != mission.ID {
+		t.Fatalf("returned mission ID=%q want %q", got.ID, mission.ID)
+	}
+	if _, err := repo.GetMission(context.Background(), mission.ID); err == nil {
+		t.Fatalf("mission still present after hard delete")
+	}
+	if len(repo.deleted) != 1 || repo.deleted[0] != string(mission.ID) {
+		t.Fatalf("repo.deleted=%v want [%s]", repo.deleted, mission.ID)
+	}
+	if len(events.events) != 1 {
+		t.Fatalf("events=%d want 1", len(events.events))
+	}
+	if events.events[0].Type != string(MissionEventPurged) {
+		t.Fatalf("event Type=%q want %q", events.events[0].Type, MissionEventPurged)
+	}
+}
+
+func TestHardDeleteMissionReturnsErrorForMissingMission(t *testing.T) {
+	repo := newFakeMissionRepository()
+	events := &fakeEventPublisher{}
+	svc, err := NewService(
+		repo,
+		newFakeKeyResultRepository(),
+		&fakeProgressEntryRepository{},
+		&fakeLifecycleEventRepository{},
+		fakeClock{now: serviceTestNow},
+		fakeCallerResolver{},
+		fakeProjectLoader{},
+		fakeTaskLoader{},
+		&fakeLinkedTaskLoader{},
+		events,
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if _, err := svc.HardDeleteMission(context.Background(), HardDeleteMissionParams{MissionID: missiondomain.MissionID("missing")}); err == nil {
+		t.Fatal("expected error for missing mission, got nil")
+	}
+	if len(repo.deleted) != 0 {
+		t.Fatalf("repo.deleted=%v want empty (no delete attempted)", repo.deleted)
+	}
+	if len(events.events) != 0 {
+		t.Fatalf("events=%d want 0 (no event for failed purge)", len(events.events))
 	}
 }
 

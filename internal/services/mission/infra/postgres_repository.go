@@ -85,6 +85,48 @@ func (r *PostgresRepository) UpdateMission(ctx context.Context, mission mission.
 	return r.saveMission(ctx, mission)
 }
 
+// DeleteMission hard-deletes a mission and all of its descendants in one
+// transaction. Order matters: progress entries reference key results, so they
+// go first, then the key results, the mission's lifecycle events, and finally
+// the mission row itself. If any step fails the whole delete rolls back, so we
+// never strand orphaned key results or progress entries.
+func (r *PostgresRepository) DeleteMission(ctx context.Context, missionID mission.MissionID) error {
+	missionID = mission.MissionID(strings.TrimSpace(string(missionID)))
+	if missionID == "" {
+		return fmt.Errorf("mission id is required")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete mission %s: begin tx: %w", missionID, err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	stmts := []struct {
+		desc  string
+		query string
+	}{
+		{"progress entries", `DELETE FROM key_result_progress_entries WHERE key_result_id IN (SELECT key_result_id FROM key_results WHERE mission_id = ?)`},
+		{"key results", `DELETE FROM key_results WHERE mission_id = ?`},
+		{"lifecycle events", `DELETE FROM mission_lifecycle_events WHERE mission_id = ?`},
+		{"mission", `DELETE FROM missions WHERE mission_id = ?`},
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, r.rebind(stmt.query), string(missionID)); err != nil {
+			return fmt.Errorf("delete mission %s (%s): %w", missionID, stmt.desc, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete mission %s: commit: %w", missionID, err)
+	}
+	committed = true
+	return nil
+}
+
 func (r *PostgresRepository) GetKeyResult(ctx context.Context, keyResultID kr.KeyResultID) (kr.KeyResult, error) {
 	keyResultID = kr.KeyResultID(strings.TrimSpace(string(keyResultID)))
 	if keyResultID == "" {
