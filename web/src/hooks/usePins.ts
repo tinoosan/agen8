@@ -1,6 +1,6 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { rpcCall, rpcUnwrapList } from '../lib/rpc'
+import { onNotification, rpcCall, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
 
 /**
@@ -40,8 +40,28 @@ export function usePins(projectId: string | null): UsePinsResult {
     queryKey: key,
     queryFn: () => rpcUnwrapList<PinView>('pin.list', { projectId: projectId ?? '' }, 'pins'),
     enabled: !!projectId,
-    refetchInterval: 30_000,
+    // SSE (below) is the primary freshness path; this slow interval is only a
+    // backstop that self-heals pins missed during a disconnect. It dropped from
+    // 30s to 60s once live invalidation landed — see docs/architecture/realtime-events.html.
+    refetchInterval: 60_000,
   })
+
+  // Live cross-device sync: a pin change made anywhere — another tab, another
+  // device, or an agent — arrives over SSE as an `event.append` notification
+  // carrying a `pin.*` event type. On any pin event, invalidate the shared pin
+  // root so every consumer refetches from the same source of truth the
+  // mutations write through. The /events stream is already scoped to this
+  // project server-side, so the client only needs to match the `pin.` prefix.
+  useEffect(() => {
+    if (!projectId) return
+    return onNotification('event.append', (notif: Record<string, unknown>) => {
+      const event = notif?.event as Record<string, unknown> | undefined
+      const type = (event?.type as string) ?? ''
+      if (type.startsWith('pin.')) {
+        queryClient.invalidateQueries({ queryKey: qk.pinsAll })
+      }
+    })
+  }, [projectId, queryClient])
 
   const pinnedIds = useMemo(
     () => new Set((pins ?? []).map((p) => p.nodeRef)),
@@ -77,6 +97,9 @@ export function usePins(projectId: string | null): UsePinsResult {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(key, ctx.prev)
     },
+    // Invalidate the shared pin root to force every pin consumer to re-query after a mutation.
+    // This is deliberately broad (`pin.list`) so Dashboard rows and command palette both
+    // absorb write outcomes from the same write-behind source of truth.
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: qk.pinsAll })
     },

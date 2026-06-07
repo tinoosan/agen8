@@ -7,6 +7,7 @@ import { usePins, type PinView } from './usePins'
 vi.mock('../lib/rpc', () => ({
   rpcCall: vi.fn(),
   rpcUnwrapList: vi.fn(),
+  onNotification: vi.fn(() => () => {}),
 }))
 
 import { rpcCall, rpcUnwrapList } from '../lib/rpc'
