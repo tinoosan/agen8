@@ -87,9 +87,9 @@ export function useStrategyMapKeyboardNav({
         return
       }
 
-      // / opens the command-palette-style node search. Also accept
-      // Cmd/Ctrl+K as a secondary binding for IDE-style muscle memory.
-      if (e.key === '/' || ((e.metaKey || e.ctrlKey) && e.key === 'k')) {
+      // "/" (and Cmd/Ctrl+"/", which also reports e.key === '/') opens the
+      // node search — the primary way to search the map.
+      if (e.key === '/') {
         e.preventDefault()
         setSearchOpen(true)
         return

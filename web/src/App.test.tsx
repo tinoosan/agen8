@@ -30,10 +30,6 @@ vi.mock('./pages/StrategyMap', () => ({
   },
 }))
 
-vi.mock('./components/CommandPalette', () => ({
-  default: () => <div>Command Palette</div>,
-}))
-
 // Mock useProjects to provide project data for routing resolution
 vi.mock('./hooks/useProjects', () => ({
   useProjects: () => ({
@@ -54,7 +50,6 @@ function resetStore() {
   act(() => {
     useStore.setState({
       artifactsOpen: false,
-      paletteOpen: false,
       strategySearchOpen: false,
       theme: 'dark',
     })
@@ -113,32 +108,13 @@ describe('App', () => {
     }
   })
 
-  it('opens and closes the command palette from keyboard shortcuts', async () => {
+  it('does not show the mobile search button off the context map', async () => {
+    // The only search worth a touch entry point is the context-map node
+    // search; off the map there's no global search, so the button is hidden.
     renderWithRouter('/')
 
-    fireEvent.keyDown(window, { ctrlKey: true, key: 'k' })
-    expect(await screen.findByText('Command Palette')).toBeInTheDocument()
-
-    fireEvent.keyDown(window, { key: 'Escape' })
-    await waitFor(() => {
-      expect(screen.queryByText('Command Palette')).not.toBeInTheDocument()
-    })
-  })
-
-  it('opens the command palette with Cmd/Ctrl+Shift+P', async () => {
-    renderWithRouter('/')
-
-    fireEvent.keyDown(window, { ctrlKey: true, shiftKey: true, key: 'P' })
-    expect(await screen.findByText('Command Palette')).toBeInTheDocument()
-  })
-
-  it('mobile search button opens the command palette off the context map', async () => {
-    renderWithRouter('/')
-
-    fireEvent.click(await screen.findByLabelText('Open search'))
-    expect(await screen.findByText('Command Palette')).toBeInTheDocument()
-    // The context-map node search is a different panel — it must stay shut.
-    expect(useStore.getState().strategySearchOpen).toBe(false)
+    expect(await screen.findByText('Project Page')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Open search')).not.toBeInTheDocument()
   })
 
   it('mobile search button opens the context-map node search on the strategy route', async () => {
@@ -151,9 +127,6 @@ describe('App', () => {
 
       fireEvent.click(await screen.findByLabelText('Open search'))
       expect(useStore.getState().strategySearchOpen).toBe(true)
-      // It opens the node search, NOT the global command palette.
-      expect(useStore.getState().paletteOpen).toBe(false)
-      expect(screen.queryByText('Command Palette')).not.toBeInTheDocument()
     } finally {
       consoleErrorSpy.mockRestore()
     }

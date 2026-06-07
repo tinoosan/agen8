@@ -61,9 +61,6 @@ interface AppStore {
   artifactsOpen: boolean
   setArtifactsOpen: (open: boolean) => void
 
-  paletteOpen: boolean
-  setPaletteOpen: (open: boolean) => void
-
   /** Context-map node search ("/" inside the map). Lifted into the store so the
    *  global mobile top-bar search button can open the same panel the keyboard
    *  shortcut does, even though the panel itself lives inside the StrategyMap
@@ -170,9 +167,6 @@ function persistFontScale(value: number) {
 export const useStore = create<AppStore>((set, get) => ({
   artifactsOpen: false,
   setArtifactsOpen: (open) => set({ artifactsOpen: open }),
-
-  paletteOpen: false,
-  setPaletteOpen: (open) => set({ paletteOpen: open }),
 
   strategySearchOpen: false,
   setStrategySearchOpen: (open) => set({ strategySearchOpen: open }),

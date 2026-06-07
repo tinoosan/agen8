@@ -26,8 +26,6 @@ const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/St
 const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisions')
 const Members = lazyWithRetry(() => import('./pages/Members'), 'pages/Members')
 
-const CommandPalette = lazyWithRetry(() => import('./components/CommandPalette'), 'components/CommandPalette')
-
 function MissionsRouteRedirect({ params }: { params: { projectId: string } }) {
   return <Redirect to={missionsPanelLink(params.projectId)} />
 }
@@ -86,23 +84,20 @@ function MobileTopBar() {
       <span className="flex-1 min-w-0 truncate text-[0.9375rem] font-semibold tracking-[-0.02em] text-[var(--text-1)]">
         {title}
       </span>
-      <button
-        type="button"
-        onClick={() => {
-          // On the context map, open its node-search panel (the same one the
-          // "/" shortcut opens) — it's the most useful search there. Elsewhere,
-          // fall back to the global command palette.
-          if (activeView === 'strategy') {
-            useStore.getState().setStrategySearchOpen(true)
-          } else {
-            useStore.getState().setPaletteOpen(true)
-          }
-        }}
-        aria-label="Open search"
-        className="h-9 w-9 flex items-center justify-center rounded-[8px] border-none bg-transparent cursor-pointer text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors shrink-0"
-      >
-        <Search size={18} />
-      </button>
+      {/* Search button only on the context map — it opens that page's node
+          search (the same panel the "/" shortcut opens), the one search worth
+          a touch entry point. Off the map there's no global search to open, so
+          the button isn't shown. */}
+      {activeView === 'strategy' && (
+        <button
+          type="button"
+          onClick={() => useStore.getState().setStrategySearchOpen(true)}
+          aria-label="Open search"
+          className="h-9 w-9 flex items-center justify-center rounded-[8px] border-none bg-transparent cursor-pointer text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors shrink-0"
+        >
+          <Search size={18} />
+        </button>
+      )}
     </div>
   )
 }
@@ -133,7 +128,7 @@ const AppShell = () => (
 )
 
 export default function App() {
-  const { paletteOpen, theme, fontFamily, fontScale, resetEphemeral } = useStore()
+  const { theme, fontFamily, fontScale, resetEphemeral } = useStore()
   const { projectId } = useNavigation()
   const auth = useAuth()
   const [location, navigate] = useLocation()
@@ -158,26 +153,6 @@ export default function App() {
     root.setAttribute('data-font-family', fontFamily)
     root.style.setProperty('--app-font-scale', `${fontScale}px`)
   }, [fontFamily, fontScale])
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const isMod = e.metaKey || e.ctrlKey
-      const key = String(e.key ?? '').toLowerCase()
-      if (isMod && !e.shiftKey && key === 'k') {
-        e.preventDefault()
-        useStore.getState().setPaletteOpen(true)
-      }
-      if (isMod && e.shiftKey && key === 'p') {
-        e.preventDefault()
-        useStore.getState().setPaletteOpen(true)
-      }
-      if (e.key === 'Escape') {
-        useStore.getState().setPaletteOpen(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   /* Reset ephemeral UI (panels, pickers) when the focused workspace changes */
   const prevFocusKey = useRef(`${projectId}`)
@@ -263,9 +238,6 @@ export default function App() {
             </Suspense>
           </main>
         </div>
-        <Suspense fallback={null}>
-          {paletteOpen && <CommandPalette />}
-        </Suspense>
         <Toaster />
       </SidebarProvider>
     </TooltipProvider>

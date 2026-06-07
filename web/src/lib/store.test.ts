@@ -6,7 +6,6 @@ describe('useStore', () => {
     // Reset store to initial state
     useStore.setState({
       artifactsOpen: false,
-      paletteOpen: false,
       strategySearchOpen: false,
     })
   })
@@ -14,7 +13,6 @@ describe('useStore', () => {
   it('has correct initial state', () => {
     const state = useStore.getState()
     expect(state.artifactsOpen).toBe(false)
-    expect(state.paletteOpen).toBe(false)
     expect(state.strategySearchOpen).toBe(false)
   })
 
@@ -26,14 +24,6 @@ describe('useStore', () => {
     expect(useStore.getState().artifactsOpen).toBe(false)
   })
 
-  it('toggles palette open state', () => {
-    expect(useStore.getState().paletteOpen).toBe(false)
-    useStore.getState().setPaletteOpen(true)
-    expect(useStore.getState().paletteOpen).toBe(true)
-    useStore.getState().setPaletteOpen(false)
-    expect(useStore.getState().paletteOpen).toBe(false)
-  })
-
   it('toggles strategy search open state', () => {
     expect(useStore.getState().strategySearchOpen).toBe(false)
     useStore.getState().setStrategySearchOpen(true)
@@ -42,9 +32,9 @@ describe('useStore', () => {
     expect(useStore.getState().strategySearchOpen).toBe(false)
   })
 
-  it('state changes are independent (artifacts does not affect palette)', () => {
+  it('state changes are independent (artifacts does not affect strategy search)', () => {
     useStore.getState().setArtifactsOpen(true)
-    expect(useStore.getState().paletteOpen).toBe(false)
+    expect(useStore.getState().strategySearchOpen).toBe(false)
   })
 
   it('resetEphemeral clears all panel states', () => {
