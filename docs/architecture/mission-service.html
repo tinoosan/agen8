@@ -362,13 +362,12 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
       <tr><td><code>ListMissions</code></td><td>Read missions for a project with service-owned filters.</td><td>None.</td></tr>
       <tr><td><code>UpdateMission</code></td><td>Update descriptive fields or route a named lifecycle transition with an optional note.</td><td>Persists mission and fires a lifecycle event when status changes. Repeating the current lifecycle state is an idempotent success; note-only retries are stored in lifecycle history without publishing duplicate bus events.</td></tr>
       <tr><td><code>DeleteMission</code></td><td>Archive the mission through the lifecycle boundary with an optional note.</td><td>Persists archived state and fires a lifecycle event. Archiving an already archived mission is an idempotent success; note-only retries are stored in lifecycle history without publishing duplicate bus events.</td></tr>
-      <tr><td><code>CreateKeyResult</code></td><td>Create a KR under an existing non-archived mission, optionally assign an owning project, and reactivate a completed mission when scope expands.</td><td>Persists KR and fires <code>kr.created</code>; may persist mission activation and fire <code>mission.activated</code>.</td></tr>
+      <tr><td><code>CreateKeyResult</code></td><td>Create a KR under an existing non-archived mission, and reactivate a completed mission when scope expands.</td><td>Persists KR and fires <code>kr.created</code>; may persist mission activation and fire <code>mission.activated</code>.</td></tr>
       <tr><td><code>GetKeyResult</code></td><td>Read one KR.</td><td>None.</td></tr>
       <tr><td><code>ListKeyResults</code></td><td>Read KRs for a mission.</td><td>None.</td></tr>
       <tr><td><code>UpdateKeyResult</code></td><td>Change KR descriptive or measurement fields and recompute progress.</td><td>Persists KR; may fire progress events.</td></tr>
       <tr><td><code>DeleteKeyResult</code></td><td>Drop/archive a KR without deleting mission history, record an optional rationale note, and recompute the parent mission from remaining live KRs.</td><td>Persists KR status and fires <code>kr.dropped</code>; may persist mission status and fire a lifecycle event. Dropping an already dropped KR is an idempotent success.</td></tr>
       <tr><td><code>ReopenKeyResult</code></td><td>Reopen a completed or dropped KR when scope has renewed work, record an optional rationale note, and reset progress to the KR starting value.</td><td>Persists KR state and fires <code>kr.reopened</code>; may reactivate the parent mission and fire <code>mission.activated</code>. Reopening an already open or in-progress KR is an idempotent success.</td></tr>
-      <tr><td><code>AssignKeyResultProject</code></td><td>Assign an open project as the KR owner.</td><td>Persists KR owner fields and fires <code>kr.owner_assigned</code>.</td></tr>
       <tr><td><code>UpdateProgress</code></td><td>Validate progress update, enforce completion gates before writing, append progress entry, update KR progress, and update milestone cursor.</td><td>Persists progress entry and KR state; fires progress, milestone, and completion events after persistence; may complete mission.</td></tr>
       <tr><td><code>ComputeMissionProgress</code></td><td>Compute aggregate mission progress, KR status counts, and non-completed blocking KR summaries.</td><td>None.</td></tr>
       <tr><td><code>GetProgressHistory</code></td><td>Read progress entries for a KR.</td><td>None.</td></tr>
@@ -504,32 +503,29 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
 
   <h3>Mission activation gate</h3>
   <p>
-    A mission can activate only when it has measurable scope and each live KR has an accountable owner. The activation predicate is:
+    A mission can activate only when it has measurable scope, regardless of KR ownership metadata. The activation predicate is:
   </p>
 
-<pre><code class="lang-go">count(nonDroppedKRs) &gt; <span class="tok-num">0</span> &amp;&amp; every(nonDroppedKRs, ownerProjectID != <span class="tok-string">""</span> &amp;&amp; ownerProjectStatus == <span class="tok-string">"open"</span>)</code></pre>
+<pre><code class="lang-go">count(nonDroppedKRs) &gt; <span class="tok-num">0</span></code></pre>
 
   <p>
-    These mission states do not activate: no KRs, all KRs dropped, or any non-dropped KR without an owning project. If there is no active measurable scope, an active project member should add KRs. If a live KR has no owner, an active project member should assign it to a project before activation.
+    These mission states do not activate: no KRs, all KRs dropped, or a malformed mission with no measurable scope. If there is no active measurable scope, an active project member should add KRs and then retry activation.
   </p>
 
-  <h3>Owner project availability</h3>
+  <h3>Owner assignment is not an activation gate</h3>
   <p>
-    A KR owner project is both a durable assignment and a live execution dependency. The historical <code>ProjectID</code> stays on the KR, but activation depends on that project still being open.
+    KR ownership fields still exist for traceability and project reporting, but they no longer gate activation.
   </p>
 
   <p>
-    Assigning a KR to an open project moves the KR from <code>draft</code> to <code>open</code>. Reassignment is allowed only while the KR is <code>draft</code> or <code>open</code>. Once progress starts and the KR becomes <code>in_progress</code>, ownership is locked to preserve accountability. <code>completed</code> and <code>dropped</code> KRs cannot be reassigned through this command.
+    Assigning or changing KR ownership may still affect progress interpretation and reporting, but mission activation and completion now rely on KR state and existence only.
   </p>
 
   <table>
-    <thead><tr><th>Owner project change</th><th>Mission result</th><th>Reason</th></tr></thead>
+    <thead><tr><th>Ownership change</th><th>Mission result</th><th>Reason</th></tr></thead>
     <tbody>
-      <tr><td>A KR is assigned to an open project.</td><td>Eligible for activation.</td><td>The live KR has an accountable delivery owner.</td></tr>
-      <tr><td>A KR's assigned project is closed or archived before activation.</td><td>Not eligible for activation.</td><td>The assignment remains historical, but the project cannot own live work.</td></tr>
-      <tr><td>An active mission has a live KR whose owner project closes or archives.</td><td><code>Paused</code></td><td>The mission has live scope without live execution capacity.</td></tr>
-      <tr><td>A completed mission has a completed KR whose owner project closes or archives.</td><td><code>Completed</code></td><td>The measurable outcome is already satisfied.</td></tr>
-      <tr><td>The KR is reassigned to an open project.</td><td>Eligible for activation again.</td><td>Live ownership has been restored.</td></tr>
+      <tr><td>A KR is assigned to a project.</td><td>Mission state unchanged.</td><td>Ownership is recorded for traceability only.</td></tr>
+      <tr><td>A KR owner field changes while live.</td><td>Mission state unchanged.</td><td>Ownership history is preserved, but status gates do not read it.</td></tr>
     </tbody>
   </table>
 
@@ -703,8 +699,8 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td>Percentage progress</td><td>Percentage KRs use the current value directly, clamped to <code>0..100</code>, and support increase semantics only for now.</td></tr>
       <tr><td>Boolean progress</td><td>Boolean KRs forbid direction and map <code>false</code> to <code>0</code>, <code>true</code> to <code>100</code>.</td></tr>
       <tr><td>Assignment</td><td>A KR can be assigned only to an open project resolved through the project service.</td></tr>
-      <tr><td>Activation gate</td><td>A mission activates only when at least one non-dropped KR exists and every non-dropped KR has an open owning project.</td></tr>
-      <tr><td>Owner availability</td><td>Closed or archived owner projects remain historical assignments, but they do not count as live execution ownership.</td></tr>
+      <tr><td>Activation gate</td><td>A mission activates only when at least one non-dropped KR exists.</td></tr>
+      <tr><td>Owner availability</td><td>Owner fields are advisory and historical; they do not block mission activation.</td></tr>
       <tr><td>Progress entry</td><td>Every value update appends a progress entry before the resulting KR state is returned.</td></tr>
       <tr><td>Milestone jumps</td><td>Progress jumps fire every newly crossed milestone threshold and do not re-fire thresholds already recorded in <code>LastMilestoneNotified</code>.</td></tr>
       <tr><td>Progress regression</td><td>Incomplete KRs may regress when measurement rules allow it; completed KRs must be explicitly reopened before progress can move down.</td></tr>
@@ -923,22 +919,20 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td><code>kr.progress_updated</code>, <code>kr.milestone</code>, <code>kr.completed</code>, <code>mission.completed</code>, <code>mission.archived</code></td><td>History and dashboard facts.</td><td>These are durable facts the caller or dashboard can observe.</td></tr>
       <tr><td><code>mission.activated</code></td><td>Mission history fact.</td><td>Shows when strategic work becomes active.</td></tr>
       <tr><td><code>kr.owner_assigned</code>, <code>kr.reopened</code></td><td>KR history fact.</td><td>Shows ownership and lifecycle changes.</td></tr>
-      <tr><td>Mission paused because live KR ownership became unavailable.</td><td>Mission history fact.</td><td>Shows why the mission stopped progressing.</td></tr>
     </tbody>
   </table>
 
   <h3>Projection idempotency</h3>
   <p>
-    Mission activation can be retried, recomputed after KR assignment, or replayed by an event subscriber. Projected history rows must therefore be idempotent per mission, assigned project, and event kind.
+    Mission activation can be retried or replayed by an event subscriber. Projected history rows must therefore be idempotent per mission and event kind.
   </p>
 
   <table>
     <thead><tr><th>Projection</th><th>Idempotency key</th><th>Duplicate rule</th></tr></thead>
     <tbody>
-      <tr><td><code>mission.activated</code> for an assigned project.</td><td><code>mission:&lt;missionId&gt;:project:&lt;projectId&gt;:activated</code></td><td>Project at most once for the activation episode.</td></tr>
+      <tr><td><code>mission.activated</code>.</td><td><code>mission:&lt;missionId&gt;:activated</code></td><td>Persist once per activation episode.</td></tr>
       <tr><td><code>kr.owner_assigned</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:owner:&lt;projectId&gt;</code></td><td>Project only when the owner project actually changes.</td></tr>
       <tr><td><code>kr.reopened</code>.</td><td><code>mission:&lt;missionId&gt;:kr:&lt;keyResultId&gt;:reopened:&lt;version&gt;</code></td><td>Project once for the reopen transition, not for later progress edits.</td></tr>
-      <tr><td>Mission paused because owner project became unavailable.</td><td><code>mission:&lt;missionId&gt;:paused:owner-unavailable:&lt;projectId&gt;</code></td><td>Send once per unavailable owner-project cause.</td></tr>
     </tbody>
   </table>
 
@@ -1013,7 +1007,6 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td><code>mission.kr.get</code></td><td><code>GetKeyResult</code></td><td>Read one KR.</td></tr>
       <tr><td><code>mission.kr.list</code></td><td><code>ListKeyResults</code></td><td>List KRs for a mission.</td></tr>
       <tr><td><code>mission.kr.update</code></td><td><code>UpdateKeyResult</code></td><td>Patch KR fields.</td></tr>
-      <tr><td><code>mission.kr.assignProject</code></td><td><code>AssignKeyResultProject</code></td><td>Assign an open project as the KR owner.</td></tr>
       <tr><td><code>mission.kr.delete</code></td><td><code>DeleteKeyResult</code></td><td>Drop/archive KR.</td></tr>
       <tr><td><code>mission.kr.reopen</code></td><td><code>ReopenKeyResult</code></td><td>Reopen completed or dropped KR scope and reset progress.</td></tr>
       <tr><td><code>mission.kr.progress</code></td><td><code>UpdateProgress</code></td><td>Record KR progress.</td></tr>
@@ -1063,7 +1056,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td>No lifecycle projection handlers in the mission app service package.</td><td>Event subscribers belong to the event/subscriber layer, not the mission service.</td></tr>
       <tr><td>No member-facing notification registry or exported event factory in mission service.</td><td>The mission service owns typed event kinds and private publishing/spec helpers; subscribers own projections.</td></tr>
       <tr><td>No automatic mission-event-to-agent-notification rule.</td><td>Mission events become history/dashboard facts unless a future retained product surface explicitly adds another projection.</td></tr>
-      <tr><td>No duplicate mission activation projections.</td><td>Activation projections use deterministic idempotency keys per mission and assigned project.</td></tr>
+      <tr><td>No duplicate mission activation projections.</td><td>Activation projections use deterministic idempotency keys per mission and event kind.</td></tr>
       <tr><td>No raw JSON or protocol DTOs in service methods.</td><td>Protocol adapters translate at the boundary.</td></tr>
       <tr><td>No partial progress writes.</td><td><code>UpdateProgress</code> runs completion gates before persistence and writes progress entry, KR state, mission state, and events as one use case.</td></tr>
       <tr><td>No KR progress under a draft mission.</td><td>Progress updates require the parent mission to be <code>active</code>.</td></tr>
@@ -1072,7 +1065,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td>No silent regression of completed KRs.</td><td>A completed KR must be explicitly reopened before progress can decrease, and reopening resets progress to the starting value and reactivates the parent mission.</td></tr>
       <tr><td>No milestone un-notification.</td><td>Progress regression does not clear <code>LastMilestoneNotified</code> or make already fired milestones eligible to fire again.</td></tr>
       <tr><td>No unsupported measurement semantics.</td><td><code>maintain</code> and range/tolerance KRs are not supported until their fields and progress rules are designed.</td></tr>
-      <tr><td>No mission activation without owned measurable scope.</td><td>Activation requires at least one non-dropped KR and every non-dropped KR assigned to an open owning project; no KRs, all dropped KRs, unowned live KRs, and closed/archived owner projects fail the gate.</td></tr>
+      <tr><td>No mission activation without measurable scope.</td><td>Activation requires at least one non-dropped KR; no KRs, all dropped KRs, or malformed measurable scope fail the gate.</td></tr>
       <tr><td>No mission completion without satisfied measurable scope.</td><td>Completion requires at least one non-dropped KR and every non-dropped KR completed; no KRs, all dropped KRs, and only draft/open/in-progress KRs fail the gate.</td></tr>
       <tr><td>No KR completion with non-terminal linked tasks.</td><td>Linked tasks in <code>pending</code>, <code>active</code>, <code>blocked</code>, or <code>in_review</code> block KR completion.</td></tr>
       <tr><td>No stale mission status after dropping KRs.</td><td>The parent mission is recomputed from remaining non-dropped KRs; previous status does not preserve an invalid active or completed state.</td></tr>
