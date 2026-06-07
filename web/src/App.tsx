@@ -3,7 +3,7 @@ import { Redirect, Route, Switch, useLocation } from 'wouter'
 import { Menu, Search } from 'lucide-react'
 import { useStore } from './lib/store'
 import { brandIconFor } from './lib/brandIcon'
-import { missionsPanelLink, strategyMapLink, useNavigation, type ActiveView } from './lib/routing'
+import { missionsPanelLink, useNavigation, type ActiveView } from './lib/routing'
 import { useAuth } from './hooks/useAuth'
 import { useRealtimeInvalidation } from './hooks/useRealtimeSync'
 import { lazyWithRetry } from './lib/lazyWithRetry'
@@ -53,8 +53,8 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
  *  Must live inside SidebarProvider so useSidebar() resolves. */
 function MobileTopBar() {
   const { toggleSidebar } = useSidebar()
-  const { activeView, projectId } = useNavigation()
-  const [location, navigate] = useLocation()
+  const { activeView } = useNavigation()
+  const [location] = useLocation()
   const theme = useStore((s) => s.theme)
 
   const title = location.startsWith('/credentials')
@@ -86,16 +86,13 @@ function MobileTopBar() {
       </span>
       {/* Search button — the one search worth a touch entry point is the
           context map's node search (the same panel the "/" shortcut opens).
-          On the map it opens that panel directly; on the dashboard it routes
-          to the map first, then opens it. Both are the strategy node search,
-          so the button isn't shown on pages without one. */}
+          It opens in place: the strategy map and the dashboard each render the
+          node-search modal off the shared strategySearchOpen flag, so the
+          button just flips the flag. Pages without that modal don't show it. */}
       {(activeView === 'strategy' || activeView === 'dashboard') && (
         <button
           type="button"
-          onClick={() => {
-            useStore.getState().setStrategySearchOpen(true)
-            if (activeView !== 'strategy' && projectId) navigate(strategyMapLink(projectId))
-          }}
+          onClick={() => useStore.getState().setStrategySearchOpen(true)}
           aria-label="Open search"
           className="h-9 w-9 flex items-center justify-center rounded-[8px] border-none bg-transparent cursor-pointer text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors shrink-0"
         >

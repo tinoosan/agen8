@@ -132,14 +132,15 @@ describe('App', () => {
     }
   })
 
-  it('mobile search button on the dashboard routes to the context map and opens node search', async () => {
-    // On the dashboard there's no node search inline, so the button first
-    // routes to the context map, then opens the same panel the "/" shortcut does.
+  it('mobile search button on the dashboard opens node search in place without navigating', async () => {
+    // The dashboard renders the node-search modal off the shared
+    // strategySearchOpen flag, so the mobile button just flips the flag — it
+    // must not navigate away to the context map.
     const { history } = renderWithRouter('/project/myapp/dashboard')
 
     fireEvent.click(await screen.findByLabelText('Open search'))
     expect(useStore.getState().strategySearchOpen).toBe(true)
-    expect(history.at(-1)).toBe('/project/myapp/strategy')
+    expect(history.at(-1)).toBe('/project/myapp/dashboard')
   })
 
   it('applies the selected theme to the document root', async () => {

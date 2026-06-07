@@ -12,10 +12,25 @@ const mockUseAuth = vi.fn()
 const mockMissionSummary = vi.fn()
 const mockDecisionFeed = vi.fn()
 const mockDashboardContextPanel = vi.fn()
+const mockUseStrategyGraph = vi.fn()
+
+// One node so the in-place node-search modal has a selectable result. The title
+// is read off data.mission.title (see StrategyMapSearch.getNodeTitle).
+const searchNode = {
+  id: 'n1',
+  type: 'mission',
+  position: { x: 0, y: 0 },
+  data: { mission: { title: 'Launch rocket', status: 'active' } },
+}
 
 vi.mock('../lib/routing', () => ({
   useNavigation: () => mockUseNavigation(),
-  strategyMapLink: (projectId: string) => `/project/${encodeURIComponent(projectId)}/strategy`,
+  strategyMapLink: (projectId: string, focusNodeId?: string) =>
+    `/project/${encodeURIComponent(projectId)}/strategy${focusNodeId ? `?focus=${focusNodeId}` : ''}`,
+}))
+
+vi.mock('../components/strategy/useStrategyGraph', () => ({
+  useStrategyGraph: (...args: unknown[]) => mockUseStrategyGraph(...args),
 }))
 
 vi.mock('../hooks/useMissions', () => ({
@@ -68,6 +83,7 @@ describe('Dashboard page', () => {
     mockUseNavigation.mockReturnValue({ projectId: 'proj-1', focusedProjectRoot: '/repo' })
     mockUseMissions.mockReturnValue({ data: [], isLoading: false })
     mockUseAuth.mockReturnValue({ user: { name: 'Ada Lovelace', email: 'ada@example.com' } })
+    mockUseStrategyGraph.mockReturnValue({ nodes: [searchNode], edges: [], isLoading: false })
   })
 
   it('greets the user and renders the work-in-motion column', () => {
@@ -117,7 +133,7 @@ describe('Dashboard page', () => {
     ]))
   })
 
-  it('header search jumps to the context map and opens its node search', async () => {
+  it('header search opens the context-map node search in place without leaving the dashboard', async () => {
     const location = memoryLocation({ path: '/project/proj-1/dashboard', record: true })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
@@ -130,8 +146,31 @@ describe('Dashboard page', () => {
 
     await userEvent.click(screen.getByLabelText('Search the context map'))
 
+    // The modal opens in place: the flag flips and the search input mounts,
+    // and the URL stays on the dashboard (no jump to the context map).
     expect(useStore.getState().strategySearchOpen).toBe(true)
-    expect(location.history.at(-1)).toBe('/project/proj-1/strategy')
+    expect(screen.getByPlaceholderText(/Search nodes/i)).toBeInTheDocument()
+    expect(location.history).toEqual(['/project/proj-1/dashboard'])
+  })
+
+  it('selecting a node from the in-place search deep-links to that node on the context map', async () => {
+    const location = memoryLocation({ path: '/project/proj-1/dashboard', record: true })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <Router hook={location.hook}>
+          <Dashboard />
+        </Router>
+      </QueryClientProvider>,
+    )
+
+    await userEvent.click(screen.getByLabelText('Search the context map'))
+    await userEvent.click(screen.getByText('Launch rocket'))
+
+    // Picking a result closes the modal and navigates to the map focused on
+    // that node — the map is the only surface that renders a graph node.
+    expect(useStore.getState().strategySearchOpen).toBe(false)
+    expect(location.history.at(-1)).toBe('/project/proj-1/strategy?focus=n1')
   })
 
   it('prompts for a project when none is focused', () => {

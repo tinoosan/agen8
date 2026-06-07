@@ -54,13 +54,16 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
   const [activeFilter, setActiveFilter] = useState<FilterPreset | null>(null)
   const [contextDepth, setContextDepth] = useState(0)
   const [helpOpen, setHelpOpen] = useState(false)
-  // Search-open lives in the global store so the mobile top-bar search button
-  // (rendered in App.tsx, outside this page) can open the same node-search
-  // panel that the "/" shortcut does. Reset on unmount so leaving and
-  // returning to the map never lands on a stale-open search.
+  // Search-open lives in the global store so search can be opened from outside
+  // this page — the mobile top-bar button and the dashboard search icon both
+  // set the flag (and the dashboard routes here) so arriving on the map lands
+  // with the same node-search panel the "/" shortcut opens. The modal Radix
+  // dialog clears the flag itself on close (Escape / outside-click / select),
+  // so there is no stale-open to guard against. We deliberately do NOT reset
+  // the flag on unmount: that cleanup fires during StrictMode's dev
+  // mount→unmount→remount and would slam the just-opened panel shut on arrival.
   const searchOpen = useStore((s) => s.strategySearchOpen)
   const setSearchOpen = useStore((s) => s.setStrategySearchOpen)
-  useEffect(() => () => setSearchOpen(false), [setSearchOpen])
   const { fitView, setCenter, getZoom, zoomIn, zoomOut, setViewport } = useReactFlow()
 
   const interactionReleaseTimerRef = useRef<number | null>(null)

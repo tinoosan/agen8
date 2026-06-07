@@ -13,6 +13,8 @@ import MissionSummary from '../components/dashboard/MissionSummary'
 import TaskSummary from '../components/dashboard/TaskSummary'
 import DashboardWorkingNow from '../components/dashboard/DashboardWorkingNow'
 import DashboardContextPanel from '../components/dashboard/DashboardContextPanel'
+import { StrategyMapSearch } from '../components/strategy/StrategyMapSearch'
+import { useStrategyGraph } from '../components/strategy/useStrategyGraph'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { writeStoredDashboardContextCollapsed, readStoredDashboardContextCollapsed } from '../lib/dashboardContextPanelStorage'
 import { useAuth } from '../hooks/useAuth'
@@ -38,6 +40,15 @@ export default function Dashboard() {
     () => (activeMissionsQuery.data ?? []).filter(mission => mission.status === 'active').length,
     [activeMissionsQuery.data],
   )
+
+  // Context-map node search, rendered in place here so it can be opened from
+  // the dashboard without leaving for the map. The graph nodes feed the search
+  // list; picking a result deep-links to the map focused on that node (the only
+  // surface that renders a graph node). The open flag is shared in the store so
+  // the mobile top-bar button (in App.tsx) opens this same modal.
+  const { nodes: searchNodes } = useStrategyGraph(projectId, focusedProjectRoot)
+  const searchOpen = useStore((s) => s.strategySearchOpen)
+  const setSearchOpen = useStore((s) => s.setStrategySearchOpen)
 
   // Focus mode (F34a) — persisted in localStorage
   const [focusMode, setFocusMode] = useState(() => {
@@ -168,10 +179,7 @@ export default function Dashboard() {
             title="Search the context map"
             aria-label="Search the context map"
             data-testid="dashboard-map-search"
-            onClick={() => {
-              useStore.getState().setStrategySearchOpen(true)
-              if (projectId) navigate(strategyMapLink(projectId))
-            }}
+            onClick={() => setSearchOpen(true)}
             className="hidden md:inline-flex w-8 h-8 rounded-[10px] text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <Search size={16} aria-hidden />
@@ -260,6 +268,15 @@ export default function Dashboard() {
       </div>
       </div>
     </div>
+    <StrategyMapSearch
+      open={searchOpen}
+      onOpenChange={setSearchOpen}
+      nodes={searchNodes}
+      onSelect={(nodeId) => {
+        setSearchOpen(false)
+        navigate(strategyMapLink(projectId, nodeId))
+      }}
+    />
     </div>
   )
 }
