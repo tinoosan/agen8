@@ -184,6 +184,8 @@ export default function MissionDetail() {
   }
 
   async function handleDelete() {
+    // Soft action: mission.delete keeps the mission record and key results for
+    // lifecycle recovery (archive/hidden), matching the Archive copy in the UI.
     try {
       await deleteMission.mutateAsync({ missionId: missionId_ })
       toast.success('Mission archived')
@@ -194,6 +196,8 @@ export default function MissionDetail() {
   }
 
   async function handlePurge() {
+    // Hard action: mission.purge removes mission + KR/progress/lifecycle rows.
+    // Keep this path distinct from archive to preserve non-reversible deletion UX.
     try {
       await purgeMission.mutateAsync({ missionId: missionId_ })
       toast.success('Mission permanently deleted')
