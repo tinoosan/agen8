@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { Activity, Ban, CheckCircle2, Diamond, GitBranch, Minus, Plus, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { FilterPreset } from './strategyMapFilters'
+import { TRACE_MIN_DEPTH, TRACE_MAX_DEPTH } from './strategyMapFilters'
 
 interface FilterButton {
   key: FilterPreset
@@ -23,8 +24,6 @@ interface Props {
    *  makes search discoverable for everyone. */
   onOpenSearch: () => void
 }
-
-const MAX_CONTEXT_DEPTH = 3
 
 export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
   activeFilter,
@@ -139,8 +138,8 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
         >
           <button
             type="button"
-            onClick={() => onContextDepthChange(Math.max(0, contextDepth - 1))}
-            disabled={contextDepth === 0}
+            onClick={() => onContextDepthChange(Math.max(TRACE_MIN_DEPTH, contextDepth - 1))}
+            disabled={contextDepth <= TRACE_MIN_DEPTH}
             className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full transition-colors hover:bg-[var(--bg-surface)] disabled:opacity-25 focus:outline-none"
             style={{ color: 'var(--text-3)' }}
           >
@@ -149,7 +148,7 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
 
           {/* Depth dots — visual indicator of context expansion */}
           <div className="flex items-center gap-[3px] px-1">
-            {Array.from({ length: MAX_CONTEXT_DEPTH }, (_, i) => (
+            {Array.from({ length: TRACE_MAX_DEPTH }, (_, i) => (
               <div
                 key={i}
                 className="rounded-full transition-all duration-200"
@@ -167,8 +166,8 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
 
           <button
             type="button"
-            onClick={() => onContextDepthChange(Math.min(MAX_CONTEXT_DEPTH, contextDepth + 1))}
-            disabled={contextDepth >= MAX_CONTEXT_DEPTH}
+            onClick={() => onContextDepthChange(Math.min(TRACE_MAX_DEPTH, contextDepth + 1))}
+            disabled={contextDepth >= TRACE_MAX_DEPTH}
             className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full transition-colors hover:bg-[var(--bg-surface)] disabled:opacity-25 focus:outline-none"
             style={{ color: 'var(--text-3)' }}
           >

@@ -159,87 +159,65 @@ export function computeDoneFilter(nodes: Node[], edges: Edge[]): FilterResult {
   return { nodeIds: matchedIds, edgeIds: connectedEdges(matchedIds, edges), matchCount }
 }
 
-// ── Path trace filter ───────────────────────────────────────────────────
+// ── Path trace filter (progressive rings) ────────────────────────────────
 
-/** Directed lineage trace: the direct ancestor path UP to the root,
- *  plus any descendants DOWN from the selected node only.
- *  Optionally expands via context links (informed_by) up to `contextDepth` hops. */
+/** Trace-path depth bounds. The trace lens reveals the graph one BFS ring at a
+ *  time, so the stepper drives a hop radius rather than a context-only expansion.
+ *  Depth 0 (just the selected node) is useless on screen, so the floor is 1 —
+ *  selecting a node always shows at least its immediate neighbours. */
+export const TRACE_MIN_DEPTH = 1
+export const TRACE_MAX_DEPTH = 5
+/** Depth applied the moment trace is enabled: light the first ring. */
+export const TRACE_INITIAL_DEPTH = 1
+
+/** Progressive ring trace: an undirected BFS outward from the selected node over
+ *  the COMBINED graph (structural lineage `statusEdge` + context links
+ *  `contextEdge`), revealing every node within `depth` hops. Each +/- step grows
+ *  or shrinks the ring by one hop, so a selection lights its immediate
+ *  neighbours first and the user walks outward — instead of the entire connected
+ *  component lighting up at once (the old "select a mission → whole tree
+ *  explodes" behaviour).
+ *
+ *  Traversal is symmetric and edge-type-agnostic: ancestors, descendants, and
+ *  context-linked siblings all appear by hop distance. The visual weight split
+ *  (direct/bold vs ambient) is applied downstream in useStrategyMapLenses, not
+ *  here. Because the ring is bounded by `depth`, the "direct edges" set stays
+ *  small — preserving the Safari label-portal/animation budget. */
 export function computeTraceFilter(
   selectedNodeId: string,
-  structuralEdges: Edge[],
   allEdges: Edge[],
-  contextDepth: number,
+  depth: number,
 ): FilterResult {
-  const childrenOf = new Map<string, string[]>()
-  const parentsOf = new Map<string, string[]>()
-  for (const edge of structuralEdges) {
-    if (!childrenOf.has(edge.source)) childrenOf.set(edge.source, [])
-    childrenOf.get(edge.source)!.push(edge.target)
-    if (!parentsOf.has(edge.target)) parentsOf.set(edge.target, [])
-    parentsOf.get(edge.target)!.push(edge.source)
+  // Undirected adjacency over every edge type.
+  const adj = new Map<string, string[]>()
+  const link = (a: string, b: string) => {
+    if (!adj.has(a)) adj.set(a, [])
+    adj.get(a)!.push(b)
+  }
+  for (const edge of allEdges) {
+    link(edge.source, edge.target)
+    link(edge.target, edge.source)
   }
 
+  // BFS rings outward, bounded by `depth` hops.
   const visited = new Set<string>([selectedNodeId])
-
-  // Walk UP: direct ancestor path
-  const upQueue = [selectedNodeId]
-  while (upQueue.length > 0) {
-    const current = upQueue.shift()!
-    const parents = parentsOf.get(current)
-    if (!parents) continue
-    for (const parent of parents) {
-      if (!visited.has(parent)) {
-        visited.add(parent)
-        upQueue.push(parent)
-      }
-    }
-  }
-
-  // Walk DOWN: descendants of the selected node only
-  const downQueue = [selectedNodeId]
-  while (downQueue.length > 0) {
-    const current = downQueue.shift()!
-    const children = childrenOf.get(current)
-    if (!children) continue
-    for (const child of children) {
-      if (!visited.has(child)) {
-        visited.add(child)
-        downQueue.push(child)
-      }
-    }
-  }
-
-  // Expand via context links (informed_by) up to contextDepth hops
-  if (contextDepth > 0) {
-    const contextAdj = new Map<string, string[]>()
-    for (const edge of allEdges) {
-      if (edge.type === 'contextEdge') {
-        if (!contextAdj.has(edge.source)) contextAdj.set(edge.source, [])
-        if (!contextAdj.has(edge.target)) contextAdj.set(edge.target, [])
-        contextAdj.get(edge.source)!.push(edge.target)
-        contextAdj.get(edge.target)!.push(edge.source)
-      }
-    }
-
-    // BFS from the structural lineage nodes, limited to contextDepth hops
-    let frontier = [...visited]
-    for (let hop = 0; hop < contextDepth; hop++) {
-      const nextFrontier: string[] = []
-      for (const nodeId of frontier) {
-        const neighbors = contextAdj.get(nodeId)
-        if (!neighbors) continue
-        for (const neighbor of neighbors) {
-          if (!visited.has(neighbor)) {
-            visited.add(neighbor)
-            nextFrontier.push(neighbor)
-          }
+  let frontier = [selectedNodeId]
+  for (let hop = 0; hop < depth; hop++) {
+    const next: string[] = []
+    for (const id of frontier) {
+      const neighbors = adj.get(id)
+      if (!neighbors) continue
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor)
+          next.push(neighbor)
         }
       }
-      frontier = nextFrontier
-      if (frontier.length === 0) break
     }
+    frontier = next
+    if (frontier.length === 0) break
   }
 
-  // Include edges from ALL edges (structural + context) where both endpoints are visited
+  // Include edges (structural + context) where both endpoints are within the ring.
   return { nodeIds: visited, edgeIds: connectedEdges(visited, allEdges), matchCount: visited.size }
 }

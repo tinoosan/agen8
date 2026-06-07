@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { Node } from '@xyflow/react'
 import type { FilterPreset } from './strategyMapFilters'
+import { TRACE_MIN_DEPTH, TRACE_MAX_DEPTH, TRACE_INITIAL_DEPTH } from './strategyMapFilters'
 import type { FitViewFn, GetZoomFn, SetCenterFn, ZoomFn } from './strategyMapControls'
 
 /**
@@ -151,10 +152,15 @@ export function useStrategyMapKeyboardNav({
         setActiveFilter((f) => f === 'decisions' ? null : 'decisions')
         return
       }
-      // T = toggle Trace Path (only when a node is selected)
+      // T = toggle Trace Path (only when a node is selected). Entering trace
+      // seeds the first ring so the selected node's neighbours light up.
       if ((e.key === 't' || e.key === 'T') && selectedNodeId) {
         e.preventDefault()
-        setActiveFilter((f) => f === 'trace' ? null : 'trace')
+        setActiveFilter((f) => {
+          const next = f === 'trace' ? null : 'trace'
+          if (next === 'trace') setContextDepth(TRACE_INITIAL_DEPTH)
+          return next
+        })
         return
       }
       // [ / ] handled in capture-phase handler above
@@ -366,13 +372,13 @@ export function useStrategyMapKeyboardNav({
       if (e.key === '[' && activeFilter === 'trace') {
         e.preventDefault()
         e.stopPropagation()
-        setContextDepth((d) => Math.max(0, d - 1))
+        setContextDepth((d) => Math.max(TRACE_MIN_DEPTH, d - 1))
         return
       }
       if (e.key === ']' && activeFilter === 'trace') {
         e.preventDefault()
         e.stopPropagation()
-        setContextDepth((d) => Math.min(3, d + 1))
+        setContextDepth((d) => Math.min(TRACE_MAX_DEPTH, d + 1))
         return
       }
     }

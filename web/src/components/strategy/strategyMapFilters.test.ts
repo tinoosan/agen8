@@ -5,6 +5,7 @@ import {
   computeBlockedFilter,
   computeDoneFilter,
   computeDecisionsFilter,
+  computeTraceFilter,
 } from './strategyMapFilters'
 
 /* ── Fixture builders ─────────────────────────────────────────────────────
@@ -170,5 +171,57 @@ describe('computeDecisionsFilter (reference model — show these)', () => {
     expect(result.nodeIds.has('D')).toBe(true)
     expect(result.nodeIds.has('T1')).toBe(true) // made_during target
     expect(result.matchCount).toBe(1) // one decision
+  })
+})
+
+describe('computeTraceFilter (progressive symmetric rings)', () => {
+  /* Adjacency over the buildGraph() graph, treated undirected:
+   *   M ── K1 ── {T1, T2, T3},  D ── T1,  T3 ── T1
+   * From T1, hop distances are:
+   *   1: K1, D, T3      2: M, T2
+   */
+
+  it('depth 1 reveals only the immediate ring (both up and down), not 2-hop nodes', () => {
+    const { edges } = buildGraph()
+    const result = computeTraceFilter('T1', edges, 1)
+    expect(result.nodeIds.has('T1')).toBe(true)  // the selected node
+    expect(result.nodeIds.has('K1')).toBe(true)  // structural parent (1 hop up)
+    expect(result.nodeIds.has('D')).toBe(true)   // context-linked decision (1 hop)
+    expect(result.nodeIds.has('T3')).toBe(true)  // context-linked sibling (1 hop)
+    // 2-hop nodes must stay dark until the ring expands.
+    expect(result.nodeIds.has('M')).toBe(false)
+    expect(result.nodeIds.has('T2')).toBe(false)
+  })
+
+  it('depth 2 expands the ring to reach the 2-hop nodes', () => {
+    const { edges } = buildGraph()
+    const result = computeTraceFilter('T1', edges, 2)
+    expect(result.nodeIds.has('M')).toBe(true)   // 2 hops up (T1→K1→M)
+    expect(result.nodeIds.has('T2')).toBe(true)  // 2 hops (T1→K1→T2)
+  })
+
+  it('depth 0 lights only the selected node (no ring, no edges)', () => {
+    const { edges } = buildGraph()
+    const result = computeTraceFilter('T1', edges, 0)
+    expect(result.nodeIds.size).toBe(1)
+    expect(result.nodeIds.has('T1')).toBe(true)
+    expect(result.edgeIds.size).toBe(0)
+  })
+
+  it('only includes edges whose both endpoints are within the revealed ring', () => {
+    const { edges } = buildGraph()
+    const result = computeTraceFilter('T1', edges, 1)
+    // Within {T1,K1,D,T3}: K1→T1, D→T1, T3→T1 qualify; M→K1 and K1→T2 do not.
+    expect(result.edgeIds.has('s:K1->T1')).toBe(true)
+    expect(result.edgeIds.has('c:D->T1')).toBe(true)
+    expect(result.edgeIds.has('c:T3->T1')).toBe(true)
+    expect(result.edgeIds.has('s:M->K1')).toBe(false) // M not in ring yet
+    expect(result.edgeIds.has('s:K1->T2')).toBe(false) // T2 not in ring yet
+  })
+
+  it('matchCount equals the number of revealed nodes', () => {
+    const { edges } = buildGraph()
+    expect(computeTraceFilter('T1', edges, 1).matchCount).toBe(4) // T1,K1,D,T3
+    expect(computeTraceFilter('T1', edges, 2).matchCount).toBe(6) // + M,T2
   })
 })

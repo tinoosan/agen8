@@ -22,7 +22,7 @@ import { StrategyMapFilterBar } from '../components/strategy/StrategyMapFilterBa
 import { StrategyMapLegend } from '../components/strategy/StrategyMapLegend'
 import { StrategyMapZoomControls } from '../components/strategy/StrategyMapZoomControls'
 import { StrategyMapCanvas } from '../components/strategy/StrategyMapCanvas'
-import { type FilterPreset } from '../components/strategy/strategyMapFilters'
+import { type FilterPreset, TRACE_INITIAL_DEPTH } from '../components/strategy/strategyMapFilters'
 import {
   getNextDisplayMode,
   useDeferredStrategyGraph,
@@ -117,6 +117,14 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
       })
     }
   }, [selectedNodeId, activeFilter])
+
+  // Toggling a filter from the bar. Entering trace seeds the first ring so the
+  // map lights the selected node's immediate neighbours (depth 0 would show only
+  // the selected node — useless); the +/- stepper then walks the rings outward.
+  const handleFilterChange = useCallback((filter: FilterPreset | null) => {
+    setActiveFilter(filter)
+    if (filter === 'trace') setContextDepth(TRACE_INITIAL_DEPTH)
+  }, [])
 
   const markInteraction = useCallback((settleDelay = 180) => {
     setIsInteracting(true)
@@ -266,7 +274,7 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
 
         <StrategyMapFilterBar
           activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
+          onFilterChange={handleFilterChange}
           hasSelectedNode={!!selectedNodeId}
           matchCount={filterResult?.matchCount ?? 0}
           contextDepth={contextDepth}

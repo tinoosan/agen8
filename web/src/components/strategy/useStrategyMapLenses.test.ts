@@ -74,10 +74,24 @@ describe('useStrategyMapLenses — set-highlight filters do not flood "direct" e
     expect(result.directEdgeIds?.has('cl:D->T1')).toBe(false)
   })
 
-  it("trace keeps its direct edges so the lineage path shows labels + flow", () => {
-    // Trace from the task walks up to M; those structural edges should be direct.
-    const result = lens('trace', 'T1', 0)
+  it("trace keeps its direct edges so the ring path shows labels + flow", () => {
+    // Trace from the task at depth 1 reveals its immediate ring (K1 up, D via
+    // context link); those edges should be direct (bold + flow), not ambient.
+    const result = lens('trace', 'T1', 1)
     expect((result.directEdgeIds?.size ?? 0)).toBeGreaterThan(0)
+  })
+
+  it('trace reveals only the first ring at depth 1, the full path at depth 2', () => {
+    // Graph: M → K1 → T1, plus D —made_during→ T1. From T1, K1 and D are 1 hop;
+    // M is 2 hops. Depth 1 must NOT yet include M (the old code lit the whole
+    // lineage at once — this pins the progressive reveal).
+    const ring1 = lens('trace', 'T1', 1)
+    expect(ring1.clusterNodeIds?.has('K1')).toBe(true)
+    expect(ring1.clusterNodeIds?.has('D')).toBe(true)
+    expect(ring1.clusterNodeIds?.has('M')).toBe(false)
+
+    const ring2 = lens('trace', 'T1', 2)
+    expect(ring2.clusterNodeIds?.has('M')).toBe(true)
   })
 
   it('no filter + no focus leaves direct/cluster sets null (full graph, no dimming)', () => {

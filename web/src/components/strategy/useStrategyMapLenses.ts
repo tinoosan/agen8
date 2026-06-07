@@ -43,8 +43,7 @@ export function useStrategyMapLenses({
     if (activeFilter === 'decisions') return computeDecisionsFilter(displayNodes, displayEdges)
     if (activeFilter === 'done') return computeDoneFilter(displayNodes, displayEdges)
     if (activeFilter === 'trace' && selectedNodeId) {
-      const structuralEdges = displayEdges.filter((e) => e.type === 'statusEdge')
-      return computeTraceFilter(selectedNodeId, structuralEdges, displayEdges, contextDepth)
+      return computeTraceFilter(selectedNodeId, displayEdges, contextDepth)
     }
     return null
   }, [activeFilter, displayNodes, displayEdges, selectedNodeId, contextDepth])

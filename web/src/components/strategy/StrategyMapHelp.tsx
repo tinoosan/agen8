@@ -39,8 +39,8 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['D'], desc: 'Toggle Done lens (highlight finished work)', group: 'Filters' },
   { keys: ['R'], desc: 'Toggle Decisions lens (reasoning links)', group: 'Filters' },
   { keys: ['T'], desc: 'Toggle Trace Path from selected node', group: 'Filters' },
-  { keys: ['['], desc: 'Decrease context depth (trace mode)', group: 'Filters' },
-  { keys: [']'], desc: 'Increase context depth (trace mode)', group: 'Filters' },
+  { keys: ['['], desc: 'Shrink trace radius (fewer rings)', group: 'Filters' },
+  { keys: [']'], desc: 'Expand trace radius (more rings)', group: 'Filters' },
 
   // Search
   { keys: ['/'], desc: 'Search for a node by name', group: 'Search' },
