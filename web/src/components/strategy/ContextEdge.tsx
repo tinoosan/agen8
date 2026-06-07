@@ -2,6 +2,7 @@ import { memo, useState } from 'react'
 import { BaseEdge, EdgeLabelRenderer, getStraightPath, type EdgeProps } from '@xyflow/react'
 import { useStrategyMapStore } from './strategyMapStore'
 import { resolveEdgeStrokeColor } from './edgeColors'
+import { contextEdgeLabel } from './contextEdgeLabels'
 
 export const ContextEdge = memo(function ContextEdge({
   id,
@@ -60,10 +61,14 @@ export const ContextEdge = memo(function ContextEdge({
   const textAngle = flipped ? angleDeg + 180 : angleDeg
   const pointsToTarget = !flipped
 
-  // Context links: "informed by" when looking toward source, "informs" toward target
+  // The label follows the edge's real type, not a hardcoded "informed by".
+  // Read from the target's side it reads the inverse (e.g. "blocks"); from the
+  // source's side (or unfocused) it reads the stored relationship (e.g. "blocked by").
+  const edgeType = (data as { edgeType?: string } | undefined)?.edgeType ?? ''
+  const phrase = contextEdgeLabel(edgeType, focusedAtTarget)
   const labelText = focusedAtTarget
-    ? `${pointsToTarget ? '←' : '→'} informs`
-    : `${pointsToTarget ? '→' : '←'} informed by`
+    ? `${pointsToTarget ? '←' : '→'} ${phrase}`
+    : `${pointsToTarget ? '→' : '←'} ${phrase}`
   return (
     <>
       <g
