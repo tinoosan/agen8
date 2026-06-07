@@ -1,8 +1,5 @@
 import { useState } from 'react'
 import { useRoute } from 'wouter'
-import { toast } from 'sonner'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import {
   AlertTriangle,
   Clock,
@@ -10,7 +7,7 @@ import {
   Pencil,
   Ban,
 } from 'lucide-react'
-import { useTask, useCancelTask } from '../hooks/useProjectTasks'
+import { useTask } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
 import { useKeyResult, useProjectKRs, useMissions } from '../hooks/useMissions'
 import { taskStatusLabel, taskStatusColor } from '../lib/statusLabels'
@@ -25,8 +22,6 @@ import {
   taskIdShort,
   taskDuration,
   parseRetryTask,
-  getAcceptanceCriteria,
-  getLatestReview,
 } from './boardHelpers'
 import { tasksPanelLink, missionDetailLink, decisionsLink } from '../lib/routing'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
@@ -36,20 +31,12 @@ import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
 import { RelatedList, type RelatedItem } from '../components/detail/RelatedList'
 import EditTaskDialog from '../components/task/EditTaskDialog'
+import { CancelTaskDialog } from '../components/task/CancelTaskDialog'
+import { AcceptanceCriteriaList } from '../components/task/AcceptanceCriteriaList'
+import { LatestReviewSection } from '../components/task/LatestReviewSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import type { Task } from '../lib/types'
 
 const TERMINAL_STATUSES = ['succeeded', 'failed', 'canceled']
 
@@ -63,79 +50,6 @@ function TaskDetailSkeleton() {
         <Skeleton className="h-32 w-full rounded-[var(--r-md)]" />
       </div>
     </DetailSkeleton>
-  )
-}
-
-/* ── Cancel-task confirmation dialog ── */
-
-function CancelTaskDialog({
-  task,
-  open,
-  onOpenChange,
-}: {
-  task: Task
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const [reason, setReason] = useState('')
-  const cancelTask = useCancelTask()
-
-  async function handleCancel() {
-    const trimmed = reason.trim()
-    if (!trimmed) {
-      toast.error('A reason is required to cancel a task')
-      return
-    }
-    try {
-      await cancelTask.mutateAsync({ taskId: task.id, reason: trimmed })
-      toast.success('Task canceled')
-      setReason('')
-      onOpenChange(false)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to cancel task')
-    }
-  }
-
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Cancel task</AlertDialogTitle>
-          <AlertDialogDescription>
-            This moves the task to a canceled state. The reason is recorded on the task and shared
-            with whoever was assigned. This can't be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <div className="flex flex-col gap-2 py-1">
-          <Label htmlFor="cancel-task-reason" className="dashboard-mission-dialog-label">Reason</Label>
-          <Textarea
-            id="cancel-task-reason"
-            placeholder="Why is this task being canceled?"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={3}
-            autoFocus
-            className="dashboard-mission-dialog-field min-h-[88px] resize-none"
-          />
-        </div>
-        <AlertDialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            className="dashboard-action-button dashboard-action-button-neutral border-0"
-          >
-            Keep task
-          </Button>
-          <Button
-            onClick={handleCancel}
-            disabled={cancelTask.isPending || !reason.trim()}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            {cancelTask.isPending ? 'Canceling…' : 'Cancel task'}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   )
 }
 
@@ -178,15 +92,10 @@ export default function TaskDetail() {
 
   const retry = parseRetryTask(task)
   const displayTitle = retry.isRetry ? retry.originalGoal : (task.title || task.description)
-  const acceptanceCriteria = getAcceptanceCriteria(task)
-  const acDone = acceptanceCriteria.filter((c) => c.satisfied).length
-  const acTotal = acceptanceCriteria.length
-  const acColor = acDone === acTotal && acTotal > 0 ? 'var(--green)' : acDone > 0 ? 'var(--amber)' : 'var(--text-3)'
   const duration = taskDuration(task)
   const assigneeLabel = taskAssignedMemberLabel(task)
   const claimedByLabel = taskClaimedMemberLabel(task)
   const createdByLabel = taskCreatedMemberLabel(task)
-  const latestReview = getLatestReview(task)
 
   const taskDecisions = (decisionsQuery.data ?? []).filter((d) => d.taskRef === task.id)
   const kr = task.keyResultRef
@@ -216,13 +125,6 @@ export default function TaskDetail() {
         ? { suffix: `${Math.round(dec.confidence * 100)}%`, suffixColor: confidenceColor(dec.confidence) }
         : {}),
     })
-  }
-
-  const reviewTone: Record<string, { fg: string; bg: string; label: string }> = {
-    approved: { fg: 'var(--green)', bg: 'color-mix(in srgb, var(--green) 12%, transparent)', label: 'Approved' },
-    retry: { fg: 'var(--amber)', bg: 'color-mix(in srgb, var(--amber) 12%, transparent)', label: 'Retry Requested' },
-    failed: { fg: 'var(--red)', bg: 'color-mix(in srgb, var(--red) 10%, transparent)', label: 'Failed' },
-    fail: { fg: 'var(--red)', bg: 'color-mix(in srgb, var(--red) 10%, transparent)', label: 'Failed' },
   }
 
   return (
@@ -400,96 +302,10 @@ export default function TaskDetail() {
         </div>
 
         {/* Acceptance Criteria */}
-        {acTotal > 0 && (
-          <CollapsibleSection
-            storageKey="task-detail-ac"
-            defaultOpen
-            label={<>Acceptance Criteria <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>{acDone}/{acTotal}</span></>}
-            accent={acColor}
-          >
-            <ul className="m-0 p-0 list-none flex flex-col" style={{ borderTop: '1px solid var(--border)' }}>
-              {acceptanceCriteria.map((criterion, i) => {
-                const checked = criterion.satisfied
-                return (
-                  <li
-                    key={criterion.id || i}
-                    className="flex items-start gap-2"
-                    style={{
-                      paddingTop: '9px',
-                      paddingBottom: '9px',
-                      borderBottom: i < acceptanceCriteria.length - 1 ? '1px solid var(--border)' : 'none',
-                    }}
-                  >
-                    <span
-                      className="flex-shrink-0 flex items-center justify-center"
-                      style={{
-                        width: 13,
-                        height: 13,
-                        marginTop: 2,
-                        borderRadius: 3,
-                        border: checked ? 'none' : '1px solid var(--border-strong)',
-                        background: checked ? 'var(--green)' : 'transparent',
-                      }}
-                    >
-                      {checked && <span style={{ color: 'white', fontSize: '0.5rem', fontWeight: 700, lineHeight: 1 }}>✓</span>}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: '0.8125rem',
-                        lineHeight: 1.47,
-                        letterSpacing: '-0.08px',
-                        color: checked ? 'var(--text-3)' : 'var(--text-1)',
-                        textDecoration: checked ? 'line-through' : 'none',
-                      }}
-                    >
-                      {criterion.text}
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
-          </CollapsibleSection>
-        )}
+        <AcceptanceCriteriaList task={task} />
 
         {/* Latest Review */}
-        {latestReview && (() => {
-          const tone = reviewTone[latestReview.decision] ?? { fg: 'var(--text-1)', bg: 'var(--bg-elevated)', label: latestReview.decision }
-          return (
-            <CollapsibleSection storageKey="task-detail-review" defaultOpen label="Latest Review">
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span
-                    style={{
-                      fontSize: '0.625rem',
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      padding: '2px 8px',
-                      borderRadius: 980,
-                      color: tone.fg,
-                      background: tone.bg,
-                    }}
-                  >
-                    {tone.label}
-                  </span>
-                  {(latestReview.reviewerRole || latestReview.reviewedBy) && (
-                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>
-                      by {latestReview.reviewerRole || latestReview.reviewedBy}
-                    </span>
-                  )}
-                  {latestReview.reviewedAt && (
-                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-3)' }}>{formatRelative(latestReview.reviewedAt, { fallback: 'unknown' })}</span>
-                  )}
-                </div>
-                {latestReview.feedback && (
-                  <div className="md-prose" style={{ fontSize: '0.8125rem', lineHeight: 1.47, color: 'var(--text-2)', marginTop: 8 }}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{latestReview.feedback}</ReactMarkdown>
-                  </div>
-                )}
-              </div>
-            </CollapsibleSection>
-          )
-        })()}
+        <LatestReviewSection task={task} />
 
         {/* Related */}
         <RelatedList items={related} storageKey="task-detail-related" />
