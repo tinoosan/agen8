@@ -24,8 +24,8 @@ vi.mock('./pages/Dashboard', () => ({
   default: () => <div>Dashboard Page</div>,
 }))
 
-vi.mock('./pages/Metrics', () => ({
-  default: () => <div>Metrics Page</div>,
+vi.mock('./pages/Pulse', () => ({
+  default: () => <div>Pulse Page</div>,
 }))
 
 vi.mock('./pages/StrategyMap', () => ({
@@ -96,9 +96,20 @@ describe('App', () => {
     expect(await screen.findByText('Project Page')).toBeInTheDocument()
   })
 
-  it('renders the metrics page at the metrics route', async () => {
-    renderWithRouter('/project/myapp/metrics')
-    expect(await screen.findByText('Metrics Page')).toBeInTheDocument()
+  it('renders the pulse page at the pulse route', async () => {
+    renderWithRouter('/project/myapp/pulse')
+    expect(await screen.findByText('Pulse Page')).toBeInTheDocument()
+  })
+
+  it('redirects the legacy metrics and activity routes to pulse', async () => {
+    const metrics = renderWithRouter('/project/myapp/metrics')
+    expect(await screen.findByText('Pulse Page')).toBeInTheDocument()
+    expect(metrics.history.at(-1)).toBe('/project/myapp/pulse')
+    metrics.unmount()
+
+    const activity = renderWithRouter('/project/myapp/activity')
+    expect(await screen.findByText('Pulse Page')).toBeInTheDocument()
+    expect(activity.history.at(-1)).toBe('/project/myapp/pulse')
   })
 
   it('shows page crash fallback when a route component throws', async () => {

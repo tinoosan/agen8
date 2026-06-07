@@ -3,7 +3,7 @@ import { useProjects } from '../hooks/useProjects'
 import { useStore, type DefaultProjectView } from './store'
 import type { Project } from './types'
 
-export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy' | 'members' | 'activity' | 'metrics'
+export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy' | 'members' | 'pulse'
 export type DashboardPanel = 'missions' | 'decisions' | 'tasks'
 
 /* ── Route constants ──────────────────────────────── */
@@ -18,8 +18,7 @@ export const ROUTES = {
   DECISION_DETAIL: '/project/:projectId/decisions/:decisionId',
   STRATEGY_MAP: '/project/:projectId/strategy',
   MEMBERS: '/project/:projectId/members',
-  ACTIVITY: '/project/:projectId/activity',
-  METRICS: '/project/:projectId/metrics',
+  PULSE: '/project/:projectId/pulse',
 } as const
 
 /* ── Link helpers for cross-surface navigation (F26) ── */
@@ -90,12 +89,8 @@ export function membersLink(projectId: string): string {
   return `/project/${encodeURIComponent(projectId)}/members`
 }
 
-export function activityLink(projectId: string): string {
-  return `/project/${encodeURIComponent(projectId)}/activity`
-}
-
-export function metricsLink(projectId: string): string {
-  return `/project/${encodeURIComponent(projectId)}/metrics`
+export function pulseLink(projectId: string): string {
+  return `/project/${encodeURIComponent(projectId)}/pulse`
 }
 
 // Build a link to the strategy map, optionally focusing a specific node
@@ -166,10 +161,11 @@ function parseLocation(pathname: string): ParsedRoute {
     activeView = 'strategy'
   } else if (segments[2] === 'members') {
     activeView = 'members'
-  } else if (segments[2] === 'activity') {
-    activeView = 'activity'
-  } else if (segments[2] === 'metrics') {
-    activeView = 'metrics'
+  } else if (segments[2] === 'pulse' || segments[2] === 'activity' || segments[2] === 'metrics') {
+    // Pulse merges the former Activity and Metrics pages. The legacy segments
+    // still resolve to the pulse view so a deep link highlights the right nav
+    // item during the brief moment before App redirects it to /pulse.
+    activeView = 'pulse'
   }
 
   return { projectId, activeView }

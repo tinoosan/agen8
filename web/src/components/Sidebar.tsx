@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
 import {
-  BarChart3, Network, Plus, PanelLeft, Users, Activity, Gauge,
+  BarChart3, Network, Plus, PanelLeft, Users, Activity,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNavigation, dashboardLink } from '../lib/routing'
@@ -188,24 +188,13 @@ export default function Sidebar() {
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    isActive={activeView === 'activity'}
-                    onClick={() => setActiveView('activity')}
-                    className={cn(ROW_BASE, activeView === 'activity' ? ROW_ACTIVE : ROW_IDLE)}
+                    isActive={activeView === 'pulse'}
+                    onClick={() => setActiveView('pulse')}
+                    className={cn(ROW_BASE, activeView === 'pulse' ? ROW_ACTIVE : ROW_IDLE)}
                     style={ROW_STYLE}
                   >
                     <Activity size={15} className="shrink-0" />
-                    <span>Activity</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={activeView === 'metrics'}
-                    onClick={() => setActiveView('metrics')}
-                    className={cn(ROW_BASE, activeView === 'metrics' ? ROW_ACTIVE : ROW_IDLE)}
-                    style={ROW_STYLE}
-                  >
-                    <Gauge size={15} className="shrink-0" />
-                    <span>Metrics</span>
+                    <span>Pulse</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

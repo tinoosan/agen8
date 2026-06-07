@@ -26,8 +26,7 @@ const DecisionDetail = lazyWithRetry(() => import('./pages/DecisionDetail'), 'pa
 const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/StrategyMap')
 const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisions')
 const Members = lazyWithRetry(() => import('./pages/Members'), 'pages/Members')
-const Activity = lazyWithRetry(() => import('./pages/Activity'), 'pages/Activity')
-const Metrics = lazyWithRetry(() => import('./pages/Metrics'), 'pages/Metrics')
+const Pulse = lazyWithRetry(() => import('./pages/Pulse'), 'pages/Pulse')
 
 function MissionsRouteRedirect({ params }: { params: { projectId: string } }) {
   return <Redirect to={missionsPanelLink(params.projectId)} />
@@ -46,7 +45,7 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   decisions: 'Decision Log',
   strategy: 'Context Map',
   members: 'Members',
-  metrics: 'Metrics',
+  pulse: 'Pulse',
 }
 
 /** Mobile-only top bar: hamburger (opens the sidebar drawer) + app icon +
@@ -229,11 +228,14 @@ export default function App() {
                   <Route path="/project/:projectId/strategy">{(params) => <StrategyMap projectId={params.projectId} />}</Route>
                   <Route path="/project/:projectId/decisions" component={Decisions} />
                   <Route path="/project/:projectId/members" component={Members} />
-                  <Route path="/project/:projectId/activity" component={Activity} />
+                  <Route path="/project/:projectId/pulse" component={Pulse} />
+                  {/* Activity + Metrics were merged into Pulse; keep the old
+                      paths working by redirecting them. */}
+                  <Route path="/project/:projectId/activity">{(params) => <Redirect to={`/project/${params.projectId}/pulse`} />}</Route>
+                  <Route path="/project/:projectId/metrics">{(params) => <Redirect to={`/project/${params.projectId}/pulse`} />}</Route>
                   <Route path="/project/:projectId/builder">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/roles">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/dashboard" component={Dashboard} />
-                  <Route path="/project/:projectId/metrics" component={Metrics} />
                   <Route path="/project/:projectId" component={Dashboard} />
                   <Route path="/account" component={Account} />
                   <Route path="/credentials" component={Credentials} />
