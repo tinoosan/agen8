@@ -20,11 +20,11 @@
   <span class="eyebrow">Architecture · Runtime &amp; protocol</span>
   <h1>Real-time events over SSE</h1>
   <p class="lede">
-    Server-Sent Events are how agen8 pushes durable state changes to every open browser without polling. A domain change is published to the in-process bus, the daemon's <code>GET /events</code> stream fans it out to connected clients for the resolved project as a JSON-RPC notification, and the React app turns notification traffic into query invalidation. The core realtime path is live for pin events with project-scoped fan-out and authenticated SSE.
+    Server-Sent Events are how agen8 pushes durable state changes to every open browser without polling. A domain change is published to the in-process bus, the daemon's <code>GET /events</code> stream fans it out to connected clients for the resolved project as a JSON-RPC notification, and the React app turns notification traffic into query invalidation. The core realtime path is live for pin, task, mission, decision, space-member, and KR domains with project-scoped fan-out and authenticated SSE.
   </p>
 
   <div class="callout">
-    <strong>Status: live core.</strong> The in-process bus and browser client were already present; the backend bridge and pin-event fan-out are now implemented. Remaining work is documented in Section&nbsp;3 as additional domains to subscribe through the existing hub.
+    <strong>Status: expanded live core.</strong> The in-process bus, browser client, and hub bridge are live. Section&nbsp;3 now reflects the currently subscribed domains and any remaining backlog is tracked via KR-linked review tasks.
   </div>
 
   <nav class="toc" aria-label="On this page">
@@ -130,7 +130,7 @@
 
   <h2 id="state">3. Current state: live vs. pending</h2>
 
-  <p>The bridge and pin publisher are implemented. Remaining backlog is explicit in the scope row below.</p>
+  <p>The bridge and publishers are implemented and the daemon now fans events for task, mission, decision, member, and KR domains through one SSE path; remaining backlog is explicitly tracked in the linked KR.
 
   <table>
     <thead><tr><th>Piece</th><th>State</th><th>Where</th></tr></thead>
@@ -144,7 +144,7 @@
       <tr><td>Per-project fan-out hub (one subscription &rarr; N clients)</td><td>Live</td><td><code>internal/daemon/events_hub.go</code></td></tr>
       <tr><td>Stream authentication for <code>EventSource</code></td><td>Live</td><td><code>internal/daemon/daemon.go</code> + cookie write path in <code>web/src/lib/rpc.ts</code></td></tr>
       <tr><td>Pin events on the bus</td><td>Live</td><td><code>internal/services/pin/app/service.go</code></td></tr>
-      <tr><td>Additional event-domain subscriptions</td><td>Pending</td><td>hub currently subscribes only to <code>TopicPinLifecycle</code></td></tr>
+      <tr><td>Additional event-domain subscriptions</td><td>Live</td><td><code>internal/daemon/events_hub.go</code> subscribes to task, mission, decision, space-member, KR, and pin lifecycle topics</td></tr>
     </tbody>
   </table>
 
