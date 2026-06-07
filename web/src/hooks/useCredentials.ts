@@ -1,26 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-
-export type CredentialKind = 'ssh_agent' | 'ssh_key' | 'ssh_password' | 'api_key'
-export type CredentialStatus = 'active' | 'disabled' | 'invalid'
-export type CredentialFieldKind = 'public' | 'secret'
-
-export interface CredentialFieldView {
-  name: string
-  kind: CredentialFieldKind
-  configured: boolean
-}
-
-export interface CredentialView {
-  id: string
-  kind: CredentialKind
-  label: string
-  status: CredentialStatus
-  fields?: CredentialFieldView[]
-  createdAt?: string
-  updatedAt?: string
-}
+import type { CredentialKind, CredentialStatus, CredentialView } from '../lib/types'
 
 interface CredentialListResult {
   credentials: CredentialView[]

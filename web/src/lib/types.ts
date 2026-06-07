@@ -410,6 +410,19 @@ export interface KeyResultView {
   completedAt?: string;
 }
 
+// A single key-result progress sample, normalized for the UI (previous/new
+// values folded to a single `value`, progressPercent → `progress`). The
+// useProgressHistory hook maps the raw RPC shape onto this view.
+export interface ProgressEntryView {
+  id: string;
+  keyResultId: string;
+  value: number;
+  progress: number;
+  updatedBy: string;
+  note?: string;
+  createdAt: string;
+}
+
 // ── Context Link types (graph links API) ────────────
 
 export type ContextLinkEdgeType =
@@ -476,4 +489,26 @@ export interface DecisionStats {
   lowConfidence: number;
   unlinked: number;
   withInvalidationConditions: number;
+}
+
+// ── Credential types ───────────────────────────────────
+
+export type CredentialKind = "ssh_agent" | "ssh_key" | "ssh_password" | "api_key";
+export type CredentialStatus = "active" | "disabled" | "invalid";
+export type CredentialFieldKind = "public" | "secret";
+
+export interface CredentialFieldView {
+  name: string;
+  kind: CredentialFieldKind;
+  configured: boolean;
+}
+
+export interface CredentialView {
+  id: string;
+  kind: CredentialKind;
+  label: string;
+  status: CredentialStatus;
+  fields?: CredentialFieldView[];
+  createdAt?: string;
+  updatedAt?: string;
 }

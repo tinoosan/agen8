@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rpcCall, rpcUnwrap, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-import type { MissionView, KeyResultView, MissionStatus, KeyResultStatus } from '../lib/types'
+import type { MissionView, KeyResultView, MissionStatus, KeyResultStatus, ProgressEntryView } from '../lib/types'
 
 type CreateKeyResultInput = {
   missionId: string
@@ -259,16 +259,6 @@ export function useProjectKRs(projectId: string | null) {
 }
 
 /* ── Progress history ───────────────────────────────── */
-
-export interface ProgressEntryView {
-  id: string
-  keyResultId: string
-  value: number
-  progress: number
-  updatedBy: string
-  note?: string
-  createdAt: string
-}
 
 interface MissionProgressEntryRPCView {
   id: string

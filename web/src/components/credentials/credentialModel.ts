@@ -22,7 +22,7 @@
  * after reload — only the injection *mode* is recoverable, because the presence
  * of `headerName` / `paramName` in the returned field list encodes it exactly.
  */
-import type { CredentialFieldView } from '../../hooks/useCredentials'
+import type { CredentialFieldView } from '../../lib/types'
 
 export type InjectionMode = 'bearer' | 'header' | 'query'
 

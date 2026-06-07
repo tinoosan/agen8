@@ -16,7 +16,7 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
 import { InlineBanner, type BannerState } from '../fields'
-import type { CredentialStatus, CredentialView } from '../../hooks/useCredentials'
+import type { CredentialStatus, CredentialView } from '../../lib/types'
 import {
   type AuthDraft,
   type InjectionMode,

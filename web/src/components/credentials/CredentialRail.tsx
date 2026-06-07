@@ -7,7 +7,7 @@
 import { useMemo, useState } from 'react'
 import { Search, Plus, KeyRound } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { CredentialView } from '../../hooks/useCredentials'
+import type { CredentialView } from '../../lib/types'
 import { deriveInjection, INJECTION_META } from './credentialModel'
 import { formatRelative } from '@/lib/format'
 

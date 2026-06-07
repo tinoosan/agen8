@@ -1,5 +1,5 @@
 import { useProgressHistory } from '../../hooks/useMissions'
-import type { ProgressEntryView } from '../../hooks/useMissions'
+import type { ProgressEntryView } from '../../lib/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatRelative } from '@/lib/format'
 import { ChevronDown, ChevronRight } from 'lucide-react'
