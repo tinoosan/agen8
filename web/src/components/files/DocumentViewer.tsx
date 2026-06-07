@@ -16,6 +16,7 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { toast } from 'sonner'
+import { copyText } from '@/lib/utils'
 import type { ArtifactNode, ArtifactGetResult } from '../../lib/types'
 import { basename, displayVirtualPathPart, downloadBlob, formatBytes } from './filePreviewUtils'
 import { rpcCall } from '../../lib/rpc'
@@ -156,7 +157,7 @@ td,th{border:1px solid #ddd;padding:8px}th{background:#f5f5f5}blockquote{border-
     const src = isEditing ? editContent : content
     if (!src) return
     try {
-      await navigator.clipboard.writeText(src)
+      await copyText(src)
       toast.success('File content copied')
     } catch (err) {
       toast.error(`Copy failed: ${err instanceof Error ? err.message : String(err)}`)

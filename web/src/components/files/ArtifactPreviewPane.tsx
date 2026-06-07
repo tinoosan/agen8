@@ -6,7 +6,7 @@ import type { ArtifactGetResult, ArtifactNode } from '../../lib/types'
 import CodeView from './CodeView'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { cn } from '@/lib/utils'
+import { cn, copyText } from '@/lib/utils'
 import { basename, decodeBase64, downloadBlob, formatBytes, getFileExt, isMarkdownFile, isSvgFile } from './filePreviewUtils'
 
 type Variant = 'page' | 'slideover'
@@ -84,7 +84,7 @@ export default function ArtifactPreviewPane({
 
   function handleCopy() {
     if (!isText || !content) return
-    void navigator.clipboard.writeText(content)
+    void copyText(content)
   }
 
   const isCompact = variant === 'slideover'

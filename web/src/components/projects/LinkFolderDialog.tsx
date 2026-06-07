@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Check, Copy, FolderDown, KeyRound, Link, TriangleAlert } from 'lucide-react'
 import type { Project } from '../../lib/types'
 import { projectDisplayName } from '../../lib/spaceHelpers'
+import { copyText } from '../../lib/utils'
 import { createLinkToken, type LinkTokenResult } from '../../lib/projectClient'
 import {
   buildMarkerFiles, MARKER_DIR, supportsDirectoryPicker, writeMarkerToDirectory, type MarkerFile,
@@ -11,13 +12,6 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-
-async function copyText(text: string): Promise<void> {
-  if (typeof navigator === 'undefined' || !navigator.clipboard) {
-    throw new Error('Clipboard is unavailable in this browser')
-  }
-  await navigator.clipboard.writeText(text)
-}
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false)

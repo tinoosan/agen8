@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { cn } from '@/lib/utils'
+import { cn, copyText } from '@/lib/utils'
 
 /* Each theme tile renders a real miniature of the palette so the choice is
    visible before it's applied. Colors are pinned literals (not live tokens)
@@ -275,7 +275,7 @@ export function AccountSecuritySection() {
 export function AccountSkillSection() {
   async function copyCommand(command: string) {
     try {
-      await navigator.clipboard.writeText(command)
+      await copyText(command)
       toast.success('Command copied')
     } catch {
       toast.error('Copy failed')
