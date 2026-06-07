@@ -97,7 +97,7 @@ export function useUpdateMission() {
   return useMutation<
     { mission: MissionView },
     Error,
-    { missionId: string; title?: string; description?: string; status?: MissionStatus }
+    { missionId: string; title?: string; description?: string; status?: MissionStatus; startDate?: string; endDate?: string }
   >({
     mutationFn: (params) => rpcCall<{ mission: MissionView }>('mission.update', params),
     onSuccess: () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -10,6 +11,8 @@ const mockUseKeyResults = vi.fn()
 const mockUseProjectTasks = vi.fn()
 const mockUseRecentDecisions = vi.fn()
 const mockMutation = { mutateAsync: vi.fn(), isPending: false }
+const mockUpdateMission = { mutateAsync: vi.fn(), isPending: false }
+const mockDeleteMission = { mutateAsync: vi.fn(), isPending: false }
 
 vi.mock('../lib/rpc', () => ({
   rpcCall: (...args: unknown[]) => mockRpcCall(...args),
@@ -28,6 +31,8 @@ vi.mock('../hooks/useMissions', () => ({
   useUpdateKeyResult: () => mockMutation,
   useUpdateKRProgress: () => mockMutation,
   useDeleteKeyResult: () => mockMutation,
+  useUpdateMission: () => mockUpdateMission,
+  useDeleteMission: () => mockDeleteMission,
 }))
 
 vi.mock('../hooks/useProjectTasks', () => ({
@@ -91,6 +96,8 @@ function renderDetail(path = '/project/proj-1/missions/mission-1') {
 describe('MissionDetail page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockUpdateMission.mutateAsync.mockResolvedValue({ mission: MISSION })
+    mockDeleteMission.mutateAsync.mockResolvedValue({ mission: MISSION })
     mockRpcCall.mockResolvedValue({ mission: MISSION })
     mockUseKeyResults.mockReturnValue({ data: KEY_RESULTS, isLoading: false, isError: false, error: null })
     mockUseProjectTasks.mockReturnValue({
@@ -128,5 +135,53 @@ describe('MissionDetail page', () => {
 
     expect(screen.queryByText('Unrelated cleanup')).not.toBeInTheDocument()
     expect(screen.queryByText('Unrelated decision')).not.toBeInTheDocument()
+  })
+
+  it('opens the edit dialog and saves through mission.update', async () => {
+    const user = userEvent.setup()
+    renderDetail()
+
+    await screen.findByRole('heading', { name: 'Stabilize public baseline' })
+
+    const actions = screen.getByRole('group', { name: /mission actions/i })
+    await user.click(within(actions).getByRole('button', { name: /^edit$/i }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Edit mission')).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateMission.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ missionId: 'mission-1', title: 'Stabilize public baseline' }),
+      )
+    })
+  })
+
+  it('deletes the mission through a confirm dialog wired to mission.delete', async () => {
+    const user = userEvent.setup()
+    renderDetail()
+
+    await screen.findByRole('heading', { name: 'Stabilize public baseline' })
+
+    // The header trigger opens the confirm; the destructive action lives inside it.
+    const actions = screen.getByRole('group', { name: /mission actions/i })
+    await user.click(within(actions).getByRole('button', { name: /^delete$/i }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: /^delete$/i }))
+
+    await waitFor(() => {
+      expect(mockDeleteMission.mutateAsync).toHaveBeenCalledWith({ missionId: 'mission-1' })
+    })
+  })
+
+  it('exposes lifecycle transitions for an active mission', async () => {
+    renderDetail()
+
+    await screen.findByRole('heading', { name: 'Stabilize public baseline' })
+
+    // Active missions can be paused or completed; those controls must be reachable.
+    expect(screen.getByRole('button', { name: /pause/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /complete/i })).toBeInTheDocument()
   })
 })

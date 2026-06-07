@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useRoute, Link } from 'wouter'
+import { useRoute, useLocation, Link } from 'wouter'
+import { toast } from 'sonner'
 import { rpcUnwrap } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-import { useKeyResults } from '../hooks/useMissions'
+import { useKeyResults, useUpdateMission, useDeleteMission } from '../hooks/useMissions'
 import { useProjectTasks } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
 import { entityDisplayTitle } from '../lib/displaySanitizers'
@@ -13,12 +14,26 @@ import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
 import { RelatedList } from '../components/detail/RelatedList'
 import { KRRow } from '../components/mission/KRRow'
+import MissionLifecycleActions from '../components/mission/MissionLifecycleActions'
+import EditMissionDialog from '../components/mission/EditMissionDialog'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { formatDate } from '@/lib/format'
 import { confidenceColor } from '@/lib/decisionDisplay'
-import { Calendar, ChevronsUpDown } from 'lucide-react'
-import type { MissionView } from '../lib/types'
+import { Calendar, ChevronsUpDown, Pencil, Trash2 } from 'lucide-react'
+import type { MissionView, MissionStatus } from '../lib/types'
 
 /* ── Status helper ──────────────────────────────────────── */
 
@@ -58,6 +73,10 @@ export default function MissionDetail() {
   const projectId  = params?.projectId  ? decodeURIComponent(params.projectId)  : null
   const missionId  = params?.missionId  ? decodeURIComponent(params.missionId)  : null
   const [expandedKrIds, setExpandedKrIds] = useState<Record<string, boolean>>({})
+  const [editOpen, setEditOpen] = useState(false)
+  const [, navigate] = useLocation()
+  const updateMission = useUpdateMission()
+  const deleteMission = useDeleteMission()
 
   const { data: mission, isLoading: missionLoading, isError: missionError, error: missionErr } =
     useQuery<MissionView>({
@@ -126,6 +145,31 @@ export default function MissionDetail() {
     })
   }
 
+  // Capture the post-guard narrowed values. The handlers below are closures, and
+  // TS won't carry the `if (!mission)` / `if (!projectId)` narrowing into them,
+  // so bind concrete consts here.
+  const missionId_ = mission.id
+  const projectIdValue = projectId
+
+  async function handleStatusChange(status: MissionStatus) {
+    try {
+      await updateMission.mutateAsync({ missionId: missionId_, status })
+      toast.success(`Mission ${status === 'active' ? 'activated' : status}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update mission status')
+    }
+  }
+
+  async function handleDelete() {
+    try {
+      await deleteMission.mutateAsync({ missionId: missionId_ })
+      toast.success('Mission deleted')
+      navigate(missionsPanelLink(projectIdValue))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete mission')
+    }
+  }
+
   const statusBadge = missionStatusBadge(mission.status)
   const overallProgress = keyResults && keyResults.length > 0
     ? keyResults.reduce((sum, kr) => sum + kr.progressPercent, 0) / keyResults.length
@@ -179,7 +223,51 @@ export default function MissionDetail() {
             )}
           </div>
 
+          {/* Mission actions — lifecycle + edit + delete. flex-wrap keeps the row
+              from overflowing the header at mobile/iPad widths (no viewport
+              breakpoints needed; wrapping is intrinsic). */}
+          <div role="group" aria-label="Mission actions" className="flex flex-wrap items-center gap-2 mt-3.5 ml-[18px]">
+            {mission.status !== 'archived' && (
+              <MissionLifecycleActions
+                mission={mission}
+                onStatusChange={handleStatusChange}
+                isPending={updateMission.isPending}
+              />
+            )}
+            <Button size="sm" variant="secondary" onClick={() => setEditOpen(true)}>
+              <Pencil size={12} className="mr-1" />
+              Edit
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="ghost" className="text-[var(--red)] hover:text-[var(--red)]">
+                  <Trash2 size={12} className="mr-1" />
+                  Delete
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete mission</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This archives "{mission.title}" and removes it from your active missions.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {deleteMission.isPending ? 'Deleting…' : 'Delete'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+
       </DetailHeader>
+
+      <EditMissionDialog mission={mission} open={editOpen} onOpenChange={setEditOpen} />
 
       {/* Scrollable KR list */}
       <div className="px-6 py-5 max-w-4xl mx-auto w-full">

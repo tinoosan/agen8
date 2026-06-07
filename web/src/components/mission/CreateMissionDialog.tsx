@@ -171,7 +171,7 @@ export default function CreateMissionDialog({ projectId, open, onOpenChange }: C
   )
 }
 
-function MissionDateField({
+export function MissionDateField({
   id,
   label,
   value,
