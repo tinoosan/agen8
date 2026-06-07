@@ -1,10 +1,13 @@
 import { type ReactNode } from 'react'
-import { Clock, Hash, AlertTriangle } from 'lucide-react'
+import { Clock, Hash, AlertTriangle, ExternalLink } from 'lucide-react'
+import { useLocation } from 'wouter'
 import { PanelHeader } from './PanelHeader'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useResizableSummary } from './useResizableSummary'
 import { RelatedSection } from './RelatedSection'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { taskDetailLink } from '../../lib/routing'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { taskStatusLabel, taskStatusColor } from '../../lib/statusLabels'
@@ -35,6 +38,7 @@ const SUMMARY_DEFAULT = 200
 export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
   const d = data as TaskNodeData
   const { task } = d
+  const [, navigate] = useLocation()
   const { height: summaryHeight, onResizeStart: handleResizeStart } = useResizableSummary(
     'task-panel-summary-height',
     { min: SUMMARY_MIN, max: SUMMARY_MAX, defaultHeight: SUMMARY_DEFAULT },
@@ -411,6 +415,27 @@ export function TaskPanel({ data, projectId, onClose }: NodePanelProps) {
           </CollapsibleSection>
         )}
 
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: '12px 16px', background: 'var(--bg-panel)', borderTop: '1px solid var(--border)' }}>
+        <Button
+          variant="outline"
+          className="w-full gap-2"
+          style={{
+            fontFamily: PANEL_FONT,
+            fontSize: '0.875rem',
+            fontWeight: 400,
+            lineHeight: 1.43,
+            letterSpacing: '-0.224px',
+            color: 'var(--apple-link)',
+            borderColor: 'var(--apple-link)',
+          }}
+          onClick={() => navigate(taskDetailLink(projectId, task.id))}
+        >
+          <ExternalLink size={12} />
+          Open Task Detail
+        </Button>
       </div>
     </div>
   )

@@ -1,4 +1,6 @@
 import type { CSSProperties } from 'react'
+import { ExternalLink } from 'lucide-react'
+import { useLocation } from 'wouter'
 import { PanelHeader } from './PanelHeader'
 import { RelatedSection } from './RelatedSection'
 import ReactMarkdown from 'react-markdown'
@@ -10,6 +12,8 @@ import { useProjectTasks } from '../../hooks/useProjectTasks'
 import type { NodePanelProps } from './types'
 import { decisionActorDisplay } from '../../lib/decisionDisplay'
 import { entityDisplayTitle } from '../../lib/displaySanitizers'
+import { decisionDetailLink } from '../../lib/routing'
+import { Button } from '@/components/ui/button'
 import { PANEL_FONT } from './panelTypography'
 
 const SOURCE_DOT: Record<DecisionSource, string> = {
@@ -44,6 +48,7 @@ function formatTimestamp(iso: string): string {
 export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
   const d = data as DecisionNodeData
   const { decision } = d
+  const [, navigate] = useLocation()
 
   // Fetch titles for related entities
   const tasksQuery = useProjectTasks(projectId)
@@ -273,6 +278,24 @@ export function DecisionPanel({ data, projectId, onClose }: NodePanelProps) {
         >
           {formatTimestamp(decision.createdAt)}
         </p>
+        <Button
+          variant="outline"
+          className="w-full gap-2"
+          style={{
+            marginTop: '12px',
+            fontFamily: PANEL_FONT,
+            fontSize: '0.875rem',
+            fontWeight: 400,
+            lineHeight: 1.43,
+            letterSpacing: '-0.224px',
+            color: 'var(--apple-link)',
+            borderColor: 'var(--apple-link)',
+          }}
+          onClick={() => navigate(decisionDetailLink(projectId, decision.id))}
+        >
+          <ExternalLink size={12} />
+          Open Decision Detail
+        </Button>
       </div>
     </div>
   )
