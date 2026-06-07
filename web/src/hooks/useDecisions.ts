@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall, rpcUnwrap, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-import type { DecisionView, DecisionSource, DecisionStats } from '../lib/types'
+import type { DecisionView, DecisionSource, DecisionStats, RpcList } from '../lib/types'
 
 export interface DecisionListFilter {
   source?: DecisionSource
@@ -103,7 +103,7 @@ export function useDecisionLog(projectId: string | null, filter: DecisionLogFilt
       const baseParams = applyDecisionContentFilters({ projectId: projectId ?? '', sort }, filter)
 
       const [listRes, countRes] = await Promise.all([
-        rpcCall<{ decisions: DecisionView[] }>('decision.list', {
+        rpcCall<RpcList<'decisions', DecisionView>>('decision.list', {
           ...baseParams,
           limit: filter.pageSize,
           offset,

@@ -1,11 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-import type { CredentialKind, CredentialStatus, CredentialView } from '../lib/types'
-
-interface CredentialListResult {
-  credentials: CredentialView[]
-}
+import type { CredentialKind, CredentialStatus, CredentialView, RpcList } from '../lib/types'
 
 interface CredentialResult {
   credential: CredentialView
@@ -39,7 +35,7 @@ export function useCredentials(params: CredentialListParams = {}) {
   return useQuery<CredentialView[]>({
     queryKey: qk.credentials(params),
     queryFn: async () => {
-      const result = await rpcCall<CredentialListResult>('credential.list', params)
+      const result = await rpcCall<RpcList<'credentials', CredentialView>>('credential.list', params)
       return result.credentials ?? []
     },
     refetchInterval: 5000,

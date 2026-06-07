@@ -2,19 +2,14 @@ import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rpcCall, onNotification } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-import type { Task, AcceptanceCriterion } from '../lib/types'
+import type { Task, AcceptanceCriterion, RpcList } from '../lib/types'
 import { normalizeTaskMembers } from '../lib/taskMembers'
-
-interface TaskListResult {
-  tasks: Task[]
-  totalCount?: number
-}
 
 export function useProjectTasks(projectId: string | null) {
   return useQuery<Task[]>({
     queryKey: qk.tasksBoard(projectId),
     queryFn: async () => {
-      const result = await rpcCall<TaskListResult>('task.list', {
+      const result = await rpcCall<RpcList<'tasks', Task> & { totalCount?: number }>('task.list', {
         projectId,
         limit: 500,
         sortBy: 'updated_at',

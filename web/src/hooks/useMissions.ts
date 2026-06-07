@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rpcCall, rpcUnwrap, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-import type { MissionView, KeyResultView, MissionStatus, KeyResultStatus, ProgressEntryView } from '../lib/types'
+import type { MissionView, KeyResultView, MissionStatus, KeyResultStatus, ProgressEntryView, RpcList } from '../lib/types'
 
 type CreateKeyResultInput = {
   missionId: string
@@ -275,7 +275,7 @@ export function useProgressHistory(keyResultId: string | null) {
   return useQuery<ProgressEntryView[]>({
     queryKey: qk.keyResultProgressHistory(keyResultId),
     queryFn: async () => {
-      const res = await rpcCall<{ entries: MissionProgressEntryRPCView[] }>(
+      const res = await rpcCall<RpcList<'entries', MissionProgressEntryRPCView>>(
         'mission.kr.progressHistory',
         { keyResultId: keyResultId ?? '' },
       )

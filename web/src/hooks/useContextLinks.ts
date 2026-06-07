@@ -2,11 +2,7 @@ import { useMemo } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
-import type { ContextLink } from '../lib/types'
-
-interface GraphLinksResult {
-  contextLinks: ContextLink[]
-}
+import type { ContextLink, RpcList } from '../lib/types'
 
 export interface ContextLinkEntity {
   entityType: string
@@ -47,7 +43,7 @@ export function useContextLinks(
     queries: targetQueries.map(({ method, params, key }) => ({
       queryKey: key,
       queryFn: async (): Promise<ContextLink[]> => {
-        const res = await rpcCall<GraphLinksResult>(method, params)
+        const res = await rpcCall<RpcList<'contextLinks', ContextLink>>(method, params)
         return res.contextLinks ?? []
       },
       enabled: Object.values(params).every(v => !!v),

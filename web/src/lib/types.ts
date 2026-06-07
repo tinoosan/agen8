@@ -1,5 +1,11 @@
 // Mirrors the Go protocol types used by the web UI.
 
+// Generic RPC list envelope: a response that carries a single named array
+// field, e.g. RpcList<'tasks', Task> === { tasks: Task[] }. Replaces the
+// per-hook one-off result interfaces (TaskListResult, CredentialListResult,
+// …) so every "{ <field>: T[] }" RPC shape is described one way.
+export type RpcList<K extends string, T> = { [P in K]: T[] };
+
 export interface Project {
   id: string;
   locationId: string;
