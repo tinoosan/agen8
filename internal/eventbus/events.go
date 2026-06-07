@@ -12,6 +12,7 @@ const (
 	TopicKRProgress           = "kr.progress"
 	TopicDecisionLogged       = "decision.logged"
 	TopicMissionLifecycle     = "mission.lifecycle"
+	TopicPinLifecycle         = "pin.lifecycle"
 )
 
 const (
@@ -103,4 +104,18 @@ type DecisionLoggedEvent struct {
 	MissionRef   string    `json:"missionRef,omitempty"`
 	TaskRef      string    `json:"taskRef,omitempty"`
 	Timestamp    time.Time `json:"timestamp"`
+}
+
+const (
+	PinEventAdded   = "pin.added"
+	PinEventRemoved = "pin.removed"
+)
+
+// PinLifecycleEvent is emitted when a project graph node is pinned or unpinned.
+type PinLifecycleEvent struct {
+	ProjectID string    `json:"projectId"`
+	NodeRef   string    `json:"nodeRef"`
+	NodeType  string    `json:"nodeType,omitempty"`
+	EventType string    `json:"eventType"`
+	Timestamp time.Time `json:"timestamp"`
 }

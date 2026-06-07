@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -85,6 +86,94 @@ func TestHealthzIncludesBuildInfo(t *testing.T) {
 	}
 	if !body.OK || body.Version != "v0.1.0" || body.Commit != "abc1234" || body.BuildDate != "2026-06-05T19:30:00Z" {
 		t.Fatalf("healthz body=%+v", body)
+	}
+}
+
+func TestEventsStreamsPinChangesToMatchingProjectClients(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	sessionToken := setupSessionForEventsTest(t, handler)
+	projectA := createProjectForLinkTokenTest(t, handler, sessionToken, t.TempDir())
+	projectB := createProjectForLinkTokenTest(t, handler, sessionToken, t.TempDir())
+
+	hubCtx, cancelHub := context.WithCancel(context.Background())
+	t.Cleanup(cancelHub)
+	go func() {
+		if err := d.events.Run(hubCtx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Errorf("events hub: %v", err)
+		}
+	}()
+	select {
+	case <-d.events.Running():
+	case <-time.After(2 * time.Second):
+		t.Fatal("events hub did not become ready")
+	}
+
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	clientA1 := openEventsClient(t, server.URL, sessionToken, projectA)
+	defer clientA1.res.Body.Close()
+	clientA2 := openEventsClient(t, server.URL, sessionToken, projectA)
+	defer clientA2.res.Body.Close()
+	clientB := openEventsClient(t, server.URL, sessionToken, projectB)
+	defer clientB.res.Body.Close()
+
+	pinBody := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":9,"method":"pin.add","params":{"projectId":%q,"nodeRef":"task-live","nodeType":"task"}}`, projectA))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/rpc", bytes.NewReader(pinBody))
+	if err != nil {
+		t.Fatalf("build pin request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sessionToken)
+	pinRes, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("pin.add request: %v", err)
+	}
+	defer pinRes.Body.Close()
+	if pinRes.StatusCode != http.StatusOK {
+		t.Fatalf("pin.add status=%d", pinRes.StatusCode)
+	}
+
+	for name, stream := range map[string]*eventsTestClient{"project A client 1": clientA1, "project A client 2": clientA2} {
+		event := readSSEData(t, stream.reader, 2*time.Second)
+		if !strings.Contains(event, `"method":"event.append"`) {
+			t.Fatalf("%s event=%s missing event.append", name, event)
+		}
+		if !strings.Contains(event, `"projectId":"`+projectA+`"`) {
+			t.Fatalf("%s event=%s missing project A", name, event)
+		}
+		if !strings.Contains(event, `"type":"pin.added"`) {
+			t.Fatalf("%s event=%s missing pin.added", name, event)
+		}
+	}
+	if event := readSSEDataOptional(clientB.reader, 150*time.Millisecond); event != "" {
+		t.Fatalf("project B unexpectedly received event: %s", event)
+	}
+}
+
+func TestEventsRequireSessionCookie(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/events?projectId=proj-1", nil)
+	rec := httptest.NewRecorder()
+	d.handleEvents(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -301,6 +390,96 @@ func createProjectForLinkTokenTest(t *testing.T, handler http.Handler, sessionTo
 		t.Fatalf("project.create missing project id: %s", rec.Body.String())
 	}
 	return resp.Result.Project.ID
+}
+
+func setupSessionForEventsTest(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("Accept", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setupResult struct {
+		Session struct {
+			Token string `json:"token"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	if setupResult.Session.Token == "" {
+		t.Fatal("setup response missing session token")
+	}
+	return setupResult.Session.Token
+}
+
+type eventsTestClient struct {
+	res    *http.Response
+	reader *bufio.Reader
+}
+
+func openEventsClient(t *testing.T, baseURL, sessionToken, projectID string) *eventsTestClient {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/events?projectId="+url.QueryEscape(projectID), nil)
+	if err != nil {
+		t.Fatalf("build events request: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken, Path: "/"})
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open events stream: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		defer res.Body.Close()
+		t.Fatalf("events status=%d", res.StatusCode)
+	}
+	reader := bufio.NewReader(res.Body)
+	if line, err := reader.ReadString('\n'); err != nil || !strings.HasPrefix(line, ": connected") {
+		res.Body.Close()
+		t.Fatalf("events initial line=%q err=%v", line, err)
+	}
+	if line, err := reader.ReadString('\n'); err != nil || strings.TrimSpace(line) != "" {
+		res.Body.Close()
+		t.Fatalf("events initial separator=%q err=%v", line, err)
+	}
+	return &eventsTestClient{res: res, reader: reader}
+}
+
+func readSSEData(t *testing.T, reader *bufio.Reader, timeout time.Duration) string {
+	t.Helper()
+	event := readSSEDataOptional(reader, timeout)
+	if event == "" {
+		t.Fatalf("timed out waiting for SSE data")
+	}
+	return event
+}
+
+func readSSEDataOptional(reader *bufio.Reader, timeout time.Duration) string {
+	ch := make(chan string, 1)
+	go func() {
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				ch <- ""
+				return
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if strings.HasPrefix(line, "data: ") {
+				ch <- strings.TrimPrefix(line, "data: ")
+				return
+			}
+		}
+	}()
+	select {
+	case event := <-ch:
+		return event
+	case <-time.After(timeout):
+		return ""
+	}
 }
 
 func createProjectLinkTokenForTest(t *testing.T, handler http.Handler, sessionToken string, projectID string) string {

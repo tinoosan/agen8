@@ -262,7 +262,7 @@ func NewApplication(cfg Config) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build pin repository: %w", err)
 	}
-	pinSvc, err := pinapp.NewService(pinapp.Config{Pins: pinRepo})
+	pinSvc, err := pinapp.NewService(pinapp.Config{Pins: pinRepo, Events: bus})
 	if err != nil {
 		return nil, fmt.Errorf("build pin service: %w", err)
 	}
@@ -404,6 +404,8 @@ type pinNodeRefReader struct {
 }
 
 func (r pinNodeRefReader) PinnedNodeRefs(ctx context.Context, projectID string) (map[string]struct{}, error) {
+	// The graph service treats an unset pin service as "no pinned refs" so queries
+	// remain available even during partial startup or degraded pin wiring.
 	if r.pins == nil {
 		return nil, nil
 	}

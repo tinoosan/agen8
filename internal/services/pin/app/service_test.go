@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
 	pindomain "github.com/tinoosan/agen8-mcp-server/internal/services/pin/domain"
 )
 
@@ -55,6 +57,20 @@ type fixedClock struct{ t time.Time }
 
 func (c fixedClock) Now() time.Time { return c.t }
 
+type publishedEvent struct {
+	topic string
+	event any
+}
+
+type fakeEvents struct {
+	events []publishedEvent
+}
+
+func (f *fakeEvents) Publish(topic string, event any) error {
+	f.events = append(f.events, publishedEvent{topic: topic, event: event})
+	return nil
+}
+
 func newServiceForTest(t *testing.T, repo pindomain.Repository, clock Clock) *Service {
 	t.Helper()
 	svc, err := NewService(Config{Pins: repo, Clock: clock})
@@ -98,6 +114,68 @@ func TestService_UnpinMissingReturnsNotFound(t *testing.T) {
 	svc := newServiceForTest(t, newFakeRepo(), fixedClock{t: time.Now()})
 	if err := svc.Unpin(ctx, "p", "missing"); err != pindomain.ErrNotFound {
 		t.Fatalf("Unpin missing = %v, want ErrNotFound", err)
+	}
+}
+
+func TestService_PinPublishesLifecycleEvent(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 7, 9, 30, 0, 0, time.UTC)
+	events := &fakeEvents{}
+	svc, err := NewService(Config{Pins: newFakeRepo(), Clock: fixedClock{t: now}, Events: events})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if _, err := svc.Pin(ctx, " proj-1 ", " mission-1 ", " mission "); err != nil {
+		t.Fatalf("Pin: %v", err)
+	}
+
+	want := []publishedEvent{{
+		topic: eventbus.TopicPinLifecycle,
+		event: eventbus.PinLifecycleEvent{
+			ProjectID: "proj-1",
+			NodeRef:   "mission-1",
+			NodeType:  "mission",
+			EventType: eventbus.PinEventAdded,
+			Timestamp: now,
+		},
+	}}
+	if !reflect.DeepEqual(events.events, want) {
+		t.Fatalf("events=%#v want %#v", events.events, want)
+	}
+}
+
+func TestService_UnpinPublishesLifecycleEvent(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 7, 9, 45, 0, 0, time.UTC)
+	repo := newFakeRepo()
+	repo.pins[key("proj-1", "task-1")] = pindomain.Pin{
+		ProjectID: "proj-1",
+		NodeRef:   "task-1",
+		NodeType:  "task",
+		CreatedAt: now,
+	}
+	events := &fakeEvents{}
+	svc, err := NewService(Config{Pins: repo, Clock: fixedClock{t: now}, Events: events})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if err := svc.Unpin(ctx, " proj-1 ", " task-1 "); err != nil {
+		t.Fatalf("Unpin: %v", err)
+	}
+
+	want := []publishedEvent{{
+		topic: eventbus.TopicPinLifecycle,
+		event: eventbus.PinLifecycleEvent{
+			ProjectID: "proj-1",
+			NodeRef:   "task-1",
+			EventType: eventbus.PinEventRemoved,
+			Timestamp: now,
+		},
+	}}
+	if !reflect.DeepEqual(events.events, want) {
+		t.Fatalf("events=%#v want %#v", events.events, want)
 	}
 }
 

@@ -29,11 +29,14 @@ const handlers = new Map<string, NotificationHandler[]>()
 let eventSource: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 export const AUTH_TOKEN_STORAGE_KEY = 'agen8.sessionToken'
+const AUTH_TOKEN_COOKIE_NAME = 'agen8.sessionToken'
 
 export function getStoredSessionToken(): string {
   if (typeof window === 'undefined') return ''
   try {
-    return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)?.trim() ?? ''
+    const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)?.trim() ?? ''
+    if (token) writeSessionCookie(token)
+    return token
   } catch {
     return ''
   }
@@ -45,9 +48,11 @@ export function setStoredSessionToken(token: string) {
   try {
     if (trimmed) {
       window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, trimmed)
+      writeSessionCookie(trimmed)
       return
     }
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    clearSessionCookie()
   } catch {
     // Blocked storage means the browser cannot persist the session token.
   }
@@ -57,9 +62,20 @@ export function clearStoredSessionToken() {
   if (typeof window === 'undefined') return
   try {
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    clearSessionCookie()
   } catch {
     // Ignore blocked storage while removing the legacy bearer-token cache.
   }
+}
+
+function writeSessionCookie(token: string) {
+  if (typeof document === 'undefined') return
+  document.cookie = `${AUTH_TOKEN_COOKIE_NAME}=${encodeURIComponent(token)}; path=/; SameSite=Lax`
+}
+
+function clearSessionCookie() {
+  if (typeof document === 'undefined') return
+  document.cookie = `${AUTH_TOKEN_COOKIE_NAME}=; path=/; max-age=0; SameSite=Lax`
 }
 
 // ---- Request / Response ------------------------------------------------

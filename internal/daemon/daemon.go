@@ -38,6 +38,7 @@ type Daemon struct {
 	rpc       *rpc.Server
 	mcpTokens *mcp.TokenStore
 	mcp       *mcp.Server
+	events    *eventsHub
 	logger    *slog.Logger
 }
 
@@ -93,6 +94,7 @@ func New(cfg Config) (*Daemon, error) {
 		rpc:       rpcServer,
 		mcpTokens: tokenStore,
 		mcp:       mcpServer,
+		events:    newEventsHub(application.EventBus, logger.With("service", "events")),
 		logger:    logger.With("service", "daemon"),
 	}
 	mcpServer.SetSessionResolver(d.resolveMCPSession)
@@ -116,6 +118,11 @@ func (d *Daemon) serveHTTP(ctx context.Context, ln net.Listener) error {
 		return err
 	}
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := d.events.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && ctx.Err() == nil {
+			d.logger.Error("events hub stopped", "error", err)
+		}
+	}()
 	if d.cfg.Out != nil {
 		if d.setupAvailable(ctx) {
 			fmt.Fprintf(d.cfg.Out, "agen8 setup: http://%s/setup?token=%s\n", ln.Addr().String(), d.cfg.SetupToken)
@@ -224,15 +231,53 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	flusher, _ := w.(http.Flusher)
-	_, _ = io.WriteString(w, ": connected\n\n")
-	if flusher != nil {
-		flusher.Flush()
+	if d.events == nil {
+		http.Error(w, "events unavailable", http.StatusServiceUnavailable)
+		return
 	}
-	<-r.Context().Done()
+	if _, err := d.httpIdentityFromSessionCookie(r.Context(), r); err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	projectID := eventProjectID(r)
+	if projectID == "" {
+		http.Error(w, "projectId is required", http.StatusBadRequest)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	events, unregister := d.events.Register(projectID)
+	defer unregister()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	_, _ = io.WriteString(w, ": connected\n\n")
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			_, _ = io.WriteString(w, ": heartbeat\n\n")
+			flusher.Flush()
+		case payload, ok := <-events:
+			if !ok {
+				return
+			}
+			_, _ = w.Write([]byte("data: "))
+			_, _ = w.Write(payload)
+			_, _ = w.Write([]byte("\n\n"))
+			flusher.Flush()
+		}
+	}
 }
 
 func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
@@ -439,6 +484,42 @@ func (d *Daemon) httpIdentity(ctx context.Context, authorization string) (rpc.Id
 		role = string(user.Role)
 	}
 	return rpc.Identity{UserID: user.ID.String(), Role: role}, nil
+}
+
+const sessionCookieName = "agen8.sessionToken"
+
+func (d *Daemon) httpIdentityFromSessionCookie(ctx context.Context, r *http.Request) (rpc.Identity, error) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return rpc.Identity{}, fmt.Errorf("session cookie is required")
+	}
+	token := strings.TrimSpace(cookie.Value)
+	if token == "" {
+		return rpc.Identity{}, fmt.Errorf("session cookie is empty")
+	}
+	return d.httpIdentity(ctx, "Bearer "+token)
+}
+
+func eventProjectID(r *http.Request) string {
+	projectID := strings.TrimSpace(r.URL.Query().Get("projectId"))
+	if projectID != "" {
+		return projectID
+	}
+	ref := strings.TrimSpace(r.Header.Get("Referer"))
+	if ref == "" {
+		return ""
+	}
+	u, err := url.Parse(ref)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := 0; i+1 < len(parts); i++ {
+		if parts[i] == "project" {
+			return strings.TrimSpace(parts[i+1])
+		}
+	}
+	return ""
 }
 
 func bearerToken(header string) string {
