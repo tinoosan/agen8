@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pin Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .flow-svg {
+    color: var(--text);
+  }
+  .flow-svg .flow-box {
+    fill: var(--bg-elevated);
+    stroke: currentColor;
+    stroke-width: 1.5;
+  }
+  .flow-svg text {
+    fill: currentColor;
+    stroke: none;
+    font-size: 16px;
+    font-weight: 650;
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / pin-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Pin Service</span>
+  <h1>Pin Service</h1>
+  <p class="lede">
+    The pin service owns the durable set of pinned graph nodes for a project. A pin is a lightweight focus marker — it resurfaces a mission, key result, task, or decision at the top of lists and search. It is the server-side source of truth that replaced per-browser <code>localStorage</code>, so a pin set survives across browsers, sessions, and everyone working in the project.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#purpose">Purpose and ownership</a></li>
+      <li><a href="#scope">Scope: per-project and shared</a></li>
+      <li><a href="#service">Service boundary</a></li>
+      <li><a href="#domain">Domain model</a></li>
+      <li><a href="#persistence">Persistence and schema</a></li>
+      <li><a href="#rpc">RPC surface</a></li>
+      <li><a href="#ranking">Search ranking integration</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="purpose">1. Purpose and ownership</h2>
+
+  <p>A pin is not a work entity. It carries no lifecycle, no events, and no graph edges — it is a presentation affordance that says "keep this in front of me." The service therefore stays deliberately thin: it stamps the pin time, trims and validates input, and persists one row per pinned node. Everything richer (lifecycle, links, notifications) belongs to the entity that was pinned, not to the pin.</p>
+
+  <table>
+    <thead>
+      <tr><th>The pin service owns</th><th>The pin service does not own</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>The canonical per-project set of pinned node refs.</td><td>The pinned entities themselves (missions, key results, tasks, decisions).</td></tr>
+      <tr><td>Idempotent pin / unpin and first-pinned time stamping.</td><td>Any event, notification, or graph edge for a pin action.</td></tr>
+      <tr><td>Project-scoped pin reads (<code>List</code>, <code>Exists</code>).</td><td>The search ranking algorithm — it only supplies the pinned set the graph service reads.</td></tr>
+      <tr><td>Self-migrating <code>pins</code> table provisioning.</td><td>Frontend cache behavior and optimistic UI (see the frontend behavior doc).</td></tr>
+    </tbody>
+  </table>
+
+  <p>The service follows the standard vertical layering: an RPC adapter translates the wire payload, the application service orchestrates trimming and time stamping, the domain validates the record, and the repository persists canonical state.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">RPC adapter</div>
+      <div class="role">Translates <code>pin.add</code>, <code>pin.remove</code>, and <code>pin.list</code> JSON-RPC payloads into typed service calls and maps domain errors onto wire codes. No caller identity is threaded — the project is the scope boundary.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Application service</div>
+      <div class="role">Trims input, validates the composite key, stamps <code>CreatedAt</code> from an injectable clock, and delegates persistence. No side effects.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain</div>
+      <div class="role">Owns <code>Pin</code>, <code>Pin.Validate</code>, the <code>Reader</code>/<code>Writer</code>/<code>Repository</code> contracts, and <code>ErrNotFound</code>.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Repository</div>
+      <div class="role">A dialect-neutral SQL store embedded by the SQLite and Postgres repositories. Self-migrates the <code>pins</code> table at construction.</div>
+    </div>
+  </div>
+
+  <h2 id="scope">2. Scope: per-project and shared</h2>
+
+  <p>A pin's identity is the composite key <code>(project_id, node_ref)</code>. There is no member dimension: pins are shared across everyone working in the project, exactly mirroring the prior single-pinned-set-per-project <code>localStorage</code> behavior. Re-pinning the same node is idempotent — it preserves the original pin time rather than creating a duplicate. <code>NodeType</code> (for example <code>"mission"</code> or <code>"decision"</code>) is advisory metadata so readers can render or filter without a second lookup; it is explicitly <em>not</em> part of the identity.</p>
+
+  <h2 id="service">3. Service boundary</h2>
+
+  <p>The application service has an explicit constructor that takes a small config. The repository is required; the clock defaults to a system clock so production wiring stays terse while tests can pin <code>CreatedAt</code>.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Config</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">Pins</span>  pindomain.<span class="tok-type">Repository</span>
+    <span class="tok-field">Clock</span> <span class="tok-type">Clock</span>
+}
+
+<span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(cfg <span class="tok-type">Config</span>) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+  <p>The three service methods are the entire surface:</p>
+
+  <table>
+    <thead>
+      <tr><th>Method</th><th>Behavior</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Pin(ctx, projectID, nodeRef, nodeType)</code></td><td>Trims, validates, stamps <code>CreatedAt</code>, upserts. Idempotent — re-pinning preserves the first-pinned time.</td></tr>
+      <tr><td><code>Unpin(ctx, projectID, nodeRef)</code></td><td>Deletes the pin. Returns <code>domain.ErrNotFound</code> when the node was not pinned.</td></tr>
+      <tr><td><code>List(ctx, projectID)</code></td><td>Returns every pin in the project, newest first. Requires a project ID.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="domain">4. Domain model</h2>
+
+  <p><code>Pin</code> is a flat record. <code>Validate</code> enforces only the minimal shape the store relies on — both halves of the composite key must be present.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Pin</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> <span class="tok-type">string</span>
+    <span class="tok-field">NodeRef</span>   <span class="tok-type">string</span>
+    <span class="tok-field">NodeType</span>  <span class="tok-type">string</span> <span class="tok-comment">// advisory, not part of identity</span>
+    <span class="tok-field">CreatedAt</span> time.<span class="tok-type">Time</span>
+}</code></pre>
+
+  <p>The repository contract is split into reader and writer halves so consumers depend only on what they use. The graph service, for instance, needs only the read side.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Reader</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">List</span>(ctx context.<span class="tok-type">Context</span>, projectID <span class="tok-type">string</span>) ([]<span class="tok-type">Pin</span>, error)
+    <span class="tok-fn">Exists</span>(ctx context.<span class="tok-type">Context</span>, projectID, nodeRef <span class="tok-type">string</span>) (<span class="tok-type">bool</span>, error)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">Writer</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">Save</span>(ctx context.<span class="tok-type">Context</span>, pin <span class="tok-type">Pin</span>) error
+    <span class="tok-fn">Delete</span>(ctx context.<span class="tok-type">Context</span>, projectID, nodeRef <span class="tok-type">string</span>) error
+}</code></pre>
+
+  <h2 id="persistence">5. Persistence and schema</h2>
+
+  <p>The store is dialect-neutral: a single <code>sqlStore</code> holds all SQL, and the SQLite and Postgres repositories embed it. The only dialect-specific concern is placeholder rebinding. The driver is selected at construction by <code>NewRepository</code>.</p>
+
+  <p>Pins use the <strong>self-migrating vertical</strong> pattern (the same one the location service uses). At construction the store runs <code>CREATE TABLE IF NOT EXISTS</code> rather than going through the version-gated baseline snapshot. Adding pins is therefore additive and safe — it never forces a schema-version bump, so existing databases keep starting without a migration step.</p>
+
+<pre><code class="lang-sql"><span class="tok-kw">CREATE TABLE IF NOT EXISTS</span> pins (
+    project_id <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+    node_ref   <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+    node_type  <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span> <span class="tok-kw">DEFAULT</span> <span class="tok-string">''</span>,
+    created_at <span class="tok-type">TEXT</span> <span class="tok-kw">NOT NULL</span>,
+    <span class="tok-kw">PRIMARY KEY</span> (project_id, node_ref)
+)</code></pre>
+
+  <p>The composite primary key enforces identity at the storage layer. <code>Save</code> is an upsert: on conflict it refreshes <code>node_type</code> but preserves the original <code>created_at</code>, so re-pinning keeps a node's first-pinned time. An <code>idx_pins_project</code> index supports the project-scoped list query, which orders <code>created_at DESC, node_ref ASC</code>.</p>
+
+  <h2 id="rpc">6. RPC surface</h2>
+
+  <p>Three methods are registered under the project scope. They take no caller identity — the project ID in each payload is the authorization boundary.</p>
+
+  <table>
+    <thead>
+      <tr><th>Method</th><th>Required params</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>pin.add</code></td><td><code>projectId</code>, <code>nodeRef</code> (<code>nodeType</code> optional)</td><td><code>{ pin }</code> — the persisted <code>PinView</code></td></tr>
+      <tr><td><code>pin.remove</code></td><td><code>projectId</code>, <code>nodeRef</code></td><td><code>{ removed }</code> — <code>false</code> when the node was not pinned</td></tr>
+      <tr><td><code>pin.list</code></td><td><code>projectId</code></td><td><code>{ pins }</code> — newest first</td></tr>
+    </tbody>
+  </table>
+
+  <p>Missing <code>projectId</code> or <code>nodeRef</code> returns invalid-params (<code>-32602</code>). <code>pin.remove</code> is intentionally idempotent: a not-pinned node is treated as success with <code>removed: false</code>, so a client can unpin without first checking state.</p>
+
+  <h2 id="ranking">7. Search ranking integration</h2>
+
+  <p>The pin set has one cross-service consumer: <code>graph_query</code> search. The graph service exposes a <code>PinReader</code> port; the application wires the pin service into it at startup through a small adapter that flattens a project's pins to a set of node refs.</p>
+
+  <svg class="flow-svg" viewBox="0 0 940 200" role="img" aria-labelledby="rank-flow-title rank-flow-desc">
+    <title id="rank-flow-title">Pin-aware search ranking flow</title>
+    <desc id="rank-flow-desc">A graph search reads the project's pinned refs and promotes pinned hits above unpinned ones.</desc>
+    <defs>
+      <marker id="arrow-rank" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+      </marker>
+    </defs>
+    <g fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#arrow-rank)">
+      <path d="M150 100 H236"></path>
+      <path d="M396 100 H482"></path>
+      <path d="M642 100 H728"></path>
+    </g>
+    <g>
+      <rect class="flow-box" x="24" y="58" width="126" height="84" rx="8"></rect>
+      <text x="87" y="95" text-anchor="middle">graph_query</text>
+      <text x="87" y="118" text-anchor="middle">search</text>
+
+      <rect class="flow-box" x="236" y="58" width="160" height="84" rx="8"></rect>
+      <text x="316" y="89" text-anchor="middle">PinReader:</text>
+      <text x="316" y="112" text-anchor="middle">pinned refs</text>
+
+      <rect class="flow-box" x="482" y="58" width="160" height="84" rx="8"></rect>
+      <text x="562" y="89" text-anchor="middle">Mark hits</text>
+      <text x="562" y="112" text-anchor="middle">pinned</text>
+
+      <rect class="flow-box" x="728" y="58" width="186" height="84" rx="8"></rect>
+      <text x="821" y="89" text-anchor="middle">Pinned first,</text>
+      <text x="821" y="112" text-anchor="middle">then relevance</text>
+    </g>
+  </svg>
+
+  <p>Pinned status is a primary sort key in the graph results: pinned hits surface ahead of unpinned ones while relevance and recency still order within each group. The dependency is optional and degrades safely — if the pin lookup is absent or errors, the graph service treats the pinned set as empty and ranks purely by relevance. A pin boost re-ranks the candidate set a search already matched; it does not resurrect a node the query did not match. The frontend applies the same idea in the command palette (see the frontend behavior doc).</p>
+
+  <h2 id="invariants">8. Invariants</h2>
+
+  <table>
+    <thead>
+      <tr><th>Invariant</th><th>Enforced by</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>A pin is identified by <code>(project_id, node_ref)</code> and is shared across the project.</td><td>The composite primary key on the <code>pins</code> table.</td></tr>
+      <tr><td>Re-pinning a node is idempotent and preserves the first-pinned time.</td><td><code>Save</code> upsert: refresh <code>node_type</code>, keep <code>created_at</code>.</td></tr>
+      <tr><td>Unpinning a not-pinned node is a safe no-op for callers.</td><td><code>Delete</code> returns <code>ErrNotFound</code>; the RPC maps it to <code>removed: false</code>.</td></tr>
+      <tr><td>Project-scoped reads require a project ID.</td><td><code>Service.List</code> and RPC param validation.</td></tr>
+      <tr><td>A pin has no side effects on work state.</td><td>The service writes only the pin row — no events, links, or notifications.</td></tr>
+      <tr><td>Adding pins never forces a database migration.</td><td>The self-migrating <code>ensureSchema</code> with <code>CREATE TABLE IF NOT EXISTS</code>.</td></tr>
+      <tr><td>Search ranking never fails because of a pin lookup.</td><td>The graph service's <code>PinReader</code> port degrades to an empty pinned set on error.</td></tr>
+      <tr><td>Production constructs the service once.</td><td><code>internal/app.NewApplication</code> builds the repository and service and wires the graph <code>PinReader</code>.</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+</body>
+</html>
