@@ -103,20 +103,21 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
     activeFilter,
     displayNodes,
     displayEdges,
-    selectedNodeId,
     contextDepth,
     effectiveFocusNodeId,
   })
 
-  // Clear trace filter and reset depth when node is deselected
+  // Clear trace and reset depth when the focus cursor clears (e.g. a pane
+  // click). Trace anchors on the cursor now, not the panel — so closing the
+  // panel while a node stays focused must keep the trace alive.
   useEffect(() => {
-    if (!selectedNodeId && activeFilter === 'trace') {
+    if (!effectiveFocusNodeId && activeFilter === 'trace') {
       queueMicrotask(() => {
         setActiveFilter(null)
         setContextDepth(0)
       })
     }
-  }, [selectedNodeId, activeFilter])
+  }, [effectiveFocusNodeId, activeFilter])
 
   // Toggling a filter from the bar. Entering trace seeds the first ring so the
   // map lights the selected node's immediate neighbours (depth 0 would show only
@@ -275,7 +276,7 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
         <StrategyMapFilterBar
           activeFilter={activeFilter}
           onFilterChange={handleFilterChange}
-          hasSelectedNode={!!selectedNodeId}
+          hasFocusedNode={!!effectiveFocusNodeId}
           matchCount={filterResult?.matchCount ?? 0}
           contextDepth={contextDepth}
           onContextDepthChange={setContextDepth}

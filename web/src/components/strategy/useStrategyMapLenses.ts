@@ -24,14 +24,12 @@ export function useStrategyMapLenses({
   activeFilter,
   displayNodes,
   displayEdges,
-  selectedNodeId,
   contextDepth,
   effectiveFocusNodeId,
 }: {
   activeFilter: FilterPreset | null
   displayNodes: Node[]
   displayEdges: Edge[]
-  selectedNodeId: string | null
   contextDepth: number
   effectiveFocusNodeId: string | null
 }) {
@@ -42,11 +40,13 @@ export function useStrategyMapLenses({
     if (activeFilter === 'blocked') return computeBlockedFilter(displayNodes, displayEdges)
     if (activeFilter === 'decisions') return computeDecisionsFilter(displayNodes, displayEdges)
     if (activeFilter === 'done') return computeDoneFilter(displayNodes, displayEdges)
-    if (activeFilter === 'trace' && selectedNodeId) {
-      return computeTraceFilter(selectedNodeId, displayEdges, contextDepth)
+    // Trace anchors on the focus cursor (not the panel), so it's reachable on
+    // the first touch and re-roots as the cursor hops along the graph.
+    if (activeFilter === 'trace' && effectiveFocusNodeId) {
+      return computeTraceFilter(effectiveFocusNodeId, displayEdges, contextDepth)
     }
     return null
-  }, [activeFilter, displayNodes, displayEdges, selectedNodeId, contextDepth])
+  }, [activeFilter, displayNodes, displayEdges, effectiveFocusNodeId, contextDepth])
 
   // ── Highlighting logic (1-hop neighborhood focus) ─────────────────────
   // When a node is focused, we compute a visual hierarchy:

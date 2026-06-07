@@ -31,14 +31,14 @@ const SHORTCUTS: Shortcut[] = [
   // Selection
   { keys: ['Enter'], desc: 'Open detail panel for the focused node', group: 'Selection' },
   { keys: ['Space'], desc: 'Open detail panel (alternative to Enter)', group: 'Selection' },
-  { keys: ['Esc'], desc: 'Close detail panel and clear selection', group: 'Selection' },
+  { keys: ['Esc'], desc: 'Dismiss active map state (filter -> panel -> focus cursor)', group: 'Selection' },
 
   // Filters
   { keys: ['M'], desc: 'Toggle In Motion lens (active, on-track work)', group: 'Filters' },
   { keys: ['B'], desc: 'Toggle Blocked lens (stuck / at-risk work)', group: 'Filters' },
   { keys: ['D'], desc: 'Toggle Done lens (highlight finished work)', group: 'Filters' },
   { keys: ['R'], desc: 'Toggle Decisions lens (reasoning links)', group: 'Filters' },
-  { keys: ['T'], desc: 'Toggle Trace Path from selected node', group: 'Filters' },
+  { keys: ['T'], desc: 'Toggle Trace Path from focused node', group: 'Filters' },
   { keys: ['['], desc: 'Shrink trace radius (fewer rings)', group: 'Filters' },
   { keys: [']'], desc: 'Expand trace radius (more rings)', group: 'Filters' },
 

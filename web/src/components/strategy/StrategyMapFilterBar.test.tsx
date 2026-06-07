@@ -13,7 +13,7 @@ function renderBar(overrides: Partial<Parameters<typeof StrategyMapFilterBar>[0]
     <StrategyMapFilterBar
       activeFilter={null}
       onFilterChange={() => {}}
-      hasSelectedNode={false}
+      hasFocusedNode={false}
       matchCount={0}
       contextDepth={0}
       onContextDepthChange={() => {}}

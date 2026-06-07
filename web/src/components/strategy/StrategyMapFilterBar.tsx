@@ -15,7 +15,7 @@ interface FilterButton {
 interface Props {
   activeFilter: FilterPreset | null
   onFilterChange: (filter: FilterPreset | null) => void
-  hasSelectedNode: boolean
+  hasFocusedNode: boolean
   matchCount: number
   contextDepth: number
   onContextDepthChange: (depth: number) => void
@@ -28,7 +28,7 @@ interface Props {
 export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
   activeFilter,
   onFilterChange,
-  hasSelectedNode,
+  hasFocusedNode,
   matchCount,
   contextDepth,
   onContextDepthChange,
@@ -39,7 +39,7 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
     { key: 'blocked', label: 'Blocked', icon: Ban, color: 'var(--amber)', visible: true },
     { key: 'done', label: 'Done', icon: CheckCircle2, color: 'var(--green)', visible: true },
     { key: 'decisions', label: 'Decisions', icon: Diamond, color: 'var(--accent)', visible: true },
-    { key: 'trace', label: 'Trace Path', icon: GitBranch, color: 'var(--accent)', visible: hasSelectedNode },
+    { key: 'trace', label: 'Trace Path', icon: GitBranch, color: 'var(--accent)', visible: hasFocusedNode },
   ]
 
   const isTraceActive = activeFilter === 'trace'

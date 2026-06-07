@@ -152,9 +152,10 @@ export function useStrategyMapKeyboardNav({
         setActiveFilter((f) => f === 'decisions' ? null : 'decisions')
         return
       }
-      // T = toggle Trace Path (only when a node is selected). Entering trace
-      // seeds the first ring so the selected node's neighbours light up.
-      if ((e.key === 't' || e.key === 'T') && selectedNodeId) {
+      // T = toggle Trace Path (only when a node is focused — the panel can be
+      // closed). Entering trace seeds the first ring so the focused node's
+      // neighbours light up.
+      if ((e.key === 't' || e.key === 'T') && effectiveFocusNodeId) {
         e.preventDefault()
         setActiveFilter((f) => {
           const next = f === 'trace' ? null : 'trace'

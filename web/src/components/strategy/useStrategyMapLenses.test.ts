@@ -39,15 +39,16 @@ const edges: Edge[] = [
   contextEdge('D', 'T1', 'made_during'),
 ]
 
-function lens(activeFilter: FilterPreset | null, selectedNodeId: string | null = null, contextDepth = 0) {
+// The trace anchor is the focus cursor (effectiveFocusNodeId) — trace is
+// reachable with the panel closed, so the second arg feeds the focus cursor.
+function lens(activeFilter: FilterPreset | null, focusNodeId: string | null = null, contextDepth = 0) {
   return renderHook(() =>
     useStrategyMapLenses({
       activeFilter,
       displayNodes: nodes,
       displayEdges: edges,
-      selectedNodeId,
       contextDepth,
-      effectiveFocusNodeId: null,
+      effectiveFocusNodeId: focusNodeId,
     }),
   ).result.current
 }
