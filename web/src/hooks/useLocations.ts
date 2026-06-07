@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { rpcCall } from '../lib/rpc'
+import { rpcCall, rpcUnwrap, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
 import type { ExecutionLocation, LocationAddress } from '../lib/types'
 
@@ -12,8 +12,7 @@ export function useLocations() {
   return useQuery<ExecutionLocation[]>({
     queryKey: qk.locations,
     queryFn: async () => {
-      const result = await rpcCall<{ locations: ExecutionLocation[] }>('location.list', {})
-      return result.locations ?? []
+      return rpcUnwrapList<ExecutionLocation>('location.list', {}, 'locations')
     },
     refetchInterval: 5000,
     retry: false,
@@ -24,8 +23,7 @@ export function useCreateLocation() {
   const queryClient = useQueryClient()
   return useMutation<ExecutionLocation, Error, { kind: string; label: string; address?: LocationAddress; auth?: LocationAuthInput }>({
     mutationFn: async (params) => {
-      const result = await rpcCall<{ location: ExecutionLocation }>('location.create', params)
-      return result.location
+      return rpcUnwrap<ExecutionLocation>('location.create', params, 'location')
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.locations })
@@ -37,8 +35,7 @@ export function useProbeLocation() {
   const queryClient = useQueryClient()
   return useMutation<ExecutionLocation, Error, string>({
     mutationFn: async (locationId) => {
-      const result = await rpcCall<{ location: ExecutionLocation }>('location.probe', { locationId })
-      return result.location
+      return rpcUnwrap<ExecutionLocation>('location.probe', { locationId }, 'location')
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.locations })
@@ -50,8 +47,7 @@ export function useInstallCodex() {
   const queryClient = useQueryClient()
   return useMutation<ExecutionLocation, Error, string>({
     mutationFn: async (locationId) => {
-      const result = await rpcCall<{ location: ExecutionLocation }>('location.installCodex', { locationId })
-      return result.location
+      return rpcUnwrap<ExecutionLocation>('location.installCodex', { locationId }, 'location')
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.locations })
@@ -63,8 +59,7 @@ export function useInstallClaude() {
   const queryClient = useQueryClient()
   return useMutation<ExecutionLocation, Error, string>({
     mutationFn: async (locationId) => {
-      const result = await rpcCall<{ location: ExecutionLocation }>('location.installClaude', { locationId })
-      return result.location
+      return rpcUnwrap<ExecutionLocation>('location.installClaude', { locationId }, 'location')
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.locations })

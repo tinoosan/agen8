@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { rpcCall } from '../lib/rpc'
+import { rpcCall, rpcUnwrap, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
 import type { DecisionView, DecisionSource, DecisionStats } from '../lib/types'
 
@@ -16,31 +16,60 @@ interface DecisionQueryOptions {
   refetchInterval?: number | false
 }
 
+/* ── Shared decision-filter helpers ──────────────────────────────────────
+ *
+ * The three decision read hooks (useRecentDecisions, useDecisionLog,
+ * useDecisionStats) all derive the same things from a DecisionListFilter:
+ *  - request params: the optional content filters folded onto the RPC params
+ *  - query-key parts: the normalized ('' / 'newest' / joined-tags) variants
+ *    that make cache identity stable.
+ * Centralizing both here keeps the filter→params and filter→key mappings in
+ * one place so they can't drift apart.
+ *
+ * ──────────────────────────────────────────────────────────────────────── */
+
+// Folds the content filters (source/tags/query/since/until) onto an existing
+// params object and returns it. Sort and paging are intentionally left to the
+// caller — only useDecisionLog/useRecentDecisions send sort, and stats never
+// pages.
+function applyDecisionContentFilters(
+  params: Record<string, unknown>,
+  filter?: DecisionListFilter,
+): Record<string, unknown> {
+  if (filter?.source) params.source = filter.source
+  if (filter?.tags?.length) params.tags = filter.tags
+  if (filter?.query) params.query = filter.query
+  if (filter?.since) params.since = filter.since
+  if (filter?.until) params.until = filter.until
+  return params
+}
+
+// Normalizes a filter into the scalar parts used to build query keys. Keeping
+// the '' / 'newest' / joined-tags normalization here means every hook's cache
+// identity is computed the same way.
+function decisionFilterKeyParts(filter?: DecisionListFilter) {
+  return {
+    source: filter?.source ?? '',
+    query: filter?.query ?? '',
+    since: filter?.since ?? '',
+    until: filter?.until ?? '',
+    sort: filter?.sort ?? 'newest',
+    tagsKey: (filter?.tags ?? []).join(','),
+  }
+}
+
 export function useRecentDecisions(
   projectId: string | null,
   filter?: DecisionListFilter,
   options?: DecisionQueryOptions,
 ) {
-  const source = filter?.source ?? ''
-  const query = filter?.query ?? ''
-  const since = filter?.since ?? ''
-  const until = filter?.until ?? ''
-  const sort = filter?.sort ?? 'newest'
+  const { source, query, since, until, sort } = decisionFilterKeyParts(filter)
   return useQuery<DecisionView[]>({
     queryKey: qk.decisionList(projectId ?? '', source, query, since, until, sort),
     queryFn: async () => {
-      const params: Record<string, unknown> = {
-        projectId: projectId ?? '',
-        limit: 50,
-      }
-      if (filter?.source) params.source = filter.source
-      if (filter?.tags?.length) params.tags = filter.tags
-      if (filter?.query) params.query = filter.query
-      if (filter?.since) params.since = filter.since
-      if (filter?.until) params.until = filter.until
+      const params = applyDecisionContentFilters({ projectId: projectId ?? '', limit: 50 }, filter)
       if (filter?.sort) params.sort = filter.sort
-      const res = await rpcCall<{ decisions: DecisionView[] }>('decision.list', params)
-      return res.decisions
+      return rpcUnwrapList<DecisionView>('decision.list', params, 'decisions')
     },
     enabled: !!projectId,
     refetchInterval: options?.refetchInterval ?? 15_000,
@@ -52,8 +81,7 @@ export function useDecision(decisionId: string | null) {
   return useQuery<DecisionView>({
     queryKey: qk.decisionGet(decisionId),
     queryFn: async () => {
-      const res = await rpcCall<{ decision: DecisionView }>('decision.get', { decisionId })
-      return res.decision
+      return rpcUnwrap<DecisionView>('decision.get', { decisionId }, 'decision')
     },
     enabled: !!decisionId,
     refetchInterval: 15_000,
@@ -66,26 +94,13 @@ export interface DecisionLogFilter extends DecisionListFilter {
 }
 
 export function useDecisionLog(projectId: string | null, filter: DecisionLogFilter) {
-  const source = filter.source ?? ''
-  const query = filter.query ?? ''
-  const since = filter.since ?? ''
-  const until = filter.until ?? ''
-  const sort = filter.sort ?? 'newest'
-  const tagsKey = (filter.tags ?? []).join(',')
+  const { source, query, since, until, sort, tagsKey } = decisionFilterKeyParts(filter)
   const offset = Math.max(0, (filter.page - 1) * filter.pageSize)
 
   return useQuery<{ decisions: DecisionView[]; total: number }>({
     queryKey: qk.decisionLog(projectId ?? '', source, tagsKey, query, since, until, sort, filter.page, filter.pageSize),
     queryFn: async () => {
-      const baseParams: Record<string, unknown> = {
-        projectId: projectId ?? '',
-        sort,
-      }
-      if (filter.source) baseParams.source = filter.source
-      if (filter.tags?.length) baseParams.tags = filter.tags
-      if (filter.query) baseParams.query = filter.query
-      if (filter.since) baseParams.since = filter.since
-      if (filter.until) baseParams.until = filter.until
+      const baseParams = applyDecisionContentFilters({ projectId: projectId ?? '', sort }, filter)
 
       const [listRes, countRes] = await Promise.all([
         rpcCall<{ decisions: DecisionView[] }>('decision.list', {
@@ -109,21 +124,12 @@ export function useDecisionLog(projectId: string | null, filter: DecisionLogFilt
 // takes the content filters (source/tags/query/since/until) but not sort or
 // page — aggregates span every matching row, so paging is irrelevant.
 export function useDecisionStats(projectId: string | null, filter?: DecisionListFilter) {
-  const source = filter?.source ?? ''
-  const query = filter?.query ?? ''
-  const since = filter?.since ?? ''
-  const until = filter?.until ?? ''
-  const tagsKey = (filter?.tags ?? []).join(',')
+  const { source, query, since, until, tagsKey } = decisionFilterKeyParts(filter)
 
   return useQuery<DecisionStats>({
     queryKey: qk.decisionStats(projectId ?? '', source, tagsKey, query, since, until),
     queryFn: async () => {
-      const params: Record<string, unknown> = { projectId: projectId ?? '' }
-      if (filter?.source) params.source = filter.source
-      if (filter?.tags?.length) params.tags = filter.tags
-      if (filter?.query) params.query = filter.query
-      if (filter?.since) params.since = filter.since
-      if (filter?.until) params.until = filter.until
+      const params = applyDecisionContentFilters({ projectId: projectId ?? '' }, filter)
       return rpcCall<DecisionStats>('decision.stats', params)
     },
     enabled: !!projectId,
@@ -134,8 +140,7 @@ export function useDecisionStats(projectId: string | null, filter?: DecisionList
 export function useExportDecisions() {
   return useMutation({
     mutationFn: async (params: Omit<DecisionListFilter, 'sort'> & { projectId: string; sort?: 'newest' | 'oldest' }) => {
-      const res = await rpcCall<{ decisions: DecisionView[] }>('decision.export', params)
-      return res.decisions ?? []
+      return rpcUnwrapList<DecisionView>('decision.export', params, 'decisions')
     },
   })
 }
@@ -144,8 +149,7 @@ export function useDeleteDecision() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (decisionId: string) => {
-      const res = await rpcCall<{ deleted: boolean }>('decision.delete', { decisionId })
-      return res.deleted
+      return rpcUnwrap<boolean>('decision.delete', { decisionId }, 'deleted')
     },
     onSuccess: async () => {
       await Promise.all([

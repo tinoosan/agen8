@@ -87,6 +87,27 @@ export async function rpcCall<T = unknown>(method: string, params: unknown = {})
   return msg.result as T
 }
 
+/**
+ * Calls an RPC method and returns a single named field from the result
+ * envelope. Collapses the `const res = await rpcCall<{ x: T }>(...); return res.x`
+ * idiom for single-object results. The cast is contained here so call sites
+ * read as `rpcUnwrap<KeyResultView>('mission.kr.get', params, 'keyResult')`.
+ */
+export async function rpcUnwrap<T>(method: string, params: unknown, field: string): Promise<T> {
+  const res = await rpcCall<Record<string, unknown>>(method, params)
+  return res[field] as T
+}
+
+/**
+ * Calls an RPC method and returns a named array field, defaulting to [] when
+ * the server omits it. Collapses the `const res = await rpcCall<{ x: T[] }>(...);
+ * return res.x ?? []` idiom that recurs across the list query hooks.
+ */
+export async function rpcUnwrapList<T>(method: string, params: unknown, field: string): Promise<T[]> {
+  const res = await rpcCall<Record<string, T[] | undefined>>(method, params)
+  return res[field] ?? []
+}
+
 // ---- Notifications (SSE) -----------------------------------------------
 
 export function onNotification(method: string, handler: NotificationHandler): () => void {

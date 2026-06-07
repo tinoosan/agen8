@@ -6,7 +6,7 @@ import { useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { useQuery } from '@tanstack/react-query'
 import { Clock, CircleCheck, CircleAlert, Target, FolderOpen } from 'lucide-react'
-import { rpcCall } from '../../lib/rpc'
+import { rpcUnwrapList } from '../../lib/rpc'
 import { qk } from '../../lib/queryKeys'
 import { dashboardLink, missionDetailLink } from '../../lib/routing'
 import { useProjects } from '../../hooks/useProjects'
@@ -81,8 +81,8 @@ export function GlobalSidebarContent() {
     queryFn: async () => {
       const results = await Promise.all(
         projectIds.map(async (pid) => {
-          const res = await rpcCall<{ missions: MissionView[] }>('mission.list', { projectId: pid })
-          return (res.missions ?? []).map(m => ({ ...m, _projectId: pid }))
+          const missions = await rpcUnwrapList<MissionView>('mission.list', { projectId: pid }, 'missions')
+          return missions.map(m => ({ ...m, _projectId: pid }))
         }),
       )
       return results.flat()

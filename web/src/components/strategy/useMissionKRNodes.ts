@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Node, Edge } from '@xyflow/react'
-import { rpcCall } from '../../lib/rpc'
+import { rpcUnwrapList } from '../../lib/rpc'
 import { qk } from '../../lib/queryKeys'
 import { useMissions } from '../../hooks/useMissions'
 import type { KeyResultView } from '../../lib/types'
@@ -29,8 +29,8 @@ export function useMissionKRNodes(projectId: string | null, _projectRoot: string
     queryFn: async () => {
       const pairs = await Promise.all(
         missionIds.map(async (missionId) => {
-          const res = await rpcCall<{ keyResults: KeyResultView[] }>('mission.kr.list', { missionId })
-          return [missionId, res.keyResults ?? []] as const
+          const keyResults = await rpcUnwrapList<KeyResultView>('mission.kr.list', { missionId }, 'keyResults')
+          return [missionId, keyResults] as const
         }),
       )
       return Object.fromEntries(pairs)

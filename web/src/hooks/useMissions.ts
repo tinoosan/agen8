@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { rpcCall } from '../lib/rpc'
+import { rpcCall, rpcUnwrap, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
 import type { MissionView, KeyResultView, MissionStatus, KeyResultStatus } from '../lib/types'
 
@@ -37,8 +37,7 @@ export function useMissions(projectId: string | null, status?: MissionStatus) {
     queryFn: async () => {
       const params: Record<string, unknown> = { projectId: projectId ?? '' }
       if (status) params.status = [status]
-      const res = await rpcCall<{ missions: MissionView[] }>('mission.list', params)
-      return res.missions
+      return rpcUnwrapList<MissionView>('mission.list', params, 'missions')
     },
     enabled: !!projectId,
     refetchInterval: 10_000,
@@ -49,10 +48,7 @@ export function useKeyResults(missionId: string | null) {
   return useQuery<KeyResultView[]>({
     queryKey: qk.keyResults(missionId),
     queryFn: async () => {
-      const res = await rpcCall<{ keyResults: KeyResultView[] }>('mission.kr.list', {
-        missionId: missionId ?? '',
-      })
-      return res.keyResults
+      return rpcUnwrapList<KeyResultView>('mission.kr.list', { missionId: missionId ?? '' }, 'keyResults')
     },
     enabled: !!missionId,
     refetchInterval: 10_000,
@@ -63,10 +59,7 @@ export function useKeyResult(keyResultId: string | null) {
   return useQuery<KeyResultView>({
     queryKey: qk.keyResultGet(keyResultId),
     queryFn: async () => {
-      const res = await rpcCall<{ keyResult: KeyResultView }>('mission.kr.get', {
-        keyResultId: keyResultId ?? '',
-      })
-      return res.keyResult
+      return rpcUnwrap<KeyResultView>('mission.kr.get', { keyResultId: keyResultId ?? '' }, 'keyResult')
     },
     enabled: !!keyResultId,
     refetchInterval: 10_000,
@@ -229,9 +222,7 @@ export function useProjectKRs(projectId: string | null) {
     queryFn: async () => {
       const results = await Promise.all(
         missionIds.map((id) =>
-          rpcCall<{ keyResults: KeyResultView[] }>('mission.kr.list', { missionId: id }).then(
-            (r) => r.keyResults,
-          ),
+          rpcUnwrapList<KeyResultView>('mission.kr.list', { missionId: id }, 'keyResults'),
         ),
       )
       const map = new Map<string, KeyResultView>()

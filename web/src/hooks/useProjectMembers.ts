@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { rpcCall } from '../lib/rpc'
+import { rpcCall, rpcUnwrapList } from '../lib/rpc'
 import { qk } from '../lib/queryKeys'
 import type { ProjectMember } from '../lib/types'
 
@@ -9,10 +9,7 @@ export function useProjectMembers(projectId: string | null) {
   return useQuery<ProjectMember[]>({
     queryKey: qk.projectMembers(projectId),
     queryFn: async () => {
-      const res = await rpcCall<{ members: ProjectMember[] }>('project.member.list', {
-        projectId: projectId ?? '',
-      })
-      return res.members ?? []
+      return rpcUnwrapList<ProjectMember>('project.member.list', { projectId: projectId ?? '' }, 'members')
     },
     enabled: !!projectId,
     refetchInterval: 30_000,

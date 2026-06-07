@@ -3,9 +3,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../lib/rpc', () => ({
-  rpcCall: vi.fn(),
-}))
+vi.mock('../../lib/rpc', () => {
+  const rpcCall = vi.fn()
+  return {
+    rpcCall,
+    rpcUnwrap: async (method: string, params: unknown, field: string) => {
+      const res = (await rpcCall(method, params)) as Record<string, unknown>
+      return res[field]
+    },
+    rpcUnwrapList: async (method: string, params: unknown, field: string) => {
+      const res = (await rpcCall(method, params)) as Record<string, unknown[]>
+      return res[field] ?? []
+    },
+  }
+})
 
 import { rpcCall } from '../../lib/rpc'
 import { DecisionPanel } from './DecisionPanel'

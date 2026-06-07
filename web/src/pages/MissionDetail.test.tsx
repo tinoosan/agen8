@@ -13,6 +13,14 @@ const mockMutation = { mutateAsync: vi.fn(), isPending: false }
 
 vi.mock('../lib/rpc', () => ({
   rpcCall: (...args: unknown[]) => mockRpcCall(...args),
+  rpcUnwrap: async (method: string, params: unknown, field: string) => {
+    const res = (await mockRpcCall(method, params)) as Record<string, unknown>
+    return res[field]
+  },
+  rpcUnwrapList: async (method: string, params: unknown, field: string) => {
+    const res = (await mockRpcCall(method, params)) as Record<string, unknown[]>
+    return res[field] ?? []
+  },
 }))
 
 vi.mock('../hooks/useMissions', () => ({
