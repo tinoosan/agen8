@@ -31,6 +31,9 @@ import (
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
 	missioninfra "github.com/tinoosan/agen8-mcp-server/internal/services/mission/infra"
+	notificationapp "github.com/tinoosan/agen8-mcp-server/internal/services/notification/app"
+	notificationdomain "github.com/tinoosan/agen8-mcp-server/internal/services/notification/domain"
+	notificationinfra "github.com/tinoosan/agen8-mcp-server/internal/services/notification/infra"
 	pinapp "github.com/tinoosan/agen8-mcp-server/internal/services/pin/app"
 	pininfra "github.com/tinoosan/agen8-mcp-server/internal/services/pin/infra"
 	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
@@ -48,19 +51,20 @@ import (
 // Application is the process-scoped composition root for the stripped
 // MCP-first work-context server.
 type Application struct {
-	AuthSvc       *authapp.Service
-	UserSvc       *userapp.Service
-	CredentialSvc *credentialapp.Service
-	GraphSvc      *graphapp.Service
-	GraphLinks    contextlink.Repository
-	TaskSvc       *taskapp.Service
-	MissionSvc    *missionapp.Service
-	ProjectSvc    *projectapp.Service
-	FileSvc       *fileapp.Service
-	LocationSvc   *locationapp.Service
-	EventBus      *eventbus.Bus
-	DecisionSvc   *decisionapp.Service
-	PinSvc        *pinapp.Service
+	AuthSvc         *authapp.Service
+	UserSvc         *userapp.Service
+	CredentialSvc   *credentialapp.Service
+	GraphSvc        *graphapp.Service
+	GraphLinks      contextlink.Repository
+	TaskSvc         *taskapp.Service
+	MissionSvc      *missionapp.Service
+	ProjectSvc      *projectapp.Service
+	FileSvc         *fileapp.Service
+	LocationSvc     *locationapp.Service
+	EventBus        *eventbus.Bus
+	DecisionSvc     *decisionapp.Service
+	PinSvc          *pinapp.Service
+	NotificationSvc *notificationapp.Service
 }
 
 // NewApplication builds the retained service graph.
@@ -271,21 +275,67 @@ func NewApplication(cfg Config) (*Application, error) {
 	// the project's pinned refs through this adapter at query time.
 	graphSvc.SetPinReader(pinNodeRefReader{pins: pinSvc})
 
+	// Notifications are a derived projection over the task snapshot — see the
+	// notification domain package. The service reads tasks through a thin
+	// adapter and reconciles into the notifications table on demand.
+	notificationRepo := notificationinfra.NewSQLiteRepository(handle)
+	notificationSvc, err := notificationapp.NewService(
+		notificationRepo,
+		notificationTaskSource{tasks: taskSvc},
+		notificationdomain.SystemClock{},
+		notificationdomain.DefaultDeriveConfig(),
+		logger.With("service", "notification"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build notification service: %w", err)
+	}
+
 	return &Application{
-		AuthSvc:       authSvc,
-		UserSvc:       userSvc,
-		CredentialSvc: credentialSvc,
-		GraphSvc:      graphSvc,
-		GraphLinks:    contextLinkRepo,
-		TaskSvc:       taskSvc,
-		MissionSvc:    missionSvc,
-		ProjectSvc:    projectSvc,
-		FileSvc:       fileSvc,
-		LocationSvc:   locationSvc,
-		EventBus:      bus,
-		DecisionSvc:   decisionSvc,
-		PinSvc:        pinSvc,
+		AuthSvc:         authSvc,
+		UserSvc:         userSvc,
+		CredentialSvc:   credentialSvc,
+		GraphSvc:        graphSvc,
+		GraphLinks:      contextLinkRepo,
+		TaskSvc:         taskSvc,
+		MissionSvc:      missionSvc,
+		ProjectSvc:      projectSvc,
+		FileSvc:         fileSvc,
+		LocationSvc:     locationSvc,
+		EventBus:        bus,
+		DecisionSvc:     decisionSvc,
+		PinSvc:          pinSvc,
+		NotificationSvc: notificationSvc,
 	}, nil
+}
+
+// notificationTaskSource adapts the task service to the notification app's
+// TaskSource port, projecting task.Task onto the neutral TaskSnapshot the
+// derivation reads. This is the seam that keeps the notification package from
+// importing the task domain.
+type notificationTaskSource struct {
+	tasks *taskapp.Service
+}
+
+func (a notificationTaskSource) Tasks(ctx context.Context, projectID string) ([]notificationdomain.TaskSnapshot, error) {
+	tasks, err := a.tasks.List(ctx, taskdomain.TaskFilter{ProjectID: types.ProjectID(strings.TrimSpace(projectID))})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]notificationdomain.TaskSnapshot, 0, len(tasks))
+	for _, t := range tasks {
+		out = append(out, notificationdomain.TaskSnapshot{
+			ID:          string(t.ID),
+			ProjectID:   string(t.ProjectID),
+			Title:       t.Title,
+			Status:      string(t.Status),
+			CreatedAt:   t.CreatedAt,
+			StartedAt:   t.StartedAt,
+			CompletedAt: t.CompletedAt,
+			UpdatedAt:   t.UpdatedAt,
+			ClaimedBy:   string(t.ClaimedByMemberID),
+		})
+	}
+	return out, nil
 }
 
 type permissiveRuntimeConfigValidator struct{}
