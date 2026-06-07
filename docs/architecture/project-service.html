@@ -157,7 +157,7 @@
       <tr><td><code>project.list</code></td><td>Render project switchers and recent projects.</td><td><code>ListProjects</code></td><td>Returns durable project records, not inferred filesystem entries.</td></tr>
       <tr><td><code>project.member.list</code></td><td>Render the project roster, boards, dashboards, and pickers.</td><td><code>ListMembers</code></td><td>Lists members by project, lifecycle, and label.</td></tr>
       <tr><td><code>project.member.register</code></td><td>Bind a connected harness session to a project member.</td><td><code>RegisterMember</code></td><td>Creates an active project member and derives the deterministic channel id.</td></tr>
-      <tr><td><code>project.member.update_config</code></td><td>Update a member's desired runtime settings.</td><td><code>UpdateMemberConfig</code></td><td>Validates harness kind, model, and effort.</td></tr>
+      <tr><td><code>project.member.update</code></td><td>Update a member display name.</td><td><code>UpdateMember</code></td><td>Requires active roster context and a non-empty display name.</td></tr>
       <tr><td><code>project.member.remove</code></td><td>Remove a member from the project roster.</td><td><code>RemoveMember</code></td><td>Sets a terminal lifecycle state; does not delete actor attribution history.</td></tr>
     </tbody>
   </table>
