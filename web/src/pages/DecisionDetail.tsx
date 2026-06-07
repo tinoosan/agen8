@@ -1,10 +1,9 @@
 import { useState, type ReactNode } from 'react'
-import { useRoute, useLocation, Link } from 'wouter'
+import { useRoute, useLocation } from 'wouter'
 import { toast } from 'sonner'
 import {
   Clock,
   Trash2,
-  ChevronRight,
   Tag,
 } from 'lucide-react'
 import { useDecision, useDeleteDecision } from '../hooks/useDecisions'
@@ -20,11 +19,11 @@ import {
 } from '../lib/routing'
 import { sanitizeDecisionTitle, safeReferenceLabel } from '../lib/displaySanitizers'
 import { decisionActorDisplay } from '../lib/decisionDisplay'
-import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { StatItem } from '../components/detail/StatItem'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
+import { RelatedList } from '../components/detail/RelatedList'
 import DecisionDetails from '../components/decision/DecisionDetails'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -241,33 +240,7 @@ export default function DecisionDetail() {
         </div>
 
         {/* Related */}
-        {related.length > 0 && (
-          <CollapsibleSection storageKey="decision-detail-related" defaultOpen label="Related">
-            <div className="flex flex-col" style={{ borderTop: '1px solid var(--border)' }}>
-              {related.map((item, i) => (
-                <Link
-                  key={item.key}
-                  to={item.to}
-                  className="flex items-center gap-2 py-2.5 no-underline group"
-                  style={{ borderBottom: i < related.length - 1 ? '1px solid var(--border)' : 'none' }}
-                >
-                  <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-3)', width: 78 }}>
-                    {item.label}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate text-[var(--text-1)] group-hover:text-[var(--accent)] transition-colors" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
-                    {item.title}
-                  </span>
-                  {item.suffix && (
-                    <span className="shrink-0 tabular-nums text-[var(--text-3)]" style={{ fontSize: '0.6875rem' }}>
-                      {item.suffix}
-                    </span>
-                  )}
-                  <ChevronRight size={13} className="shrink-0 text-[var(--text-3)]" />
-                </Link>
-              ))}
-            </div>
-          </CollapsibleSection>
-        )}
+        <RelatedList items={related} storageKey="decision-detail-related" />
 
         {/* Tags */}
         {tags.length > 0 && (

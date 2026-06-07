@@ -15,10 +15,10 @@ import { formatKRProgress } from '../lib/missionUtils'
 import { entityDisplayTitle } from '../lib/displaySanitizers'
 import { missionsPanelLink, taskDetailLink, decisionDetailLink } from '../lib/routing'
 import ProgressHistory from '../components/mission/ProgressHistory'
-import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
+import { RelatedList } from '../components/detail/RelatedList'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -710,31 +710,7 @@ export default function MissionDetail() {
           same flat, per-row-labelled list the task and decision detail pages use */}
       {related.length > 0 && (
         <div className="px-6 pb-8 max-w-4xl mx-auto w-full">
-          <CollapsibleSection storageKey="mission-detail-related" defaultOpen label="Related">
-            <div className="flex flex-col" style={{ borderTop: '1px solid var(--border)' }}>
-              {related.map((item, i) => (
-                <Link
-                  key={item.key}
-                  to={item.to}
-                  className="flex items-center gap-2 py-2.5 no-underline group"
-                  style={{ borderBottom: i < related.length - 1 ? '1px solid var(--border)' : 'none' }}
-                >
-                  <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-3)', width: 78 }}>
-                    {item.label}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate text-[var(--text-1)] group-hover:text-[var(--accent)] transition-colors" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
-                    {item.title}
-                  </span>
-                  {item.suffix && (
-                    <span className="shrink-0 tabular-nums" style={{ fontSize: '0.6875rem', color: item.suffixColor ?? 'var(--text-3)' }}>
-                      {item.suffix}
-                    </span>
-                  )}
-                  <ChevronRight size={13} className="shrink-0 text-[var(--text-3)]" />
-                </Link>
-              ))}
-            </div>
-          </CollapsibleSection>
+          <RelatedList items={related} storageKey="mission-detail-related" />
         </div>
       )}
     </div>

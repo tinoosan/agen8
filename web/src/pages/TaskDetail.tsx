@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useRoute, Link } from 'wouter'
+import { useRoute } from 'wouter'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -9,7 +9,6 @@ import {
   Hash,
   Pencil,
   Ban,
-  ChevronRight,
 } from 'lucide-react'
 import { useTask, useCancelTask } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
@@ -35,6 +34,7 @@ import { StatItem } from '../components/detail/StatItem'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
+import { RelatedList, type RelatedItem } from '../components/detail/RelatedList'
 import EditTaskDialog from '../components/task/EditTaskDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -193,7 +193,30 @@ export default function TaskDetail() {
     ? directKrQuery.data ?? krsQuery.data?.get(task.keyResultRef)
     : undefined
   const mission = kr ? (missionsQuery.data ?? []).find((m) => m.id === kr.missionId) : undefined
-  const hasRelated = !!mission || !!kr || taskDecisions.length > 0
+  const related: RelatedItem[] = []
+  if (mission) {
+    related.push({ key: 'mission', label: 'Mission', title: mission.title, to: missionDetailLink(projectId, mission.id) })
+  }
+  if (kr) {
+    related.push({
+      key: 'kr',
+      label: 'Key Result',
+      title: kr.title,
+      to: mission ? missionDetailLink(projectId, mission.id) : tasksPanelLink(projectId),
+      ...(kr.progressPercent > 0 ? { suffix: `${Math.round(kr.progressPercent)}%` } : {}),
+    })
+  }
+  for (const dec of taskDecisions) {
+    related.push({
+      key: dec.id,
+      label: 'Decision',
+      title: dec.title,
+      to: decisionsLink(projectId),
+      ...(dec.confidence > 0
+        ? { suffix: `${Math.round(dec.confidence * 100)}%`, suffixColor: confidenceColor(dec.confidence) }
+        : {}),
+    })
+  }
 
   const reviewTone: Record<string, { fg: string; bg: string; label: string }> = {
     approved: { fg: 'var(--green)', bg: 'color-mix(in srgb, var(--green) 12%, transparent)', label: 'Approved' },
@@ -469,65 +492,7 @@ export default function TaskDetail() {
         })()}
 
         {/* Related */}
-        {hasRelated && (
-          <CollapsibleSection storageKey="task-detail-related" defaultOpen label="Related">
-            <div className="flex flex-col" style={{ borderTop: '1px solid var(--border)' }}>
-              {mission && (
-                <Link
-                  to={missionDetailLink(projectId, mission.id)}
-                  className="flex items-center gap-2 py-2.5 no-underline group"
-                  style={{ borderBottom: (kr || taskDecisions.length > 0) ? '1px solid var(--border)' : 'none' }}
-                >
-                  <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-3)', width: 78 }}>Mission</span>
-                  <span className="flex-1 min-w-0 truncate text-[var(--text-1)] group-hover:text-[var(--accent)] transition-colors" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
-                    {mission.title}
-                  </span>
-                  <ChevronRight size={13} className="shrink-0 text-[var(--text-3)]" />
-                </Link>
-              )}
-              {kr && (
-                <Link
-                  to={mission ? missionDetailLink(projectId, mission.id) : tasksPanelLink(projectId)}
-                  className="flex items-center gap-2 py-2.5 no-underline group"
-                  style={{ borderBottom: taskDecisions.length > 0 ? '1px solid var(--border)' : 'none' }}
-                >
-                  <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-3)', width: 78 }}>Key Result</span>
-                  <span className="flex-1 min-w-0 truncate text-[var(--text-1)] group-hover:text-[var(--accent)] transition-colors" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
-                    {kr.title}
-                  </span>
-                  {kr.progressPercent > 0 && (
-                    <span className="shrink-0 tabular-nums text-[var(--text-3)]" style={{ fontSize: '0.6875rem' }}>
-                      {Math.round(kr.progressPercent)}%
-                    </span>
-                  )}
-                  <ChevronRight size={13} className="shrink-0 text-[var(--text-3)]" />
-                </Link>
-              )}
-              {taskDecisions.map((dec, i) => (
-                <Link
-                  key={dec.id}
-                  to={decisionsLink(projectId)}
-                  className="flex items-center gap-2 py-2.5 no-underline group"
-                  style={{ borderBottom: i < taskDecisions.length - 1 ? '1px solid var(--border)' : 'none' }}
-                >
-                  <span style={{ fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-3)', width: 78 }}>Decision</span>
-                  <span className="flex-1 min-w-0 truncate text-[var(--text-1)] group-hover:text-[var(--accent)] transition-colors" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
-                    {dec.title}
-                  </span>
-                  {dec.confidence > 0 && (
-                    <span
-                      className="shrink-0 tabular-nums"
-                      style={{ fontSize: '0.6875rem', color: confidenceColor(dec.confidence) }}
-                    >
-                      {Math.round(dec.confidence * 100)}%
-                    </span>
-                  )}
-                  <ChevronRight size={13} className="shrink-0 text-[var(--text-3)]" />
-                </Link>
-              ))}
-            </div>
-          </CollapsibleSection>
-        )}
+        <RelatedList items={related} storageKey="task-detail-related" />
 
         {/* Artifacts */}
         {task.artifacts && task.artifacts.length > 0 && (
