@@ -24,6 +24,7 @@ import { decisionActorDisplay } from '../lib/decisionDisplay'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { StatItem } from '../components/detail/StatItem'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
+import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import DecisionDetails from '../components/decision/DecisionDetails'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -61,15 +62,12 @@ function TextSection({ label, children }: { label: string; children: ReactNode }
 
 function DecisionDetailSkeleton() {
   return (
-    <div className="px-6 pt-8 max-w-4xl mx-auto w-full">
-      <Skeleton className="h-4 w-20 mb-6" />
-      <Skeleton className="h-8 w-96 mb-3" />
-      <Skeleton className="h-4 w-40 mb-8" />
+    <DetailSkeleton>
       <div className="flex flex-col gap-4">
         <Skeleton className="h-28 w-full rounded-[var(--r-md)]" />
         <Skeleton className="h-20 w-full rounded-[var(--r-md)]" />
       </div>
-    </div>
+    </DetailSkeleton>
   )
 }
 

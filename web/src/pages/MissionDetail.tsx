@@ -17,6 +17,7 @@ import { missionsPanelLink, taskDetailLink, decisionDetailLink } from '../lib/ro
 import ProgressHistory from '../components/mission/ProgressHistory'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
+import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -503,10 +504,7 @@ function KRRow({
 
 function MissionDetailSkeleton() {
   return (
-    <div className="px-6 pt-8 max-w-4xl mx-auto w-full">
-      <Skeleton className="h-4 w-24 mb-6" />
-      <Skeleton className="h-8 w-80 mb-2" />
-      <Skeleton className="h-4 w-48 mb-8" />
+    <DetailSkeleton>
       <div className="flex flex-col gap-0.5">
         {[1, 2, 3].map(i => (
           <div key={i} className="flex items-center gap-3 px-3 py-2">
@@ -517,7 +515,7 @@ function MissionDetailSkeleton() {
           </div>
         ))}
       </div>
-    </div>
+    </DetailSkeleton>
   )
 }
 
