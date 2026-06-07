@@ -26,6 +26,7 @@ const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/St
 const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisions')
 const Members = lazyWithRetry(() => import('./pages/Members'), 'pages/Members')
 const Activity = lazyWithRetry(() => import('./pages/Activity'), 'pages/Activity')
+const Metrics = lazyWithRetry(() => import('./pages/Metrics'), 'pages/Metrics')
 
 const CommandPalette = lazyWithRetry(() => import('./components/CommandPalette'), 'components/CommandPalette')
 
@@ -46,6 +47,7 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   decisions: 'Decision Log',
   strategy: 'Context Map',
   members: 'Members',
+  metrics: 'Metrics',
 }
 
 /** Mobile-only top bar: hamburger (opens the sidebar drawer) + app icon +
@@ -253,7 +255,7 @@ export default function App() {
                   <Route path="/project/:projectId/builder">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/roles">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/dashboard" component={Dashboard} />
-                  <Route path="/project/:projectId/metrics">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
+                  <Route path="/project/:projectId/metrics" component={Metrics} />
                   <Route path="/project/:projectId" component={Dashboard} />
                   <Route path="/account" component={Account} />
                   <Route path="/credentials" component={Credentials} />
