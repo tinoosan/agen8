@@ -34,7 +34,7 @@
   </nav>
 
   <h2 id="boundary">1. Service boundary</h2>
-  <p>A location is a durable reference to a place that can contain project files. The first baseline always includes the local location so a new local daemon can register a project from the current machine. Remote locations can be added later, but their purpose remains root discovery and access validation, not harness orchestration.</p>
+  <p>A location is a durable reference to a place that can contain project files. The baseline always includes the local location so a new local daemon can register a project from the current machine. SSH locations represent project roots on other machines. Their purpose is root discovery and access validation, not harness orchestration.</p>
 
   <div class="grid">
     <div class="card">
@@ -60,7 +60,7 @@
   </div>
 
   <h2 id="shape">2. Domain shape</h2>
-  <p>The current service shape is intentionally small. A location can be local, SSH, or managed in the domain, but the release baseline treats local as the supported setup path and keeps remote work behind explicit future validation.</p>
+  <p>The current service shape is intentionally small. A location can be local, SSH, or managed in the domain. The release baseline supports local and SSH locations for project-root browsing. Managed locations remain a reserved domain kind until there is a concrete backend that fits the same root-addressability model.</p>
 
 <pre class="mocha"><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Location</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">ID</span>             location.ID
@@ -121,22 +121,24 @@
   </div>
 
   <h2 id="filesystem">4. Filesystem contract</h2>
-  <p>Filesystem calls are location-scoped. Clients send a location id plus a path or a project-scoped virtual path. The service normalizes paths and returns structured entries, not shell output. File previews are owned by the file service; location only answers discovery and addressability questions.</p>
+  <p>Filesystem calls are location-scoped. Clients send a location id plus a path or a project-scoped virtual path. Local locations read through the daemon filesystem. SSH locations read through the SSH/SFTP transport using the referenced credential. The service normalizes paths and returns structured entries, not shell output. File previews are owned by the file service; location only answers discovery and addressability questions.</p>
 
   <table>
     <thead><tr><th>Operation</th><th>Purpose</th><th>Boundary</th></tr></thead>
     <tbody>
       <tr><td><code>location.list</code></td><td>Show known locations.</td><td>No project mutation.</td></tr>
+      <tr><td><code>location.create</code></td><td>Add an SSH location with label, host, port, username, and optional credential reference.</td><td>No raw secrets on the location record.</td></tr>
       <tr><td><code>location.fs.listDir</code></td><td>Browse a directory inside a location.</td><td>No arbitrary command execution.</td></tr>
       <tr><td><code>location.probe</code></td><td>Refresh reachability/readiness.</td><td>Returns sanitized errors only.</td></tr>
+      <tr><td><code>location.delete</code></td><td>Remove an unused location from future project selection.</td><td>Does not delete projects or database data.</td></tr>
     </tbody>
   </table>
 
   <h2 id="credentials">5. Credential boundary</h2>
-  <p>Locations reference credentials by id. Credential values live in the credential service and are resolved only by trusted backend callers. Location records never store raw private keys, passwords, tokens, or command output that could contain secrets.</p>
+  <p>Locations reference credentials by id. Credential values live in the credential service and are resolved only by trusted backend callers. Location records never store raw private keys, passwords, tokens, or command output that could contain secrets. The browser can create SSH password or private-key credentials while adding an SSH location, but the created location still stores only the credential id.</p>
 
   <h2 id="rpc">6. RPC surface</h2>
-  <p>The RPC adapter translates browser requests into typed location service calls. MCP project registration can use the local project root directly; it does not need to call location RPC first when the harness already knows its working directory.</p>
+  <p>The RPC adapter translates browser requests into typed location service calls. The Locations page uses the RPC surface to list locations, create SSH locations, probe readiness, delete unused locations, and browse directories during project creation. MCP project registration can use the local project root directly; it does not need to call location RPC first when the harness already knows its working directory.</p>
 
   <h2 id="invariants">7. Invariants</h2>
   <table>
