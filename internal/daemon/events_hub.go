@@ -7,10 +7,19 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/ThreeDotsLabs/watermill/message"
+
+	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
 )
 
 const eventAppendMethod = "event.append"
+
+// notificationBuilder decodes a raw bus payload for one topic into the
+// project it belongs to and the event.append notification bytes to fan out.
+// An empty projectID means "decoded fine but nothing to route" (the message is
+// acked and dropped); a non-nil error means the payload was malformed (nacked).
+type notificationBuilder func(payload []byte) (projectID string, notification []byte, err error)
 
 type eventsHub struct {
 	bus    *eventbus.Bus
@@ -38,28 +47,75 @@ func newEventsHub(bus *eventbus.Bus, logger *slog.Logger) *eventsHub {
 	}
 }
 
+// topicSubscriptions maps every domain topic the hub fans out to the browser to
+// the decoder for that topic's payload. Pin/task/decision/member publish typed
+// structs; mission and KR publish a generic types.EventRecord (carrying the
+// project id in Data["projectId"]), so they share buildRecordNotification.
+//
+// Adding a surface to live SSE is now a one-line change here plus a matching
+// `event.type` prefix filter on the frontend hook — see
+// docs/architecture/realtime-events.html.
+func (h *eventsHub) topicSubscriptions() []struct {
+	topic   string
+	builder notificationBuilder
+} {
+	return []struct {
+		topic   string
+		builder notificationBuilder
+	}{
+		{eventbus.TopicPinLifecycle, h.buildPinNotification},
+		{eventbus.TopicTaskLifecycle, h.buildTaskNotification},
+		{eventbus.TopicDecisionLogged, h.buildDecisionNotification},
+		{eventbus.TopicSpaceMemberLifecycle, h.buildMemberNotification},
+		{eventbus.TopicMissionLifecycle, h.buildRecordNotification},
+		{eventbus.TopicKRProgress, h.buildRecordNotification},
+	}
+}
+
 func (h *eventsHub) Run(ctx context.Context) error {
 	if h == nil || h.bus == nil {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	messages, err := h.bus.Subscribe(ctx, eventbus.TopicPinLifecycle)
-	if err != nil {
-		return fmt.Errorf("subscribe pin lifecycle: %w", err)
+
+	var wg sync.WaitGroup
+	for _, sub := range h.topicSubscriptions() {
+		messages, err := h.bus.Subscribe(ctx, sub.topic)
+		if err != nil {
+			return fmt.Errorf("subscribe %s: %w", sub.topic, err)
+		}
+		wg.Add(1)
+		go func(topic string, messages <-chan *message.Message, build notificationBuilder) {
+			defer wg.Done()
+			h.consume(ctx, topic, messages, build)
+		}(sub.topic, messages, sub.builder)
 	}
+
 	h.once.Do(func() { close(h.ready) })
+	<-ctx.Done()
+	wg.Wait()
+	return ctx.Err()
+}
+
+// consume drains one topic's subscription, translating each message into an
+// event.append notification and fanning it out to the project's clients.
+func (h *eventsHub) consume(ctx context.Context, topic string, messages <-chan *message.Message, build notificationBuilder) {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return
 		case msg, ok := <-messages:
 			if !ok {
-				return nil
+				return
 			}
-			if err := h.handlePinLifecycle(msg.Payload); err != nil {
-				h.logger.Warn("drop pin lifecycle event", "error", err)
+			projectID, notification, err := build(msg.Payload)
+			if err != nil {
+				h.logger.Warn("drop realtime event", "topic", topic, "error", err)
 				msg.Nack()
 				continue
+			}
+			if projectID != "" && notification != nil {
+				h.publish(projectID, notification)
 			}
 			msg.Ack()
 		}
@@ -101,13 +157,13 @@ func (h *eventsHub) Register(projectID string) (<-chan []byte, func()) {
 	return client.ch, unregister
 }
 
-func (h *eventsHub) handlePinLifecycle(payload []byte) error {
+func (h *eventsHub) buildPinNotification(payload []byte) (string, []byte, error) {
 	var event eventbus.PinLifecycleEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		return fmt.Errorf("decode pin lifecycle: %w", err)
+		return "", nil, fmt.Errorf("decode pin lifecycle: %w", err)
 	}
 	if event.ProjectID == "" {
-		return fmt.Errorf("pin lifecycle event missing projectId")
+		return "", nil, fmt.Errorf("pin lifecycle event missing projectId")
 	}
 	notification, err := encodeEventAppend(event.ProjectID, map[string]any{
 		"type":      event.EventType,
@@ -117,11 +173,98 @@ func (h *eventsHub) handlePinLifecycle(payload []byte) error {
 		"nodeType":  event.NodeType,
 		"timestamp": event.Timestamp,
 	})
-	if err != nil {
-		return err
+	return event.ProjectID, notification, err
+}
+
+func (h *eventsHub) buildTaskNotification(payload []byte) (string, []byte, error) {
+	var event eventbus.TaskLifecycleEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return "", nil, fmt.Errorf("decode task lifecycle: %w", err)
 	}
-	h.publish(event.ProjectID, notification)
-	return nil
+	if event.ProjectID == "" {
+		return "", nil, fmt.Errorf("task lifecycle event missing projectId")
+	}
+	notification, err := encodeEventAppend(event.ProjectID, map[string]any{
+		"type":      event.EventType,
+		"eventType": event.EventType,
+		"projectId": event.ProjectID,
+		"taskId":    event.TaskID,
+		"status":    event.Status,
+		"timestamp": event.Timestamp,
+	})
+	return event.ProjectID, notification, err
+}
+
+func (h *eventsHub) buildDecisionNotification(payload []byte) (string, []byte, error) {
+	var event eventbus.DecisionLoggedEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return "", nil, fmt.Errorf("decode decision logged: %w", err)
+	}
+	if event.ProjectID == "" {
+		return "", nil, fmt.Errorf("decision logged event missing projectId")
+	}
+	notification, err := encodeEventAppend(event.ProjectID, map[string]any{
+		"type":       "decision.logged",
+		"eventType":  "decision.logged",
+		"projectId":  event.ProjectID,
+		"decisionId": event.DecisionID,
+		"title":      event.Title,
+		"memberName": event.MemberName,
+		"confidence": event.Confidence,
+		"timestamp":  event.Timestamp,
+	})
+	return event.ProjectID, notification, err
+}
+
+func (h *eventsHub) buildMemberNotification(payload []byte) (string, []byte, error) {
+	var event eventbus.SpaceMemberLifecycleEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return "", nil, fmt.Errorf("decode member lifecycle: %w", err)
+	}
+	if event.ProjectID == "" {
+		// Member events are not always project-scoped; drop quietly.
+		return "", nil, nil
+	}
+	notification, err := encodeEventAppend(event.ProjectID, map[string]any{
+		"type":           event.EventType,
+		"eventType":      event.EventType,
+		"projectId":      event.ProjectID,
+		"memberId":       event.MemberID,
+		"displayName":    event.DisplayName,
+		"harnessKind":    event.HarnessKind,
+		"model":          event.Model,
+		"lifecycleState": event.LifecycleState,
+		"timestamp":      event.Timestamp,
+	})
+	return event.ProjectID, notification, err
+}
+
+// buildRecordNotification decodes the generic types.EventRecord used by mission
+// and KR events. The project id lives in Data["projectId"]; the remaining Data
+// keys (missionId, keyResultId, status, progressPercent, …) are forwarded so
+// consumers and the activity feed can render without a follow-up fetch.
+func (h *eventsHub) buildRecordNotification(payload []byte) (string, []byte, error) {
+	var event types.EventRecord
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return "", nil, fmt.Errorf("decode event record: %w", err)
+	}
+	projectID := event.Data["projectId"]
+	if projectID == "" {
+		return "", nil, fmt.Errorf("event record missing projectId")
+	}
+	fields := map[string]any{
+		"type":      event.Type,
+		"eventType": event.Type,
+		"projectId": projectID,
+		"timestamp": event.Timestamp,
+	}
+	for key, value := range event.Data {
+		if _, exists := fields[key]; !exists {
+			fields[key] = value
+		}
+	}
+	notification, err := encodeEventAppend(projectID, fields)
+	return projectID, notification, err
 }
 
 func (h *eventsHub) publish(projectID string, payload []byte) {
