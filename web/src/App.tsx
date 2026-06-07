@@ -25,6 +25,7 @@ const DecisionDetail = lazyWithRetry(() => import('./pages/DecisionDetail'), 'pa
 const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/StrategyMap')
 const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisions')
 const Members = lazyWithRetry(() => import('./pages/Members'), 'pages/Members')
+const Activity = lazyWithRetry(() => import('./pages/Activity'), 'pages/Activity')
 
 const CommandPalette = lazyWithRetry(() => import('./components/CommandPalette'), 'components/CommandPalette')
 
@@ -248,6 +249,7 @@ export default function App() {
                   <Route path="/project/:projectId/strategy">{(params) => <StrategyMap projectId={params.projectId} />}</Route>
                   <Route path="/project/:projectId/decisions" component={Decisions} />
                   <Route path="/project/:projectId/members" component={Members} />
+                  <Route path="/project/:projectId/activity" component={Activity} />
                   <Route path="/project/:projectId/builder">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/roles">{(params) => <Redirect to={`/project/${params.projectId}/dashboard`} />}</Route>
                   <Route path="/project/:projectId/dashboard" component={Dashboard} />

@@ -2487,6 +2487,39 @@ body {
 .decision-recency-day    { opacity: 0.7; }
 .decision-recency-old    { opacity: 0.55; }
 
+/* ── Activity feed: GitHub-style timeline rail ──────────────────────────
+ * A single vertical line runs through the icon column; each event hangs a
+ * circular icon "node" on it. The line is drawn with ::before on the row
+ * (not a separate element) so it tracks row height automatically, and the
+ * node sits above it via z-index. First/last rows trim the line so it
+ * starts/stops at the node center rather than bleeding past the list. */
+.activity-feed { position: relative; }
+.activity-ev { position: relative; display: flex; gap: 14px; padding: 7px 0; }
+.activity-ev::before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+.activity-ev:first-child::before { top: 14px; }
+.activity-ev:last-child::before { bottom: auto; height: 14px; }
+.activity-node {
+  position: relative;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+
 /* New decision entrance — plays once on mount */
 .decision-recency-recent {
   animation: fade-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
