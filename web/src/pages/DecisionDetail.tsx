@@ -23,6 +23,7 @@ import {
 import { sanitizeDecisionTitle, safeReferenceLabel } from '../lib/displaySanitizers'
 import { decisionActorDisplay } from '../lib/decisionDisplay'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
+import { StatItem } from '../components/detail/StatItem'
 import DecisionDetails from '../components/decision/DecisionDetails'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -39,22 +40,6 @@ import {
 // Raw refs are opaque ids — shorten them so a missing title doesn't blow out the row.
 function shortRef(ref: string): string {
   return ref.length > 16 ? `${ref.slice(0, 10)}…` : ref
-}
-
-/* ── Stat row in the metadata grid ── */
-
-function StatItem({ label, value, icon }: { label: string; value: ReactNode; icon?: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
-        {label}
-      </span>
-      <span className="flex items-center gap-1.5 text-[var(--text-1)]" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
-        {icon}
-        {value}
-      </span>
-    </div>
-  )
 }
 
 /* ── Plain text section (Context / Outcome) ── */

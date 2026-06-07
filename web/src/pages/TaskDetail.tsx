@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { useRoute, Link } from 'wouter'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
@@ -33,6 +33,7 @@ import {
 } from './boardHelpers'
 import { tasksPanelLink, missionDetailLink, decisionsLink } from '../lib/routing'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
+import { StatItem } from '../components/detail/StatItem'
 import EditTaskDialog from '../components/task/EditTaskDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -50,22 +51,6 @@ import {
 import type { Task } from '../lib/types'
 
 const TERMINAL_STATUSES = ['succeeded', 'failed', 'canceled']
-
-/* ── Stat row in the metadata grid ── */
-
-function StatItem({ label, value, icon }: { label: string; value: ReactNode; icon?: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
-        {label}
-      </span>
-      <span className="flex items-center gap-1.5 text-[var(--text-1)]" style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}>
-        {icon}
-        {value}
-      </span>
-    </div>
-  )
-}
 
 /* ── Loading skeleton ── */
 
