@@ -74,62 +74,6 @@ type LocationProbeParams struct {
 	LocationID string `json:"locationId"`
 }
 
-type LocationInstallCodexParams struct {
-	LocationID string `json:"locationId"`
-}
-
-type LocationCodexAuthStatusParams struct {
-	LocationID string `json:"locationId"`
-}
-
-type LocationCodexLoginParams struct {
-	LocationID string `json:"locationId"`
-}
-
-type LocationInstallClaudeParams struct {
-	LocationID string `json:"locationId"`
-}
-
-type LocationClaudeAuthStatusParams struct {
-	LocationID string `json:"locationId"`
-}
-
-type LocationClaudeLoginParams struct {
-	LocationID string `json:"locationId"`
-}
-
-type LocationClaudeLoginCompleteParams struct {
-	LocationID string `json:"locationId"`
-	Code       string `json:"code"`
-}
-
-type LocationClaudeAuthStatusResult struct {
-	LoggedIn   bool   `json:"loggedIn"`
-	AuthMethod string `json:"authMethod,omitempty"`
-	Provider   string `json:"provider,omitempty"`
-	RawJSON    string `json:"rawJson,omitempty"`
-}
-
-type LocationCodexAuthStatusResult struct {
-	LoggedIn bool   `json:"loggedIn"`
-	Method   string `json:"method,omitempty"`
-	Output   string `json:"output,omitempty"`
-}
-
-type LocationCodexLoginResult struct {
-	Output   string `json:"output"`
-	LoginURL string `json:"loginUrl,omitempty"`
-	LogPath  string `json:"logPath,omitempty"`
-	PID      string `json:"pid,omitempty"`
-}
-
-type LocationClaudeLoginResult struct {
-	Output   string `json:"output"`
-	LoginURL string `json:"loginUrl,omitempty"`
-	LogPath  string `json:"logPath,omitempty"`
-	PID      string `json:"pid,omitempty"`
-}
-
 type LocationView struct {
 	ID           string               `json:"id"`
 	Kind         string               `json:"kind"`
@@ -224,9 +168,6 @@ func capabilityViews(probe locationdomain.Probe) []CapabilityView {
 	return []CapabilityView{
 		{Name: "reachable", Status: boolStatus(probe.Reachable)},
 		{Name: "fileBrowsing", Status: boolStatus(probe.FileBrowsing)},
-		{Name: "exec", Status: boolStatus(probe.Exec)},
-		{Name: "codex", Status: boolStatus(probe.Codex)},
-		{Name: "claude", Status: boolStatus(probe.Claude)},
 	}
 }
 
@@ -241,7 +182,7 @@ func probeStatus(record locationdomain.Record) string {
 	if record.LastProbeError != "" {
 		return ProbeStatusFailed
 	}
-	if record.Probe.Reachable && record.Probe.FileBrowsing && record.Probe.Exec && record.Probe.Codex {
+	if record.Probe.Reachable && record.Probe.FileBrowsing {
 		return ProbeStatusPassed
 	}
 	return ProbeStatusUnknown

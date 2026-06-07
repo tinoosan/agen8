@@ -81,7 +81,7 @@
     <tbody>
       <tr><td><code>label</code></td><td>User-facing location name.</td><td>The local location displays as <code>This machine</code>.</td></tr>
       <tr><td><code>address</code></td><td>Host metadata for non-local locations.</td><td>The UI can show where a root is expected to live without exposing secrets.</td></tr>
-      <tr><td><code>ready</code></td><td>Durable readiness summary.</td><td>Project creation can filter unusable locations.</td></tr>
+      <tr><td><code>ready</code></td><td>Durable readiness summary. A location is ready when it is reachable and supports directory browsing.</td><td>Project creation can filter unusable locations without requiring Codex, Claude Code, or shell execution.</td></tr>
       <tr><td><code>credentialRef</code></td><td>Reference to a stored credential record.</td><td>Credential material stays in the credential service.</td></tr>
     </tbody>
   </table>

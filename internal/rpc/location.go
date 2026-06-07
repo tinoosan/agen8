@@ -8,20 +8,13 @@ import (
 )
 
 const (
-	MethodLocationList                = "location.list"
-	MethodLocationGet                 = "location.get"
-	MethodLocationCreate              = "location.create"
-	MethodLocationUpdate              = "location.update"
-	MethodLocationDelete              = "location.delete"
-	MethodLocationProbe               = "location.probe"
-	MethodLocationInstall             = "location.installCodex"
-	MethodLocationCodexAuthStatus     = "location.codexAuthStatus"
-	MethodLocationCodexLogin          = "location.codexLogin"
-	MethodLocationClaudeInstall       = "location.installClaude"
-	MethodLocationClaudeAuthStatus    = "location.claudeAuthStatus"
-	MethodLocationClaudeLogin         = "location.claudeLogin"
-	MethodLocationClaudeLoginComplete = "location.claudeLoginComplete"
-	MethodLocationFSListDir           = "location.fs.listDir"
+	MethodLocationList      = "location.list"
+	MethodLocationGet       = "location.get"
+	MethodLocationCreate    = "location.create"
+	MethodLocationUpdate    = "location.update"
+	MethodLocationDelete    = "location.delete"
+	MethodLocationProbe     = "location.probe"
+	MethodLocationFSListDir = "location.fs.listDir"
 )
 
 func RegisterLocation(reg *Registry, locationSvc *locationapp.Service) error {
@@ -47,27 +40,6 @@ func RegisterLocation(reg *Registry, locationSvc *locationapp.Service) error {
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodLocationProbe, false, handler.LocationProbe)
-		},
-		func() error {
-			return AddBoundHandler(reg, MethodLocationInstall, false, handler.LocationInstallCodex)
-		},
-		func() error {
-			return AddBoundHandler(reg, MethodLocationCodexAuthStatus, false, handler.LocationCodexAuthStatus)
-		},
-		func() error {
-			return AddBoundHandler(reg, MethodLocationCodexLogin, false, handler.LocationCodexLogin)
-		},
-		func() error {
-			return AddBoundHandler(reg, MethodLocationClaudeInstall, false, handler.LocationInstallClaude)
-		},
-		func() error {
-			return AddBoundHandler(reg, MethodLocationClaudeAuthStatus, false, handler.LocationClaudeAuthStatus)
-		},
-		func() error {
-			return AddBoundHandler(reg, MethodLocationClaudeLogin, false, handler.LocationClaudeLogin)
-		},
-		func() error {
-			return AddBoundHandler(reg, MethodLocationClaudeLoginComplete, false, handler.LocationClaudeLoginComplete)
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodLocationFSListDir, false, handler.LocationFSListDir)

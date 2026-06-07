@@ -92,27 +92,6 @@ func TestRegisterLocationListDirRequiresPath(t *testing.T) {
 	}
 }
 
-func TestRegisterLocationInstallCodexRequiresLocationID(t *testing.T) {
-	t.Parallel()
-	server := newLocationRPCServerForTest(t)
-	raw, err := server.Handle(context.Background(), []byte(`{
-		"jsonrpc":"2.0",
-		"id":1,
-		"method":"location.installCodex",
-		"params":{}
-	}`))
-	if err != nil {
-		t.Fatalf("Handle location.installCodex: %v", err)
-	}
-	var resp Response
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if resp.Error == nil || resp.Error.Code != CodeInvalidParams {
-		t.Fatalf("response error = %+v", resp.Error)
-	}
-}
-
 func newLocationRPCServerForTest(t *testing.T) *Server {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{
