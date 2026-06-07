@@ -5,7 +5,6 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   ArrowLeft,
-  AlertCircle,
   AlertTriangle,
   Clock,
   Hash,
@@ -34,6 +33,7 @@ import {
 import { tasksPanelLink, missionDetailLink, decisionsLink } from '../lib/routing'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { StatItem } from '../components/detail/StatItem'
+import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import EditTaskDialog from '../components/task/EditTaskDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -160,24 +160,17 @@ export default function TaskDetail() {
   const missionsQuery = useMissions(projectId)
 
   if (!projectId || !taskId) {
-    return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Task not found.</div>
+    return <DetailNotFound entity="task" />
   }
 
   if (isLoading) return <TaskDetailSkeleton />
 
   if (isError) {
-    return (
-      <div className="max-w-4xl mx-auto px-6 pt-8">
-        <div className="flex items-center gap-2 text-[var(--red)] text-sm">
-          <AlertCircle size={15} />
-          <span>Failed to load task: {error instanceof Error ? error.message : 'Unknown error'}</span>
-        </div>
-      </div>
-    )
+    return <DetailError entity="task" message={error instanceof Error ? error.message : 'Unknown error'} />
   }
 
   if (!task) {
-    return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Task not found.</div>
+    return <DetailNotFound entity="task" />
   }
 
   const status = task.status ?? 'pending'

@@ -16,6 +16,7 @@ import { entityDisplayTitle } from '../lib/displaySanitizers'
 import { missionsPanelLink, taskDetailLink, decisionDetailLink } from '../lib/routing'
 import ProgressHistory from '../components/mission/ProgressHistory'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
+import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -37,7 +38,6 @@ import {
   ChevronRight,
   ChevronDown,
   ArrowLeft,
-  AlertCircle,
   TrendingUp,
   TrendingDown,
   Calendar,
@@ -550,7 +550,7 @@ export default function MissionDetail() {
   const { data: projectDecisions } = useRecentDecisions(projectId)
 
   if (!projectId || !missionId) {
-    return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Mission not found.</div>
+    return <DetailNotFound entity="mission" />
   }
 
   if (missionLoading || krsLoading) return <MissionDetailSkeleton />
@@ -558,18 +558,11 @@ export default function MissionDetail() {
   if (missionError || krsError) {
     const msg = missionErr instanceof Error ? missionErr.message
       : krsErr instanceof Error ? (krsErr as Error).message : 'Unknown error'
-    return (
-      <div className="max-w-4xl mx-auto px-6 pt-8">
-        <div className="flex items-center gap-2 text-[var(--red)] text-sm">
-          <AlertCircle size={15} />
-          <span>Failed to load mission: {msg}</span>
-        </div>
-      </div>
-    )
+    return <DetailError entity="mission" message={msg} />
   }
 
   if (!mission) {
-    return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Mission not found.</div>
+    return <DetailNotFound entity="mission" />
   }
 
   // Related cross-references (tasks + decisions). Filtering mirrors the strategy

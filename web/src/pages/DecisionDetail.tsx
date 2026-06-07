@@ -3,7 +3,6 @@ import { useRoute, useLocation, Link } from 'wouter'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
-  AlertCircle,
   Clock,
   Trash2,
   ChevronRight,
@@ -24,6 +23,7 @@ import { sanitizeDecisionTitle, safeReferenceLabel } from '../lib/displaySanitiz
 import { decisionActorDisplay } from '../lib/decisionDisplay'
 import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { StatItem } from '../components/detail/StatItem'
+import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import DecisionDetails from '../components/decision/DecisionDetails'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -92,24 +92,17 @@ export default function DecisionDetail() {
   const tasksQuery = useProjectTasks(projectId)
 
   if (!projectId || !decisionId) {
-    return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Decision not found.</div>
+    return <DetailNotFound entity="decision" />
   }
 
   if (isLoading) return <DecisionDetailSkeleton />
 
   if (isError) {
-    return (
-      <div className="max-w-4xl mx-auto px-6 pt-8">
-        <div className="flex items-center gap-2 text-[var(--red)] text-sm">
-          <AlertCircle size={15} />
-          <span>Failed to load decision: {error instanceof Error ? error.message : 'Unknown error'}</span>
-        </div>
-      </div>
-    )
+    return <DetailError entity="decision" message={error instanceof Error ? error.message : 'Unknown error'} />
   }
 
   if (!decision) {
-    return <div className="max-w-4xl mx-auto px-6 pt-8 text-[var(--text-3)] text-sm">Decision not found.</div>
+    return <DetailNotFound entity="decision" />
   }
 
   const title = sanitizeDecisionTitle(decision.title)
