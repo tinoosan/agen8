@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { useLocation } from 'wouter'
 import {
-  UserRound, KeyRound, LogOut, Moon, Sun,
+  UserRound, KeyRound, LogOut, Moon, Sun, Server,
 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useStore, isLightTheme } from '../../lib/store'
@@ -50,6 +50,10 @@ export function AccountChip() {
       <button type="button" className={ROW_CLS} style={ROW_STYLE} onClick={() => navigate('/credentials')}>
         <KeyRound size={14} className="shrink-0" />
         <span>Credentials</span>
+      </button>
+      <button type="button" className={ROW_CLS} style={ROW_STYLE} onClick={() => navigate('/locations')}>
+        <Server size={14} className="shrink-0" />
+        <span>Locations</span>
       </button>
       <button
         type="button"

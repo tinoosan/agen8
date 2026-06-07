@@ -19,14 +19,14 @@ export function locationLabel(location: ExecutionLocation): string {
 }
 
 export function locationDescription(location: ExecutionLocation): string {
-  if (location.kind === 'local') return 'Local execution'
+  if (location.kind === 'local') return 'Daemon machine'
   const address = location.address
   if (address?.host) {
     const user = address.username ? `${address.username}@` : ''
     const port = address.port ? `:${address.port}` : ''
     return `${user}${address.host}${port}`
   }
-  if (location.kind === 'managed') return 'Managed execution'
+  if (location.kind === 'managed') return 'Managed location'
   return location.kind
 }
 

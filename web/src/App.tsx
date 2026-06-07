@@ -16,6 +16,7 @@ const Project = lazyWithRetry(() => import('./pages/Project'), 'pages/Project')
 const Login = lazyWithRetry(() => import('./pages/Login'), 'pages/Login')
 const Account = lazyWithRetry(() => import('./pages/Account'), 'pages/Account')
 const Credentials = lazyWithRetry(() => import('./pages/Credentials'), 'pages/Credentials')
+const Locations = lazyWithRetry(() => import('./pages/Locations'), 'pages/Locations')
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'), 'pages/Dashboard')
 const MissionDetail = lazyWithRetry(() => import('./pages/MissionDetail'), 'pages/MissionDetail')
 const TaskDetail = lazyWithRetry(() => import('./pages/TaskDetail'), 'pages/TaskDetail')
@@ -57,6 +58,8 @@ function MobileTopBar() {
 
   const title = location.startsWith('/credentials')
     ? 'Credentials'
+    : location.startsWith('/locations')
+      ? 'Locations'
     : location.startsWith('/account')
       ? 'Settings'
       : MOBILE_VIEW_TITLES[activeView] ?? 'agen8'
@@ -235,6 +238,7 @@ export default function App() {
                   <Route path="/project/:projectId" component={Dashboard} />
                   <Route path="/account" component={Account} />
                   <Route path="/credentials" component={Credentials} />
+                  <Route path="/locations" component={Locations} />
                   <Route path="/login" component={Login} />
                   <Route path="/" component={Project} />
                 </Switch>

@@ -76,4 +76,10 @@ describe('Sidebar', () => {
     expect(screen.getByText(/^User$/)).toBeInTheDocument()
     expect(screen.queryByText(/^Local daemon$/)).not.toBeInTheDocument()
   })
+
+  it('links daemon-level locations from the sidebar footer', () => {
+    renderSidebar()
+
+    expect(screen.getByRole('button', { name: /locations/i })).toBeInTheDocument()
+  })
 })
