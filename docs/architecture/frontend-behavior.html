@@ -101,15 +101,25 @@
     <li>Opening the detail panel is an explicit action via <code>Enter</code>, <code>Space</code>, or a <strong>second tap</strong> on an already-focused node.</li>
     <li>With the panel closed, traversal and map centering remain active so users can keep walking the graph while reading later.</li>
     <li>The map keeps focus and detail panel lifecycles separate: <code>Escape</code> dismisses one layer per press in this order: active lens/filter, open panel, then focus cursor.</li>
-    <li>Trace mode is radial by rings: enabling <strong>Trace Path</strong> seeds depth 1, and <code>[</code>/<code>]</code> change the hop radius one ring at a time.</li>
   </ul>
+
+  <p><strong>Trace path</strong> is a per-node lens that walks the graph outward from a single anchor, revealing the neighbourhood one ring at a time instead of lighting the whole connected component at once (the old "select a mission &rarr; everything explodes" behaviour). Its model:</p>
+  <ul>
+    <li><strong>Anchored on the focus cursor, not the panel.</strong> Trace keys off the focus cursor (<code>effectiveFocusNodeId</code>), so it is reachable on the <strong>first touch</strong> with the detail panel closed. The <strong>Trace Path</strong> button appears as soon as a node is focused, and the <code>T</code> shortcut toggles it under the same condition.</li>
+    <li><strong>Follow the cursor.</strong> Because the lens re-derives from the cursor, tapping another node <strong>re-roots</strong> the trace to it and re-reveals that node's rings. The trace tracks wherever you tap rather than staying pinned to where it started.</li>
+    <li><strong>Alternating structural &harr; context rings.</strong> Each stepper press is one reveal phase, and phases alternate. Odd steps grow the <em>structural</em> skeleton (mission&rarr;KR&rarr;task lineage) by one hop; even steps layer in <em>context</em> links (decisions and other reasoning edges) off everything shown so far. The structural frontier advances <strong>only</strong> on structural edges, so context-added nodes never pull their own lineage back into the skeleton &mdash; "structural ring 2" stays exactly two structural hops from the anchor. Both adjacencies are undirected, so lineage grows symmetrically (ancestors and descendants).</li>
+    <li><strong>Depth bounds.</strong> The radius runs from <code>TRACE_MIN_DEPTH</code> (1 &mdash; a bare anchor with nothing around it is useless, so entering trace seeds the first structural ring) to <code>TRACE_MAX_DEPTH</code> (6 &mdash; three structural rings interleaved with three context passes). <code>[</code>/<code>]</code> and the on-canvas <code>&minus;</code>/<code>+</code> stepper change the radius one phase at a time.</li>
+    <li><strong>Edge-weighting safety rule.</strong> Within the revealed set, only <strong>structural</strong> edges render as <em>direct</em> (bold path with a flow animation); context links stay <em>ambient</em> (highlighted via opacity only). This is deliberate: a "direct" context link spawns a label portal plus an infinite dash animation, and lighting many at once kills the browser render process (the Safari "a problem repeatedly occurred" crash). Keeping context ambient is what makes trace safe on a high-degree node.</li>
+    <li><strong>Auto-clear follows the cursor too.</strong> Trace clears (and the depth resets) when the focus cursor clears &mdash; e.g. a pane click or the final <code>Escape</code> &mdash; not when the detail panel closes. Closing the panel while a node stays focused keeps the trace alive.</li>
+  </ul>
+
   <p>Implementation references:</p>
   <ul>
     <li><a href="../web/src/pages/StrategyMap.tsx">web/src/pages/StrategyMap.tsx</a> (state boundaries)</li>
     <li><a href="../web/src/components/strategy/useStrategyMapNodeHandlers.ts">web/src/components/strategy/useStrategyMapNodeHandlers.ts</a> (traversal + explicit panel-open gesture)</li>
     <li><a href="../web/src/components/strategy/useStrategyMapKeyboardNav.ts">web/src/components/strategy/useStrategyMapKeyboardNav.ts</a> (focus, focus cursor and progressive dismiss)</li>
-    <li><a href="../web/src/components/strategy/useStrategyMapLenses.ts">web/src/components/strategy/useStrategyMapLenses.ts</a> (focus neighborhood rendering)</li>
-    <li><a href="../web/src/components/strategy/strategyMapFilters.ts">web/src/components/strategy/strategyMapFilters.ts</a> (TRACE_MIN_DEPTH / TRACE_MAX_DEPTH / ring expansion)</li>
+    <li><a href="../web/src/components/strategy/useStrategyMapLenses.ts">web/src/components/strategy/useStrategyMapLenses.ts</a> (focus neighborhood rendering; trace lens anchored on <code>effectiveFocusNodeId</code>)</li>
+    <li><a href="../web/src/components/strategy/strategyMapFilters.ts">web/src/components/strategy/strategyMapFilters.ts</a> (<code>computeTraceFilter</code> alternating structural&harr;context BFS; <code>TRACE_MIN_DEPTH</code> / <code>TRACE_MAX_DEPTH</code>; structural-only direct edges)</li>
     <li><a href="../web/src/components/strategy/StrategyMapHelp.tsx">web/src/components/strategy/StrategyMapHelp.tsx</a> (keyboard model and staged Esc copy)</li>
   </ul>
 
