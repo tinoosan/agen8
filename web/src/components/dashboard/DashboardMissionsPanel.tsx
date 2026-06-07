@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'wouter'
 import { useMissions } from '../../hooks/useMissions'
-import { usePinnedMissions } from '../../hooks/usePinnedMissions'
+import { usePins } from '../../hooks/usePins'
 import CreateMissionDialog from '../mission/CreateMissionDialog'
 import type { MissionStatus } from '../../lib/types'
 import { missionDetailLink } from '../../lib/routing'
@@ -51,7 +51,7 @@ export default function DashboardMissionsPanel({
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   const { data: allMissions, isLoading, isError, error } = useMissions(projectId)
-  const { isPinned, togglePin } = usePinnedMissions(projectId)
+  const { isPinned, togglePin } = usePins(projectId)
 
   const statusCounts = useMemo(
     () =>
@@ -241,7 +241,7 @@ export default function DashboardMissionsPanel({
                   className="dashboard-queue-row flex items-center gap-2 px-3 py-2.5 rounded-[var(--r-md)] hover:bg-[var(--bg-hover)] transition-colors"
                 >
                   <button
-                    onClick={() => togglePin(mission.id)}
+                    onClick={() => togglePin(mission.id, 'mission')}
                     className={cn(
                       'shrink-0 p-0.5 rounded-[var(--r-sm)] transition-colors bg-transparent border-none cursor-pointer',
                       pinned ? 'text-[var(--accent)]' : 'text-[var(--text-3)] hover:text-[var(--text-2)]',

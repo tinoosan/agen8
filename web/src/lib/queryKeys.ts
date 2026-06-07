@@ -89,6 +89,10 @@ export const qk = {
   taskGetAll: ['task.get'] as const,
   taskGet: (taskId: string | null) => ['task.get', taskId ?? ''] as const,
 
+  // ── pins ──────────────────────────────────────────────
+  pinsAll: ['pin.list'] as const,
+  pins: (projectId: string | null) => ['pin.list', projectId ?? ''] as const,
+
   // ── projects ──────────────────────────────────────────
   projectsAll: ['project.list'] as const,
   projects: (includeArchived: boolean) =>

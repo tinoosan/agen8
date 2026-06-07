@@ -5,8 +5,10 @@ import {
   Clock,
   Trash2,
   Tag,
+  Pin,
 } from 'lucide-react'
 import { useDecision, useDeleteDecision } from '../hooks/useDecisions'
+import { usePins } from '../hooks/usePins'
 import { useMissions, useProjectKRs } from '../hooks/useMissions'
 import { useProjectTasks } from '../hooks/useProjectTasks'
 import { formatRelative } from '@/lib/format'
@@ -87,6 +89,7 @@ export default function DecisionDetail() {
   const missionsQuery = useMissions(projectId)
   const krsQuery = useProjectKRs(projectId)
   const tasksQuery = useProjectTasks(projectId)
+  const { isPinned, togglePin } = usePins(projectId)
 
   if (!projectId || !decisionId) {
     return <DetailNotFound entity="decision" />
@@ -198,6 +201,21 @@ export default function DecisionDetail() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => togglePin(decisionId, 'decision')}
+                className="dashboard-action-button"
+                style={{
+                  letterSpacing: '-0.12px',
+                  color: isPinned(decisionId) ? 'var(--accent)' : undefined,
+                }}
+                aria-pressed={isPinned(decisionId)}
+                title={isPinned(decisionId) ? 'Unpin decision' : 'Pin decision'}
+              >
+                <Pin size={12} className={isPinned(decisionId) ? 'mr-1 fill-current' : 'mr-1'} />
+                {isPinned(decisionId) ? 'Pinned' : 'Pin'}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
