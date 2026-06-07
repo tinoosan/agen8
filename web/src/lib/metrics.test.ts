@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeMetrics, formatSuccessRate } from './metrics'
+import { computeMetrics, computeMemberPerformance, formatSuccessRate } from './metrics'
 import type { Task, ProjectMember } from './types'
 
 /* Fixed anchor so in-flight durations (which read `now`) stay deterministic. */
@@ -158,6 +158,79 @@ describe('computeMetrics — leaderboards', () => {
       tasks: [makeTask({ id: 'a', status: 'canceled', claimedByMemberId: 'm1' })],
     })
     expect(modelLeaderboard).toEqual([])
+  })
+})
+
+describe('computeMemberPerformance', () => {
+  const members = [
+    makeMember({ id: 'm1', displayName: 'Alpha' }),
+    makeMember({ id: 'm2', displayName: 'Bravo' }),
+  ]
+
+  it('seeds a zeroed entry for every roster member, even idle ones', () => {
+    const perf = computeMemberPerformance({ members, tasks: [], now: T0 })
+    expect(perf.size).toBe(2)
+    const m2 = perf.get('m2')!
+    expect(m2).toMatchObject({ memberId: 'm2', done: 0, failed: 0, inProgress: 0, successRate: null, avgWorkTimeMs: null })
+    // The daily series is the full window, all zeros.
+    expect(m2.daily.length).toBe(14)
+    expect(m2.daily.every((d) => d.done === 0)).toBe(true)
+  })
+
+  it('attributes done / failed / in-progress to the claiming member', () => {
+    const perf = computeMemberPerformance({
+      members,
+      now: T0,
+      tasks: [
+        makeTask({ id: 'a', status: 'succeeded', claimedByMemberId: 'm1', startedAt: at(-30 * MIN), completedAt: at(-20 * MIN) }),
+        makeTask({ id: 'b', status: 'succeeded', claimedByMemberId: 'm1', startedAt: at(-50 * MIN), completedAt: at(-40 * MIN) }),
+        makeTask({ id: 'c', status: 'failed', claimedByMemberId: 'm1' }),
+        makeTask({ id: 'd', status: 'active', claimedByMemberId: 'm1' }),
+        makeTask({ id: 'e', status: 'succeeded', claimedByMemberId: 'm2', startedAt: at(-15 * MIN), completedAt: at(-5 * MIN) }),
+      ],
+    })
+    const m1 = perf.get('m1')!
+    expect(m1.done).toBe(2)
+    expect(m1.failed).toBe(1)
+    expect(m1.inProgress).toBe(1)
+    // 2 done of 3 terminal = 2/3.
+    expect(m1.successRate).toBeCloseTo(2 / 3, 5)
+    // Each completed task took 10m of work → 10m average.
+    expect(m1.avgWorkTimeMs).toBe(10 * MIN)
+    expect(perf.get('m2')!.done).toBe(1)
+  })
+
+  it('ignores tasks with no claiming member (unattributable work)', () => {
+    const perf = computeMemberPerformance({
+      members,
+      now: T0,
+      tasks: [makeTask({ id: 'a', status: 'succeeded' })],
+    })
+    expect(perf.get('m1')!.done).toBe(0)
+    expect(perf.get('m2')!.done).toBe(0)
+  })
+
+  it('buckets completed tasks into the daily window by completion day', () => {
+    const DAY = 24 * 60 * MIN
+    const perf = computeMemberPerformance({
+      members,
+      now: T0,
+      windowDays: 7,
+      tasks: [
+        // two completed "today", one "two days ago", one outside the window.
+        makeTask({ id: 'a', status: 'succeeded', claimedByMemberId: 'm1', startedAt: at(-30 * MIN), completedAt: at(-10 * MIN) }),
+        makeTask({ id: 'b', status: 'succeeded', claimedByMemberId: 'm1', startedAt: at(-40 * MIN), completedAt: at(-20 * MIN) }),
+        makeTask({ id: 'c', status: 'succeeded', claimedByMemberId: 'm1', startedAt: at(-2 * DAY - 30 * MIN), completedAt: at(-2 * DAY) }),
+        makeTask({ id: 'd', status: 'succeeded', claimedByMemberId: 'm1', startedAt: at(-30 * DAY), completedAt: at(-30 * DAY + MIN) }),
+      ],
+    })
+    const m1 = perf.get('m1')!
+    expect(m1.daily.length).toBe(7)
+    // The window total counts only the 3 completions inside it (the 30-days-ago one is excluded).
+    const windowTotal = m1.daily.reduce((s, d) => s + d.done, 0)
+    expect(windowTotal).toBe(3)
+    // Newest bucket (last) holds the two completed today.
+    expect(m1.daily[m1.daily.length - 1].done).toBe(2)
   })
 })
 

@@ -81,7 +81,7 @@ describe('MetricsPanel', () => {
     expect(screen.getByText(/of 3 total tasks/i)).toBeTruthy()
   })
 
-  it('renders the model and harness leaderboards with attributed work', () => {
+  it('renders the harness leaderboard with attributed work (model moved to Members)', () => {
     mockMembers.mockReturnValue(
       ok([member({ id: 'm1', model: 'claude-opus-4.7', harnessKind: 'claude-code' })]),
     )
@@ -97,18 +97,18 @@ describe('MetricsPanel', () => {
       ]),
     )
     renderPanel()
-    expect(screen.getByText('Model leaderboard')).toBeTruthy()
     expect(screen.getByText('Harness leaderboard')).toBeTruthy()
-    // The model and harness keys both appear (in their respective tables/cards).
-    expect(screen.getAllByText('claude-opus-4.7').length).toBeGreaterThan(0)
+    // The per-model leaderboard now lives on the Members page, not here.
+    expect(screen.queryByText('Model leaderboard')).toBeNull()
+    expect(screen.queryByText('claude-opus-4.7')).toBeNull()
+    // The harness key still appears in its leaderboard.
     expect(screen.getAllByText('claude-code').length).toBeGreaterThan(0)
   })
 
-  it('shows an empty leaderboard message when nothing is attributable', () => {
+  it('shows the empty harness-leaderboard message when nothing is attributable', () => {
     // A succeeded task but no member to attribute it to.
     mockTasks.mockReturnValue(ok([task({ id: 'a', status: 'succeeded' })]))
     renderPanel()
-    expect(screen.getByText(/attributed to a model yet/i)).toBeTruthy()
     expect(screen.getByText(/attributed to a harness yet/i)).toBeTruthy()
   })
 

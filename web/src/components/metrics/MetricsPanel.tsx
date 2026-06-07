@@ -1,13 +1,13 @@
 import { useMemo, type ReactNode } from 'react'
-import { BarChart3, Award, LayoutGrid, AlertCircle } from 'lucide-react'
+import { BarChart3, LayoutGrid, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import { useProjectMembers } from '../../hooks/useProjectMembers'
 import { formatCoarseDuration } from '../../lib/taskTiming'
+import { ShareBar, SuccessPill } from './leaderboardBits'
 import {
   computeMetrics,
-  formatSuccessRate,
   type LeaderboardEntry,
 } from '../../lib/metrics'
 
@@ -56,32 +56,6 @@ function StatTile({
  * wide ones (≥640px) get the table. The switch is a CONTAINER query because the
  * inline sidebar eats ~272px, so the viewport overstates the room available. */
 
-function ShareBar({ value }: { value: number }) {
-  const width = Math.max(0, Math.min(100, value))
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
-      <span
-        className="block h-full rounded-full bg-[var(--accent)]"
-        style={{ width: `${width}%` }}
-      />
-    </div>
-  )
-}
-
-function SuccessPill({ rate }: { rate: number | null }) {
-  if (rate === null) return <span className="text-[var(--text-3)]">—</span>
-  // Green at/above 90%, amber 70–90%, red below — mirrors the status palette.
-  const color = rate >= 0.9 ? 'var(--green)' : rate >= 0.7 ? 'var(--amber)' : 'var(--red)'
-  return (
-    <span
-      className="inline-block rounded-[6px] px-1.5 py-px text-[0.6875rem] font-semibold tabular-nums"
-      style={{ color, background: `color-mix(in srgb, ${color} 16%, transparent)` }}
-    >
-      {formatSuccessRate(rate)}
-    </span>
-  )
-}
-
 function Leaderboard({
   title,
   caption,
@@ -91,7 +65,7 @@ function Leaderboard({
 }: {
   title: string
   caption: string
-  icon: typeof Award
+  icon: typeof LayoutGrid
   unitLabel: string
   entries: LeaderboardEntry[]
 }) {
@@ -261,7 +235,7 @@ export default function MetricsPanel({ projectId }: { projectId: string | null }
     )
   }
 
-  const { throughput, modelLeaderboard, harnessLeaderboard } = metrics
+  const { throughput, harnessLeaderboard } = metrics
 
   return (
     <div className="@container flex flex-col gap-8">
@@ -301,14 +275,6 @@ export default function MetricsPanel({ projectId }: { projectId: string | null }
           />
         </div>
       </section>
-
-      <Leaderboard
-        title="Model leaderboard"
-        caption="Which model is doing the most, and how reliably."
-        icon={Award}
-        unitLabel="Model"
-        entries={modelLeaderboard}
-      />
 
       <Leaderboard
         title="Harness leaderboard"

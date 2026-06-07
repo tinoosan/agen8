@@ -83,6 +83,17 @@ function mean(values: number[]): number | null {
   return sum / values.length
 }
 
+/** Local-time YYYY-MM-DD key for a date — the bucket unit for the daily series.
+ * We bucket in LOCAL time (not UTC) so the sparkline lines up with the day the
+ * viewer experienced, and an unparseable date yields a key no window contains. */
+function localDateKey(d: Date): string {
+  const y = d.getFullYear()
+  if (Number.isNaN(y)) return 'invalid'
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 /* Mutable accumulator while folding tasks into a leaderboard bucket. */
 interface Bucket {
   key: string
@@ -203,4 +214,128 @@ export function computeMetrics({
 export function formatSuccessRate(rate: number | null): string {
   if (rate === null) return '—'
   return `${Math.round(rate * 100)}%`
+}
+
+/* ── Per-member performance (powers the Members roster) ───────────────────────
+ *
+ * Same honest-MVP projection as the leaderboards, but bucketed by the member who
+ * claimed each task rather than by their model/harness. This lives next to the
+ * roster's existing attributes (model/harness/effort) so each agent's recent
+ * output reads inline. The `daily` series is a trailing-window count of
+ * COMPLETED tasks per day — the input for the roster's mini sparkline.
+ */
+
+export interface MemberDailyPoint {
+  /** Local-time YYYY-MM-DD for this bucket. */
+  date: string
+  /** Tasks the member completed (succeeded) on this day. */
+  done: number
+}
+
+export interface MemberPerformance {
+  memberId: string
+  /** Successfully completed tasks attributed to this member. */
+  done: number
+  /** Failed tasks attributed to this member. */
+  failed: number
+  /** Tasks the member is currently working (status `active`). */
+  inProgress: number
+  /** done / (done + failed); null when there are no terminal outcomes yet. */
+  successRate: number | null
+  /** Mean work time over this member's completed tasks; null when none. */
+  avgWorkTimeMs: number | null
+  /** Trailing-window completed-count series, oldest → newest, for the sparkline. */
+  daily: MemberDailyPoint[]
+}
+
+export interface ComputeMemberPerformanceInput {
+  tasks?: Task[]
+  members?: ProjectMember[]
+  /** Injected for deterministic tests; affects in-flight durations + the window. */
+  now?: number
+  /** Trailing window length (days) for the daily series. Defaults to 14. */
+  windowDays?: number
+}
+
+/**
+ * Project per-member performance keyed by member id. Pure and deterministic.
+ * Every roster member gets an entry (zeroed when idle) so the UI can render a
+ * consistent row; tasks claimed by an unknown member id also get one, which is
+ * harmless because the roster only ever looks up ids it already knows.
+ */
+export function computeMemberPerformance({
+  tasks,
+  members,
+  now = Date.now(),
+  windowDays = 14,
+}: ComputeMemberPerformanceInput): Map<string, MemberPerformance> {
+  const taskList = tasks ?? []
+  const memberList = members ?? []
+  const days = Math.max(1, Math.floor(windowDays))
+
+  // Trailing day window, oldest → newest. Stepped with setDate (not ms math) so
+  // it stays correct across DST transitions.
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  start.setDate(start.getDate() - (days - 1))
+  const windowKeys: string[] = []
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start)
+    d.setDate(start.getDate() + i)
+    windowKeys.push(localDateKey(d))
+  }
+  const windowSet = new Set(windowKeys)
+
+  interface Acc {
+    done: number
+    failed: number
+    inProgress: number
+    workTimes: number[]
+    byDay: Map<string, number>
+  }
+  const accById = new Map<string, Acc>()
+  const ensure = (id: string): Acc => {
+    let a = accById.get(id)
+    if (!a) {
+      a = { done: 0, failed: 0, inProgress: 0, workTimes: [], byDay: new Map() }
+      accById.set(id, a)
+    }
+    return a
+  }
+  // Seed every roster member so idle agents still get a (zeroed) row.
+  for (const m of memberList) ensure(m.id)
+
+  for (const task of taskList) {
+    const id = task.claimedByMemberId
+    if (!id) continue
+    const a = ensure(id)
+    if (task.status === DONE_STATUS) {
+      a.done += 1
+      const workMs = inProgressDurationMs(task, now)
+      if (workMs !== null) a.workTimes.push(workMs)
+      if (task.completedAt) {
+        const key = localDateKey(new Date(task.completedAt))
+        if (windowSet.has(key)) a.byDay.set(key, (a.byDay.get(key) ?? 0) + 1)
+      }
+    } else if (task.status === FAILED_STATUS) {
+      a.failed += 1
+    } else if (task.status === IN_PROGRESS_STATUS) {
+      a.inProgress += 1
+    }
+  }
+
+  const result = new Map<string, MemberPerformance>()
+  for (const [id, a] of accById) {
+    const terminal = a.done + a.failed
+    result.set(id, {
+      memberId: id,
+      done: a.done,
+      failed: a.failed,
+      inProgress: a.inProgress,
+      successRate: terminal === 0 ? null : a.done / terminal,
+      avgWorkTimeMs: mean(a.workTimes),
+      daily: windowKeys.map((date) => ({ date, done: a.byDay.get(date) ?? 0 })),
+    })
+  }
+  return result
 }
