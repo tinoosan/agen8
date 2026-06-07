@@ -32,6 +32,8 @@ export function useStrategyMapFocusEffects({
   directEdgeIds,
   clusterEdgeIds,
   activeFilter,
+  showArchived,
+  onRequestShowArchived,
 }: {
   displayNodes: Node[]
   setCenter: SetCenterFn
@@ -48,6 +50,8 @@ export function useStrategyMapFocusEffects({
   directEdgeIds: ReadonlySet<string> | null
   clusterEdgeIds: ReadonlySet<string> | null
   activeFilter: FilterPreset | null
+  showArchived: boolean
+  onRequestShowArchived: () => void
 }) {
   // Read ?focus= query param on mount
   const pendingFocusRef = useRef<string | null>(null)
@@ -64,12 +68,17 @@ export function useStrategyMapFocusEffects({
 
   // Watch both the ref (URL param on mount) and the store (command palette while on map)
   const storePendingFocus = useStrategyMapStore((s) => s.pendingFocusNodeId)
+  // Tracks the target we've already tried to reveal by enabling the archived
+  // view, so a genuinely-missing node enables archived at most once instead of
+  // toggling it on every displayNodes change.
+  const archivedRetryTargetRef = useRef<string | null>(null)
   useEffect(() => {
     const targetId = storePendingFocus ?? pendingFocusRef.current
     if (!targetId || displayNodes.length === 0) return
     const targetNode = displayNodes.find(n => n.id === targetId)
     if (targetNode) {
       pendingFocusRef.current = null
+      archivedRetryTargetRef.current = null
       useStrategyMapStore.setState({ pendingFocusNodeId: null })
       queueMicrotask(() => {
         setFocusNodeId(targetNode.id)
@@ -83,8 +92,22 @@ export function useStrategyMapFocusEffects({
           })
         }, 100)
       }
+      return
     }
-  }, [displayNodes, setCenter, storePendingFocus, setFocusNodeId, setSelectedNodeId])
+
+    // Target not present yet. The map hides archived/completed missions & KRs by
+    // default, so a deep link to one silently no-ops. Only missions & KRs are
+    // archived-filtered (useStrategyGraph passes showArchived to the mission/KR
+    // source only), so enable the archived view once for a missing mission/KR
+    // target. Tasks & decisions are never archived-filtered — a missing leaf is
+    // just a not-yet-rendered leaf, so leave archived alone and let the effect
+    // re-run when the leaf nodes appear.
+    const isLeaf = targetId.startsWith('task:') || targetId.startsWith('decision:')
+    if (!isLeaf && !showArchived && archivedRetryTargetRef.current !== targetId) {
+      archivedRetryTargetRef.current = targetId
+      onRequestShowArchived()
+    }
+  }, [displayNodes, setCenter, storePendingFocus, setFocusNodeId, setSelectedNodeId, showArchived, onRequestShowArchived])
 
   // Mirror React-owned render state into the Zustand store so node/edge
   // components can subscribe to individual fields via selectors. See

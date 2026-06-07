@@ -44,9 +44,11 @@ interface InnerProps extends Props {
   nodes: Node[]
   edges: Edge[]
   isLoading: boolean
+  showArchived: boolean
+  onRequestShowArchived: () => void
 }
 
-function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: InnerProps) {
+function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, showArchived, onRequestShowArchived }: InnerProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState<FilterPreset | null>(null)
@@ -224,6 +226,8 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading }: I
     directEdgeIds,
     clusterEdgeIds,
     activeFilter,
+    showArchived,
+    onRequestShowArchived,
   })
 
   return (
@@ -368,6 +372,7 @@ export default function StrategyMap({ projectId }: Props) {
       // Local UI preference only.
     }
   }, [projectId, showArchived])
+  const enableArchived = useCallback(() => setShowArchived(true), [])
   const { nodes, edges, isLoading } = useStrategyGraph(projectId, focusedProjectRoot, { showArchived })
   const isEmpty = !isLoading && nodes.length === 0
 
@@ -398,6 +403,8 @@ export default function StrategyMap({ projectId }: Props) {
             nodes={nodes}
             edges={edges}
             isLoading={isLoading}
+            showArchived={showArchived}
+            onRequestShowArchived={enableArchived}
           />
         </ReactFlowProvider>
       )}
