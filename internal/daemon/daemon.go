@@ -68,6 +68,7 @@ func New(cfg Config) (*Daemon, error) {
 		func() error { return rpc.RegisterProject(reg, application.ProjectSvc) },
 		func() error { return rpc.RegisterFile(reg, application.FileSvc) },
 		func() error { return rpc.RegisterLocation(reg, application.LocationSvc) },
+		func() error { return rpc.RegisterPin(reg, application.PinSvc) },
 	} {
 		if err := register(); err != nil {
 			return nil, err

@@ -31,6 +31,8 @@ import (
 	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
 	missioninfra "github.com/tinoosan/agen8-mcp-server/internal/services/mission/infra"
+	pinapp "github.com/tinoosan/agen8-mcp-server/internal/services/pin/app"
+	pininfra "github.com/tinoosan/agen8-mcp-server/internal/services/pin/infra"
 	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
 	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	projectinfra "github.com/tinoosan/agen8-mcp-server/internal/services/project/infra"
@@ -58,6 +60,7 @@ type Application struct {
 	LocationSvc   *locationapp.Service
 	EventBus      *eventbus.Bus
 	DecisionSvc   *decisionapp.Service
+	PinSvc        *pinapp.Service
 }
 
 // NewApplication builds the retained service graph.
@@ -255,6 +258,15 @@ func NewApplication(cfg Config) (*Application, error) {
 	}
 	graphLinks.svc = graphSvc
 
+	pinRepo, err := pininfra.NewRepository(handle)
+	if err != nil {
+		return nil, fmt.Errorf("build pin repository: %w", err)
+	}
+	pinSvc, err := pinapp.NewService(pinapp.Config{Pins: pinRepo})
+	if err != nil {
+		return nil, fmt.Errorf("build pin service: %w", err)
+	}
+
 	return &Application{
 		AuthSvc:       authSvc,
 		UserSvc:       userSvc,
@@ -268,6 +280,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		LocationSvc:   locationSvc,
 		EventBus:      bus,
 		DecisionSvc:   decisionSvc,
+		PinSvc:        pinSvc,
 	}, nil
 }
 
