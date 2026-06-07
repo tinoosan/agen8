@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rpcCall, onNotification } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 import type { Task, AcceptanceCriterion } from '../lib/types'
 import { normalizeTaskMembers } from '../lib/taskMembers'
 
@@ -11,7 +12,7 @@ interface TaskListResult {
 
 export function useProjectTasks(projectId: string | null) {
   return useQuery<Task[]>({
-    queryKey: ['project.tasks.board', projectId ?? ''],
+    queryKey: qk.tasksBoard(projectId),
     queryFn: async () => {
       const result = await rpcCall<TaskListResult>('task.list', {
         projectId,
@@ -30,7 +31,7 @@ export function useProjectTasks(projectId: string | null) {
 // Fetches a single task by id for the routed detail page.
 export function useTask(taskId: string | null) {
   return useQuery<Task>({
-    queryKey: ['task.get', taskId ?? ''],
+    queryKey: qk.taskGet(taskId),
     queryFn: async () => {
       const result = await rpcCall<{ task: Task }>('task.get', { taskId })
       return normalizeTaskMembers(result.task)
@@ -64,7 +65,7 @@ export function useCreateTask() {
   return useMutation<{ task: Task }, Error, CreateTaskInput>({
     mutationFn: (params) => rpcCall<{ task: Task }>('task.create', params),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] })
+      queryClient.invalidateQueries({ queryKey: qk.tasksBoardAll })
     },
   })
 }
@@ -83,8 +84,8 @@ export function useUpdateTask() {
   return useMutation<{ task: Task }, Error, UpdateTaskInput>({
     mutationFn: (params) => rpcCall<{ task: Task }>('task.update', params),
     onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] })
-      queryClient.invalidateQueries({ queryKey: ['task.get', vars.taskId] })
+      queryClient.invalidateQueries({ queryKey: qk.tasksBoardAll })
+      queryClient.invalidateQueries({ queryKey: qk.taskGet(vars.taskId) })
     },
   })
 }
@@ -94,8 +95,8 @@ export function useCancelTask() {
   return useMutation<{ task: Task }, Error, { taskId: string; reason: string }>({
     mutationFn: (params) => rpcCall<{ task: Task }>('task.cancel', params),
     onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] })
-      queryClient.invalidateQueries({ queryKey: ['task.get', vars.taskId] })
+      queryClient.invalidateQueries({ queryKey: qk.tasksBoardAll })
+      queryClient.invalidateQueries({ queryKey: qk.taskGet(vars.taskId) })
     },
   })
 }
@@ -118,7 +119,7 @@ export function useProjectTasksSSE() {
       const type = (event?.type as string) ?? ''
       const isTaskEvent = TASK_EVENT_PREFIXES.some(prefix => type.startsWith(prefix))
       if (isTaskEvent) {
-        queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] })
+        queryClient.invalidateQueries({ queryKey: qk.tasksBoardAll })
       }
     })
     return unsub

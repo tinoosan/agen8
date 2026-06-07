@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 import type { ExecutionLocation, LocationAddress } from '../lib/types'
 
 export interface LocationAuthInput {
@@ -9,7 +10,7 @@ export interface LocationAuthInput {
 
 export function useLocations() {
   return useQuery<ExecutionLocation[]>({
-    queryKey: ['location.list'],
+    queryKey: qk.locations,
     queryFn: async () => {
       const result = await rpcCall<{ locations: ExecutionLocation[] }>('location.list', {})
       return result.locations ?? []
@@ -27,7 +28,7 @@ export function useCreateLocation() {
       return result.location
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['location.list'] })
+      void queryClient.invalidateQueries({ queryKey: qk.locations })
     },
   })
 }
@@ -40,7 +41,7 @@ export function useProbeLocation() {
       return result.location
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['location.list'] })
+      void queryClient.invalidateQueries({ queryKey: qk.locations })
     },
   })
 }
@@ -53,7 +54,7 @@ export function useInstallCodex() {
       return result.location
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['location.list'] })
+      void queryClient.invalidateQueries({ queryKey: qk.locations })
     },
   })
 }
@@ -66,7 +67,7 @@ export function useInstallClaude() {
       return result.location
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['location.list'] })
+      void queryClient.invalidateQueries({ queryKey: qk.locations })
     },
   })
 }
@@ -150,7 +151,7 @@ export function useDeleteLocation() {
       await rpcCall<Record<string, never>>('location.delete', { locationId })
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['location.list'] })
+      void queryClient.invalidateQueries({ queryKey: qk.locations })
     },
   })
 }

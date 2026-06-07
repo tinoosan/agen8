@@ -20,6 +20,7 @@ import { copyText } from '@/lib/utils'
 import type { ArtifactNode, ArtifactGetResult } from '../../lib/types'
 import { basename, displayVirtualPathPart, downloadBlob, formatBytes } from './filePreviewUtils'
 import { rpcCall } from '../../lib/rpc'
+import { qk } from '../../lib/queryKeys'
 import { useNavigation } from '../../lib/routing'
 
 interface DocumentViewerProps {
@@ -115,7 +116,7 @@ export default function DocumentViewer({ file, preview, isLoading, error, varian
         path: filePath,
         bytesB64,
       })
-      await queryClient.invalidateQueries({ queryKey: ['files.get.preview', projectId, focusedProjectRoot, filePath] })
+      await queryClient.invalidateQueries({ queryKey: qk.filePreview(projectId, focusedProjectRoot, filePath) })
       setIsEditing(false)
       toast.success('Document saved')
     } catch (err) {

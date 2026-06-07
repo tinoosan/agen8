@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useRoute, Link } from 'wouter'
 import { rpcCall } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 import { useKeyResults } from '../hooks/useMissions'
 import { useProjectTasks } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
@@ -60,7 +61,7 @@ export default function MissionDetail() {
 
   const { data: mission, isLoading: missionLoading, isError: missionError, error: missionErr } =
     useQuery<MissionView>({
-      queryKey: ['mission.get', missionId ?? ''],
+      queryKey: qk.missionGet(missionId),
       queryFn: async () => {
         const res = await rpcCall<{ mission: MissionView }>('mission.get', { missionId: missionId ?? '' })
         return res.mission

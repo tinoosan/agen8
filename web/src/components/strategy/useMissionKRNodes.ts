@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Node, Edge } from '@xyflow/react'
 import { rpcCall } from '../../lib/rpc'
+import { qk } from '../../lib/queryKeys'
 import { useMissions } from '../../hooks/useMissions'
 import type { KeyResultView } from '../../lib/types'
 import type { MissionNodeData } from './MissionNode'
@@ -24,7 +25,7 @@ export function useMissionKRNodes(projectId: string | null, _projectRoot: string
 
   // Consolidated map query to avoid one active query observer per mission.
   const krByMissionQuery = useQuery<Record<string, KeyResultView[]>>({
-    queryKey: ['keyResult.listByMissionSet', missionIds.join(',')],
+    queryKey: qk.keyResultsByMissionSet(missionIds),
     queryFn: async () => {
       const pairs = await Promise.all(
         missionIds.map(async (missionId) => {

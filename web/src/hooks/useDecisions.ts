@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 import type { DecisionView, DecisionSource, DecisionStats } from '../lib/types'
 
 export interface DecisionListFilter {
@@ -26,7 +27,7 @@ export function useRecentDecisions(
   const until = filter?.until ?? ''
   const sort = filter?.sort ?? 'newest'
   return useQuery<DecisionView[]>({
-    queryKey: ['decision.list', projectId ?? '', source, query, since, until, sort],
+    queryKey: qk.decisionList(projectId ?? '', source, query, since, until, sort),
     queryFn: async () => {
       const params: Record<string, unknown> = {
         projectId: projectId ?? '',
@@ -49,7 +50,7 @@ export function useRecentDecisions(
 // Fetches a single decision by id for the routed detail page.
 export function useDecision(decisionId: string | null) {
   return useQuery<DecisionView>({
-    queryKey: ['decision.get', decisionId ?? ''],
+    queryKey: qk.decisionGet(decisionId),
     queryFn: async () => {
       const res = await rpcCall<{ decision: DecisionView }>('decision.get', { decisionId })
       return res.decision
@@ -74,7 +75,7 @@ export function useDecisionLog(projectId: string | null, filter: DecisionLogFilt
   const offset = Math.max(0, (filter.page - 1) * filter.pageSize)
 
   return useQuery<{ decisions: DecisionView[]; total: number }>({
-    queryKey: ['decision.log', projectId ?? '', source, tagsKey, query, since, until, sort, filter.page, filter.pageSize],
+    queryKey: qk.decisionLog(projectId ?? '', source, tagsKey, query, since, until, sort, filter.page, filter.pageSize),
     queryFn: async () => {
       const baseParams: Record<string, unknown> = {
         projectId: projectId ?? '',
@@ -115,7 +116,7 @@ export function useDecisionStats(projectId: string | null, filter?: DecisionList
   const tagsKey = (filter?.tags ?? []).join(',')
 
   return useQuery<DecisionStats>({
-    queryKey: ['decision.stats', projectId ?? '', source, tagsKey, query, since, until],
+    queryKey: qk.decisionStats(projectId ?? '', source, tagsKey, query, since, until),
     queryFn: async () => {
       const params: Record<string, unknown> = { projectId: projectId ?? '' }
       if (filter?.source) params.source = filter.source
@@ -148,8 +149,8 @@ export function useDeleteDecision() {
     },
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['decision.log'] }),
-        queryClient.invalidateQueries({ queryKey: ['decision.list'] }),
+        queryClient.invalidateQueries({ queryKey: qk.decisionLogAll }),
+        queryClient.invalidateQueries({ queryKey: qk.decisionsAll }),
       ])
     },
   })

@@ -3,6 +3,7 @@ import { useLocation } from 'wouter'
 import { useProjects } from '../hooks/useProjects'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
+import { qk } from '../lib/queryKeys'
 import { projectDisplayName } from '@/lib/projectHelpers'
 import { Plus, Search } from 'lucide-react'
 import type { Project } from '../lib/types'
@@ -92,7 +93,7 @@ export default function ProjectPage() {
   }, [])
 
   const handleCreateSuccess = (project: Project) => {
-    queryClient.invalidateQueries({ queryKey: ['project.list'] })
+    queryClient.invalidateQueries({ queryKey: qk.projectsAll })
     toast.success(`Project "${projectDisplayName(project)}" created`)
     if (project.id) {
       navigate(`/project/${encodeURIComponent(project.id)}`)
@@ -275,7 +276,7 @@ export default function ProjectPage() {
             onRemoved={() => {
               const removed = removeTarget
               setRemoveTarget(null)
-              queryClient.invalidateQueries({ queryKey: ['project.list'] })
+              queryClient.invalidateQueries({ queryKey: qk.projectsAll })
               toast.success(`Project "${projectDisplayName(removed.project)}" ${removed.action === 'delete' ? 'deleted' : 'archived'}`)
             }}
           />

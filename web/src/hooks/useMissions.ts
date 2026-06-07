@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 import type { MissionView, KeyResultView, MissionStatus, KeyResultStatus } from '../lib/types'
 
 type CreateKeyResultInput = {
@@ -32,7 +33,7 @@ type UpdateKeyResultInput = {
 
 export function useMissions(projectId: string | null, status?: MissionStatus) {
   return useQuery<MissionView[]>({
-    queryKey: ['mission.list', projectId ?? '', status ?? ''],
+    queryKey: qk.missions(projectId, status),
     queryFn: async () => {
       const params: Record<string, unknown> = { projectId: projectId ?? '' }
       if (status) params.status = [status]
@@ -46,7 +47,7 @@ export function useMissions(projectId: string | null, status?: MissionStatus) {
 
 export function useKeyResults(missionId: string | null) {
   return useQuery<KeyResultView[]>({
-    queryKey: ['keyResult.list', missionId ?? ''],
+    queryKey: qk.keyResults(missionId),
     queryFn: async () => {
       const res = await rpcCall<{ keyResults: KeyResultView[] }>('mission.kr.list', {
         missionId: missionId ?? '',
@@ -60,7 +61,7 @@ export function useKeyResults(missionId: string | null) {
 
 export function useKeyResult(keyResultId: string | null) {
   return useQuery<KeyResultView>({
-    queryKey: ['keyResult.get', keyResultId ?? ''],
+    queryKey: qk.keyResultGet(keyResultId),
     queryFn: async () => {
       const res = await rpcCall<{ keyResult: KeyResultView }>('mission.kr.get', {
         keyResultId: keyResultId ?? '',
@@ -91,7 +92,7 @@ export function useCreateMission() {
   >({
     mutationFn: (params) => rpcCall<{ mission: MissionView }>('mission.create', params),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mission.list'] })
+      queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
 }
@@ -105,7 +106,7 @@ export function useUpdateMission() {
   >({
     mutationFn: (params) => rpcCall<{ mission: MissionView }>('mission.update', params),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mission.list'] })
+      queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
 }
@@ -115,7 +116,7 @@ export function useDeleteMission() {
   return useMutation<{ mission: MissionView }, Error, { missionId: string }>({
     mutationFn: (params) => rpcCall<{ mission: MissionView }>('mission.delete', params),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mission.list'] })
+      queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
 }
@@ -131,8 +132,8 @@ export function useCreateKeyResult() {
   >({
     mutationFn: (params) => rpcCall<{ keyResult: KeyResultView }>('mission.kr.create', normalizeKeyResultMutation(params)),
     onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['keyResult.list', vars.missionId] })
-      queryClient.invalidateQueries({ queryKey: ['mission.list'] })
+      queryClient.invalidateQueries({ queryKey: qk.keyResults(vars.missionId) })
+      queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
 }
@@ -149,8 +150,8 @@ export function useUpdateKeyResult() {
       return rpcCall<{ keyResult: KeyResultView }>('mission.kr.update', normalizeKeyResultMutation(params))
     },
     onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['keyResult.list', vars.missionId] })
-      queryClient.invalidateQueries({ queryKey: ['mission.list'] })
+      queryClient.invalidateQueries({ queryKey: qk.keyResults(vars.missionId) })
+      queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
 }
@@ -191,8 +192,8 @@ export function useDeleteKeyResult() {
       return rpcCall<{ keyResult: KeyResultView }>('mission.kr.delete', params)
     },
     onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['keyResult.list', vars.missionId] })
-      queryClient.invalidateQueries({ queryKey: ['mission.list'] })
+      queryClient.invalidateQueries({ queryKey: qk.keyResults(vars.missionId) })
+      queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
 }
@@ -209,9 +210,9 @@ export function useUpdateKRProgress() {
       return rpcCall<{ keyResult: KeyResultView }>('mission.kr.progress', params)
     },
     onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['keyResult.list', vars.missionId] })
-      queryClient.invalidateQueries({ queryKey: ['keyResult.progressHistory', vars.keyResultId] })
-      queryClient.invalidateQueries({ queryKey: ['mission.list'] })
+      queryClient.invalidateQueries({ queryKey: qk.keyResults(vars.missionId) })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultProgressHistory(vars.keyResultId) })
+      queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
 }
@@ -224,7 +225,7 @@ export function useProjectKRs(projectId: string | null) {
   const missionIds = (missionsQuery.data ?? []).map((m) => m.id)
 
   return useQuery<Map<string, KeyResultView>>({
-    queryKey: ['keyResult.listAll', projectId ?? '', missionIds.join(',')],
+    queryKey: qk.keyResultsListAll(projectId, missionIds),
     queryFn: async () => {
       const results = await Promise.all(
         missionIds.map((id) =>
@@ -273,7 +274,7 @@ interface MissionProgressEntryRPCView {
 
 export function useProgressHistory(keyResultId: string | null) {
   return useQuery<ProgressEntryView[]>({
-    queryKey: ['keyResult.progressHistory', keyResultId ?? ''],
+    queryKey: qk.keyResultProgressHistory(keyResultId),
     queryFn: async () => {
       const res = await rpcCall<{ entries: MissionProgressEntryRPCView[] }>(
         'mission.kr.progressHistory',

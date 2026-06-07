@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { qk } from '../lib/queryKeys'
 import { useNavigation, type DashboardPanel } from '../lib/routing'
 import { useLocation, useSearch } from 'wouter'
 import { useMissions } from '../hooks/useMissions'
@@ -92,14 +93,14 @@ export default function Dashboard() {
     setManualRefreshing(true)
     try {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['mission.list'] }),
-        queryClient.invalidateQueries({ queryKey: ['keyResult.list'] }),
-        queryClient.invalidateQueries({ queryKey: ['keyResult.listAll'] }),
-        queryClient.invalidateQueries({ queryKey: ['keyResult.progressHistory'] }),
-        queryClient.invalidateQueries({ queryKey: ['decision.list'] }),
-        queryClient.invalidateQueries({ queryKey: ['decision.log'] }),
-        queryClient.invalidateQueries({ queryKey: ['project.tasks.board'] }),
-        queryClient.invalidateQueries({ queryKey: ['task.get'] }),
+        queryClient.invalidateQueries({ queryKey: qk.missionsAll }),
+        queryClient.invalidateQueries({ queryKey: qk.keyResultsAll }),
+        queryClient.invalidateQueries({ queryKey: qk.keyResultsListAllRoot }),
+        queryClient.invalidateQueries({ queryKey: qk.keyResultProgressHistoryRoot }),
+        queryClient.invalidateQueries({ queryKey: qk.decisionsAll }),
+        queryClient.invalidateQueries({ queryKey: qk.decisionLogAll }),
+        queryClient.invalidateQueries({ queryKey: qk.tasksBoardAll }),
+        queryClient.invalidateQueries({ queryKey: qk.taskGetAll }),
       ])
     } finally {
       window.setTimeout(() => setManualRefreshing(false), 120)

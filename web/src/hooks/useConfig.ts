@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 import type {
   RuntimeConfig,
   ConfigUpdateResult,
@@ -11,7 +12,7 @@ import type {
 
 export function useConfig() {
   return useQuery<RuntimeConfig>({
-    queryKey: ['config.get'],
+    queryKey: qk.config,
     queryFn: () => rpcCall<RuntimeConfig>('config.get'),
     staleTime: 30_000,
     retry: 1,
@@ -24,7 +25,7 @@ export function useConfigUpdate() {
     mutationFn: (params) =>
       rpcCall<ConfigUpdateResult>('config.update', params),
     onSuccess: (data) => {
-      queryClient.setQueryData(['config.get'], data.config)
+      queryClient.setQueryData(qk.config, data.config)
     },
   })
 }
@@ -33,7 +34,7 @@ export function useConfigUpdate() {
 
 export function useProjectConfig(enabled = true) {
   return useQuery<ProjectSettings>({
-    queryKey: ['config.getProject'],
+    queryKey: qk.projectConfig,
     queryFn: () => rpcCall<ProjectSettings>('config.getProject'),
     staleTime: 30_000,
     retry: 1,
@@ -51,7 +52,7 @@ export function useProjectConfigUpdate() {
     mutationFn: (params) =>
       rpcCall<ProjectConfigUpdateResult>('config.updateProject', params),
     onSuccess: (data) => {
-      queryClient.setQueryData(['config.getProject'], data.config)
+      queryClient.setQueryData(qk.projectConfig, data.config)
     },
   })
 }

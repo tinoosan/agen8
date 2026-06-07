@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { qk } from '../lib/queryKeys'
 import {
   getAuthStatus,
   login as loginRequest,
@@ -11,7 +12,7 @@ import {
 export function useAuth() {
   const queryClient = useQueryClient()
   const statusQuery = useQuery({
-    queryKey: ['auth.status'],
+    queryKey: qk.authStatus,
     queryFn: getAuthStatus,
     staleTime: 15_000,
     retry: false,
@@ -19,7 +20,7 @@ export function useAuth() {
   })
 
   const refresh = async () => queryClient.fetchQuery({
-    queryKey: ['auth.status'],
+    queryKey: qk.authStatus,
     queryFn: getAuthStatus,
   })
 

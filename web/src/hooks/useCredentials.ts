@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 
 export type CredentialKind = 'ssh_agent' | 'ssh_key' | 'ssh_password' | 'api_key'
 export type CredentialStatus = 'active' | 'disabled' | 'invalid'
@@ -53,11 +54,9 @@ export interface CredentialDeleteParams {
   credentialId: string
 }
 
-export const CREDENTIALS_KEY = 'credential.list'
-
 export function useCredentials(params: CredentialListParams = {}) {
   return useQuery<CredentialView[]>({
-    queryKey: [CREDENTIALS_KEY, params],
+    queryKey: qk.credentials(params),
     queryFn: async () => {
       const result = await rpcCall<CredentialListResult>('credential.list', params)
       return result.credentials ?? []
@@ -72,7 +71,7 @@ export function useCredentialCreate() {
     mutationFn: (params: CredentialCreateParams) =>
       rpcCall<CredentialResult>('credential.create', params),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [CREDENTIALS_KEY] })
+      void queryClient.invalidateQueries({ queryKey: qk.credentialsAll })
     },
   })
 }
@@ -83,7 +82,7 @@ export function useCredentialUpdate() {
     mutationFn: (params: CredentialUpdateParams) =>
       rpcCall<CredentialResult>('credential.update', params),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [CREDENTIALS_KEY] })
+      void queryClient.invalidateQueries({ queryKey: qk.credentialsAll })
     },
   })
 }
@@ -99,7 +98,7 @@ export function useCredentialDelete() {
     mutationFn: (params: CredentialDeleteParams) =>
       rpcCall('credential.delete', params),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [CREDENTIALS_KEY] })
+      void queryClient.invalidateQueries({ queryKey: qk.credentialsAll })
     },
   })
 }

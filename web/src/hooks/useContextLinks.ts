@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 import type { ContextLink } from '../lib/types'
 
 interface GraphLinksResult {
@@ -32,19 +33,19 @@ export function useContextLinks(
   isLoading: boolean
 } {
   const targetQueries = useMemo(() => {
-    const q: { method: string; params: Record<string, string> }[] = []
+    const q: { method: string; params: Record<string, string>; key: readonly unknown[] }[] = []
     for (const id of krIds)
-      q.push({ method: 'graph.linksByTarget', params: { targetType: 'key_result', targetId: id } })
+      q.push({ method: 'graph.linksByTarget', params: { targetType: 'key_result', targetId: id }, key: qk.graphLinksByTarget('key_result', id) })
     for (const id of missionIds)
-      q.push({ method: 'graph.linksByTarget', params: { targetType: 'mission', targetId: id } })
+      q.push({ method: 'graph.linksByTarget', params: { targetType: 'mission', targetId: id }, key: qk.graphLinksByTarget('mission', id) })
     for (const { entityType, entityId } of leafSources)
-      q.push({ method: 'graph.linksBySource', params: { sourceType: entityType, sourceId: entityId } })
+      q.push({ method: 'graph.linksBySource', params: { sourceType: entityType, sourceId: entityId }, key: qk.graphLinksBySource(entityType, entityId) })
     return q
   }, [krIds, missionIds, leafSources])
 
   const queries = useQueries({
-    queries: targetQueries.map(({ method, params }) => ({
-      queryKey: [method, ...Object.values(params)],
+    queries: targetQueries.map(({ method, params, key }) => ({
+      queryKey: key,
       queryFn: async (): Promise<ContextLink[]> => {
         const res = await rpcCall<GraphLinksResult>(method, params)
         return res.contextLinks ?? []

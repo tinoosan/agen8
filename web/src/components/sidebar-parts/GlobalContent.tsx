@@ -7,6 +7,7 @@ import { useLocation } from 'wouter'
 import { useQuery } from '@tanstack/react-query'
 import { Clock, CircleCheck, CircleAlert, Target, FolderOpen } from 'lucide-react'
 import { rpcCall } from '../../lib/rpc'
+import { qk } from '../../lib/queryKeys'
 import { dashboardLink, missionDetailLink } from '../../lib/routing'
 import { useProjects } from '../../hooks/useProjects'
 import type { MissionView } from '../../lib/types'
@@ -76,7 +77,7 @@ export function GlobalSidebarContent() {
   }, [projects])
 
   const allMissionsQuery = useQuery<Array<MissionView & { _projectId: string }>>({
-    queryKey: ['sidebar.globalMissions', projectIds],
+    queryKey: qk.sidebarGlobalMissions(projectIds),
     queryFn: async () => {
       const results = await Promise.all(
         projectIds.map(async (pid) => {

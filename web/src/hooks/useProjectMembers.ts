@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { rpcCall } from '../lib/rpc'
+import { qk } from '../lib/queryKeys'
 import type { ProjectMember } from '../lib/types'
 
 // Lists the project's roster. Used by the task assignee picker, where
 // task.create requires a valid project member.
 export function useProjectMembers(projectId: string | null) {
   return useQuery<ProjectMember[]>({
-    queryKey: ['project.member.list', projectId ?? ''],
+    queryKey: qk.projectMembers(projectId),
     queryFn: async () => {
       const res = await rpcCall<{ members: ProjectMember[] }>('project.member.list', {
         projectId: projectId ?? '',
@@ -28,7 +29,7 @@ export function useRemoveMember() {
     mutationFn: (params) =>
       rpcCall<{ member: ProjectMember }>('project.member.remove', params),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['project.member.list'] })
+      queryClient.invalidateQueries({ queryKey: qk.projectMembersAll })
     },
   })
 }
