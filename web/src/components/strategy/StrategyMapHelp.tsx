@@ -36,7 +36,7 @@ const SHORTCUTS: Shortcut[] = [
   // Filters
   { keys: ['M'], desc: 'Toggle In Motion lens (active, on-track work)', group: 'Filters' },
   { keys: ['B'], desc: 'Toggle Blocked lens (stuck / at-risk work)', group: 'Filters' },
-  { keys: ['D'], desc: 'Toggle Done lens (hide finished work)', group: 'Filters' },
+  { keys: ['D'], desc: 'Toggle Done lens (highlight finished work)', group: 'Filters' },
   { keys: ['R'], desc: 'Toggle Decisions lens (reasoning links)', group: 'Filters' },
   { keys: ['T'], desc: 'Toggle Trace Path from selected node', group: 'Filters' },
   { keys: ['['], desc: 'Decrease context depth (trace mode)', group: 'Filters' },

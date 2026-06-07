@@ -120,7 +120,7 @@ export function useStrategyMapKeyboardNav({
         setActiveFilter((f) => f === 'blocked' ? null : 'blocked')
         return
       }
-      // D = toggle Done (declutter) lens
+      // D = toggle Done lens (highlight completed work)
       if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
         setActiveFilter((f) => f === 'done' ? null : 'done')
