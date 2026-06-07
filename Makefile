@@ -20,8 +20,11 @@ REMOTE_HTTP_HOST := $(word 1,$(subst :, ,$(REMOTE_HTTP_ADDR)))
 REMOTE_HTTP_PORT := $(word 2,$(subst :, ,$(REMOTE_HTTP_ADDR)))
 REMOTE_VITE_HOST := $(word 1,$(subst :, ,$(REMOTE_VITE_ADDR)))
 REMOTE_VITE_PORT := $(word 2,$(subst :, ,$(REMOTE_VITE_ADDR)))
+DOCS_DIR ?= docs
+DOCS_HOST ?= 0.0.0.0
+DOCS_PORT ?= 8088
 
-.PHONY: run clean reset-local-data seed-clean seed-list ensure-air web-install web-build build-go build dev remote dev-remote daemon-remote test test-go test-web lint lint-go lint-web fmt-check guardrails ci race install-hooks worktree-create worktree-clean
+.PHONY: run clean reset-local-data seed-clean seed-list ensure-air web-install web-build build-go build dev remote dev-remote daemon-remote test test-go test-web lint lint-go lint-web fmt-check guardrails ci race install-hooks worktree-create worktree-clean docs
 
 # Seeding is automatic at startup (from ./defaults) for now.
 run: daemon-remote
@@ -131,3 +134,15 @@ worktree-create:
 
 worktree-clean:
 	@./scripts/worktree/cleanup.sh "$(BRANCH)"
+
+# Serve the static architecture docs over HTTP for easy reading.
+#
+#   make docs
+#
+# Binds to 0.0.0.0 so another device (phone/tablet) on the same Wi-Fi can reach
+# it at the printed LAN URL. -c-1 disables caching so doc edits show on reload.
+# Override DOCS_PORT / DOCS_HOST / DOCS_DIR as needed.
+docs:
+	@printf 'docs (LAN):   http://%s:%s/\n' "$(LAN_IP)" "$(DOCS_PORT)"
+	@printf 'docs (local): http://127.0.0.1:%s/\n' "$(DOCS_PORT)"
+	@npx --yes http-server "$(DOCS_DIR)" -a "$(DOCS_HOST)" -p "$(DOCS_PORT)" -c-1

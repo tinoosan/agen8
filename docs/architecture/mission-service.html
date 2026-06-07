@@ -362,6 +362,7 @@ missionSvc, err := missionapp.<span class="tok-fn">NewService</span>(
       <tr><td><code>ListMissions</code></td><td>Read missions for a project with service-owned filters.</td><td>None.</td></tr>
       <tr><td><code>UpdateMission</code></td><td>Update descriptive fields or route a named lifecycle transition with an optional note.</td><td>Persists mission and fires a lifecycle event when status changes. Repeating the current lifecycle state is an idempotent success; note-only retries are stored in lifecycle history without publishing duplicate bus events.</td></tr>
       <tr><td><code>DeleteMission</code></td><td>Archive the mission through the lifecycle boundary with an optional note.</td><td>Persists archived state and fires a lifecycle event. Archiving an already archived mission is an idempotent success; note-only retries are stored in lifecycle history without publishing duplicate bus events.</td></tr>
+      <tr><td><code>HardDeleteMission</code></td><td>Hard-delete the mission and descendants with no restore path.</td><td>Deletes the mission and all owned KRs/progress/events, then emits <code>mission.purged</code> after persistence.</td></tr>
       <tr><td><code>CreateKeyResult</code></td><td>Create a KR under an existing non-archived mission, and reactivate a completed mission when scope expands.</td><td>Persists KR and fires <code>kr.created</code>; may persist mission activation and fire <code>mission.activated</code>.</td></tr>
       <tr><td><code>GetKeyResult</code></td><td>Read one KR.</td><td>None.</td></tr>
       <tr><td><code>ListKeyResults</code></td><td>Read KRs for a mission.</td><td>None.</td></tr>
@@ -782,6 +783,12 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
         <td>Same lifecycle payload.</td>
       </tr>
       <tr>
+        <td><code>mission.lifecycle</code></td>
+        <td><code>mission.purged</code></td>
+        <td>A mission and all owned descendants are hard-deleted.</td>
+        <td>Lifecycle payload with purge actor and mission marker.</td>
+      </tr>
+      <tr>
         <td><code>kr.progress</code></td>
         <td><code>kr.progress_updated</code></td>
         <td>A KR progress value changes without crossing a special milestone.</td>
@@ -868,6 +875,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
     <span class="tok-field">MissionEventPaused</span>    <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"mission.paused"</span>
     <span class="tok-field">MissionEventCompleted</span> <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"mission.completed"</span>
     <span class="tok-field">MissionEventArchived</span>  <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"mission.archived"</span>
+    <span class="tok-field">MissionEventPurged</span>    <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"mission.purged"</span>
 
     <span class="tok-field">KREventProgressUpdated</span> <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.progress_updated"</span>
     <span class="tok-field">KREventMilestone</span>       <span class="tok-type">MissionEventKind</span> = <span class="tok-string">"kr.milestone"</span>
@@ -916,7 +924,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
   <table>
     <thead><tr><th>Mission event</th><th>Projection</th><th>Reason</th></tr></thead>
     <tbody>
-      <tr><td><code>kr.progress_updated</code>, <code>kr.milestone</code>, <code>kr.completed</code>, <code>mission.completed</code>, <code>mission.archived</code></td><td>History and dashboard facts.</td><td>These are durable facts the caller or dashboard can observe.</td></tr>
+      <tr><td><code>kr.progress_updated</code>, <code>kr.milestone</code>, <code>kr.completed</code>, <code>mission.completed</code>, <code>mission.archived</code>, <code>mission.purged</code></td><td>History and dashboard facts.</td><td>These are durable facts the caller or dashboard can observe.</td></tr>
       <tr><td><code>mission.activated</code></td><td>Mission history fact.</td><td>Shows when strategic work becomes active.</td></tr>
       <tr><td><code>kr.owner_assigned</code>, <code>kr.reopened</code></td><td>KR history fact.</td><td>Shows ownership and lifecycle changes.</td></tr>
     </tbody>
@@ -1002,6 +1010,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td><code>mission.list</code></td><td><code>ListMissions</code></td><td>List mission views for a project.</td></tr>
       <tr><td><code>mission.update</code></td><td><code>UpdateMission</code></td><td>Patch descriptive fields or request lifecycle transition.</td></tr>
       <tr><td><code>mission.delete</code></td><td><code>DeleteMission</code></td><td>Archive mission.</td></tr>
+      <tr><td><code>mission.purge</code></td><td><code>HardDeleteMission</code></td><td>Permanently delete a mission and all descendants.</td></tr>
       <tr><td><code>mission.history</code></td><td><code>GetLifecycleHistory</code></td><td>Read mission lifecycle entries and notes.</td></tr>
       <tr><td><code>mission.kr.create</code></td><td><code>CreateKeyResult</code></td><td>Create a KR.</td></tr>
       <tr><td><code>mission.kr.get</code></td><td><code>GetKeyResult</code></td><td>Read one KR.</td></tr>
@@ -1034,13 +1043,14 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
   <h2 id="delete-archive">12. Delete and archive semantics</h2>
 
   <p>
-    Mission and KR service methods do not expose hard deletion. Deletion requests are lifecycle changes that preserve history.
+    Mission deletion has two modes: <code>mission.delete</code> archives and preserves history, while <code>mission.purge</code> is a hard-delete operation with no restore path.
   </p>
 
   <table>
     <thead><tr><th>Operation</th><th>Result</th><th>Visibility</th></tr></thead>
     <tbody>
       <tr><td><code>DeleteMission</code></td><td>Archives the mission.</td><td>Archived missions are terminal unless a future restore flow is explicitly designed.</td></tr>
+      <tr><td><code>HardDeleteMission</code></td><td>Deletes the mission, its key results, progress, and events.</td><td>The mission is permanently removed and no restore path exists.</td></tr>
       <tr><td><code>DeleteKeyResult</code></td><td>Drops the KR.</td><td>Dropped KRs are excluded from activation, completion, and progress aggregation, but remain queryable as history.</td></tr>
     </tbody>
   </table>
@@ -1071,7 +1081,7 @@ events.<span class="tok-fn">PublishAfterCommit</span>(facts)</code></pre>
       <tr><td>No stale mission status after dropping KRs.</td><td>The parent mission is recomputed from remaining non-dropped KRs; previous status does not preserve an invalid active or completed state.</td></tr>
       <tr><td>No reactivation for cosmetic or administrative KR edits.</td><td>A completed mission reactivates only when new live measurable work is introduced.</td></tr>
       <tr><td>No silent event-publish failures on state transitions.</td><td>Fired events are part of the service contract.</td></tr>
-      <tr><td>No hard delete through mission service methods.</td><td>Mission deletion archives and KR deletion drops so history remains available.</td></tr>
+      <tr><td>No implicit hard delete.</td><td><code>DeleteMission</code> archives and publishes <code>mission.archived</code>; <code>HardDeleteMission</code> hard-deletes and publishes <code>mission.purged</code>.</td></tr>
       <tr><td>No activity timeline embedded in mission metadata.</td><td>The event layer owns event history and query projections.</td></tr>
       <tr><td>Tests drive service methods and production RPC/MCP entry points.</td><td>The service is done only when real wiring reaches it.</td></tr>
     </tbody>

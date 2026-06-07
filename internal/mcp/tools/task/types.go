@@ -16,6 +16,7 @@ type Service interface {
 	Claim(context.Context, taskdomain.TaskID) (taskdomain.Task, error)
 	Release(context.Context, taskdomain.TaskID) (taskdomain.Task, error)
 	Complete(context.Context, taskapp.CompleteTaskParams) (taskdomain.Task, error)
+	Update(context.Context, taskapp.UpdateTaskParams) (taskdomain.Task, error)
 	Block(context.Context, taskdomain.TaskID, string) (taskdomain.Task, error)
 	Unblock(context.Context, taskdomain.TaskID, string) (taskdomain.Task, error)
 	Assign(context.Context, taskapp.AssignTaskParams) (taskdomain.Task, error)

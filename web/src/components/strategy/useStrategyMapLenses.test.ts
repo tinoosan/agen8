@@ -118,4 +118,18 @@ describe('useStrategyMapLenses — set-highlight filters do not flood "direct" e
     expect(result.directEdgeIds).toBeNull()
     expect(result.clusterNodeIds).toBeNull()
   })
+
+  it('plain node focus marks its structural edge direct but keeps a touching context link ambient (iPad crash regression)', () => {
+    // Regression: focusing a node used to flag EVERY touching edge — including
+    // context links — as direct. A direct context edge spawns a label portal +
+    // an infinite dash animation; a node with many context links floods the
+    // render process and crashes iOS WebKit on select. Only the structural edge
+    // may be direct; the context link stays ambient (highlighted, not animated).
+    const result = lens(null, 'T1')
+    expect(result.directEdgeIds?.has('s:K1->T1')).toBe(true)   // structural = direct
+    expect(result.directEdgeIds?.has('cl:D->T1')).toBe(false)  // context never direct
+    // The context link is still revealed (its node + edge join the neighborhood).
+    expect(result.clusterNodeIds?.has('D')).toBe(true)
+    expect(result.clusterEdgeIds?.has('cl:D->T1')).toBe(true)
+  })
 })

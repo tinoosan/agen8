@@ -81,6 +81,8 @@ type AssignTaskParams struct {
 type ReviewTaskParams struct {
 	TaskID   domain.TaskID
 	Reason   string
+	Summary  string
+	Note     string
 	Criteria []domain.CriterionReview
 }
 
@@ -367,6 +369,45 @@ func (s *Service) resolveCreationMissionRef(ctx context.Context, keyResultRef, m
 	return resolvedMissionRef, nil
 }
 
+func (s *Service) resolveUpdateMissionRef(ctx context.Context, loaded domain.Task, keyResultRef *string, metadata map[string]any) (map[string]any, error) {
+	resolvedMissionRef := ""
+	taskKeyResultRef := strings.TrimSpace(loaded.KeyResultRef)
+	if keyResultRef != nil {
+		taskKeyResultRef = strings.TrimSpace(*keyResultRef)
+	}
+
+	nextMetadata := cloneMap(loaded.Metadata)
+	if metadata != nil {
+		nextMetadata = cloneMap(metadata)
+	}
+
+	if taskKeyResultRef == "" {
+		return nextMetadata, nil
+	}
+
+	if s.missions == nil {
+		return nil, fmt.Errorf("task service: key result mission reader is required")
+	}
+	resolvedMissionRef, err := s.missions.KeyResultMission(ctx, taskKeyResultRef)
+	if err != nil {
+		return nil, fmt.Errorf("resolve task key result %s mission: %w", taskKeyResultRef, err)
+	}
+	resolvedMissionRef = strings.TrimSpace(resolvedMissionRef)
+	if resolvedMissionRef == "" {
+		return nil, fmt.Errorf("task service: key result %s is missing mission linkage", taskKeyResultRef)
+	}
+
+	metadataMissionRef, err := missionRefFromMetadata(nextMetadata)
+	if err != nil {
+		return nil, err
+	}
+	if metadataMissionRef != "" && !strings.EqualFold(metadataMissionRef, resolvedMissionRef) {
+		return nil, fmt.Errorf("task service: key result %s belongs to mission %s, but metadata provided %s", taskKeyResultRef, resolvedMissionRef, metadataMissionRef)
+	}
+
+	return metadataWithMissionRef(nextMetadata, resolvedMissionRef)
+}
+
 func (s *Service) Update(ctx context.Context, params UpdateTaskParams) (domain.Task, error) {
 	caller, err := s.resolveCaller(ctx)
 	if err != nil {
@@ -418,6 +459,13 @@ func (s *Service) Update(ctx context.Context, params UpdateTaskParams) (domain.T
 	if params.Metadata != nil {
 		loaded.Metadata = cloneMap(params.Metadata)
 	}
+
+	normalizedMetadata, err := s.resolveUpdateMissionRef(ctx, loaded, params.KeyResultRef, params.Metadata)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	loaded.Metadata = normalizedMetadata
+
 	now := s.clock.Now().UTC()
 	loaded.UpdatedAt = &now
 	if err := s.tasks.UpdateTask(ctx, loaded); err != nil {
@@ -530,7 +578,7 @@ func (s *Service) ApproveReview(ctx context.Context, params ReviewTaskParams) (d
 	if err != nil {
 		return domain.Task{}, err
 	}
-	next.Metadata = mergeTaskMetadata(next.Metadata, s.reviewMetadata(ctx, caller, loaded.ProjectID, "approve", params.Reason))
+	next.Metadata = mergeTaskMetadata(next.Metadata, s.reviewMetadata(ctx, caller, loaded.ProjectID, "approve", params.Reason, params.Summary, params.Note))
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
@@ -539,9 +587,8 @@ func (s *Service) ApproveReview(ctx context.Context, params ReviewTaskParams) (d
 }
 
 // reviewMetadata captures the reviewer's verdict on the task record so the
-// review surface renders it. Approve is the only outcome that needs this: retry
-// and fail already persist their reason in Task.Error.
-func (s *Service) reviewMetadata(ctx context.Context, caller Caller, projectID types.ProjectID, decision, note string) map[string]any {
+// review surface renders it.
+func (s *Service) reviewMetadata(ctx context.Context, caller Caller, projectID types.ProjectID, decision, reason, summary, note string) map[string]any {
 	meta := map[string]any{
 		"reviewDecision": decision,
 		"reviewedAt":     s.clock.Now().UTC().Format(time.RFC3339),
@@ -552,8 +599,21 @@ func (s *Service) reviewMetadata(ctx context.Context, caller Caller, projectID t
 	if role := s.callerMemberLabel(ctx, caller, projectID); role != "" {
 		meta["reviewerRole"] = role
 	}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		meta["reviewReason"] = reason
+	}
+	if summary = strings.TrimSpace(summary); summary != "" {
+		meta["reviewSummary"] = summary
+	}
 	if note = strings.TrimSpace(note); note != "" {
+		meta["reviewNote"] = note
+	}
+	if note != "" {
 		meta["reviewFeedback"] = note
+	} else if summary != "" {
+		meta["reviewFeedback"] = summary
+	} else if reason != "" {
+		meta["reviewFeedback"] = reason
 	}
 	return meta
 }
@@ -574,6 +634,7 @@ func (s *Service) RetryReview(ctx context.Context, params ReviewTaskParams) (dom
 	if err != nil {
 		return domain.Task{}, err
 	}
+	next.Metadata = mergeTaskMetadata(next.Metadata, s.reviewMetadata(ctx, caller, loaded.ProjectID, "retry", params.Reason, params.Summary, params.Note))
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
@@ -597,6 +658,7 @@ func (s *Service) FailReview(ctx context.Context, params ReviewTaskParams) (doma
 	if err != nil {
 		return domain.Task{}, err
 	}
+	next.Metadata = mergeTaskMetadata(next.Metadata, s.reviewMetadata(ctx, caller, loaded.ProjectID, "fail", params.Reason, params.Summary, params.Note))
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}

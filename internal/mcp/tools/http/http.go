@@ -103,6 +103,9 @@ func (h Handler) run(ctx context.Context, call CallContext, input requestInput) 
 	if err != nil || parsedURL == nil {
 		return Result{}, fmt.Errorf("http: invalid url %q", input.URL)
 	}
+	if parsedURL.User != nil {
+		return Result{}, fmt.Errorf("http: url must not include userinfo")
+	}
 	switch strings.ToLower(strings.TrimSpace(parsedURL.Scheme)) {
 	case "http", "https":
 	default:
@@ -121,6 +124,7 @@ func (h Handler) run(ctx context.Context, call CallContext, input requestInput) 
 
 	headers := cloneHeaderMap(input.Headers)
 	requestURL := parsedURL.String()
+	safeInputURL := sanitizeURLString(requestURL)
 	injected, injectedValues, err := h.injectCredential(ctx, call, parsedURL.Hostname(), &requestURL, headers)
 	if err != nil {
 		return Result{}, err
@@ -198,8 +202,8 @@ func (h Handler) run(ctx context.Context, call CallContext, input requestInput) 
 	structured := map[string]any{
 		"ok":                  true,
 		"tool":                Name,
-		"url":                 input.URL,
-		"finalUrl":            finalURL,
+		"url":                 safeInputURL,
+		"finalUrl":            sanitizeURLString(finalURL),
 		"status":              httpResp.StatusCode,
 		"statusText":          httpResp.Status,
 		"headers":             cloneHeader(httpResp.Header),
@@ -456,6 +460,15 @@ func mapFromList(list []keyValueEntry) map[string]string {
 		return nil
 	}
 	return out
+}
+
+func sanitizeURLString(raw string) string {
+	parsedURL, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	parsedURL.User = nil
+	return parsedURL.String()
 }
 
 func credentialValue(values map[string]string, keys ...string) string {

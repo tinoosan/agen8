@@ -107,6 +107,7 @@
   <tr><td><code>block</code></td><td><code>Block</code></td><td>service publishes <code>blocked</code></td></tr>
   <tr><td><code>unblock</code></td><td><code>Unblock</code></td><td>service publishes <code>unblocked</code></td></tr>
   <tr><td><code>reassign</code></td><td><code>Assign</code></td><td>service publishes <code>assigned</code></td></tr>
+  <tr><td><code>update</code></td><td><code>Update</code></td><td>none</td></tr>
   <tr><td><code>cancel</code></td><td><code>Cancel</code></td><td>service publishes <code>canceled</code> when an assigned member may still act</td></tr>
   <tr><td><code>review</code> approve</td><td><code>ApproveReview</code></td><td>none</td></tr>
   <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td>service publishes <code>retry_requested</code></td></tr>
@@ -115,19 +116,19 @@
 
 <h2>5. Schema</h2>
 
-<p>The schema requires only <code>action</code> at the top level. Callers include only the fields used by the selected action. The decoder rejects unknown fields, fields that belong to another action, and explicit <code>null</code> values before resolving members or calling the task service. <code>create</code> requires <code>description</code> and <code>assignee_member_id</code>; <code>reassign</code> requires <code>task_id</code> and <code>assignee_member_id</code>. Agen8 resolves caller identity from the MCP session, but task assignment is agent intent and must be explicit.</p>
+<p>The schema requires only <code>action</code> at the top level. Callers include only the fields used by the selected action. The decoder rejects unknown fields, fields that belong to another action, and explicit <code>null</code> values before resolving members or calling the task service. <code>create</code> requires <code>description</code> and <code>assignee_member_id</code>; <code>reassign</code> requires <code>task_id</code> and <code>assignee_member_id</code>. <code>review</code> supports <code>summary</code> and <code>note</code> for reviewer guidance in addition to <code>reason</code> where required by the decision.</p>
 
 <table>
   <tr><th>Field</th><th>Used by</th></tr>
   <tr><td><code>action</code></td><td>all calls</td></tr>
   <tr><td><code>task_id</code></td><td>get, claim, release, submit, block, unblock, reassign, cancel, review</td></tr>
   <tr><td><code>assignee_member_id</code></td><td>create, reassign</td></tr>
-  <tr><td><code>title</code>, <code>description</code>, <code>acceptance_criteria</code>, <code>task_kind</code></td><td>create</td></tr>
-  <tr><td><code>key_result_ref</code>, <code>mission_ref</code>, <code>metadata</code></td><td>create</td></tr>
+  <tr><td><code>title</code>, <code>description</code>, <code>acceptance_criteria</code>, <code>task_kind</code></td><td>create, update</td></tr>
+  <tr><td><code>key_result_ref</code>, <code>mission_ref</code>, <code>metadata</code></td><td>create, update</td></tr>
   <tr><td><code>status</code>, <code>limit</code>, <code>offset</code></td><td>list</td></tr>
-  <tr><td><code>summary</code>, <code>artifacts</code></td><td>submit</td></tr>
+  <tr><td><code>summary</code>, <code>artifacts</code></td><td>submit, review</td></tr>
   <tr><td><code>reason</code></td><td>block, cancel, review retry, review fail</td></tr>
-  <tr><td><code>note</code></td><td>unblock</td></tr>
+  <tr><td><code>note</code></td><td>unblock, review</td></tr>
   <tr><td><code>decision</code>, <code>criteria</code></td><td>review</td></tr>
 </table>
 

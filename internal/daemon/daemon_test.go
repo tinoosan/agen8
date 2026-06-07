@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -49,6 +51,184 @@ func TestSetupRejectsMismatchedPasswordConfirmation(t *testing.T) {
 	}
 	if open := d.setupAvailable(req.Context()); !open {
 		t.Fatal("setup should remain open after rejected password confirmation")
+	}
+}
+
+func TestHandleRPCRejectsOverlyLargePayload(t *testing.T) {
+	d, err := New(Config{AppConfig: config.Config{DataDir: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+	payload := `{"jsonrpc":"2.0","id":1,"method":"auth.login","params":{"username":"` + strings.Repeat("a", maxRPCRequestBodyBytes) + `"}}`
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(payload))
+	req.ContentLength = int64(maxRPCRequestBodyBytes + 1)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "request body is too large") {
+		t.Fatalf("body=%q want 'request body is too large'", rec.Body.String())
+	}
+}
+
+func TestReadRequestBodyRejectsChunkedOverLimit(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(strings.Repeat("a", maxRPCRequestBodyBytes+1)))
+	req.ContentLength = -1
+
+	body, err := readRequestBody(req, maxRPCRequestBodyBytes)
+	if err == nil {
+		t.Fatalf("want error for oversized chunked payload, got body=%q", body)
+	}
+	if !strings.Contains(err.Error(), "rpc request body is too large") {
+		t.Fatalf("got error=%v, want too-large error", err)
+	}
+}
+
+func TestReadRequestBodyRestoresBodyForReuse(t *testing.T) {
+	payload := []byte(`{"jsonrpc":"2.0","id":1,"method":"auth.login"}`)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+
+	body, err := readRequestBody(req, maxRPCRequestBodyBytes)
+	if err != nil {
+		t.Fatalf("readRequestBody: %v", err)
+	}
+	if !bytes.Equal(body, payload) {
+		t.Fatalf("body=%q want %q", body, payload)
+	}
+	reread, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("re-read restored body: %v", err)
+	}
+	if !bytes.Equal(reread, payload) {
+		t.Fatalf("restored body=%q want %q", reread, payload)
+	}
+}
+
+func TestParseLoopbackDevWebURLAcceptsLocalTargets(t *testing.T) {
+	tests := []string{
+		"http://localhost:3000",
+		"https://127.0.0.1:3000",
+		"http://[::1]:3000",
+	}
+	for _, tc := range tests {
+		t.Run(tc, func(t *testing.T) {
+			parsed, err := parseLoopbackDevWebURL(tc)
+			if err != nil {
+				t.Fatalf("parseLoopbackDevWebURL(%q): %v", tc, err)
+			}
+			if parsed == nil || parsed.Host == "" {
+				t.Fatalf("parseLoopbackDevWebURL(%q) returned empty host", tc)
+			}
+		})
+	}
+}
+
+func TestParseLoopbackDevWebURLRejectsUnsafeValues(t *testing.T) {
+	tests := []string{
+		"",
+		"http://",
+		"https://example.com",
+		"ftp://127.0.0.1:8080",
+		"http://192.168.0.1:8080",
+		"http://10.0.0.1:8080",
+	}
+	for _, tc := range tests {
+		t.Run(tc, func(t *testing.T) {
+			if _, err := parseLoopbackDevWebURL(tc); err == nil {
+				t.Fatalf("parseLoopbackDevWebURL(%q): want error", tc)
+			}
+		})
+	}
+}
+
+func TestEnsureLoopbackHostnameRequiresLoopbackResolution(t *testing.T) {
+	if err := ensureLoopbackHostname("localhost"); err != nil {
+		t.Fatalf("ensureLoopbackHostname(localhost): %v", err)
+	}
+	if err := ensureLoopbackHostname("example.com"); err == nil {
+		t.Fatalf("ensureLoopbackHostname(example.com) unexpectedly succeeded")
+	}
+}
+
+func TestLoopbackAwareDialContextRejectsInvalidDialTarget(t *testing.T) {
+	_, err := loopbackAwareDialContext()(context.Background(), "tcp", "localhost")
+	if err == nil || !strings.Contains(err.Error(), "proxy target host is invalid") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestLoopbackAwareDialContextRejectsNonLoopbackDrift(t *testing.T) {
+	oldLookup := lookupLoopbackHostIPs
+	lookupLoopbackHostIPs = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("198.51.100.10")}, nil
+	}
+	t.Cleanup(func() {
+		lookupLoopbackHostIPs = oldLookup
+	})
+
+	_, err := loopbackAwareDialContext()(context.Background(), "tcp", "dev.local:443")
+	if err == nil {
+		t.Fatal("loopbackAwareDialContext should reject non-loopback drift")
+	}
+	if !strings.Contains(err.Error(), "non-loopback") {
+		t.Fatalf("unexpected error=%v", err)
+	}
+}
+
+func TestLoopbackAwareDialContextAllowsLoopbackHostValidationToProceed(t *testing.T) {
+	oldLookup := lookupLoopbackHostIPs
+	lookupLoopbackHostIPs = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("127.0.0.1")}, nil
+	}
+	t.Cleanup(func() {
+		lookupLoopbackHostIPs = oldLookup
+	})
+
+	_, err := loopbackAwareDialContext()(context.Background(), "tcp", "localhost:80")
+	if err == nil {
+		t.Fatalf("expected network error when dialing localhost without listener")
+	}
+	if strings.Contains(err.Error(), "non-loopback") {
+		t.Fatalf("loopback host was blocked by loopback validation: %v", err)
+	}
+	if strings.Contains(err.Error(), "proxy target host is invalid") {
+		t.Fatalf("loopback host parsing unexpectedly failed: %v", err)
+	}
+}
+
+func TestWebHandlerFailsForUnsafeDevWebURL(t *testing.T) {
+	t.Setenv(EnvDevWebURL, "http://example.com")
+
+	d, err := New(Config{AppConfig: config.Config{DataDir: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = d.webHandler()
+	if err == nil {
+		t.Fatal("webHandler should fail with non-loopback web URL")
+	}
+}
+
+func TestWebHandlerBuildsProxyForLocalDevWebURL(t *testing.T) {
+	t.Setenv(EnvDevWebURL, "http://127.0.0.1:8080")
+
+	d, err := New(Config{AppConfig: config.Config{DataDir: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	h, err := d.webHandler()
+	if err != nil {
+		t.Fatalf("webHandler: %v", err)
+	}
+	if h == nil {
+		t.Fatal("webHandler returned nil handler")
 	}
 }
 

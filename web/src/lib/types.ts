@@ -134,6 +134,9 @@ export interface AcceptanceCriterion {
 export interface AttemptReview {
   decision: string;
   feedback?: string;
+  summary?: string;
+  note?: string;
+  reason?: string;
   reviewedBy?: string;
   reviewerRole?: string;
   reviewedAt?: string;

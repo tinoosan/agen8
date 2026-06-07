@@ -19,6 +19,7 @@ type stubService struct {
 	listReq     taskdomain.TaskFilter
 	listResp    []taskdomain.Task
 	assignReq   taskapp.AssignTaskParams
+	updateReq   taskapp.UpdateTaskParams
 	reviewReq   taskapp.ReviewTaskParams
 	seenCaller  taskapp.Caller
 	called      string
@@ -85,6 +86,29 @@ func (s *stubService) Assign(ctx context.Context, req taskapp.AssignTaskParams) 
 func (s *stubService) Cancel(ctx context.Context, id taskdomain.TaskID, reason string) (taskdomain.Task, error) {
 	s.capture(ctx, "cancel")
 	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", Error: reason, Status: taskdomain.TaskStatusCanceled}, nil
+}
+
+func (s *stubService) Update(ctx context.Context, req taskapp.UpdateTaskParams) (taskdomain.Task, error) {
+	s.capture(ctx, "update")
+	s.updateReq = req
+	title := ""
+	if req.Title != nil {
+		title = strings.TrimSpace(*req.Title)
+	}
+	description := ""
+	if req.Description != nil {
+		description = strings.TrimSpace(*req.Description)
+	}
+	taskKind := ""
+	if req.TaskKind != nil {
+		taskKind = strings.TrimSpace(*req.TaskKind)
+	}
+	keyResultRef := ""
+	if req.KeyResultRef != nil {
+		keyResultRef = strings.TrimSpace(*req.KeyResultRef)
+	}
+	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: "worker-1", Title: title, Description: description, TaskKind: taskKind, KeyResultRef: keyResultRef, Metadata: req.Metadata, Status: taskdomain.TaskStatusPending}, nil
+
 }
 
 func (s *stubService) ApproveReview(ctx context.Context, req taskapp.ReviewTaskParams) (taskdomain.Task, error) {
@@ -334,6 +358,25 @@ func TestHandleRejectsCrossProjectAssignee(t *testing.T) {
 	}
 }
 
+func TestHandleRejectsProjectMismatchInActorContext(t *testing.T) {
+	svc := &stubService{}
+	call := CallContext{
+		Tasks: svc,
+		Members: stubMembers{members: map[member.ID]member.Record{
+			"coord-1": {ID: "coord-1", ProjectID: "space-1", MemberType: member.TypeCoordinator, LifecycleState: member.LifecycleActive},
+		}},
+		ProjectID:     "space-2",
+		ActorMemberID: "coord-1",
+	}
+	_, err := NewHandler().Handle(context.Background(), call, json.RawMessage(`{"action":"list","limit":10}`))
+	if err == nil || !strings.Contains(err.Error(), "registered member \"coord-1\" is not in project \"space-2\"") {
+		t.Fatalf("error=%v want project mismatch for actor context", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("task service ran despite actor context mismatch: %q", svc.called)
+	}
+}
+
 func TestHandleRejectsInactiveAssignee(t *testing.T) {
 	svc := &stubService{}
 	call := CallContext{
@@ -436,6 +479,38 @@ func TestHandleCancelReturnsStatusReason(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateCallsUpdateAndPassesMissionRef(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"update","task_id":"task-1","title":"Tighten checks","task_kind":"security_scan","key_result_ref":"kr-1","mission_ref":"mission-1","metadata":{"tag":"review"},"acceptance_criteria":["check logs","patch handler"]}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if svc.called != "update" {
+		t.Fatalf("called=%q want update", svc.called)
+	}
+	if svc.updateReq.TaskID != "task-1" || svc.updateReq.TaskKind == nil || *svc.updateReq.TaskKind != "security_scan" || svc.updateReq.KeyResultRef == nil || *svc.updateReq.KeyResultRef != "kr-1" {
+		t.Fatalf("update req=%+v", svc.updateReq)
+	}
+	if svc.updateReq.Metadata["missionRef"] != "mission-1" || svc.updateReq.Metadata["tag"] != "review" {
+		t.Fatalf("update metadata=%+v", svc.updateReq.Metadata)
+	}
+	if svc.updateReq.Title == nil || *svc.updateReq.Title != "Tighten checks" {
+		t.Fatalf("update title=%v", svc.updateReq.Title)
+	}
+	if svc.updateReq.AcceptanceCriteria == nil || len(*svc.updateReq.AcceptanceCriteria) != 2 {
+		t.Fatalf("update acceptance criteria=%+v", svc.updateReq.AcceptanceCriteria)
+	}
+	if criterion := (*svc.updateReq.AcceptanceCriteria)[0]; criterion.ID == "" || criterion.Text == "" {
+		t.Fatalf("first acceptance criterion=%+v", criterion)
+	}
+	if svc.updateReq.Description != nil {
+		t.Fatalf("unexpected description=%v", *svc.updateReq.Description)
+	}
+	if !strings.Contains(result.Text, `"action":"update"`) {
+		t.Fatalf("text = %s", result.Text)
+	}
+}
+
 func TestHandleReviewMapsDecisionToServiceMethod(t *testing.T) {
 	svc := &stubService{}
 	_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"retry","reason":"tighten it","criteria":[{"id":"criterion-1","satisfied":false}]}`))
@@ -453,41 +528,81 @@ func TestHandleReviewMapsDecisionToServiceMethod(t *testing.T) {
 	}
 }
 
-func TestHandleReviewAcceptsApproveSummaryAlias(t *testing.T) {
+func TestHandleReviewPassesReviewFieldsForApprove(t *testing.T) {
 	svc := &stubService{}
-	_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"approve","summary":"approved after inspection","criteria":[{"id":"criterion-1","satisfied":true}]}`))
+	_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"approve","summary":"approved after inspection","note":"all criteria met","criteria":[{"id":"criterion-1","satisfied":true}]}`))
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
 	if svc.called != "approve" {
 		t.Fatalf("called=%q want approve", svc.called)
 	}
-	if svc.reviewReq.Reason != "approved after inspection" {
-		t.Fatalf("review reason=%q want summary alias", svc.reviewReq.Reason)
+	if svc.reviewReq.Reason != "" {
+		t.Fatalf("review reason=%q want empty", svc.reviewReq.Reason)
+	}
+	if svc.reviewReq.Summary != "approved after inspection" {
+		t.Fatalf("review summary=%q want approved after inspection", svc.reviewReq.Summary)
+	}
+	if svc.reviewReq.Note != "all criteria met" {
+		t.Fatalf("review note=%q want all criteria met", svc.reviewReq.Note)
 	}
 }
 
-func TestHandleReviewUsesSummaryAndNoteAsFeedbackFallbacks(t *testing.T) {
-	t.Run("summary", func(t *testing.T) {
-		svc := &stubService{}
-		_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"retry","summary":"tighten summary","criteria":[{"id":"criterion-1","satisfied":false}]}`))
-		if err != nil {
-			t.Fatalf("handle: %v", err)
-		}
-		if svc.called != "retry" || svc.reviewReq.Reason != "tighten summary" {
-			t.Fatalf("called=%q review req=%+v", svc.called, svc.reviewReq)
-		}
-	})
-	t.Run("note", func(t *testing.T) {
-		svc := &stubService{}
-		_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"fail","note":"missing evidence","criteria":[{"id":"criterion-1","satisfied":false}]}`))
-		if err != nil {
-			t.Fatalf("handle: %v", err)
-		}
-		if svc.called != "fail" || svc.reviewReq.Reason != "missing evidence" {
-			t.Fatalf("called=%q review req=%+v", svc.called, svc.reviewReq)
-		}
-	})
+func TestHandleReviewPassesReviewFieldsForRetryAndFail(t *testing.T) {
+	svc := &stubService{}
+	_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"retry","reason":"tighten it","summary":"retry summary","note":"add additional unit tests","criteria":[{"id":"criterion-1","satisfied":false}]}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if svc.called != "retry" {
+		t.Fatalf("called=%q want retry", svc.called)
+	}
+	if svc.reviewReq.Reason != "tighten it" {
+		t.Fatalf("review reason=%q want tighten it", svc.reviewReq.Reason)
+	}
+	if svc.reviewReq.Summary != "retry summary" {
+		t.Fatalf("review summary=%q want retry summary", svc.reviewReq.Summary)
+	}
+	if svc.reviewReq.Note != "add additional unit tests" {
+		t.Fatalf("review note=%q want add additional unit tests", svc.reviewReq.Note)
+	}
+
+	svc = &stubService{}
+	_, err = NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"fail","reason":"security risk","summary":"blocked due risk","note":"update validation","criteria":[{"id":"criterion-1","satisfied":false}]}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if svc.called != "fail" {
+		t.Fatalf("called=%q want fail", svc.called)
+	}
+	if svc.reviewReq.Reason != "security risk" {
+		t.Fatalf("review reason=%q want security risk", svc.reviewReq.Reason)
+	}
+	if svc.reviewReq.Summary != "blocked due risk" {
+		t.Fatalf("review summary=%q want blocked due risk", svc.reviewReq.Summary)
+	}
+	if svc.reviewReq.Note != "update validation" {
+		t.Fatalf("review note=%q want update validation", svc.reviewReq.Note)
+	}
+}
+
+func TestHandleReviewRetryFailRequireReason(t *testing.T) {
+	svc := &stubService{}
+	_, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"retry","summary":"needs more detail","criteria":[{"id":"criterion-1","satisfied":false}]}`))
+	if err == nil || !strings.Contains(err.Error(), "reason is required") {
+		t.Fatalf("expected reason requirement, got %v", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("service called without reason: %q", svc.called)
+	}
+
+	_, err = NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"fail","note":"needs more evidence","criteria":[{"id":"criterion-1","satisfied":false}]}`))
+	if err == nil || !strings.Contains(err.Error(), "reason is required") {
+		t.Fatalf("expected reason requirement, got %v", err)
+	}
+	if svc.called != "" {
+		t.Fatalf("service called without reason: %q", svc.called)
+	}
 }
 
 func TestDecodeRejectsUnknownAction(t *testing.T) {

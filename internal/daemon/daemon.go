@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,8 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
 )
 
+type loopbackIPLookup func(string) ([]net.IP, error)
+
 type Daemon struct {
 	cfg       Config
 	app       *app.Application
@@ -41,6 +44,12 @@ type Daemon struct {
 	events    *eventsHub
 	logger    *slog.Logger
 }
+
+const maxRPCRequestBodyBytes = 1024 * 1024
+
+var errRPCRequestBodyTooLarge = errors.New("rpc request body is too large")
+
+var lookupLoopbackHostIPs loopbackIPLookup = net.LookupIP
 
 func New(cfg Config) (*Daemon, error) {
 	cfg, err := cfg.withDefaults()
@@ -162,14 +171,14 @@ func (d *Daemon) webHandler() (http.Handler, error) {
 	if devWebURL == "" {
 		return web.Handler()
 	}
-	target, err := url.Parse(devWebURL)
+	target, err := parseLoopbackDevWebURL(devWebURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", EnvDevWebURL, err)
-	}
-	if target.Scheme == "" || target.Host == "" {
-		return nil, fmt.Errorf("%s must be an absolute URL", EnvDevWebURL)
+		return nil, fmt.Errorf("%s is invalid: %w", EnvDevWebURL, err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = &http.Transport{
+		DialContext: loopbackAwareDialContext(),
+	}
 	director := proxy.Director
 	proxy.Director = func(r *http.Request) {
 		director(r)
@@ -177,6 +186,78 @@ func (d *Daemon) webHandler() (http.Handler, error) {
 		r.Header.Del("Cookie")
 	}
 	return proxy, nil
+}
+
+func loopbackAwareDialContext() func(context.Context, string, string) (net.Conn, error) {
+	dialer := &net.Dialer{}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("proxy target host is invalid: %w", err)
+		}
+		if err := validateLoopbackDialTarget(host); err != nil {
+			return nil, err
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+}
+
+func validateLoopbackDialTarget(host string) error {
+	return ensureLoopbackHostname(host)
+}
+
+func parseLoopbackDevWebURL(raw string) (*url.URL, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("empty URL")
+	}
+	target, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse URL: %w", err)
+	}
+	if target.Scheme == "" || target.Host == "" {
+		return nil, fmt.Errorf("must be an absolute URL")
+	}
+	if !strings.EqualFold(target.Scheme, "http") && !strings.EqualFold(target.Scheme, "https") {
+		return nil, fmt.Errorf("unsupported scheme %q: only http/https allowed", target.Scheme)
+	}
+	host := strings.ToLower(strings.TrimSpace(target.Hostname()))
+	if host == "" {
+		return nil, fmt.Errorf("missing hostname")
+	}
+	if isLoopbackHostname(host) {
+		return target, ensureLoopbackHostname(host)
+	}
+	parsedIP := net.ParseIP(host)
+	if parsedIP != nil && parsedIP.IsLoopback() {
+		return target, nil
+	}
+	return nil, fmt.Errorf("host %q is not loopback-safe", host)
+}
+
+func ensureLoopbackHostname(host string) error {
+	ips, err := lookupLoopbackHostIPs(host)
+	if err != nil {
+		return fmt.Errorf("host %q resolve failure: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("host %q has no resolved IP addresses", host)
+	}
+	for _, ip := range ips {
+		if !ip.IsLoopback() {
+			return fmt.Errorf("host %q resolves to non-loopback IP %q", host, ip.String())
+		}
+	}
+	return nil
+}
+
+func isLoopbackHostname(host string) bool {
+	switch strings.TrimSpace(strings.ToLower(host)) {
+	case "localhost", "127.0.0.1", "::1", "0:0:0:0:0:0:0:1":
+		return true
+	default:
+		return false
+	}
 }
 
 func (d *Daemon) handleWeb(next http.Handler) http.Handler {
@@ -202,8 +283,12 @@ func (d *Daemon) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := readRequestBody(r, maxRPCRequestBodyBytes)
 	if err != nil {
+		if errors.Is(err, errRPCRequestBodyTooLarge) {
+			http.Error(w, "request body is too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read request body", http.StatusBadRequest)
 		return
 	}
@@ -228,6 +313,24 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(resp)
+}
+
+func readRequestBody(r *http.Request, maxBytes int64) ([]byte, error) {
+	if r == nil || r.Body == nil {
+		return nil, nil
+	}
+	if r.ContentLength > maxBytes {
+		return nil, fmt.Errorf("%w: content-length %d exceeds %d", errRPCRequestBodyTooLarge, r.ContentLength, maxBytes)
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBytes+1))
+	if err != nil {
+		return body, err
+	}
+	if int64(len(body)) > maxBytes {
+		return body, fmt.Errorf("%w: body exceeded %d bytes", errRPCRequestBodyTooLarge, maxBytes)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return body, nil
 }
 
 func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Note Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .flow-svg {
+    color: var(--text);
+  }
+  .flow-svg .flow-box {
+    fill: var(--bg-elevated);
+    stroke: currentColor;
+    stroke-width: 1.5;
+  }
+  .flow-svg text {
+    fill: currentColor;
+    stroke: none;
+    font-size: 16px;
+    font-weight: 650;
+  }
+  .flow-svg .edge-label {
+    font-size: 13px;
+    font-weight: 500;
+    fill: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / note-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Note Service</span>
+  <h1>Note Service</h1>
+  <p class="lede">
+    The note service is where an agent keeps the lightweight thoughts it produces mid-session — a learning worth remembering, an idea worth pursuing — that would otherwise die in the transcript. A note starts as freely editable, freely deletable scratch memory. The moment something durable grows from it — a decision that cites it, a task spawned from it — it hardens into permanent record: immutable and undeletable, for as long as that durable thing exists. That one hardening rule is the whole primitive. Everything else a note does, it does through the work graph.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#purpose">Purpose and ownership</a></li>
+      <li><a href="#note-model">Note model</a></li>
+      <li><a href="#service">Service boundary</a></li>
+      <li><a href="#domain">Domain model</a></li>
+      <li><a href="#persistence">Persistence and queries</a></li>
+      <li><a href="#leads-to">Leading to work: edges, the latch, and events</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="purpose">1. Purpose and ownership</h2>
+
+  <p>A note is a captured thought, not a log line. It holds the kind of artifact an agent generates while working and would otherwise lose: a learning that explains why the code behaves as it does, or an idea for work that is not yet a task. The service makes that artifact durable and queryable, and lets it participate in the work graph like any other node.</p>
+
+  <p>The lifecycle turns on one fact, and it is <strong>read from the graph, not stored on the note</strong>: <em>does a durable node currently depend on this note?</em> While nothing does, the note is freely mutable and freely deletable by the agent or the user. The moment a durable node grows from it — a task it spawned, a decision that was informed by it — the note is frozen: it can no longer be edited or deleted, because something permanent now stands on it. Because the freeze is derived from live edges rather than a stored flag, it answers its own edge cases: archive that durable node and the edge stays live, so the note stays frozen; delete that node and its edges cascade away, so the note becomes editable again — with no un-freeze code to run.</p>
+
+  <p>That derived latch is the entire reason the note primitive exists. A note is the one agent-facing object that is freely-deletable working memory until it has a consequence, then hardens into permanent record. Its type and its relationships it borrows from the graph.</p>
+
+  <table>
+    <thead>
+      <tr><th>The note service owns</th><th>The note service does not own</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Canonical <code>Note</code> records and body validation.</td><td>The lifecycle, creation, or deletion of durable nodes (decisions, missions, key results, tasks) — including whether they can be deleted at all.</td></tr>
+      <tr><td>The curated <code>type</code> label — a soft, scannable facet that does not gate what a note may lead to.</td><td>Drawing consequence edges into being: the node that grows from a note references it and draws the <code>spawned</code> / <code>informed_by</code> edge. The note service only reads those edges.</td></tr>
+      <tr><td>The derived open&harr;frozen latch: a note is editable and deletable iff it currently has no consequence edge.</td><td>The graph's cascade behavior. When a durable node is deleted, the graph removes its incident edges; the note re-opens as a consequence, not by note-service action.</td></tr>
+      <tr><td>The <code>archived</code> visibility flag, kept independent of the latch.</td><td>Writing harness memory files such as <code>MEMORY.md</code>; a note's reach is graph-only.</td></tr>
+      <tr><td>The note's own associative edges (a <code>made_during</code> context link at capture) and their cleanup when an open note is deleted.</td><td>Surfacing notes to a human — delivery and routing are a separate concern.</td></tr>
+      <tr><td>Project-scoped note queries, graph hydration, and lifecycle event publication.</td><td>Transcript card rendering or activity-feed formatting.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The service follows the same architectural rule as the task and decision services: protocol adapters translate payloads, the application service orchestrates side effects, the domain validates the record, and the repository persists canonical state.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">MCP and RPC adapters</div>
+      <div class="role">Translate tool or JSON-RPC payloads into typed service calls. The MCP note tool owns <code>capture</code>, <code>edit</code>, <code>delete</code>, <code>archive</code>, <code>get</code>, and <code>list</code> action semantics. There is no <code>promote</code> action.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Application service</div>
+      <div class="role">Capture, edit, or delete an open note; before any edit or delete, ask the graph whether a consequence edge exists and refuse loudly if it does. Toggle the archived flag independent of the latch, and publish events.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Domain</div>
+      <div class="role">Owns <code>Note</code>, the curated <code>NoteType</code> label, <code>NoteSource</code>, constructors, filters, and body validation. There is no stored status field — open vs frozen is derived from live edges, not a domain enum.</div>
+    </div>
+    <div class="layer repo">
+      <div class="label">Repository</div>
+      <div class="role">Stores and loads note records. Query methods take <code>NoteFilter</code> so project scope and filter semantics stay in one contract.</div>
+    </div>
+  </div>
+
+  <h2 id="note-model">2. Note model</h2>
+
+  <p>A note carries a curated <code>type</code> label, a body, who produced it, and an <code>archived</code> flag. Its relationships — what it was captured against, what grew from it — live in the graph, not on the record.</p>
+
+  <table>
+    <thead>
+      <tr><th>Type</th><th>Meaning</th><th>Typically leads to</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>insight</code></td><td>A learning or observation worth keeping.</td><td>A <code>decision</code> that is <code>informed_by</code> it.</td></tr>
+      <tr><td><code>idea</code></td><td>A seed of future work.</td><td>A <code>mission</code>, <code>key result</code>, or <code>task</code> it <code>spawned</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The "typically leads to" column is convention, not constraint. <code>type</code> is a <strong>curated soft label</strong>: seeded with <code>insight</code> and <code>idea</code>, and extended deliberately when a new value earns its keep for filtering. The agent picks from the set; it does not invent values per note, because a free-text type fragments the very scannability the label exists to provide. What the label does <em>not</em> do is gate consequences — an <code>insight</code> can lead to an <code>idea</code>, a note captured under one mission can relate to another, and any note can lead to anything the graph can express. The label is for humans scanning and for filtering; the edges carry the meaning.</p>
+
+  <p>The note's mutability is a derived state with two values, and a durable node is the toggle between them:</p>
+
+  <svg class="flow-svg" viewBox="0 0 980 300" role="img" aria-labelledby="note-life-flow-title note-life-flow-desc">
+    <title id="note-life-flow-title">Note lifecycle flow</title>
+    <desc id="note-life-flow-desc">An agent captures a note; while no durable node depends on it the note is open, mutable, and deletable; when a durable node grows from it the note becomes frozen; if that node is later deleted the note re-opens.</desc>
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+      </marker>
+    </defs>
+    <g fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M200 160 H360"></path>
+      <path d="M540 130 H780"></path>
+      <path d="M780 195 H540"></path>
+    </g>
+    <g>
+      <rect class="flow-box" x="30" y="115" width="170" height="90" rx="8"></rect>
+      <text x="115" y="152" text-anchor="middle">Agent</text>
+      <text x="115" y="178" text-anchor="middle">captures</text>
+
+      <rect class="flow-box" x="360" y="95" width="180" height="130" rx="8"></rect>
+      <text x="450" y="140" text-anchor="middle">Open</text>
+      <text x="450" y="166" text-anchor="middle">mutable</text>
+      <text x="450" y="192" text-anchor="middle">deletable</text>
+
+      <rect class="flow-box" x="780" y="95" width="180" height="130" rx="8"></rect>
+      <text x="870" y="140" text-anchor="middle">Frozen</text>
+      <text x="870" y="166" text-anchor="middle">immutable</text>
+      <text x="870" y="192" text-anchor="middle">undeletable</text>
+
+      <text class="edge-label" x="660" y="118" text-anchor="middle">a durable node grows from it</text>
+      <text class="edge-label" x="660" y="216" text-anchor="middle">that node is deleted</text>
+    </g>
+  </svg>
+
+  <p>The forward transition is the appearance of a consequence edge; the backward one is its disappearance when the durable node is deleted. Both are read from the graph — the note service stores neither. Archiving the durable node is not deletion, so it leaves the edge live and the note frozen.</p>
+
+  <h3>MCP tool schema</h3>
+
+  <p>The MCP <code>note</code> tool schema requires only <code>action</code> at the top level because the active model tool runtime does not accept top-level schema combinators. Callers provide <code>action</code> and only the fields used by that action. The handler enforces the action-specific field contract, rejects unknown fields, rejects fields that belong to a different action, and rejects explicit <code>null</code> values before any service call.</p>
+
+  <table>
+    <thead>
+      <tr><th>Action</th><th>Required fields</th><th>Optional fields</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>capture</code></td>
+        <td><code>action</code>, <code>type</code>, <code>body</code></td>
+        <td><code>context_ref</code> (draws a <code>made_during</code> edge to a task, key result, or mission)</td>
+      </tr>
+      <tr>
+        <td><code>edit</code></td>
+        <td><code>action</code>, <code>note_id</code>, and at least one of <code>body</code> / <code>type</code></td>
+        <td>the unedited one of <code>body</code> / <code>type</code></td>
+      </tr>
+      <tr>
+        <td><code>delete</code></td>
+        <td><code>action</code>, <code>note_id</code></td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><code>archive</code></td>
+        <td><code>action</code>, <code>note_id</code>, <code>archived</code></td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><code>get</code></td>
+        <td><code>action</code>, <code>note_id</code></td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><code>list</code></td>
+        <td><code>action</code>, <code>project_id</code></td>
+        <td><code>type</code>, <code>archived</code>, <code>since</code>, <code>until</code>, <code>limit</code>, <code>offset</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>There is no <code>promote</code> action, because a note does not create the thing it leads to. Work that grows from a note is created by its own tool — the task, mission, or decision surface — which references the note and draws the <code>spawned</code> or <code>informed_by</code> edge. <code>edit</code> and <code>delete</code> are refused when the note is frozen; the handler surfaces that as an error, never a silent no-op. <code>archive</code> is always permitted, frozen or not, because visibility is a separate axis from mutability.</p>
+
+  <h2 id="service">3. Service boundary</h2>
+
+  <p>The application service has an explicit constructor. It does not accept a dependency bag. Required production dependencies fail startup when absent.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">func</span> <span class="tok-fn">NewService</span>(
+    repo domain.<span class="tok-type">Repository</span>,
+    clock domain.<span class="tok-type">Clock</span>,
+    edges <span class="tok-type">GraphConsequenceReader</span>,
+    links <span class="tok-type">GraphLinkWriter</span>,
+    linkDeleter <span class="tok-type">GraphLinkDeleter</span>,
+    events <span class="tok-type">EventPublisher</span>,
+    members <span class="tok-type">MemberDisplayLookup</span>,
+    logger *slog.<span class="tok-type">Logger</span>,
+) (*<span class="tok-type">Service</span>, error)</code></pre>
+
+  <p><code>edges</code> is the read port the latch is derived from: before an edit or delete, the service asks it whether any <code>spawned</code> or <code>informed_by</code> edge is currently incident to the note. A non-empty answer means a durable node depends on the note, so the verb is refused. <code>links</code> draws the note's own associative edges — the <code>made_during</code> context link at capture — and <code>linkDeleter</code> removes them when an open note is deleted. Member display lookup enriches event payloads for readable text; failures there are presentation-only and do not block persistence.</p>
+
+  <p>There are no promotion ports. The note service does not import the decision, mission, or task services, and never creates a durable node. That keeps it a leaf: it owns its records and its latch, and it reads the graph to evaluate that latch, but it does not reach into other domains. The node that grows from a note is built and validated by its own service, which draws the consequence edge as it does so.</p>
+
+  <h2 id="domain">4. Domain model</h2>
+
+  <p><code>Note</code> is a small, intrinsic record. It carries no status field and no target pointer, because the open/frozen distinction is not stored on the note — it is computed from the edges the graph holds against it.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Note</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ID</span>             <span class="tok-type">NoteID</span>
+    <span class="tok-field">ProjectID</span>      <span class="tok-type">string</span>
+    <span class="tok-field">Source</span>         <span class="tok-type">NoteSource</span>
+    <span class="tok-field">SourceIdentity</span> <span class="tok-type">string</span>
+    <span class="tok-field">Type</span>           <span class="tok-type">NoteType</span>
+    <span class="tok-field">Body</span>           <span class="tok-type">string</span>
+    <span class="tok-field">Archived</span>       <span class="tok-type">bool</span>
+    <span class="tok-field">CreatedAt</span>      time.<span class="tok-type">Time</span>
+    <span class="tok-field">UpdatedAt</span>      time.<span class="tok-type">Time</span>
+}</code></pre>
+
+  <p>Two independent axes govern a note, and only one of them is stored:</p>
+
+  <table>
+    <thead>
+      <tr><th>Axis</th><th>Values</th><th>Stored?</th><th>Reversible?</th><th>Controls</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Mutability (the latch)</td><td>open &harr; frozen</td><td>No — derived from live consequence edges</td><td>Yes — re-opens if the depending node is deleted</td><td><code>edit</code> and <code>delete</code></td></tr>
+      <tr><td>Visibility</td><td>active &harr; archived</td><td>Yes — the <code>Archived</code> field</td><td>Yes</td><td>whether the note shows in default views</td></tr>
+    </tbody>
+  </table>
+
+  <p><code>Source</code> records who produced the note; the retained source is <code>agent</code>. <code>UpdatedAt</code> moves on every edit while the note is open; once a consequence edge exists, edits are refused, so the timestamp naturally settles at the last moment the note was still scratch.</p>
+
+  <h2 id="persistence">5. Persistence and queries</h2>
+
+  <p>The repository is split into reader and writer contracts. Service methods use domain names: <code>CreateNote</code>, <code>GetNote</code>, <code>ListNotes</code>, <code>UpdateNote</code>, and <code>DeleteNote</code>. <code>UpdateNote</code> serves both the edit path and the archive toggle; the service, not the repository, enforces that an edit or delete is refused once a consequence edge exists — the repository persists stored state and does not know about the latch.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">NoteFilter</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span> <span class="tok-type">string</span>
+    <span class="tok-field">Types</span>     []<span class="tok-type">NoteType</span>
+    <span class="tok-field">Archived</span>  *<span class="tok-type">bool</span>
+    <span class="tok-field">Query</span>     <span class="tok-type">string</span>
+    <span class="tok-field">Since</span>     *time.<span class="tok-type">Time</span>
+    <span class="tok-field">Until</span>     *time.<span class="tok-type">Time</span>
+    <span class="tok-field">SortDesc</span>  <span class="tok-type">bool</span>
+    <span class="tok-field">Limit</span>     <span class="tok-type">int</span>
+    <span class="tok-field">Offset</span>    <span class="tok-type">int</span>
+}</code></pre>
+
+  <p>Project scope is part of <code>NoteFilter</code>, and the filter covers the stored facets: type, archived state, text search, time window, sort order, and pagination. There is no <code>status</code> filter, because open vs frozen is not stored. When a caller needs that distinction — for example, to show only the still-open notes an agent can still revise — the service hydrates each note's derived state through the same <code>GraphConsequenceReader</code> the latch uses, rather than reading a column.</p>
+
+  <h2 id="leads-to">6. Leading to work: edges, the latch, and events</h2>
+
+  <p>Capture is ordered like any creation: validate the type label and body, optionally draw a <code>made_during</code> edge to a referenced task, key result, or mission, persist the row, and publish <code>note.captured</code>. Deleting an open note removes that associative edge before deleting the row, so a discarded note leaves nothing behind. A <code>made_during</code> edge is context, not consequence — it records where the note was captured and never freezes it.</p>
+
+  <p>A note leads to durable work from the <em>other</em> side. The node is created by its own service, which references the note and draws a consequence edge — <code>spawned</code> from the note to the new work, or <code>informed_by</code> from a decision back to the note. The note is not the actor and creates nothing; this is what keeps the note service a leaf. The latch is then a pure derivation: the edge <em>is</em> the frozen state.</p>
+
+  <svg class="flow-svg" viewBox="0 0 980 250" role="img" aria-labelledby="leads-flow-title leads-flow-desc">
+    <title id="leads-flow-title">How a note freezes and re-opens</title>
+    <desc id="leads-flow-desc">A durable node is created by its own service, which draws a consequence edge referencing the note; the note is frozen by derivation from that live edge; if the node is later deleted, the edge cascades away and the note re-opens.</desc>
+    <defs>
+      <marker id="arrow-leads" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+      </marker>
+      <marker id="arrow-return" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="currentColor"></path>
+      </marker>
+    </defs>
+    <g fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#arrow-leads)">
+      <path d="M250 95 H310"></path>
+      <path d="M560 95 H620"></path>
+    </g>
+    <g fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-return)">
+      <path d="M730 150 V190 H320 V150"></path>
+    </g>
+    <g>
+      <rect class="flow-box" x="40" y="52" width="210" height="86" rx="8"></rect>
+      <text x="145" y="89" text-anchor="middle">Durable node</text>
+      <text x="145" y="112" text-anchor="middle">created elsewhere</text>
+
+      <rect class="flow-box" x="310" y="52" width="250" height="86" rx="8"></rect>
+      <text x="435" y="89" text-anchor="middle">Consequence edge</text>
+      <text x="435" y="112" text-anchor="middle">spawned / informed_by</text>
+
+      <rect class="flow-box" x="620" y="52" width="220" height="86" rx="8"></rect>
+      <text x="730" y="89" text-anchor="middle">Note frozen</text>
+      <text x="730" y="112" text-anchor="middle">(derived)</text>
+
+      <text class="edge-label" x="525" y="225" text-anchor="middle">node deleted &rarr; edge cascades &rarr; note re-opens</text>
+    </g>
+  </svg>
+
+  <p>The freeze is never written to the note. Before an edit or delete, the service reads the live consequence edges; any present and the verb fails loudly. Because the state is derived, two awkward problems simply do not arise: there is no window where a note is linked but still mutable, since the edge and the frozen state are the same thing; and there is no un-freeze code, since the graph's cascade on node deletion removes the edge and the note re-opens on its next read.</p>
+
+  <p>One contract this leans on lives outside the note service: the consequence edge and the durable node it implies must come into being together. A note must never be frozen against a node that does not exist, so the creating service draws the <code>spawned</code> or <code>informed_by</code> edge atomically with the node it creates. The note service does not invent a fallback or paper over a half-built link; it simply reads whatever edges are really there.</p>
+
+  <p><code>note.captured</code>, <code>note.edited</code>, <code>note.archived</code>, and <code>note.deleted</code> are published after their respective persistence steps; publish failure returns an error, because a missing event hides a state change from downstream projections. There is no <code>note.frozen</code> event: freezing is not a transition the note service performs, it is a derived reading of the graph. The signal that a note became load-bearing rides on the edge-creation event emitted by the service that drew it.</p>
+
+  <h2 id="invariants">7. Invariants</h2>
+
+  <table>
+    <thead>
+      <tr><th>Invariant</th><th>Enforced by</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>A note is a durable capture of a lightweight artifact; transient transcript text is not the source of truth.</td><td>The service persists <code>Note</code> records.</td></tr>
+      <tr><td>A note has a curated <code>type</code> label and a non-empty body; the label does not constrain what the note may lead to.</td><td><code>Note.Validate</code> checks the body and validates <code>type</code> against the curated set; consequence is governed by edges, not type.</td></tr>
+      <tr><td>Mutability is derived, not stored: a note is editable and deletable iff it currently has no consequence edge; otherwise both verbs fail loudly.</td><td><code>Service.Edit</code> and <code>Service.Delete</code> consult <code>GraphConsequenceReader</code> before acting and return an error — never a silent no-op — when an edge exists.</td></tr>
+      <tr><td>A note is frozen only while a durable node actually depends on it. Archiving that node keeps the note frozen; deleting that node re-opens it.</td><td>The latch reads live <code>spawned</code> / <code>informed_by</code> edges; edge cascade on node deletion is owned by the graph, not the note service.</td></tr>
+      <tr><td>A note is never frozen against a node that does not exist.</td><td>The creating service draws the consequence edge atomically with the durable node; the note service only reads edges that are really present.</td></tr>
+      <tr><td>A note's associative edges (<code>made_during</code>) do not freeze it, and a deleted open note leaves no edges behind.</td><td><code>Service.Delete</code> removes the note's own edges before deleting the row; a note with a consequence edge cannot be deleted.</td></tr>
+      <tr><td>Visibility is independent of the latch: a note can be archived or restored whether it is open or frozen.</td><td><code>Service.Archive</code> toggles <code>Archived</code> without consulting the latch.</td></tr>
+      <tr><td>A note's reach is graph-only; it never writes harness memory or delivers to a human.</td><td>The service has no memory-file or delivery ports.</td></tr>
+      <tr><td>Project-scoped reads require a project ID.</td><td><code>Service.List</code>, <code>Service.Get</code>, and RPC validation.</td></tr>
+      <tr><td>Production constructs the service once.</td><td><code>internal/app.NewApplication</code> wires the repository, consequence reader, graph link writer and deleter, event bus, clock, and logger.</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+</body>
+</html>

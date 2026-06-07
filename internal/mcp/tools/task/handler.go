@@ -131,6 +131,61 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		}
 		task, err := call.Tasks.Assign(taskCtx, taskapp.AssignTaskParams{TaskID: id, AssignedTo: assignee.MemberID})
 		return h.taskResultForActor(ctx, call, "reassign", task, err, map[string]any{"assignee": assignee}, actor)
+	case "update":
+		id, err := requireTaskID(input.TaskID)
+		if err != nil {
+			return Result{}, err
+		}
+		params := taskapp.UpdateTaskParams{TaskID: id}
+		if input.Title != "" {
+			title := input.Title
+			params.Title = &title
+		}
+		if input.Description != "" {
+			description := input.Description
+			params.Description = &description
+		}
+		if len(input.AcceptanceCriteria) > 0 {
+			criteria := make([]taskdomain.AcceptanceCriterion, 0, len(input.AcceptanceCriteria))
+			seen := map[string]struct{}{}
+			for _, value := range input.AcceptanceCriteria {
+				value = strings.TrimSpace(value)
+				if value == "" {
+					continue
+				}
+				if _, ok := seen[value]; ok {
+					continue
+				}
+				seen[value] = struct{}{}
+				criteria = append(criteria, taskdomain.AcceptanceCriterion{
+					ID:   fmt.Sprintf("criterion-%d", len(criteria)+1),
+					Text: value,
+				})
+			}
+			if len(criteria) > 0 {
+				params.AcceptanceCriteria = &criteria
+			}
+		}
+		if input.TaskKind != "" {
+			taskKind := input.TaskKind
+			params.TaskKind = &taskKind
+		}
+		if input.KeyResultRef != "" {
+			keyResultRef := input.KeyResultRef
+			params.KeyResultRef = &keyResultRef
+		}
+		metadata := cloneRequestMetadata(input.Metadata)
+		if missionRef := strings.TrimSpace(input.MissionRef); missionRef != "" {
+			if metadata == nil {
+				metadata = map[string]any{}
+			}
+			metadata["missionRef"] = missionRef
+		}
+		if len(metadata) > 0 {
+			params.Metadata = metadata
+		}
+		task, err := call.Tasks.Update(taskCtx, params)
+		return h.taskResult(ctx, call, "update", task, err, nil)
 	case "cancel":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -147,7 +202,13 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		if err != nil {
 			return Result{}, err
 		}
-		params := taskapp.ReviewTaskParams{TaskID: id, Reason: reviewText(input), Criteria: reviewCriteria(input.Criteria)}
+		params := taskapp.ReviewTaskParams{
+			TaskID:   id,
+			Reason:   input.Reason,
+			Summary:  input.Summary,
+			Note:     input.Note,
+			Criteria: reviewCriteria(input.Criteria),
+		}
 		var task taskdomain.Task
 		switch input.Decision {
 		case "approve":
@@ -173,15 +234,6 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	default:
 		return Result{}, fmt.Errorf("task: unsupported action %q", input.Action)
 	}
-}
-
-func reviewText(input requestInput) string {
-	for _, value := range []string{input.Reason, input.Summary, input.Note} {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 type actor struct {
@@ -217,8 +269,11 @@ func (h Handler) actor(ctx context.Context, call CallContext) (actor, error) {
 		return actor{}, fmt.Errorf("task: registered member %q is not active", memberID)
 	}
 	projectID := strings.TrimSpace(call.ProjectID)
+	rosterProjectID := strings.TrimSpace(rosterMember.ProjectID)
 	if projectID == "" {
-		projectID = strings.TrimSpace(rosterMember.ProjectID)
+		projectID = rosterProjectID
+	} else if rosterProjectID != "" && projectID != rosterProjectID {
+		return actor{}, fmt.Errorf("task: registered member %q is not in project %q", memberID, projectID)
 	}
 	if projectID == "" {
 		return actor{}, fmt.Errorf("task: registered member project is required")
@@ -316,6 +371,17 @@ func parseStatus(value string) (taskdomain.TaskStatus, error) {
 	default:
 		return "", fmt.Errorf("task: unsupported status %q", value)
 	}
+}
+
+func cloneRequestMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func reviewCriteria(values []reviewCriterionInput) []taskdomain.CriterionReview {

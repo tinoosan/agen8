@@ -125,6 +125,65 @@ describe('getLatestReview', () => {
       reviewerRole: 'cto',
     })
   })
+
+  it('uses explicit reviewSummary, reviewNote, and reviewReason as feedback pieces when present', () => {
+    const review = getLatestReview(makeTask({
+      id: 'reviewed-task-with-explicit-fields',
+      metadata: {
+        reviewDecision: 'approve',
+        reviewSummary: 'Concise summary.',
+        reviewNote: 'Detailed implementation notes.',
+        reviewReason: 'Policy-aligned.',
+        reviewFeedback: 'Legacy note should not be preferred.',
+        reviewedBy: 'security-team',
+        reviewedAt: '2026-06-07T16:00:00Z',
+        reviewerRole: 'Sage (QA/Security Engineer)',
+      },
+    }))
+
+    expect(review).toEqual({
+      decision: 'approved',
+      feedback: 'Concise summary.\n\nDetailed implementation notes.\n\nPolicy-aligned.',
+      reviewedBy: 'security-team',
+      reviewedAt: '2026-06-07T16:00:00Z',
+      reviewerRole: 'Sage (QA/Security Engineer)',
+    })
+  })
+
+  it('maps decisions to approved/rejected/pending from legacy or attempt payloads', () => {
+    const rejectedFromMetadata = getLatestReview(makeTask({
+      id: 'reviewed-task-rejected',
+      metadata: {
+        reviewDecision: 'rejected',
+        reviewSummary: 'Retry needed.',
+      },
+    }))
+
+    expect(rejectedFromMetadata).toEqual({
+      decision: 'rejected',
+      feedback: 'Retry needed.',
+      reviewedBy: undefined,
+      reviewedAt: undefined,
+      reviewerRole: undefined,
+    })
+
+    const pendingFromAttempts = getLatestReview(makeTask({
+      id: 'reviewed-task-attempt-pending',
+      metadata: {
+        attempts: [
+          { attempt: 1, review: { decision: 'pending', feedback: 'Waiting on rerun' } },
+        ],
+      },
+    }))
+
+    expect(pendingFromAttempts).toEqual({
+      decision: 'pending',
+      feedback: 'Waiting on rerun',
+      reviewedBy: undefined,
+      reviewedAt: undefined,
+      reviewerRole: undefined,
+    })
+  })
 })
 
 describe('taskDuration', () => {

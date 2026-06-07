@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	nethttp "net/http"
+	neturl "net/url"
 	"strings"
 	"testing"
 
@@ -275,6 +276,18 @@ func TestHandleTruncatesResponse(t *testing.T) {
 	}
 }
 
+func TestHandleRejectsURLWithUserinfo(t *testing.T) {
+	handler := testHandler(func(*nethttp.Request) (*nethttp.Response, error) {
+		t.Fatalf("request should not execute when userinfo is present")
+		return nil, nil
+	})
+
+	_, err := handler.Handle(context.Background(), CallContext{}, json.RawMessage(`{"url":"https://alice:secret@example.com/data","method":"GET"}`))
+	if err == nil || !strings.Contains(err.Error(), "url must not include userinfo") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
 func TestHandleOmitsBinaryResponse(t *testing.T) {
 	handler := testHandler(func(req *nethttp.Request) (*nethttp.Response, error) {
 		return &nethttp.Response{
@@ -293,6 +306,37 @@ func TestHandleOmitsBinaryResponse(t *testing.T) {
 	structured := result.Structured.(map[string]any)
 	if structured["bodyOmitted"] != true || structured["bodyOmittedReason"] != "non-text response" {
 		t.Fatalf("structured=%+v", structured)
+	}
+}
+
+func TestHandleSanitizesFinalUrlUserinfo(t *testing.T) {
+	finalURL, err := neturl.Parse("https://alice:secret@example.com/callback")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	handler := testHandler(func(req *nethttp.Request) (*nethttp.Response, error) {
+		return &nethttp.Response{
+			StatusCode: 200,
+			Status:     "200 OK",
+			Header:     nethttp.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			Request: &nethttp.Request{
+				URL: finalURL,
+			},
+		}, nil
+	})
+
+	result, err := handler.Handle(context.Background(), CallContext{}, json.RawMessage(`{"url":"https://example.com","method":"GET"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	finalURLValue := structured["finalUrl"].(string)
+	if strings.Contains(finalURLValue, "alice") || strings.Contains(finalURLValue, "@") {
+		t.Fatalf("finalUrl leaked userinfo: %q", finalURLValue)
+	}
+	if finalURLValue != "https://example.com/callback" {
+		t.Fatalf("finalUrl unexpected=%q", finalURLValue)
 	}
 }
 

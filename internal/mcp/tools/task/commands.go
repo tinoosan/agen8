@@ -102,6 +102,7 @@ var fieldsByAction = map[string]map[string]struct{}{
 	),
 	"get":      fieldSet("action", "task_id"),
 	"list":     fieldSet("action", "assignee_member_id", "status", "limit", "offset"),
+	"update":   fieldSet("action", "task_id", "title", "description", "acceptance_criteria", "task_kind", "key_result_ref", "mission_ref", "metadata"),
 	"claim":    fieldSet("action", "task_id"),
 	"release":  fieldSet("action", "task_id"),
 	"submit":   fieldSet("action", "task_id", "summary", "artifacts", "metadata"),

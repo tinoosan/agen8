@@ -211,7 +211,7 @@ agen8-mcp version</code></pre>
 
   <h2 id="dev-web">6. Dev web proxy</h2>
 
-  <p>The daemon is the only browser entry point in development and production. Vite exists only as a hot-reload asset server. When <code>AGEN8_DEV_WEB_URL</code> is set, the daemon keeps protocol routes for itself and reverse-proxies the remaining web UI requests to Vite. When the variable is unset, the daemon serves the embedded frontend from <code>internal/web/dist</code>.</p>
+  <p>The daemon is the only browser entry point in development and production. Vite exists only as a hot-reload asset server. When <code>AGEN8_DEV_WEB_URL</code> is set, it must be an absolute <code>http</code> or <code>https</code> URL and is validated to resolve to a loopback host before reverse-proxying non-daemon routes to Vite. When the variable is unset, the daemon serves the embedded frontend from <code>internal/web/dist</code>.</p>
 
   <div class="diagram">
   <svg viewBox="0 0 940 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" font-family="Inter, system-ui, sans-serif" font-size="12">

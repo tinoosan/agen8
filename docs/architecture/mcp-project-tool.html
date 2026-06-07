@@ -33,10 +33,10 @@
 <strong>Boundary.</strong> Project tool behavior lives in <code>internal/mcp/tools/project</code>. The tool exposes project records and the member roster through composite actions. Work coordination happens through the retained mission, task, decision, graph, and HTTP tools. The project service owns project records, lifecycle, and the member roster subdomain. No service accepts raw <code>project(...)</code> tool JSON, and no service package defines a project-tool-specific service or port.
 </div>
 
-<h2>Actions</h2>
+  <h2>Actions</h2>
 
-<table>
-  <tr><th>Action</th><th>Handler responsibility</th><th>Service calls</th><th>Result</th></tr>
+  <table>
+    <tr><th>Action</th><th>Handler responsibility</th><th>Service calls</th><th>Result</th></tr>
   <tr>
     <td><code>register</code></td>
     <td>Resolve or create the local project, bind the MCP caller to an Agen8 member, and register the session token for this user-owned daemon.</td>
@@ -51,7 +51,7 @@
   </tr>
   <tr>
     <td><code>member_create</code></td>
-    <td>Resolve the active actor member, stamp caller context, validate the requested runtime config, and delegate member registration to the project service.</td>
+    <td>Resolve the active actor member, stamp caller context, and delegate member registration to the project service.</td>
     <td><code>ProjectSvc.GetMember</code>, <code>ProjectSvc.RegisterMember</code>.</td>
     <td>Created member with member id, display label, granted member type, lifecycle state, and channel id.</td>
   </tr>
@@ -62,8 +62,8 @@
     <td>Member record with stable id, display label, member type, lifecycle state, and channel id.</td>
   </tr>
   <tr>
-    <td><code>member_update_config</code></td>
-    <td>Resolve the active actor member, stamp caller context, validate runtime config, and delegate roster update to the project service.</td>
+    <td><code>member_update</code></td>
+    <td>Resolve the active actor member, stamp caller context, and delegate roster rename to the project service.</td>
     <td><code>ProjectSvc.GetMember</code>, <code>ProjectSvc.UpdateMemberConfig</code>.</td>
     <td>Updated member record.</td>
   </tr>
@@ -184,25 +184,22 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <table>
   <tr><th>Field</th><th>Used by</th><th>Rule</th></tr>
-  <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>register</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update_config</code>, <code>member_remove</code>.</td></tr>
+  <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>register</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update</code>, <code>member_remove</code>.</td></tr>
   <tr><td><code>project_root</code></td><td><code>register</code></td><td>Optional when <code>project_id</code> is supplied. Creates or reuses a local project for the working directory.</td></tr>
   <tr><td><code>project_id</code></td><td><code>register</code></td><td>Optional when <code>project_root</code> is supplied. Reuses an existing project.</td></tr>
   <tr><td><code>location_id</code></td><td><code>register</code></td><td>Optional. Defaults to the local location when a project root creates a project.</td></tr>
   <tr><td><code>session_id</code></td><td><code>register</code></td><td>Optional stable native harness session id. Explicit arguments take precedence over MCP metadata.</td></tr>
   <tr><td><code>thread_id</code></td><td><code>register</code></td><td>Optional stable native harness thread id. Explicit arguments take precedence over MCP metadata and session id.</td></tr>
-  <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
-  <tr><td><code>display_name</code></td><td><code>member_create</code></td><td>Optional display label. Created members have the same project-level rights as other active members.</td></tr>
-  <tr><td><code>harness_kind</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime harness kind passed to service config validation.</td></tr>
-  <tr><td><code>model</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime model passed to service config validation.</td></tr>
-  <tr><td><code>effort</code></td><td><code>member_create</code>, <code>member_update_config</code></td><td>Required. Runtime reasoning effort passed to service config validation.</td></tr>
-  <tr><td>permission mode</td><td><code>member_create</code>, <code>member_update_config</code></td><td>Not accepted by the MCP tool. The project service uses the loosest default for the harness kind when a member is created.</td></tr>
+  <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
+  <tr><td><code>display_name</code></td><td><code>member_create</code>, <code>register</code></td><td>Required for <code>member_create</code>. Optional for <code>register</code> (fallback display label is generated if omitted).</td></tr>
+  <tr><td><code>display_name</code></td><td><code>member_update</code></td><td>Required target member display label.</td></tr>
 </table>
 
-<h2>Member policy</h2>
+  <h2>Member policy</h2>
 
-<table>
-  <tr><th>Caller</th><th>Visible actions</th><th>Reason</th></tr>
-  <tr><td>Active project member</td><td><code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update_config</code>, <code>member_remove</code></td><td>Members are equal project participants in the public baseline. Display names identify who did what in the graph.</td></tr>
+  <table>
+    <tr><th>Caller</th><th>Visible actions</th><th>Reason</th></tr>
+  <tr><td>Active project member</td><td><code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update</code>, <code>member_remove</code></td><td>Members are equal project participants in the public baseline. Display names identify who did what in the graph.</td></tr>
 </table>
 
 <p><code>memberType</code> can still appear in responses for compatibility, but authorization is based on active same-project membership. The handler rejects missing or removed actor members before it calls <code>ProjectSvc</code>.</p>
@@ -231,7 +228,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
   <tr><th>Test</th><th>Assertion</th></tr>
   <tr><td><code>member_list</code> success</td><td>Resolves the actor member, calls the roster read path, and returns member labels and stable channel ids.</td></tr>
   <tr><td><code>member_create</code> success</td><td>Executes through the MCP server session, stamps caller identity, calls the registrar, and returns the created member payload.</td></tr>
-  <tr><td><code>member_get</code>, <code>member_update_config</code>, <code>member_remove</code> success</td><td>Call the same production session path and delegate to the project service roster methods.</td></tr>
+  <tr><td><code>member_get</code>, <code>member_update</code>, <code>member_remove</code> success</td><td>Call the same production session path and delegate to the project service roster methods.</td></tr>
   <tr><td>member mutation validation</td><td>Rejects missing ids or runtime fields before calling the registrar.</td></tr>
   <tr><td>missing actor</td><td>Fails loudly before calling the project service.</td></tr>
   <tr><td>missing structured payload</td><td>Returns an explicit capture/decode error.</td></tr>

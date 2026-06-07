@@ -45,7 +45,31 @@ export function getLatestReview(task: Task): AttemptReview | null {
   let decision = typeof meta.reviewDecision === 'string' ? meta.reviewDecision.trim() : ''
   if (!decision) return null
   if (decision === 'approve') decision = 'approved'
-  const feedback = typeof meta.reviewFeedback === 'string' ? meta.reviewFeedback.trim() : ''
+
+  const feedbackPieces: string[] = []
+  const reviewSummary =
+    typeof meta.reviewSummary === 'string' ? meta.reviewSummary.trim() : ''
+  const reviewNote =
+    typeof meta.reviewNote === 'string' ? meta.reviewNote.trim() : ''
+  const reviewReason =
+    typeof meta.reviewReason === 'string' ? meta.reviewReason.trim() : ''
+  const reviewFeedback =
+    typeof meta.reviewFeedback === 'string' ? meta.reviewFeedback.trim() : ''
+
+  if (reviewSummary && !feedbackPieces.includes(reviewSummary)) {
+    feedbackPieces.push(reviewSummary)
+  }
+  if (reviewNote && !feedbackPieces.includes(reviewNote)) {
+    feedbackPieces.push(reviewNote)
+  }
+  if (reviewReason && !feedbackPieces.includes(reviewReason)) {
+    feedbackPieces.push(reviewReason)
+  }
+  if (!feedbackPieces.length && reviewFeedback) {
+    feedbackPieces.push(reviewFeedback)
+  }
+
+  const feedback = feedbackPieces.join('\n\n')
   const reviewedBy = typeof meta.reviewedBy === 'string' ? meta.reviewedBy.trim() : ''
   const reviewedAt = typeof meta.reviewedAt === 'string' ? meta.reviewedAt.trim() : ''
   const reviewerRole =

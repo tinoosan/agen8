@@ -98,13 +98,20 @@ export function useStrategyMapLenses({
     const dEdges = new Set<string>()
 
     for (const edge of displayEdges) {
-      if (edge.source === effectiveFocusNodeId) {
-        neighborIds.add(edge.target)
-        dEdges.add(edge.id)
-      } else if (edge.target === effectiveFocusNodeId) {
-        neighborIds.add(edge.source)
-        dEdges.add(edge.id)
-      }
+      const touchesFocus =
+        edge.source === effectiveFocusNodeId || edge.target === effectiveFocusNodeId
+      if (!touchesFocus) continue
+      neighborIds.add(edge.source === effectiveFocusNodeId ? edge.target : edge.source)
+      // Only STRUCTURAL edges become "direct" (bold + label + dash-flow). A
+      // direct CONTEXT edge spawns a label portal AND an infinite
+      // `context-dash-flow` animation (see ContextEdge.tsx). Focusing a node
+      // with many context links would then mount dozens-to-hundreds of
+      // perpetual animations + portals at once — which iOS WebKit's tight
+      // render-memory budget can't survive, so the iPad crashes on select.
+      // Context links touching the focus stay AMBIENT: they're still revealed
+      // via clusterEdgeIds below (both endpoints land in the neighborhood),
+      // just never animated. This mirrors what the trace lens already does.
+      if (edge.type === 'statusEdge') dEdges.add(edge.id)
     }
 
     const cEdges = new Set<string>(dEdges)

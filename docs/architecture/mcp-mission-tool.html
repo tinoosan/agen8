@@ -122,6 +122,7 @@ type ProgressService interface {
   <tr><td><code>pause</code></td><td><code>UpdateMission</code></td><td>Pause an active mission; accepts an optional lifecycle <code>note</code>.</td></tr>
   <tr><td><code>complete</code></td><td><code>UpdateMission</code></td><td>Complete a mission after KR gates pass; accepts an optional lifecycle <code>note</code>.</td></tr>
   <tr><td><code>archive</code></td><td><code>DeleteMission</code></td><td>Archive a mission; accepts an optional lifecycle <code>note</code>.</td></tr>
+  <tr><td><code>purge</code></td><td><code>HardDeleteMission</code></td><td>Hard-delete a mission and its descendants permanently; operation cannot be undone.</td></tr>
   <tr><td><code>history</code></td><td><code>GetLifecycleHistory</code></td><td>Read mission and KR lifecycle events for a mission, including persisted lifecycle notes.</td></tr>
   <tr><td><code>kr_create</code></td><td><code>CreateKeyResult</code></td><td>Create a key result under a mission.</td></tr>
   <tr><td><code>kr_get</code></td><td><code>GetKeyResult</code></td><td>Read one key result.</td></tr>
@@ -134,7 +135,7 @@ type ProgressService interface {
   <tr><td><code>progress</code></td><td><code>ComputeMissionProgress</code></td><td>Read aggregate mission progress, status counts, and blocking non-completed KRs.</td></tr>
 </table>
 
-<p>Lifecycle actions are idempotent when the target state is already present. Repeating <code>activate</code> on an active mission, <code>complete</code> on a completed mission, <code>archive</code> on an archived mission, or <code>kr_drop</code> on a dropped KR returns the current record without publishing duplicate bus events. When an accepted action includes <code>note</code>, the MCP response echoes it at the top level and the service includes it in lifecycle history; state-changing actions also publish the lifecycle event. The <code>history</code> action reads those persisted lifecycle event payloads with <code>limit</code> and <code>offset</code>.</p>
+<p>Lifecycle actions are idempotent when the target state is already present. Repeating <code>activate</code> on an active mission, <code>complete</code> on a completed mission, <code>archive</code> on an archived mission, or <code>kr_drop</code> on a dropped KR returns the current record without publishing duplicate bus events. <code>purge</code> is permanent and non-idempotent; repeated calls may fail if the mission no longer exists. When an accepted action includes <code>note</code>, the MCP response echoes it at the top level and the service includes it in lifecycle history; state-changing actions also publish the lifecycle event. The <code>history</code> action reads those persisted lifecycle event payloads with <code>limit</code> and <code>offset</code>.</p>
 
 <h2>5. Hard rules</h2>
 

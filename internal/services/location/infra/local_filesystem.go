@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	pathpkg "path"
 	"path/filepath"
 	"sort"
@@ -826,20 +825,6 @@ func runSSHCommandWithInput(ctx context.Context, client *ssh.Client, command str
 	case result := <-done:
 		return string(result.output), result.err
 	}
-}
-
-func runLocalCommand(ctx context.Context, command string, args ...string) (string, error) {
-	output, err := runLocalCommandOutput(ctx, command, args...)
-	if err != nil {
-		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(output))
-	}
-	return output, nil
-}
-
-func runLocalCommandOutput(ctx context.Context, command string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, command, args...)
-	output, err := cmd.CombinedOutput()
-	return string(output), err
 }
 
 func localStateDir(name string) (string, error) {

@@ -1441,8 +1441,16 @@ body {
   min-width: 0;
   width: 100%;
   height: 100%;
-  padding: 0 0 20px 28px;
+  /* Page gutter scales with viewport: tight + symmetric on phones (sidebar is a
+     drawer there, so no column to offset from), generous on desktop. */
+  padding: 0 16px 20px 16px;
   box-sizing: border-box;
+}
+
+@media (min-width: 768px) {
+  .dashboard-shell {
+    padding: 0 0 20px 28px;
+  }
 }
 
 :root {

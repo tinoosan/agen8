@@ -177,7 +177,7 @@ func (s *Server) RunListener(ctx context.Context, listener net.Listener, wg *syn
 	if listener == nil {
 		panic("mcp listener is required")
 	}
-	srv := &http.Server{Handler: s.Handler()}
+	srv := newMCPHTTPServer(s.Handler())
 	if wg != nil {
 		wg.Add(2)
 	}
@@ -202,10 +202,16 @@ func (s *Server) RunListener(ctx context.Context, listener net.Listener, wg *syn
 	}()
 }
 
+func newMCPHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+}
+
 const (
 	mcpRPCCodeInternalError = -32603
 	mcpRPCCodeInvalidToken  = -32001
 )
+
+const maxMCPRequestBodyBytes = 1024 * 1024
 
 type mcpJSONRPCResponse struct {
 	JSONRPC string           `json:"jsonrpc"`
@@ -915,9 +921,15 @@ func readAndRestoreBody(r *http.Request) ([]byte, error) {
 	if r == nil || r.Body == nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(r.Body)
+	if r.ContentLength > maxMCPRequestBodyBytes {
+		return nil, fmt.Errorf("request body too large: content-length %d exceeds %d", r.ContentLength, maxMCPRequestBodyBytes)
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxMCPRequestBodyBytes+1))
 	if err != nil {
 		return body, err
+	}
+	if int64(len(body)) > maxMCPRequestBodyBytes {
+		return body, fmt.Errorf("request body too large: body exceeded %d bytes", maxMCPRequestBodyBytes)
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	return body, nil

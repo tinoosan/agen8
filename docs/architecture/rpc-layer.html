@@ -165,6 +165,7 @@
     project.go               # project service method registration
     task.go                # task service method registration example
     mission.go             # mission service method registration
+    pin.go                 # pin service method registration
 
   caller/
     caller.go              # shared service caller context contract
@@ -185,7 +186,11 @@
     mission/
       rpc/
         handler.go         # mission.* and mission.kr.* adapter
-        types.go           # mission and KR RPC params/results/views</pre></div>
+        types.go           # mission and KR RPC params/results/views
+    pin/
+      rpc/
+        handler.go         # pin.add/remove/list adapter
+        types.go           # pin RPC params/results/views</pre></div>
 
   <p>The RPC server does not live under <code>internal/app</code>. Service-specific RPC adapters and DTOs live next to their service. The daemon wires <code>app.NewApplication</code>, <code>rpc.NewRegistry</code>, service registrations, and the selected listener.</p>
 
@@ -199,6 +204,9 @@
       <tr><td>JSON-RPC params</td><td><code>TaskCreateParams</code></td><td><code>internal/services/task/rpc</code></td></tr>
       <tr><td>JSON-RPC result</td><td><code>TaskCreateResult</code></td><td><code>internal/services/task/rpc</code></td></tr>
       <tr><td>Read view</td><td><code>TaskView</code></td><td><code>internal/services/task/rpc</code></td></tr>
+      <tr><td>JSON-RPC params</td><td><code>PinAddParams</code></td><td><code>internal/services/pin/rpc</code></td></tr>
+      <tr><td>JSON-RPC result</td><td><code>PinAddResult</code></td><td><code>internal/services/pin/rpc</code></td></tr>
+      <tr><td>Read view</td><td><code>PinView</code></td><td><code>internal/services/pin/rpc</code></td></tr>
       <tr><td>Service command</td><td><code>taskapp.CreateTaskParams</code></td><td><code>internal/services/task/app</code></td></tr>
       <tr><td>Domain aggregate</td><td><code>domain.Task</code></td><td><code>internal/services/task/domain</code></td></tr>
     </tbody>

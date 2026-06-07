@@ -28,6 +28,7 @@
       <li><a href="#mission-list-surface">Mission list surface behavior</a></li>
       <li><a href="#palette-search">Command palette search behavior</a></li>
       <li><a href="#strategy-map-search">Strategy Map mobile search behavior</a></li>
+      <li><a href="#strategy-map-interaction">Strategy Map interaction model</a></li>
       <li><a href="#mission-lifecycle">Mission lifecycle and delete semantics</a></li>
       <li><a href="#backend-impact">Backend impact</a></li>
     </ol>
@@ -93,7 +94,26 @@
     <li><a href="../web/src/components/strategy/StrategyMapSearch.tsx">web/src/components/strategy/StrategyMapSearch.tsx</a> (search modal behavior)</li>
   </ul>
 
-  <h2 id="mission-lifecycle">6. Mission lifecycle and delete semantics</h2>
+  <h2 id="strategy-map-interaction">6. Strategy Map interaction model</h2>
+  <p>The strategy map uses two distinct cursors: a focus cursor for traversal and a selection state for the detail panel.</p>
+  <ul>
+    <li>Cursor traversal is the default: <strong>single node tap/click</strong>, arrow keys, and Tab/Shift+Tab move focus first and keep traversal smooth.</li>
+    <li>Opening the detail panel is an explicit action via <code>Enter</code>, <code>Space</code>, or a <strong>second tap</strong> on an already-focused node.</li>
+    <li>With the panel closed, traversal and map centering remain active so users can keep walking the graph while reading later.</li>
+    <li>The map keeps focus and detail panel lifecycles separate: <code>Escape</code> dismisses one layer per press in this order: active lens/filter, open panel, then focus cursor.</li>
+    <li>Trace mode is radial by rings: enabling <strong>Trace Path</strong> seeds depth 1, and <code>[</code>/<code>]</code> change the hop radius one ring at a time.</li>
+  </ul>
+  <p>Implementation references:</p>
+  <ul>
+    <li><a href="../web/src/pages/StrategyMap.tsx">web/src/pages/StrategyMap.tsx</a> (state boundaries)</li>
+    <li><a href="../web/src/components/strategy/useStrategyMapNodeHandlers.ts">web/src/components/strategy/useStrategyMapNodeHandlers.ts</a> (traversal + explicit panel-open gesture)</li>
+    <li><a href="../web/src/components/strategy/useStrategyMapKeyboardNav.ts">web/src/components/strategy/useStrategyMapKeyboardNav.ts</a> (focus, focus cursor and progressive dismiss)</li>
+    <li><a href="../web/src/components/strategy/useStrategyMapLenses.ts">web/src/components/strategy/useStrategyMapLenses.ts</a> (focus neighborhood rendering)</li>
+    <li><a href="../web/src/components/strategy/strategyMapFilters.ts">web/src/components/strategy/strategyMapFilters.ts</a> (TRACE_MIN_DEPTH / TRACE_MAX_DEPTH / ring expansion)</li>
+    <li><a href="../web/src/components/strategy/StrategyMapHelp.tsx">web/src/components/strategy/StrategyMapHelp.tsx</a> (keyboard model and staged Esc copy)</li>
+  </ul>
+
+  <h2 id="mission-lifecycle">7. Mission lifecycle and delete semantics</h2>
   <p>Frontend mission lifecycle remains soft-first:</p>
   <ul>
     <li><code>MissionLifecycleActions</code> only renders status transitions (activate/pause/resume/complete/archive) mapped to <code>mission.update</code>.</li>
@@ -108,7 +128,7 @@
     <li><a href="../web/src/hooks/useMissions.ts">web/src/hooks/useMissions.ts</a> (<code>useDeleteMission</code> vs <code>useHardDeleteMission</code>)</li>
   </ul>
 
-  <h2 id="backend-impact">7. Backend impact</h2>
+  <h2 id="backend-impact">8. Backend impact</h2>
   <p>Frontend ordering is user-visible, but source-of-truth ranking support comes from backend pin-aware search:</p>
   <ul>
     <li><code>pin</code> service provides list/add/remove endpoints used by the frontend.</li>

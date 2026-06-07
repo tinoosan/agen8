@@ -489,7 +489,11 @@ internal/mcp/tools/graph/
 }</code></pre>
 
   <h3>Search behavior</h3>
-  <p>Search accepts a concrete node type or <code>all</code>. Concrete search calls one hydrator. <code>all</code> fans out across hydrators with a per-hydrator timeout, merges hits, scores exact title matches ahead of prefix and substring matches, then sorts by score, created time, type, and id. Concrete search uses the same final scoring step when a query is present, so a newer weak match does not outrank an older title match. A hydrator timeout produces a <code>search_partial_timeout</code> warning; a non-timeout hydrator error fails the request.</p>
+  <p>Search accepts a concrete node type or <code>all</code>. Concrete search calls one hydrator. <code>all</code> fans out across hydrators with a per-hydrator timeout, merges hits, scores exact title matches ahead of prefix and substring matches, then sorts by score, created time, type, and id. Concrete search uses the same final scoring step when a query is present, so a newer weak match does not outrank an older title match.</p>
+
+  <p>Pin status is a secondary ranking layer. When a pin reader is available, both query and browse paths receive a pinned-node set and pinned rows are lifted ahead of unpinned rows while preserving existing score/time tie-breaks within each group. If the pin reader is missing or fails, this layer is skipped and search still returns deterministic relevance ordering.</p>
+
+  <p>A hydrator timeout produces a <code>search_partial_timeout</code> warning; a non-timeout hydrator error fails the request.</p>
 
   <table>
     <thead><tr><th>Search input</th><th>Rule</th></tr></thead>
