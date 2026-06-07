@@ -155,6 +155,8 @@ export function useDeleteDecision() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: qk.decisionLogAll }),
         queryClient.invalidateQueries({ queryKey: qk.decisionsAll }),
+        queryClient.invalidateQueries({ queryKey: qk.decisionStatsRoot }),
+        queryClient.invalidateQueries({ queryKey: qk.decisionGetAll }),
       ])
     },
   })

@@ -22,8 +22,10 @@ export const qk = {
   missionsAll: ['mission.list'] as const,
   missions: (projectId: string | null, status?: string) =>
     ['mission.list', projectId ?? '', status ?? ''] as const,
+  missionGetAll: ['mission.get'] as const,
   missionGet: (missionId: string | null) =>
     ['mission.get', missionId ?? ''] as const,
+  sidebarGlobalMissionsRoot: ['sidebar.globalMissions'] as const,
   sidebarGlobalMissions: (projectIds: string[]) =>
     ['sidebar.globalMissions', projectIds] as const,
 
@@ -31,11 +33,13 @@ export const qk = {
   keyResultsAll: ['keyResult.list'] as const,
   keyResults: (missionId: string | null) =>
     ['keyResult.list', missionId ?? ''] as const,
+  keyResultGetAll: ['keyResult.get'] as const,
   keyResultGet: (keyResultId: string | null) =>
     ['keyResult.get', keyResultId ?? ''] as const,
   keyResultsListAllRoot: ['keyResult.listAll'] as const,
   keyResultsListAll: (projectId: string | null, missionIds: string[]) =>
     ['keyResult.listAll', projectId ?? '', missionIds.join(',')] as const,
+  keyResultsByMissionSetRoot: ['keyResult.listByMissionSet'] as const,
   keyResultsByMissionSet: (missionIds: string[]) =>
     ['keyResult.listByMissionSet', missionIds.join(',')] as const,
   keyResultProgressHistoryRoot: ['keyResult.progressHistory'] as const,
@@ -52,6 +56,7 @@ export const qk = {
     until: string,
     sort: string,
   ) => ['decision.list', projectId, source, query, since, until, sort] as const,
+  decisionGetAll: ['decision.get'] as const,
   decisionGet: (decisionId: string | null) =>
     ['decision.get', decisionId ?? ''] as const,
   decisionLogAll: ['decision.log'] as const,
@@ -67,6 +72,7 @@ export const qk = {
     pageSize: number,
   ) =>
     ['decision.log', projectId, source, tagsKey, query, since, until, sort, page, pageSize] as const,
+  decisionStatsRoot: ['decision.stats'] as const,
   decisionStats: (
     projectId: string,
     source: string,

@@ -86,6 +86,8 @@ export function useCreateMission() {
     mutationFn: (params) => rpcCall<{ mission: MissionView }>('mission.create', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.missionsAll })
+      queryClient.invalidateQueries({ queryKey: qk.sidebarGlobalMissionsRoot })
+      queryClient.invalidateQueries({ queryKey: qk.missionGetAll })
     },
   })
 }
@@ -100,6 +102,8 @@ export function useUpdateMission() {
     mutationFn: (params) => rpcCall<{ mission: MissionView }>('mission.update', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.missionsAll })
+      queryClient.invalidateQueries({ queryKey: qk.sidebarGlobalMissionsRoot })
+      queryClient.invalidateQueries({ queryKey: qk.missionGetAll })
     },
   })
 }
@@ -110,6 +114,8 @@ export function useDeleteMission() {
     mutationFn: (params) => rpcCall<{ mission: MissionView }>('mission.delete', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.missionsAll })
+      queryClient.invalidateQueries({ queryKey: qk.sidebarGlobalMissionsRoot })
+      queryClient.invalidateQueries({ queryKey: qk.missionGetAll })
     },
   })
 }
@@ -126,6 +132,9 @@ export function useCreateKeyResult() {
     mutationFn: (params) => rpcCall<{ keyResult: KeyResultView }>('mission.kr.create', normalizeKeyResultMutation(params)),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: qk.keyResults(vars.missionId) })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsListAllRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsByMissionSetRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultGetAll })
       queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
@@ -144,6 +153,9 @@ export function useUpdateKeyResult() {
     },
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: qk.keyResults(vars.missionId) })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsListAllRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsByMissionSetRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultGetAll })
       queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
@@ -186,6 +198,9 @@ export function useDeleteKeyResult() {
     },
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: qk.keyResults(vars.missionId) })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsListAllRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsByMissionSetRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultGetAll })
       queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
   })
@@ -204,6 +219,9 @@ export function useUpdateKRProgress() {
     },
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: qk.keyResults(vars.missionId) })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsListAllRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultsByMissionSetRoot })
+      queryClient.invalidateQueries({ queryKey: qk.keyResultGetAll })
       queryClient.invalidateQueries({ queryKey: qk.keyResultProgressHistory(vars.keyResultId) })
       queryClient.invalidateQueries({ queryKey: qk.missionsAll })
     },
