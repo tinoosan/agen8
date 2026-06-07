@@ -1827,19 +1827,16 @@ func TestComputeMissionProgressNoNonDroppedKeyResults(t *testing.T) {
 	}
 }
 
-func TestUpdateMissionActivatesWhenEveryLiveKeyResultHasOpenOwnerProject(t *testing.T) {
+func TestUpdateMissionActivatesWithAtLeastOneLiveKeyResult(t *testing.T) {
+	// A mission activates as long as it has one non-dropped key result; dropped
+	// KRs are ignored and owner-project state is no longer consulted.
 	mission := missionForServiceTest(t, missiondomain.MissionStatusDraft)
 	keyResults := newFakeKeyResultRepository(
-		krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-1"},
-		krdomain.KeyResult{ID: "kr-2", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-2"},
+		krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen},
+		krdomain.KeyResult{ID: "kr-2", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen},
 		krdomain.KeyResult{ID: "kr-dropped", MissionID: mission.ID, Status: krdomain.KeyResultStatusDropped},
 	)
-	svc := newServiceForTestWithProjects(t, newFakeMissionRepository(mission), keyResults, fakeProjectLoaderWithProjects{
-		projects: map[string]fakeProject{
-			"project-1": {title: "Research", status: projectdomain.StatusOpen},
-			"project-2": {title: "Build", status: projectdomain.StatusOpen},
-		},
-	})
+	svc := newServiceForTest(t, newFakeMissionRepository(mission), keyResults)
 	status := missiondomain.MissionStatusActive
 
 	got, err := svc.UpdateMission(context.Background(), UpdateMissionParams{
@@ -1950,40 +1947,20 @@ func TestUpdateMissionActivationDoesNotPublishEventWhenPersistenceFails(t *testi
 	}
 }
 
-func TestUpdateMissionActivationRequiresNonDroppedKeyResultAndOpenOwnerProject(t *testing.T) {
+func TestUpdateMissionActivationRequiresNonDroppedKeyResult(t *testing.T) {
+	// The activation gate was relaxed to a single precondition: at least one
+	// non-dropped key result. The former KR->owner-project requirement (and its
+	// "missing owner" / "closed owner" rejections) was removed, so a live KR now
+	// activates regardless of any owner project's state.
 	mission := missionForServiceTest(t, missiondomain.MissionStatusDraft)
 	status := missiondomain.MissionStatusActive
 
-	t.Run("no live KRs", func(t *testing.T) {
-		svc := newServiceForTest(t, newFakeMissionRepository(mission), newFakeKeyResultRepository(
-			krdomain.KeyResult{ID: "kr-dropped", MissionID: mission.ID, Status: krdomain.KeyResultStatusDropped},
-		))
-		if _, err := svc.UpdateMission(context.Background(), UpdateMissionParams{MissionID: mission.ID, Status: &status}); err == nil {
-			t.Fatal("activate error is nil")
-		}
-	})
-
-	t.Run("missing owner", func(t *testing.T) {
-		svc := newServiceForTest(t, newFakeMissionRepository(mission), newFakeKeyResultRepository(
-			krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen},
-		))
-		if _, err := svc.UpdateMission(context.Background(), UpdateMissionParams{MissionID: mission.ID, Status: &status}); err == nil {
-			t.Fatal("activate error is nil")
-		}
-	})
-
-	t.Run("closed owner", func(t *testing.T) {
-		svc := newServiceForTestWithProjects(t, newFakeMissionRepository(mission), newFakeKeyResultRepository(
-			krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-1"},
-		), fakeProjectLoaderWithProjects{
-			projects: map[string]fakeProject{
-				"project-1": {title: "Research", status: projectdomain.StatusClosed},
-			},
-		})
-		if _, err := svc.UpdateMission(context.Background(), UpdateMissionParams{MissionID: mission.ID, Status: &status}); err == nil {
-			t.Fatal("activate error is nil")
-		}
-	})
+	svc := newServiceForTest(t, newFakeMissionRepository(mission), newFakeKeyResultRepository(
+		krdomain.KeyResult{ID: "kr-dropped", MissionID: mission.ID, Status: krdomain.KeyResultStatusDropped},
+	))
+	if _, err := svc.UpdateMission(context.Background(), UpdateMissionParams{MissionID: mission.ID, Status: &status}); err == nil {
+		t.Fatal("activate error is nil")
+	}
 }
 
 func TestUpdateMissionCompletesWhenEveryLiveKeyResultCompleted(t *testing.T) {
