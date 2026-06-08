@@ -17,7 +17,8 @@ harness session manager.
 - Default local data directory: `~/.agen8` (`--data-dir` or
   `AGEN8_DATA_DIR` can point isolated runs somewhere else)
 - Development daemon: `make dev remote`
-- Build command: `make build-go`
+- Build command: `make build` (full binary with embedded UI; `make build-go`
+  recompiles only the Go side)
 - Version check: `./bin/agen8-mcp version`
 - Health check: `GET http://127.0.0.1:7777/healthz`
 - MCP endpoint: `http://127.0.0.1:7777/mcp?token=<token>`
@@ -29,41 +30,114 @@ harness session manager.
 See `docs/release-baseline.html` for the setup, verification, and release
 baseline checklist.
 
-## Local Setup
+## Getting Started
 
-Start the development daemon with:
+Agen8 ships as a single self-contained binary: the web UI is compiled into it,
+so once it is built there is nothing else to serve. Run it locally, create an
+account in the browser, then point your AI harness at it.
+
+### 1. Prerequisites
+
+- **Go 1.25+** — to compile the daemon.
+- **Node.js and npm** — to build the web UI assets that get embedded in the
+  binary.
+- An MCP-capable harness to connect (e.g. Codex or Claude Code). Optional, but
+  it is what Agen8 exists to support.
+
+### 2. Build
+
+```sh
+make build
+```
+
+This builds the web UI and compiles the daemon with that UI embedded, producing
+the binary at `./bin/agen8-mcp`. (Check the version any time with
+`./bin/agen8-mcp version`.)
+
+### 3. Run
+
+```sh
+./bin/agen8-mcp
+```
+
+That starts the daemon (equivalent to `./bin/agen8-mcp daemon start`). By
+default it listens on `127.0.0.1:7777` and stores its data in `~/.agen8`.
+Override either if you need to:
+
+```sh
+./bin/agen8-mcp daemon start --http-addr 127.0.0.1:8080 --data-dir /path/to/data
+```
+
+Confirm it is up:
+
+```sh
+curl http://127.0.0.1:7777/healthz
+```
+
+### 4. Create your account
+
+On the **first run with a fresh data directory**, the daemon prints a setup URL
+to the terminal that includes a one-time setup token. Open that URL in a
+browser, create the first local account, then create or open a project.
+
+First-run setup also returns an initial **API key** — this is the token your
+harness will use to talk to Agen8. Copy it somewhere safe.
+
+### 5. Connect a harness
+
+Add an MCP server entry to your harness pointing at the daemon, using the API
+key from the previous step as the token:
+
+```text
+http://127.0.0.1:7777/mcp?token=<your-agen8-api-key>
+```
+
+`.mcp.example.json` at the repo root is a ready-to-copy template. Copy it to
+`.mcp.json` and drop in your key. Keep the real `.mcp.json` local — it is
+gitignored because it holds your machine-specific server entry and API key.
+
+### 6. Install the Agen8 workflow skill
+
+Install the workflow skill into your harness so it knows how to drive Agen8
+(register, plan missions/key results, run tasks, log decisions):
+
+```sh
+./bin/agen8-mcp skill install --harness codex
+# or, for Claude Code:
+./bin/agen8-mcp skill install --harness claude-cli
+```
+
+Re-run the same command any time to refresh the installed skill.
+
+### 7. Start working
+
+From inside your harness, call `project.register` with the project root and a
+readable `display_name` such as `Atlas (Backend Engineer)` or
+`Iris (Frontend Reviewer)`, so tasks, decisions, and graph records stay
+understandable. From there you create missions and key results, then run tasks
+against them.
+
+Your runtime data lives outside the repository (default `~/.agen8`). It is never
+removed by routine cleanup — resetting the database is an explicit, deliberate
+action.
+
+## Development
+
+The steps above run the *built* binary. For working **on** Agen8 itself, use the
+hot-reloading development daemon instead:
 
 ```sh
 make dev remote
 ```
 
-On a fresh data directory, the daemon prints a setup URL that includes the
-one-time setup token. Open that URL, create the first local account, then create
-or open a project in the web UI.
+This runs the Go daemon behind [Air](https://github.com/air-verse/air) and a
+Vite dev server for the web UI, so Go and frontend changes reload as you edit.
+The browser always opens the daemon URL; Vite only serves hot-reload assets. The
+first-run account flow is identical to the built binary.
 
-Runtime data lives outside the repository. On macOS the default is
-`~/.agen8`; use `DATA_DIR=...`, `AGEN8_DATA_DIR`, or `--data-dir` only when an
-isolated verification run is intentional. `make clean` removes build artifacts
-and logs, not the live SQLite database. Database resets are explicit release or
-operator actions, not part of routine cleanup.
-
-Connect a harness to:
-
-```text
-http://127.0.0.1:7777/mcp?token=<api-key>
-```
-
-Use `.mcp.example.json` as the checked-in template. Keep the real `.mcp.json`
-local; it is ignored because it contains machine-specific MCP server entries
-and the user's local Agen8 API key.
-
-First-run setup returns an initial daemon API key for MCP clients. Use that API
-key as the token in the harness MCP server URL.
-
-Then call `project.register` with the project root and a readable
-`display_name`, such as `Atlas (Backend Engineer)` or
-`Iris (Frontend Reviewer)`, so tasks, decisions, and graph records remain
-understandable.
+Override runtime state only when an isolated run is intentional, via `DATA_DIR=`,
+`AGEN8_DATA_DIR`, or `--data-dir`. `make clean` removes build artifacts and logs
+but never the live SQLite database.
 
 ## Pre-Push Check
 
