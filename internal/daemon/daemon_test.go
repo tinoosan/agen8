@@ -109,6 +109,63 @@ func TestReadRequestBodyRestoresBodyForReuse(t *testing.T) {
 	}
 }
 
+func TestHandleSetupRejectsOversizedJSONPayload(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+	oversizedName := strings.Repeat("a", maxSetupRequestBodyBytes)
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"` + oversizedName + `","password":"password123","confirmPassword":"password123"}`
+	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "setup request body is too large") {
+		t.Fatalf("body=%q want setup body limit error", body)
+	}
+}
+
+func TestHandleSetupRejectsOversizedFormPayload(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+	oversizedEmailLocal := strings.Repeat("a", maxSetupRequestBodyBytes)
+	form := "token=test-setup-token&email=" + oversizedEmailLocal + "%40example.com&name=Admin&password=password123&confirmPassword=password123"
+	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "setup request body is too large") {
+		t.Fatalf("body=%q want setup body limit error", body)
+	}
+}
+
 func TestParseLoopbackDevWebURLAcceptsLocalTargets(t *testing.T) {
 	tests := []string{
 		"http://localhost:3000",
@@ -133,9 +190,14 @@ func TestParseLoopbackDevWebURLRejectsUnsafeValues(t *testing.T) {
 		"",
 		"http://",
 		"https://example.com",
+		"http://alice:secret@127.0.0.1:8080",
+		"http://bob@localhost:8080",
 		"ftp://127.0.0.1:8080",
 		"http://192.168.0.1:8080",
 		"http://10.0.0.1:8080",
+		"http://%6c%6f%63%61%6c%68%6f%73%74:3000",
+		"http://[::1%25EN0]:3000",
+		"http://%e0%ae:3000",
 	}
 	for _, tc := range tests {
 		t.Run(tc, func(t *testing.T) {
@@ -349,11 +411,121 @@ func TestEventsRequireSessionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/events?projectId=proj-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/events?projectId=proj-1", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:8080")
 	rec := httptest.NewRecorder()
 	d.handleEvents(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestEventsRejectsCrossOriginRequest(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	sessionToken := setupSessionForEventsTest(t, handler)
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, t.TempDir())
+
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/events?projectId="+url.QueryEscape(projectID), nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken, Path: "/"})
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	d.handleEvents(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestEventsRejectsProjectNotOwnedBySession(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	sessionToken := setupSessionForEventsTest(t, handler)
+	_ = createProjectForLinkTokenTest(t, handler, sessionToken, t.TempDir())
+
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/events?projectId=missing-project", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken, Path: "/"})
+	req.Header.Set("Origin", "http://127.0.0.1:8080")
+	rec := httptest.NewRecorder()
+	d.handleEvents(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestEventsRejectsOriginlessRequestWithoutReferer(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	sessionToken := setupSessionForEventsTest(t, handler)
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, t.TempDir())
+
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/events?projectId="+url.QueryEscape(projectID), nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken, Path: "/"})
+	rec := httptest.NewRecorder()
+	d.handleEvents(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestEventsAcceptsRefererMatchWhenOriginMissing(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/events", nil)
+	req.Header.Set("Referer", "http://127.0.0.1:8080/setup")
+	if !checkSameOriginRequest(req) {
+		t.Fatalf("expected same-origin referer fallback to pass")
+	}
+
+	req.Header.Set("Origin", "https://127.0.0.1:8080")
+	if checkSameOriginRequest(req) {
+		t.Fatalf("expected origin-host mismatch to fail")
+	}
+}
+
+func TestCheckSameOriginRequestWithRefererFallback(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/events?projectId=project", nil)
+	req.Header.Set("Referer", "https://127.0.0.1:8080/setup")
+	if checkSameOriginRequest(req) {
+		t.Fatalf("expected mismatched referer scheme to be rejected")
+	}
+
+	req.Header.Set("Referer", "http://127.0.0.1:8080/setup")
+	if !checkSameOriginRequest(req) {
+		t.Fatalf("expected referer fallback to accept same-origin request")
+	}
+
+	req.Header.Del("Origin")
+	req.Header.Set("Referer", "http://evil.example/setup")
+	if checkSameOriginRequest(req) {
+		t.Fatalf("expected malicious referer to be rejected")
 	}
 }
 
@@ -607,6 +779,10 @@ func openEventsClient(t *testing.T, baseURL, sessionToken, projectID string) *ev
 	if err != nil {
 		t.Fatalf("build events request: %v", err)
 	}
+	if base, parseErr := url.Parse(baseURL); parseErr == nil {
+		req.Header.Set("Origin", base.Scheme+"://"+base.Host)
+	}
+	req.Header.Set("Referer", baseURL+"/")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken, Path: "/"})
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -978,17 +1154,9 @@ func TestAPIKeyResolvesConcurrentSessionMembers(t *testing.T) {
 //     enforced downstream at each tool's actor gate (see the mission/graph/decision
 //     handler member-less tests), not here.
 //
-//   - The two failure branches surface different errors, and that difference is the
-//     proof of no fall-through. An invalid wlt_ is handled in the link-token branch
-//     (daemon.go:271-275), which returns ValidateLinkToken's specific sentinel
-//     (ErrTokenNotFound when unminted, ErrTokenExpired when revoked or expired). An
-//     invalid ak_ is handled in the api-key branch (daemon.go:278-284), which returns
-//     the original mcpTokens store-miss error and DISCARDS authErr (line 281) - so
-//     every api-key failure collapses to the same generic error and the specific auth
-//     sentinel never surfaces. Asserting the wlt_ sentinel therefore proves the token
-//     was NOT silently retried down the api-key path: a fall-through would have yielded
-//     the generic store-miss error instead. (The collapse on the api-key side is the
-//     real behavior today; see dec-5c8aca7b for the asymmetry it leaves behind.)
+//   - Failure behavior is now unified: both invalid link tokens and invalid API keys
+//     return the same collapsed error class so token state is not exposed through
+//     branch-specific sentinels.
 //
 // This subsumes the earlier single-purpose tests (invalid wlt_, invalid ak_, and
 // unknown-session member-less) and adds the valid, revoked, expired, and empty
@@ -1092,15 +1260,11 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 		t.Fatalf("create expired link token: %v", err)
 	}
 
-	// errClass names the error contract each token class must meet. It encodes WHERE the
-	// failure is produced, which is how this table proves an invalid wlt_ is handled
-	// inside the link-token branch and never falls through to the api-key path.
+	// errClass names the error contract each token class must meet.
 	type errClass int
 	const (
-		resolves             errClass = iota // success: nil error, usable member-less session
-		authSentinelNotFound                 // wlt_ unminted: auth.ErrTokenNotFound surfaces from the link-token branch
-		authSentinelExpired                  // wlt_ revoked or expired: auth.ErrTokenExpired surfaces from the link-token branch
-		storeMissCollapsed                   // ak_ (any) or empty: collapses to the mcp store-miss error; authErr discarded at daemon.go:281
+		resolves           errClass = iota // success: nil error, usable member-less session
+		storeMissCollapsed                 // auth failures collapse to the mcp store-miss error
 	)
 
 	cases := []struct {
@@ -1129,19 +1293,14 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 			body:  claimBodyForSession("session-that-was-never-registered"),
 			want:  resolves,
 		},
-		// Every api-key failure collapses to the same mcp store-miss error: daemon.go:281
-		// returns the original mcpTokens.Resolve error and discards authErr, so unminted,
-		// revoked, and expired ak_ are indistinguishable to the caller.
+		// Both link-token and API-key failures collapse to the same mcp store-miss error.
 		{name: "revoked api key collapses to store-miss error", token: revokedKey.Token, want: storeMissCollapsed},
 		{name: "expired api key collapses to store-miss error", token: expiredKey.Token, want: storeMissCollapsed},
 		{name: "unminted api key collapses to store-miss error", token: "ak_this-key-does-not-exist", want: storeMissCollapsed},
 		{name: "empty token collapses to store-miss error", token: "", want: storeMissCollapsed},
-		// Every link-token failure surfaces its specific auth sentinel from the wlt_ branch.
-		// That specific sentinel is the proof of no fall-through: a fall-through to the
-		// api-key path would instead yield the generic store-miss error asserted above.
-		{name: "revoked link token surfaces ErrTokenExpired (no fall-through)", token: revokedLink.Token, want: authSentinelExpired},
-		{name: "expired link token surfaces ErrTokenExpired (no fall-through)", token: expiredLink.Token, want: authSentinelExpired},
-		{name: "unminted link token surfaces ErrTokenNotFound (no fall-through)", token: "wlt_this-token-was-never-minted", want: authSentinelNotFound},
+		{name: "revoked link token collapses to store-miss error", token: revokedLink.Token, want: storeMissCollapsed},
+		{name: "expired link token collapses to store-miss error", token: expiredLink.Token, want: storeMissCollapsed},
+		{name: "unminted link token collapses to store-miss error", token: "wlt_this-token-was-never-minted", want: storeMissCollapsed},
 	}
 
 	// assertLoudFailure is the shared no-silent-fallback check: any failed resolve must
@@ -1160,24 +1319,12 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := d.resolveMCPSession(ctx, tc.token, http.Header{}, tc.body)
 			switch tc.want {
-			case authSentinelNotFound:
-				assertLoudFailure(t, got, err)
-				if !errors.Is(err, auth.ErrTokenNotFound) {
-					t.Fatalf("invalid wlt_ must surface auth.ErrTokenNotFound from the link-token branch (proves no fall-through to the api-key path), got %v", err)
-				}
-				return
-			case authSentinelExpired:
-				assertLoudFailure(t, got, err)
-				if !errors.Is(err, auth.ErrTokenExpired) {
-					t.Fatalf("revoked/expired wlt_ must surface auth.ErrTokenExpired from the link-token branch (proves no fall-through), got %v", err)
-				}
-				return
 			case storeMissCollapsed:
 				assertLoudFailure(t, got, err)
 				// authErr is discarded at daemon.go:281, so the specific auth sentinel must NOT
-				// surface here - the failure collapses to the generic mcp store-miss error.
+				// surface here - failure collapses to the generic mcp store-miss error.
 				if errors.Is(err, auth.ErrTokenNotFound) || errors.Is(err, auth.ErrTokenExpired) {
-					t.Fatalf("api-key/empty failure should collapse to the mcp store-miss error (authErr discarded at daemon.go:281), but a domain sentinel surfaced: %v", err)
+					t.Fatalf("failure should collapse to the mcp store-miss error (authErr discarded at daemon.go:281), but a domain sentinel surfaced: %v", err)
 				}
 				return
 			}

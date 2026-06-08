@@ -45,7 +45,10 @@ type Daemon struct {
 	logger    *slog.Logger
 }
 
-const maxRPCRequestBodyBytes = 1024 * 1024
+const (
+	maxRPCRequestBodyBytes  = 1024 * 1024
+	maxSetupRequestBodyBytes = 64 * 1024
+)
 
 var errRPCRequestBodyTooLarge = errors.New("rpc request body is too large")
 
@@ -196,6 +199,8 @@ func loopbackAwareDialContext() func(context.Context, string, string) (net.Conn,
 		if err != nil {
 			return nil, fmt.Errorf("proxy target host is invalid: %w", err)
 		}
+		// Dev web proxying is intentionally loopback-only to keep local web bridge
+		// traffic on trusted local endpoints even when URL parsing succeeds.
 		if err := validateLoopbackDialTarget(host); err != nil {
 			return nil, err
 		}
@@ -219,12 +224,21 @@ func parseLoopbackDevWebURL(raw string) (*url.URL, error) {
 	if target.Scheme == "" || target.Host == "" {
 		return nil, fmt.Errorf("must be an absolute URL")
 	}
+	if target.User != nil {
+		return nil, fmt.Errorf("userinfo is not allowed in %s", EnvDevWebURL)
+	}
 	if !strings.EqualFold(target.Scheme, "http") && !strings.EqualFold(target.Scheme, "https") {
 		return nil, fmt.Errorf("unsupported scheme %q: only http/https allowed", target.Scheme)
 	}
 	host := strings.ToLower(strings.TrimSpace(target.Hostname()))
 	if host == "" {
 		return nil, fmt.Errorf("missing hostname")
+	}
+	if strings.Contains(host, "%") {
+		return nil, fmt.Errorf("hostname contains percent-encoding, which is not supported")
+	}
+	if !isDNSLabelSafe(host) {
+		return nil, fmt.Errorf("hostname %q has unsafe characters", host)
 	}
 	if isLoopbackHostname(host) {
 		return target, ensureLoopbackHostname(host)
@@ -259,6 +273,23 @@ func isLoopbackHostname(host string) bool {
 	default:
 		return false
 	}
+}
+
+func isDNSLabelSafe(host string) bool {
+	if host == "" {
+		return false
+	}
+	for _, r := range host {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '.' || r == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (d *Daemon) handleWeb(next http.Handler) http.Handler {
@@ -339,13 +370,30 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "events unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if _, err := d.httpIdentityFromSessionCookie(r.Context(), r); err != nil {
+	if !checkSameOriginRequest(r) {
+		http.Error(w, "cross-origin request blocked", http.StatusForbidden)
+		return
+	}
+	identity, err := d.httpIdentityFromSessionCookie(r.Context(), r)
+	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	projectID := eventProjectID(r)
 	if projectID == "" {
 		http.Error(w, "projectId is required", http.StatusBadRequest)
+		return
+	}
+	project, err := d.app.ProjectSvc.GetProject(caller.ContextWithCaller(r.Context(), caller.Caller{
+		UserID: strings.TrimSpace(identity.UserID),
+		Role:    strings.TrimSpace(identity.Role),
+	}), types.ProjectID(projectID))
+	if err != nil {
+		http.Error(w, "project access denied", http.StatusForbidden)
+		return
+	}
+	if strings.TrimSpace(project.UserID()) != strings.TrimSpace(identity.UserID) {
+		http.Error(w, "project access denied", http.StatusForbidden)
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -382,6 +430,42 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+func checkSameOriginRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.Host == "" {
+		return false
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		origin = deriveOriginFromReferer(r)
+	}
+	if origin == "" {
+		return false
+	}
+	return strings.EqualFold(origin, scheme+"://"+r.Host)
+}
+
+func deriveOriginFromReferer(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	referer := strings.TrimSpace(r.Header.Get("Referer"))
+	if referer == "" {
+		return ""
+	}
+	refererURL, err := url.Parse(referer)
+	if err != nil || refererURL.Host == "" {
+		return ""
+	}
+	return refererURL.Scheme + "://" + refererURL.Host
 }
 
 func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
@@ -421,7 +505,7 @@ func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header htt
 		if strings.HasPrefix(strings.TrimSpace(token), "wlt_") {
 			bind, bindErr := d.app.AuthSvc.ValidateLinkToken(ctx, token)
 			if bindErr != nil {
-				return mcp.Session{}, bindErr
+				return mcp.Session{}, err
 			}
 			session = d.mcpSession(token, bind.User.ID.String(), "")
 			session.ProjectID = strings.TrimSpace(bind.ProjectID)
@@ -669,6 +753,14 @@ type setupRequest struct {
 func (d *Daemon) handleSetupCreate(w http.ResponseWriter, r *http.Request) {
 	if !d.setupAvailable(r.Context()) {
 		http.Error(w, "setup is closed", http.StatusConflict)
+		return
+	}
+	if _, err := readRequestBody(r, maxSetupRequestBodyBytes); err != nil {
+		if errors.Is(err, errRPCRequestBodyTooLarge) {
+			http.Error(w, "setup request body is too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "read setup request body", http.StatusBadRequest)
 		return
 	}
 	req, err := decodeSetupRequest(r)
