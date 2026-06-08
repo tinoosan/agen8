@@ -203,9 +203,11 @@ go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 git status --short
 ```
 
-The final status should be clean. If the web build regenerates
-`internal/web/dist`, commit that generated output with the matching source
-change. Publish `.mcp.example.json`, not a real local `.mcp.json`.
+The final status should be clean. The generated web bundle in
+`internal/web/dist` is **not** committed — only the `.gitkeep` placeholder is
+tracked, so `npm run build` regenerating the bundle leaves git status clean.
+The binary embeds the freshly built bundle at `make build` time. Publish
+`.mcp.example.json`, not a real local `.mcp.json`.
 
 ## Initial Repository Shape
 

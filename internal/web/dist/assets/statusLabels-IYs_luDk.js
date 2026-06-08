@@ -1,2 +1,0 @@
-const a={pending:"Queued",active:"Working",blocked:"Blocked",paused:"Paused",in_review:"In Review",succeeded:"Done",failed:"Failed",canceled:"Canceled"};function t(e){return a[e]??e}const r={Queued:"var(--text-3)",Working:"var(--blue)",Blocked:"var(--amber)",Paused:"var(--text-2)","In Review":"var(--accent)",Done:"var(--green)",Failed:"var(--red)",Canceled:"var(--text-3)"};function d(e){const n=a[e]??e;return r[n]??"var(--text-3)"}export{t as a,d as t};
-//# sourceMappingURL=statusLabels-IYs_luDk.js.map

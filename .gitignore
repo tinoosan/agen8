@@ -72,10 +72,12 @@ obsidian-vault/
 tmp/
 tmp/**
 
-# Generated web assets
-internal/web/dist/
-!internal/web/dist/
-!internal/web/dist/index.html
+# Generated web assets. The embedded SPA bundle is built by `make build` /
+# `npm run build` (vite) and is NOT committed — only the .gitkeep placeholder is
+# tracked, so `//go:embed all:dist` compiles offline (fresh checkout, Node-free
+# Go CI). The build recreates .gitkeep after vite empties the directory.
+internal/web/dist/*
+!internal/web/dist/.gitkeep
 web/test-results/
 
 

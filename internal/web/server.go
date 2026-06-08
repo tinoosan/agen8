@@ -11,7 +11,11 @@ import (
 // DefaultWebPort is the default HTTP server port for the web UI.
 const DefaultWebPort = 8080
 
-//go:embed dist
+// all:dist embeds the placeholder .gitkeep too, so the package compiles even
+// when the generated bundle is absent (the bundle is no longer committed; it is
+// built by `make build`/`npm run build`). See internal/web/dist/.gitkeep.
+//
+//go:embed all:dist
 var staticFiles embed.FS
 
 // Handler returns an HTTP handler for the compiled frontend SPA.

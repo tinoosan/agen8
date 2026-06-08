@@ -129,7 +129,7 @@ make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(d
 make dev remote
 # Run retained MCP tool UAT from a real harness connection.</code></pre>
 
-  <p>Start and end with <code>git status --short</code>. The release candidate should be clean before tagging. If <code>npm --prefix web run build</code> updates <code>internal/web/dist</code>, commit the generated assets with the source change that produced them. Keep the real local <code>.mcp.json</code> ignored; publish <code>.mcp.example.json</code> only.</p>
+  <p>Start and end with <code>git status --short</code>. The release candidate should be clean before tagging. The generated bundle in <code>internal/web/dist</code> is not committed (only the <code>.gitkeep</code> placeholder is tracked), so <code>npm --prefix web run build</code> leaves git status clean; the binary embeds the freshly built bundle at <code>make build</code> time. Keep the real local <code>.mcp.json</code> ignored; publish <code>.mcp.example.json</code> only.</p>
 
   <p>The release workflow builds <code>agen8-mcp</code> archives for Linux and macOS on version tags matching <code>v*</code>.</p>
 

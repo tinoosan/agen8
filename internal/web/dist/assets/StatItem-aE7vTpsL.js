@@ -1,2 +1,0 @@
-import{j as e}from"./query-vendor-CuwYThd-.js";function n({label:t,value:r,icon:s}){return e.jsxs("div",{className:"flex flex-col gap-1",children:[e.jsx("span",{style:{fontSize:"0.625rem",fontWeight:500,letterSpacing:"0.08em",textTransform:"uppercase",color:"var(--text-3)"},children:t}),e.jsxs("span",{className:"flex items-center gap-1.5 text-[var(--text-1)]",style:{fontSize:"0.8125rem",letterSpacing:"-0.08px"},children:[s,r]})]})}export{n as S};
-//# sourceMappingURL=StatItem-aE7vTpsL.js.map
