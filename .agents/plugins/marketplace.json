@@ -1,0 +1,20 @@
+{
+  "name": "agen8-local",
+  "interface": {
+    "displayName": "Agen8 Local"
+  },
+  "plugins": [
+    {
+      "name": "agen8",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agen8"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

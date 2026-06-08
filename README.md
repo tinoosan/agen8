@@ -124,6 +124,39 @@ Install the workflow skill into your harness so it knows how to drive Agen8
 
 Re-run the same command any time to refresh the installed skill.
 
+### Optional: Install the Codex plugin
+
+The repo also includes a Codex plugin at `plugins/agen8`. It packages the
+Agen8 skill and a stable MCP server entry for `http://127.0.0.1:7777/mcp`.
+
+Add the Agen8 GitHub repo as a plugin marketplace, then install `agen8` from
+the Codex app:
+
+```sh
+codex plugin marketplace add tinoosan/agen8
+```
+
+For local plugin development from this checkout instead, register the repo
+folder:
+
+```sh
+codex plugin marketplace add /Users/santino.onyeme/Projects/agen8
+```
+
+Set the API key before starting Codex:
+
+```sh
+launchctl setenv AGEN8_MCP_TOKEN '<your-agen8-api-key>'
+```
+
+The plugin still needs enterprise Codex accounts with an MCP allowlist to allow
+the Agen8 URL:
+
+```toml
+[mcp_servers.agen8]
+identity = { url = "http://127.0.0.1:7777/mcp" }
+```
+
 ### 7. Start working
 
 From inside your harness, call `project.register` with the project root and a

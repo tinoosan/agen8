@@ -1,0 +1,32 @@
+{
+  "name": "agen8",
+  "version": "0.1.0+codex.20260608134557",
+  "description": "Use Agen8 as a durable work-context layer for Codex.",
+  "author": {
+    "name": "Agen8"
+  },
+  "repository": "https://github.com/tinoosan/agen8",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agen8",
+    "shortDescription": "Connect Codex to local Agen8 work memory.",
+    "longDescription": "Agen8 gives Codex a durable local work-context layer for projects, missions, key results, tasks, decisions, and graph-backed context.",
+    "developerName": "Agen8",
+    "category": "Productivity",
+    "composerIcon": "./assets/composer-icon.png",
+    "logo": "./assets/logo.png",
+    "brandColor": "#4F7DFF",
+    "capabilities": [
+      "MCP tools",
+      "Project memory",
+      "Task coordination",
+      "Decision logging"
+    ],
+    "defaultPrompt": [
+      "Register this project with Agen8.",
+      "Inspect current Agen8 work context.",
+      "Continue from the active Agen8 task."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
