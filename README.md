@@ -1,6 +1,6 @@
-# Agen8 MCP Server
+# Agen8
 
-Agen8 MCP Server is an MCP-first work-context layer for AI harnesses.
+Agen8 is an MCP-first work-context layer for AI harnesses.
 
 Codex, Claude Code, and other harnesses remain the primary work surfaces. Agen8
 provides the durable structured record behind them: projects, members, missions,
