@@ -9,6 +9,8 @@ import {
   Pencil,
   Trash2,
   BarChart2,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react'
 import { strategyMapLink, mapNodeId } from '../../lib/routing'
 import { useUpdateKeyResult, useDeleteKeyResult } from '../../hooks/useMissions'
@@ -30,11 +32,19 @@ import {
   DIRECTIONS,
   ghostInput,
   krStatusBadge,
-  directionIcon,
 } from './krFields'
 import { KRProgressStrip } from './KRProgressStrip'
 import { KRDetailView } from './KRDetailView'
-import type { KeyResultView } from '../../lib/types'
+import type { KeyResultView, KeyResultDirection } from '../../lib/types'
+
+/* The one JSX-returning KR helper. It lives here, not in krFields, so that
+   module stays component-free for react-refresh. */
+function directionIcon(dir: KeyResultDirection) {
+  switch (dir) {
+    case 'increase': return <TrendingUp  size={10} className="text-[var(--green)]" />
+    case 'decrease': return <TrendingDown size={10} className="text-[var(--red)]" />
+  }
+}
 
 /* ── KR row ─────────────────────────────────────────────── */
 

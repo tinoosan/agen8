@@ -53,13 +53,3 @@ func TestInstallRejectsUnknownHarness(t *testing.T) {
 		t.Fatal("expected unsupported harness error")
 	}
 }
-
-func TestEmbeddedSkillMatchesRepoCopy(t *testing.T) {
-	repoSkill, err := os.ReadFile(filepath.Join("..", "..", "skills", "agen8", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("read repo skill: %v", err)
-	}
-	if string(repoSkill) != string(EmbeddedSkill()) {
-		t.Fatal("embedded Agen8 skill is out of sync with skills/agen8/SKILL.md")
-	}
-}

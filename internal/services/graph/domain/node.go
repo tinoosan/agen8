@@ -3,12 +3,12 @@ package domain
 import "context"
 
 const (
-	NodeTypeTask           = "task"
-	NodeTypeDecision       = "decision"
-	NodeTypeKeyResult      = "key_result"
-	NodeTypeMission        = "mission"
-	NodeTypePlan           = "plan"
-	NodeTypeAll            = "all"
+	NodeTypeTask      = "task"
+	NodeTypeDecision  = "decision"
+	NodeTypeKeyResult = "key_result"
+	NodeTypeMission   = "mission"
+	NodeTypePlan      = "plan"
+	NodeTypeAll       = "all"
 )
 
 const (

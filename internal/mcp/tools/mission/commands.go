@@ -112,14 +112,14 @@ var fieldsByAction = map[string]map[string]struct{}{
 		"baseline",
 		"target_value",
 	),
-	"kr_get":          fieldSet("action", "key_result_id"),
-	"kr_list":         fieldSet("action", "mission_id", "limit", "offset"),
-	"kr_update":       fieldSet("action", "key_result_id", "title", "description", "measurement_type", "direction", "unit", "baseline", "target_value"),
-	"kr_drop":         fieldSet("action", "key_result_id", "note"),
-	"kr_reopen":       fieldSet("action", "key_result_id", "note"),
-	"kr_progress":     fieldSet("action", "key_result_id", "value", "note", "expected_version"),
-	"kr_history":      fieldSet("action", "key_result_id"),
-	"progress":        fieldSet("action", "mission_id"),
+	"kr_get":      fieldSet("action", "key_result_id"),
+	"kr_list":     fieldSet("action", "mission_id", "limit", "offset"),
+	"kr_update":   fieldSet("action", "key_result_id", "title", "description", "measurement_type", "direction", "unit", "baseline", "target_value"),
+	"kr_drop":     fieldSet("action", "key_result_id", "note"),
+	"kr_reopen":   fieldSet("action", "key_result_id", "note"),
+	"kr_progress": fieldSet("action", "key_result_id", "value", "note", "expected_version"),
+	"kr_history":  fieldSet("action", "key_result_id"),
+	"progress":    fieldSet("action", "mission_id"),
 }
 
 func fieldSet(fields ...string) map[string]struct{} {

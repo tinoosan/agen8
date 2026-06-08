@@ -46,7 +46,7 @@ type Daemon struct {
 }
 
 const (
-	maxRPCRequestBodyBytes  = 1024 * 1024
+	maxRPCRequestBodyBytes   = 1024 * 1024
 	maxSetupRequestBodyBytes = 64 * 1024
 )
 
@@ -386,7 +386,7 @@ func (d *Daemon) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	project, err := d.app.ProjectSvc.GetProject(caller.ContextWithCaller(r.Context(), caller.Caller{
 		UserID: strings.TrimSpace(identity.UserID),
-		Role:    strings.TrimSpace(identity.Role),
+		Role:   strings.TrimSpace(identity.Role),
 	}), types.ProjectID(projectID))
 	if err != nil {
 		http.Error(w, "project access denied", http.StatusForbidden)
