@@ -84,6 +84,10 @@ func (r *postgresAPIKeyRepository) Get(ctx context.Context, id apikey.ID) (apike
 	return r.store.GetAPIKey(ctx, id)
 }
 
+func (r *postgresAPIKeyRepository) ListByUser(ctx context.Context, userID user.ID) ([]apikey.Key, error) {
+	return r.store.ListAPIKeysByUser(ctx, userID)
+}
+
 func (r *postgresAPIKeyRepository) Create(ctx context.Context, key apikey.Key) error {
 	return r.store.CreateAPIKey(ctx, key)
 }

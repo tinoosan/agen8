@@ -29,7 +29,7 @@ func TestRunVersionPrintsBuildInfo(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"agen8-mcp v0.1.0",
+		"agen8 v0.1.0",
 		"commit: abc1234",
 		"built: 2026-06-05T19:30:00Z",
 	} {

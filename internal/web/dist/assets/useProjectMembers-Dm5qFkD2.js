@@ -1,0 +1,2 @@
+import{u as t,c as u,d as n}from"./query-vendor-CuwYThd-.js";import{Z as r,r as a,ah as m}from"./index-C4tLQHE9.js";function i(e){return t({queryKey:r.projectMembers(e),queryFn:async()=>m("project.member.list",{projectId:e??""},"members"),enabled:!!e,refetchInterval:3e4})}function l(){const e=u();return n({mutationFn:s=>a("project.member.remove",s),onSuccess:()=>{e.invalidateQueries({queryKey:r.projectMembersAll})}})}export{l as a,i as u};
+//# sourceMappingURL=useProjectMembers-Dm5qFkD2.js.map

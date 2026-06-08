@@ -12,6 +12,7 @@ const (
 	MethodAuthStatus       = "auth.status"
 	MethodAuthLogin        = "auth.login"
 	MethodAuthLogout       = "auth.logout"
+	MethodAuthAPIKeyList   = "auth.apiKey.list"
 	MethodAuthAPIKeyCreate = "auth.apiKey.create"
 	MethodAuthAPIKeyRevoke = "auth.apiKey.revoke"
 )
@@ -39,6 +40,9 @@ func RegisterAuth(reg *Registry, authSvc *authapp.Service) error {
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodAuthLogout, false, handler.Logout)
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodAuthAPIKeyList, true, handler.ListAPIKeys)
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodAuthAPIKeyCreate, false, handler.CreateAPIKey)

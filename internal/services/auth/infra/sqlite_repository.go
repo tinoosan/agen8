@@ -84,6 +84,10 @@ func (r *sqliteAPIKeyRepository) Get(ctx context.Context, id apikey.ID) (apikey.
 	return r.store.GetAPIKey(ctx, id)
 }
 
+func (r *sqliteAPIKeyRepository) ListByUser(ctx context.Context, userID user.ID) ([]apikey.Key, error) {
+	return r.store.ListAPIKeysByUser(ctx, userID)
+}
+
 func (r *sqliteAPIKeyRepository) Create(ctx context.Context, key apikey.Key) error {
 	return r.store.CreateAPIKey(ctx, key)
 }

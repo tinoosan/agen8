@@ -124,6 +124,84 @@ func TestRegisterAuthAPIKeyCreate(t *testing.T) {
 	}
 }
 
+func TestRegisterAuthAPIKeyList(t *testing.T) {
+	account := rpcAuthUserRecord(t, "user-1", user.LifecycleActive)
+	server, _ := newAuthRPCServer(t, account)
+	ctx := ContextWithIdentity(context.Background(), Identity{UserID: "user-1", Role: "admin"})
+	createAPIKeyOverRPC(t, server, ctx, "first")
+	createAPIKeyOverRPC(t, server, ctx, "second")
+
+	raw, err := server.Handle(ctx, []byte(`{
+		"jsonrpc": "2.0",
+		"id": "1",
+		"method": "auth.apiKey.list",
+		"params": {}
+	}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	resp := decodeAuthRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("response error=%+v", resp.Error)
+	}
+	var result authrpc.ListAPIKeysResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Keys) != 2 {
+		t.Fatalf("len(keys)=%d want 2", len(result.Keys))
+	}
+	for _, key := range result.Keys {
+		if key.ID == "" || key.Prefix == "" || key.CreatedAt.IsZero() || !key.Active {
+			t.Fatalf("invalid key view=%+v", key)
+		}
+	}
+}
+
+func TestRegisterAuthAPIKeyRevokeRejectsOtherUsersKey(t *testing.T) {
+	account := rpcAuthUserRecord(t, "user-1", user.LifecycleActive)
+	other := rpcAuthUserRecord(t, "user-2", user.LifecycleActive)
+	server, _ := newAuthRPCServer(t, account, other)
+	otherCtx := ContextWithIdentity(context.Background(), Identity{UserID: "user-2", Role: "admin"})
+	otherKey := createAPIKeyOverRPC(t, server, otherCtx, "other")
+
+	raw, err := server.Handle(ContextWithIdentity(context.Background(), Identity{UserID: "user-1", Role: "admin"}), []byte(`{
+		"jsonrpc": "2.0",
+		"id": "1",
+		"method": "auth.apiKey.revoke",
+		"params": { "id": "`+otherKey.ID+`" }
+	}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	resp := decodeAuthRPCResponse(t, raw)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "token not found") {
+		t.Fatalf("response error=%+v want token not found", resp.Error)
+	}
+}
+
+func createAPIKeyOverRPC(t *testing.T, server *Server, ctx context.Context, name string) authrpc.CreateAPIKeyResult {
+	t.Helper()
+	raw, err := server.Handle(ctx, []byte(`{
+		"jsonrpc": "2.0",
+		"id": "create",
+		"method": "auth.apiKey.create",
+		"params": { "name": "`+name+`" }
+	}`))
+	if err != nil {
+		t.Fatalf("Handle create: %v", err)
+	}
+	resp := decodeAuthRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("create response error=%+v", resp.Error)
+	}
+	var result authrpc.CreateAPIKeyResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal create result: %v", err)
+	}
+	return result
+}
+
 func newAuthRPCServer(t *testing.T, users ...user.User) (*Server, *authapp.Service) {
 	t.Helper()
 	svc, err := authapp.NewService(
@@ -251,6 +329,16 @@ func (r *rpcAuthAPIKeyRepo) Get(_ context.Context, id apikey.ID) (apikey.Key, er
 		}
 	}
 	return apikey.Key{}, auth.ErrTokenNotFound
+}
+
+func (r *rpcAuthAPIKeyRepo) ListByUser(_ context.Context, userID user.ID) ([]apikey.Key, error) {
+	var records []apikey.Key
+	for _, record := range r.records {
+		if record.UserID == userID {
+			records = append(records, record)
+		}
+	}
+	return records, nil
 }
 
 func (r *rpcAuthAPIKeyRepo) Create(_ context.Context, record apikey.Key) error {

@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
-import { Check, Copy, Minus, Plus, RotateCcw, Terminal, UserRound } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check, Copy, KeyRound, Minus, Plus, RotateCcw, Terminal, Trash2, UserRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '../../hooks/useAuth'
+import { createAPIKey, listAPIKeys, revokeAPIKey } from '../../lib/authClient'
+import {
+  buildMCPSetup,
+  CLAUDE_SKILL_COMMAND,
+  CODEX_SKILL_COMMAND,
+  type MCPSetupSnippets,
+} from '../../lib/mcpSetup'
 import {
   useStore,
   FONT_SCALE_DEFAULT,
@@ -17,6 +25,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatDate } from '@/lib/format'
+import { qk } from '@/lib/queryKeys'
+import type { AuthAPIKey } from '@/lib/types'
+import ConfirmationDialog from '@/components/ConfirmationDialog'
 import {
   Select,
   SelectContent,
@@ -71,12 +82,12 @@ const fontFamilyOptions: Array<{ value: FontFamily; label: string; note: string;
 const skillInstallCommands = [
   {
     harness: 'Codex',
-    command: 'agen8-mcp skill install --harness codex',
+    command: CODEX_SKILL_COMMAND,
     path: '~/.codex/skills/agen8/SKILL.md',
   },
   {
     harness: 'Claude CLI',
-    command: 'agen8-mcp skill install --harness claude-cli',
+    command: CLAUDE_SKILL_COMMAND,
     path: '~/.claude/skills/agen8/SKILL.md',
   },
 ]
@@ -121,6 +132,49 @@ function SettingsRow({
         {description && <p className="mt-1 mb-0 text-[0.75rem] leading-relaxed text-[var(--text-3)]">{description}</p>}
       </div>
       <div className="min-w-0">{children}</div>
+    </div>
+  )
+}
+
+function CopySnippetButton({ value, label = 'Copy' }: { value: string; label?: string }) {
+  async function handleCopy() {
+    try {
+      await copyText(value)
+      toast.success('Copied')
+    } catch {
+      toast.error('Copy failed')
+    }
+  }
+
+  return (
+    <Button type="button" variant="ghost" size="sm" className="gap-1.5" onClick={() => void handleCopy()}>
+      <Copy size={13} />
+      {label}
+    </Button>
+  )
+}
+
+function SetupSnippet({
+  title,
+  description,
+  value,
+}: {
+  title: string
+  description?: string
+  value: string
+}) {
+  return (
+    <div className="grid gap-2 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-[0.8125rem] font-semibold text-[var(--text-1)]">{title}</div>
+          {description && <p className="m-0 mt-1 text-[0.6875rem] leading-relaxed text-[var(--text-3)]">{description}</p>}
+        </div>
+        <CopySnippetButton value={value} />
+      </div>
+      <code className="block max-h-[220px] overflow-auto whitespace-pre-wrap break-all rounded-[var(--r-sm)] bg-[var(--bg-app)] px-2.5 py-2 text-[0.75rem] leading-relaxed text-[var(--text-1)]">
+        {value}
+      </code>
     </div>
   )
 }
@@ -268,6 +322,175 @@ export function AccountSecuritySection() {
           </div>
         </SettingsRow>
       </SettingsPanel>
+    </section>
+  )
+}
+
+export function AccountMCPAccessSection() {
+  const queryClient = useQueryClient()
+  const [creating, setCreating] = useState(false)
+  const [snippets, setSnippets] = useState<MCPSetupSnippets | null>(null)
+  const [secret, setSecret] = useState('')
+  const [revokeTarget, setRevokeTarget] = useState<AuthAPIKey | null>(null)
+  const [revoking, setRevoking] = useState(false)
+
+  const keysQuery = useQuery({
+    queryKey: qk.apiKeys,
+    queryFn: listAPIKeys,
+  })
+  const keys = keysQuery.data ?? []
+
+  async function handleCreateKey() {
+    setCreating(true)
+    try {
+      const result = await createAPIKey('Agen8 MCP key')
+      const generated = buildMCPSetup(result.secret)
+      setSecret(result.secret)
+      setSnippets(generated)
+      await queryClient.invalidateQueries({ queryKey: qk.apiKeys })
+      toast.success('MCP key generated')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to generate MCP key')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function handleRevokeKey() {
+    if (!revokeTarget) return
+    setRevoking(true)
+    try {
+      await revokeAPIKey(revokeTarget.id)
+      await queryClient.invalidateQueries({ queryKey: qk.apiKeys })
+      setRevokeTarget(null)
+      toast.success('MCP key revoked')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to revoke MCP key')
+    } finally {
+      setRevoking(false)
+    }
+  }
+
+  return (
+    <section id="settings-mcp-access" className="grid gap-4">
+      <div>
+        <h2 className="m-0 text-[1.0625rem] font-semibold text-[var(--text-1)]">MCP access</h2>
+        <p className="mt-1 mb-0 text-[0.8125rem] text-[var(--text-3)]">
+          Generate the token and setup text needed to connect Codex, Claude Code, or another MCP client.
+        </p>
+      </div>
+      <SettingsPanel>
+        <SettingsRow title="Harness token" description="Keys are shown once. Generate a new one any time you need another client connection.">
+          <div className="grid gap-3">
+            <div className="grid gap-3 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center gap-2 text-[0.8125rem] font-semibold text-[var(--text-1)]">
+                  <KeyRound size={14} aria-hidden />
+                  Agen8 MCP key
+                </div>
+                <p className="m-0 text-[0.75rem] leading-relaxed text-[var(--text-3)]">
+                  Use this for local MCP clients. Keep it private like a password.
+                </p>
+              </div>
+              <Button type="button" size="sm" onClick={() => void handleCreateKey()} disabled={creating}>
+                {creating ? 'Generating...' : snippets ? 'Generate another key' : 'Generate MCP key'}
+              </Button>
+            </div>
+
+            {snippets && (
+              <div className="grid gap-3">
+                <SetupSnippet
+                  title="API key"
+                  description="Copy this now. Agen8 will not show the same key again."
+                  value={secret}
+                />
+                <SetupSnippet
+                  title="MCP URL"
+                  description="Use this endpoint when a client asks for a server URL."
+                  value={snippets.url}
+                />
+                <SetupSnippet
+                  title=".mcp.json"
+                  description="Use this project config when your MCP client reads JSON server entries."
+                  value={snippets.jsonConfig}
+                />
+                <SetupSnippet
+                  title="Codex command"
+                  description="Adds Agen8 through the Codex CLI."
+                  value={snippets.codexCommand}
+                />
+                <SetupSnippet
+                  title="Claude Code command"
+                  description="Adds Agen8 for Claude Code at user scope."
+                  value={snippets.claudeCommand}
+                />
+              </div>
+            )}
+
+            <div className="grid gap-2">
+              <div className="text-[0.8125rem] font-semibold text-[var(--text-1)]">Existing MCP keys</div>
+              {keysQuery.isLoading ? (
+                <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-3 text-[0.75rem] text-[var(--text-3)]">
+                  Loading keys...
+                </div>
+              ) : keys.length === 0 ? (
+                <div className="rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-3 text-[0.75rem] text-[var(--text-3)]">
+                  No MCP keys yet.
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)]">
+                  {keys.map((key) => (
+                    <div
+                      key={key.id}
+                      className="grid gap-3 border-b border-[var(--border)] px-3 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-[0.8125rem] font-semibold text-[var(--text-1)]">{key.name}</span>
+                          <span className={cn(
+                            'rounded-full px-1.5 py-[1px] text-[0.625rem] font-medium uppercase leading-4',
+                            key.active
+                              ? 'bg-[var(--green-dim)] text-[var(--green)]'
+                              : 'bg-[var(--bg-elevated)] text-[var(--text-3)]',
+                          )}>
+                            {key.active ? 'Active' : 'Revoked'}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-[var(--text-3)]">
+                          <span className="font-mono">{key.prefix}</span>
+                          <span>Created {formatDate(key.createdAt, { fallback: 'Unknown' })}</span>
+                          {key.revokedAt && <span>Revoked {formatDate(key.revokedAt, { fallback: 'Unknown' })}</span>}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost-danger"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => setRevokeTarget(key)}
+                        disabled={!key.active}
+                      >
+                        <Trash2 size={13} />
+                        Revoke
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </SettingsRow>
+      </SettingsPanel>
+      <ConfirmationDialog
+        open={!!revokeTarget}
+        title="Revoke MCP key"
+        message={revokeTarget ? `Revoke "${revokeTarget.name}"? Clients using this key will stop connecting to Agen8.` : ''}
+        confirmLabel={revoking ? 'Revoking...' : 'Revoke key'}
+        tone="danger"
+        busy={revoking}
+        onClose={() => setRevokeTarget(null)}
+        onConfirm={() => void handleRevokeKey()}
+      />
     </section>
   )
 }
@@ -579,6 +802,7 @@ export function AccountSettingsSections() {
     <>
       <AccountProfileSection />
       <AccountSecuritySection />
+      <AccountMCPAccessSection />
       <AccountSkillSection />
       <AccountPreferencesSection />
     </>

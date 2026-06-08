@@ -128,6 +128,61 @@ func TestCreateAPIKeyRequiresName(t *testing.T) {
 	}
 }
 
+func TestListAPIKeysReturnsAllUserKeys(t *testing.T) {
+	account := authUserRecord(t, "user-1", user.LifecycleActive)
+	other := authUserRecord(t, "user-2", user.LifecycleActive)
+	svc, _ := newAuthServiceForTest(t, account, other)
+
+	first, err := svc.CreateAPIKey(context.Background(), CreateAPIKeyParams{UserID: account.ID, Name: "first"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey first: %v", err)
+	}
+	second, err := svc.CreateAPIKey(context.Background(), CreateAPIKeyParams{UserID: account.ID, Name: "second"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey second: %v", err)
+	}
+	if _, err := svc.CreateAPIKey(context.Background(), CreateAPIKeyParams{UserID: other.ID, Name: "other"}); err != nil {
+		t.Fatalf("CreateAPIKey other: %v", err)
+	}
+
+	keys, err := svc.ListAPIKeys(context.Background(), account.ID)
+	if err != nil {
+		t.Fatalf("ListAPIKeys: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("len(keys)=%d want 2", len(keys))
+	}
+	gotIDs := map[string]bool{}
+	for _, key := range keys {
+		gotIDs[key.ID.String()] = true
+		if key.UserID != account.ID {
+			t.Fatalf("listed key for wrong user: %+v", key)
+		}
+	}
+	if !gotIDs[first.APIKey.ID.String()] || !gotIDs[second.APIKey.ID.String()] {
+		t.Fatalf("listed key ids=%v missing generated keys", gotIDs)
+	}
+}
+
+func TestRevokeUserAPIKeyRejectsOtherUsersKey(t *testing.T) {
+	account := authUserRecord(t, "user-1", user.LifecycleActive)
+	other := authUserRecord(t, "user-2", user.LifecycleActive)
+	svc, _ := newAuthServiceForTest(t, account, other)
+
+	otherKey, err := svc.CreateAPIKey(context.Background(), CreateAPIKeyParams{UserID: other.ID, Name: "other"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey other: %v", err)
+	}
+
+	err = svc.RevokeUserAPIKey(context.Background(), account.ID, otherKey.APIKey.ID)
+	if err != auth.ErrTokenNotFound {
+		t.Fatalf("RevokeUserAPIKey error=%v want token not found", err)
+	}
+	if _, err := svc.ValidateAPIKey(context.Background(), otherKey.Token); err != nil {
+		t.Fatalf("other user's key should remain valid: %v", err)
+	}
+}
+
 func TestCredentialLifecycleLogsOmitCredentialIdentifiersAndTokens(t *testing.T) {
 	account := authUserRecord(t, "user-1", user.LifecycleActive)
 	var logOutput bytes.Buffer
@@ -420,6 +475,16 @@ func (r *memoryAPIKeyRepo) Get(_ context.Context, id apikey.ID) (apikey.Key, err
 		}
 	}
 	return apikey.Key{}, auth.ErrTokenNotFound
+}
+
+func (r *memoryAPIKeyRepo) ListByUser(_ context.Context, userID user.ID) ([]apikey.Key, error) {
+	var records []apikey.Key
+	for _, record := range r.records {
+		if record.UserID == userID {
+			records = append(records, record)
+		}
+	}
+	return records, nil
 }
 
 func (r *memoryAPIKeyRepo) Create(_ context.Context, record apikey.Key) error {

@@ -123,6 +123,37 @@ func TestSQLiteRepositoriesAPIKeyCreateGetUpdate(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoriesAPIKeyListByUser(t *testing.T) {
+	repos := newSQLiteAuthRepositoriesForTest(t)
+	userA := authUserID(t, "user-a")
+	userB := authUserID(t, "user-b")
+	for _, record := range []apikey.Key{
+		apiKeyRecord(t, "api-key-1", userA, "first", authInfraNow),
+		apiKeyRecord(t, "api-key-2", userA, "second", authInfraNow.Add(time.Minute)),
+		apiKeyRecord(t, "api-key-3", userB, "other", authInfraNow.Add(2*time.Minute)),
+	} {
+		if err := repos.APIKeys.Create(context.Background(), record); err != nil {
+			t.Fatalf("Create %s: %v", record.ID.String(), err)
+		}
+	}
+
+	keys, err := repos.APIKeys.ListByUser(context.Background(), userA)
+	if err != nil {
+		t.Fatalf("ListByUser: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("len(keys)=%d want 2", len(keys))
+	}
+	if keys[0].Name != "second" || keys[1].Name != "first" {
+		t.Fatalf("key order=%q,%q want newest first", keys[0].Name, keys[1].Name)
+	}
+	for _, key := range keys {
+		if key.UserID != userA {
+			t.Fatalf("listed key for wrong user: %+v", key)
+		}
+	}
+}
+
 func newSQLiteAuthRepositoriesForTest(t *testing.T) Repositories {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{
@@ -140,6 +171,22 @@ func newSQLiteAuthRepositoriesForTest(t *testing.T) Repositories {
 		t.Fatalf("NewRepositories: %v", err)
 	}
 	return repos
+}
+
+func apiKeyRecord(t *testing.T, rawID string, userID user.ID, name string, createdAt time.Time) apikey.Key {
+	t.Helper()
+	keyID, err := apikey.NewID(rawID)
+	if err != nil {
+		t.Fatalf("apikey NewID: %v", err)
+	}
+	return apikey.Key{
+		ID:        keyID,
+		UserID:    userID,
+		Name:      name,
+		Prefix:    "ak_" + rawID,
+		TokenHash: auth.HashToken(rawID),
+		CreatedAt: createdAt,
+	}
 }
 
 func authUserID(t *testing.T, raw string) user.ID {

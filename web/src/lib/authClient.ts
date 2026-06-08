@@ -33,6 +33,7 @@ interface AuthStatusResult {
 
 interface UserStatusResult {
   setupOpen: boolean
+  setupUrl?: string
   user?: AuthUser | null
 }
 
@@ -55,6 +56,20 @@ interface CreateAPIKeyRPCResult {
   expiresAt?: string
 }
 
+interface APIKeyRPCView {
+  id: string
+  name: string
+  prefix: string
+  createdAt: string
+  expiresAt?: string
+  revokedAt?: string
+  active: boolean
+}
+
+interface ListAPIKeysRPCResult {
+  keys: APIKeyRPCView[]
+}
+
 export async function getAuthStatus(): Promise<AuthStatus> {
   let auth: AuthStatusResult
   try {
@@ -68,10 +83,13 @@ export async function getAuthStatus(): Promise<AuthStatus> {
     }
   }
   if (!auth.authenticated) {
+    const setup = await getSetupStatus()
     return {
       enabled: true,
       hostedMode: true,
       authenticated: false,
+      setupOpen: setup.setupOpen,
+      setupUrl: setup.setupUrl,
       user: null,
     }
   }
@@ -81,6 +99,8 @@ export async function getAuthStatus(): Promise<AuthStatus> {
     enabled: true,
     hostedMode: true,
     authenticated: true,
+    setupOpen: userStatus.setupOpen,
+    setupUrl: userStatus.setupUrl,
     user: userStatus.user ?? {
       id: auth.user?.id ?? auth.userId ?? '',
       email: '',
@@ -88,6 +108,14 @@ export async function getAuthStatus(): Promise<AuthStatus> {
       role: auth.role ?? auth.user?.role,
       createdAt: '',
     },
+  }
+}
+
+async function getSetupStatus(): Promise<UserStatusResult> {
+  try {
+    return await rpcCall<UserStatusResult>('auth.setupStatus', {})
+  } catch {
+    return { setupOpen: false }
   }
 }
 
@@ -133,6 +161,19 @@ export async function createAPIKey(name: string): Promise<CreateAPIKeyResult> {
       createdAt: '',
     },
   }
+}
+
+export async function listAPIKeys(): Promise<AuthAPIKey[]> {
+  const result = await rpcCall<ListAPIKeysRPCResult>('auth.apiKey.list', {})
+  return result.keys.map((key) => ({
+    id: key.id,
+    name: key.name,
+    prefix: key.prefix,
+    createdAt: key.createdAt,
+    expiresAt: key.expiresAt,
+    revokedAt: key.revokedAt,
+    active: key.active,
+  }))
 }
 
 export async function revokeAPIKey(keyId: string): Promise<void> {

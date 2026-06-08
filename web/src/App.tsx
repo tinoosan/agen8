@@ -171,6 +171,10 @@ export default function App() {
 
   useEffect(() => {
     if (auth.isLoading) return
+    if (!auth.isAuthenticated && auth.status?.setupOpen && auth.status.setupUrl) {
+      window.location.assign(auth.status.setupUrl)
+      return
+    }
     if (!auth.isAuthenticated && !isAuthRoute) {
       navigate('/login')
       return
@@ -178,7 +182,7 @@ export default function App() {
     if (auth.isAuthenticated && isAuthRoute) {
       navigate('/')
     }
-  }, [auth.isAuthenticated, auth.isLoading, isAuthRoute, navigate])
+  }, [auth.isAuthenticated, auth.isLoading, auth.status?.setupOpen, auth.status?.setupUrl, isAuthRoute, navigate])
 
   if (isAuthRoute) {
     if (!auth.isAuthenticated) {

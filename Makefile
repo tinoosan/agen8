@@ -51,7 +51,7 @@ web-build: web-install
 
 build-go:
 	@mkdir -p ./bin
-	@go build -ldflags "$(GO_LDFLAGS)" -o bin/agen8-mcp ./cmd/agen8-mcp
+	@go build -ldflags "$(GO_LDFLAGS)" -o bin/agen8 ./cmd/agen8-mcp
 
 # Build the full binary (requires web assets to be built first)
 build: web-build build-go
@@ -127,7 +127,7 @@ dev-remote: ensure-air web-install
 	AGEN8_LOG_FILE="tmp/daemon.log" \
 	AGEN8_DEV_WEB_URL="http://127.0.0.1:$(REMOTE_VITE_PORT)" \
 	"$$AIR_BIN" \
-		-build.full_bin "./tmp/agen8-mcp daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(REMOTE_HTTP_ADDR)\""
+		-build.full_bin "./tmp/agen8 daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(REMOTE_HTTP_ADDR)\""
 
 worktree-create:
 	@./scripts/worktree/create.sh "$(KIND)" "$(TASK)" "$(SLUG)" "$(or $(BASE),dev)"

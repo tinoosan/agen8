@@ -13,15 +13,16 @@ harness session manager.
 
 ## Current Baseline
 
-- Binary: `agen8-mcp`
+- Binary: `agen8`
 - Default local data directory: `~/.agen8` (`--data-dir` or
   `AGEN8_DATA_DIR` can point isolated runs somewhere else)
 - Development daemon: `make dev remote`
 - Build command: `make build` (full binary with embedded UI; `make build-go`
   recompiles only the Go side)
-- Version check: `./bin/agen8-mcp version`
+- Version check: `./bin/agen8 version`
 - Health check: `GET http://127.0.0.1:7777/healthz`
-- MCP endpoint: `http://127.0.0.1:7777/mcp?token=<token>`
+- MCP endpoint: `http://127.0.0.1:7777/mcp?token=<token>` or
+  `http://127.0.0.1:7777/mcp` with `Authorization: Bearer <token>`
 - Retained MCP tools: `project`, `mission`, `task`, `decision`,
   `graph_query`, and `http`
 - Pre-push gate: clean git status, Go tests, frontend lint/tests/build,
@@ -51,21 +52,21 @@ make build
 ```
 
 This builds the web UI and compiles the daemon with that UI embedded, producing
-the binary at `./bin/agen8-mcp`. (Check the version any time with
-`./bin/agen8-mcp version`.)
+the binary at `./bin/agen8`. (Check the version any time with
+`./bin/agen8 version`.)
 
 ### 3. Run
 
 ```sh
-./bin/agen8-mcp
+./bin/agen8
 ```
 
-That starts the daemon (equivalent to `./bin/agen8-mcp daemon start`). By
+That starts the daemon (equivalent to `./bin/agen8 daemon start`). By
 default it listens on `127.0.0.1:7777` and stores its data in `~/.agen8`.
 Override either if you need to:
 
 ```sh
-./bin/agen8-mcp daemon start --http-addr 127.0.0.1:8080 --data-dir /path/to/data
+./bin/agen8 daemon start --http-addr 127.0.0.1:8080 --data-dir /path/to/data
 ```
 
 Confirm it is up:
@@ -86,7 +87,8 @@ harness will use to talk to Agen8. Copy it somewhere safe.
 ### 5. Connect a harness
 
 Add an MCP server entry to your harness pointing at the daemon, using the API
-key from the previous step as the token:
+key from the previous step as the token. The simplest form puts the token in
+the local URL:
 
 ```text
 http://127.0.0.1:7777/mcp?token=<your-agen8-api-key>
@@ -96,15 +98,28 @@ http://127.0.0.1:7777/mcp?token=<your-agen8-api-key>
 `.mcp.json` and drop in your key. Keep the real `.mcp.json` local — it is
 gitignored because it holds your machine-specific server entry and API key.
 
+Agen8 also accepts the same token as a bearer token. This is useful for Codex
+or managed environments where you want the server URL to stay stable while the
+secret lives separately:
+
+```toml
+[mcp_servers.agen8]
+url = "http://127.0.0.1:7777/mcp"
+bearer_token_env_var = "AGEN8_MCP_TOKEN"
+```
+
+Then set `AGEN8_MCP_TOKEN` to your `ak_...` API key before starting Codex. The
+query-token URL remains supported, including for project link tokens.
+
 ### 6. Install the Agen8 workflow skill
 
 Install the workflow skill into your harness so it knows how to drive Agen8
 (register, plan missions/key results, run tasks, log decisions):
 
 ```sh
-./bin/agen8-mcp skill install --harness codex
+./bin/agen8 skill install --harness codex
 # or, for Claude Code:
-./bin/agen8-mcp skill install --harness claude-cli
+./bin/agen8 skill install --harness claude-cli
 ```
 
 Re-run the same command any time to refresh the installed skill.

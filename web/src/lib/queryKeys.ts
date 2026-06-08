@@ -115,6 +115,7 @@ export const qk = {
 
   // ── auth ──────────────────────────────────────────────
   authStatus: ['auth.status'] as const,
+  apiKeys: ['auth.apiKey.list'] as const,
 
   // ── credentials ───────────────────────────────────────
   credentialsAll: ['credential.list'] as const,

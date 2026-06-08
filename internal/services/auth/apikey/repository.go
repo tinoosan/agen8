@@ -2,6 +2,8 @@ package apikey
 
 import "context"
 
+import user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+
 type Repository interface {
 	Reader
 	Writer
@@ -10,6 +12,7 @@ type Repository interface {
 type Reader interface {
 	GetByTokenHash(ctx context.Context, tokenHash string) (Key, error)
 	Get(ctx context.Context, id ID) (Key, error)
+	ListByUser(ctx context.Context, userID user.ID) ([]Key, error)
 }
 
 type Writer interface {

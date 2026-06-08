@@ -75,6 +75,9 @@ export interface AuthAPIKey {
   prefix: string;
   name: string;
   createdAt: string;
+  expiresAt?: string;
+  revokedAt?: string;
+  active?: boolean;
   lastUsed?: string;
 }
 
@@ -82,6 +85,8 @@ export interface AuthStatus {
   enabled: boolean;
   hostedMode?: boolean;
   authenticated: boolean;
+  setupOpen?: boolean;
+  setupUrl?: string;
   user?: AuthUser | null;
 }
 

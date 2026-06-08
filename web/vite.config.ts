@@ -95,6 +95,7 @@ export default defineConfig({
       '/rpc': daemonProxyTarget,
       '/api': daemonProxyTarget,
       '/auth/chatgpt': daemonProxyTarget,
+      '/setup': daemonProxyTarget,
       '/events': {
         target: daemonProxyTarget,
         changeOrigin: true,

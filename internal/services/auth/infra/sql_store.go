@@ -193,6 +193,40 @@ func (s *sqlStore) GetAPIKey(ctx context.Context, id apikey.ID) (apikey.Key, err
 	`, id.String())
 }
 
+func (s *sqlStore) ListAPIKeysByUser(ctx context.Context, userID user.ID) ([]apikey.Key, error) {
+	if strings.TrimSpace(userID.String()) == "" {
+		return nil, fmt.Errorf("api key user id is required")
+	}
+	rows, err := s.db.QueryContext(ctx, s.rebind(`
+		SELECT api_key_id, user_id, name, prefix, token_hash, expires_at, revoked_at, created_at
+		FROM auth_api_keys
+		WHERE user_id = ?
+		ORDER BY created_at DESC, api_key_id DESC
+	`), userID.String())
+	if err != nil {
+		return nil, fmt.Errorf("list api keys: %w", err)
+	}
+	defer rows.Close()
+
+	var records []apikey.Key
+	for rows.Next() {
+		var rawID, rawUserID, name, prefix, tokenHash, createdAt string
+		var expiresAt, revokedAt sql.NullString
+		if err := rows.Scan(&rawID, &rawUserID, &name, &prefix, &tokenHash, &expiresAt, &revokedAt, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan api key row: %w", err)
+		}
+		record, err := scanAPIKey(rawID, rawUserID, name, prefix, tokenHash, expiresAt, revokedAt, createdAt)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate api keys: %w", err)
+	}
+	return records, nil
+}
+
 func (s *sqlStore) CreateAPIKey(ctx context.Context, record apikey.Key) error {
 	if err := validateAPIKey(record); err != nil {
 		return err

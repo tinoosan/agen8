@@ -276,6 +276,14 @@ func (s *Service) CreateAPIKey(ctx context.Context, params CreateAPIKeyParams) (
 	return CreateAPIKeyResult{APIKey: record, Token: token}, nil
 }
 
+func (s *Service) ListAPIKeys(ctx context.Context, userID user.ID) ([]apikey.Key, error) {
+	account, err := s.activeUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.apiKeys.ListByUser(ctx, account.ID)
+}
+
 func (s *Service) ValidateAPIKey(ctx context.Context, token string) (user.User, error) {
 	record, err := s.apiKeys.GetByTokenHash(ctx, auth.HashToken(token))
 	if err != nil {
@@ -290,6 +298,23 @@ func (s *Service) ValidateAPIKey(ctx context.Context, token string) (user.User, 
 func (s *Service) RevokeAPIKey(ctx context.Context, id apikey.ID) error {
 	record, err := s.apiKeys.Get(ctx, id)
 	if err != nil {
+		return auth.ErrTokenNotFound
+	}
+	now := s.clock.Now()
+	record.RevokedAt = &now
+	return s.apiKeys.Update(ctx, record)
+}
+
+func (s *Service) RevokeUserAPIKey(ctx context.Context, userID user.ID, id apikey.ID) error {
+	account, err := s.activeUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	record, err := s.apiKeys.Get(ctx, id)
+	if err != nil {
+		return auth.ErrTokenNotFound
+	}
+	if record.UserID != account.ID {
 		return auth.ErrTokenNotFound
 	}
 	now := s.clock.Now()

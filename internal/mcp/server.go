@@ -131,7 +131,7 @@ func NewServer(tokenStore *TokenStore) (*Server, error) {
 	}
 	out.handler = mcp.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcp.Server {
-			token := strings.TrimSpace(r.URL.Query().Get("token"))
+			token := tokenFromRequest(r)
 			initialSession, ok := sessionFromContext(r.Context())
 			if !ok {
 				resolved, err := out.tokenStore.Resolve(token)
@@ -267,7 +267,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	requestSessionID, requestThreadID := SessionRefsFromHTTPHeader(resolverHeader)
 	ctx := contextWithSessionRefs(r.Context(), requestSessionID, requestThreadID)
-	session, err := s.resolveSession(ctx, r.URL.Query().Get("token"), resolverHeader, body)
+	session, err := s.resolveSession(ctx, tokenFromRequest(r), resolverHeader, body)
 	if err != nil {
 		s.writeRPCError(w, extractRPCID(body), mcpRPCCodeInvalidToken, err.Error())
 		return
@@ -277,6 +277,29 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	r = r.WithContext(context.WithValue(ctx, sessionContextKey{}, session))
 	s.handler.ServeHTTP(w, r)
+}
+
+func tokenFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token != "" {
+		return token
+	}
+	return bearerTokenFromHeader(r.Header.Get("Authorization"))
+}
+
+func bearerTokenFromHeader(header string) string {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return ""
+	}
+	parts := strings.Fields(header)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 func mcpRPCMethod(body []byte) string {

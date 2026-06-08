@@ -18,6 +18,7 @@ import (
 
 	"github.com/tinoosan/agen8-mcp-server/internal/config"
 	"github.com/tinoosan/agen8-mcp-server/internal/mcp"
+	"github.com/tinoosan/agen8-mcp-server/internal/rpc"
 	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
 	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
 	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
@@ -163,6 +164,274 @@ func TestHandleSetupRejectsOversizedFormPayload(t *testing.T) {
 	}
 	if body := rec.Body.String(); !strings.Contains(body, "setup request body is too large") {
 		t.Fatalf("body=%q want setup body limit error", body)
+	}
+}
+
+func TestSetupPageIncludesMCPSetupResultShell(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/setup?token=test-setup-token", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="setup-result"`,
+		`data-copy-target="api-key"`,
+		`id="mcp-config"`,
+		`id="codex-command"`,
+		`id="claude-command"`,
+		`agen8.sessionToken`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("setup page missing %q", want)
+		}
+	}
+}
+
+func TestHandleSetupJSONIncludesMCPArtifacts(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	req := httptest.NewRequest(http.MethodPost, "http://0.0.0.0:7777/setup", strings.NewReader(setupBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var result struct {
+		APIKey struct {
+			Secret string `json:"secret"`
+		} `json:"apiKey"`
+		MCP struct {
+			URL                string `json:"url"`
+			Config             string `json:"config"`
+			CodexCommand       string `json:"codexCommand"`
+			ClaudeCommand      string `json:"claudeCommand"`
+			CodexSkillCommand  string `json:"codexSkillCommand"`
+			ClaudeSkillCommand string `json:"claudeSkillCommand"`
+		} `json:"mcp"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	if result.APIKey.Secret == "" {
+		t.Fatal("setup response missing api key secret")
+	}
+	if !strings.HasPrefix(result.MCP.URL, "http://127.0.0.1:7777/mcp?token=ak_") {
+		t.Fatalf("mcp url=%q want loopback URL with API key", result.MCP.URL)
+	}
+	for _, want := range []string{
+		result.APIKey.Secret,
+		`"mcpServers"`,
+		"codex mcp add agen8 --url",
+		"claude mcp add --transport http --scope user agen8",
+		"agen8 skill install --harness codex",
+		"agen8 skill install --harness claude-cli",
+	} {
+		joined := strings.Join([]string{
+			result.MCP.URL,
+			result.MCP.Config,
+			result.MCP.CodexCommand,
+			result.MCP.ClaudeCommand,
+			result.MCP.CodexSkillCommand,
+			result.MCP.ClaudeSkillCommand,
+		}, "\n")
+		if !strings.Contains(joined, want) {
+			t.Fatalf("mcp artifacts missing %q in %s", want, joined)
+		}
+	}
+}
+
+func TestSetupStatusRPCReturnsSetupURLWhileOpen(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test setup token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"auth.setupStatus","params":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp rpc.Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode rpc response: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("rpc error=%+v", resp.Error)
+	}
+	var result struct {
+		SetupOpen bool   `json:"setupOpen"`
+		SetupURL  string `json:"setupUrl"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode setup status result: %v", err)
+	}
+	if !result.SetupOpen {
+		t.Fatal("setup should be open")
+	}
+	if result.SetupURL != "/setup?token=test+setup+token" {
+		t.Fatalf("setupUrl=%q", result.SetupURL)
+	}
+}
+
+func TestSetupStatusRPCClosesAfterSetup(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+	setupSessionForEventsTest(t, handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"auth.setupStatus","params":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp rpc.Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode rpc response: %v", err)
+	}
+	var result struct {
+		SetupOpen bool   `json:"setupOpen"`
+		SetupURL  string `json:"setupUrl"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode setup status result: %v", err)
+	}
+	if result.SetupOpen || result.SetupURL != "" {
+		t.Fatalf("result=%+v want closed without setup URL", result)
+	}
+}
+
+func TestHandleSetupFormRevealsMCPArtifacts(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	form := "token=test-setup-token&email=admin%40example.com&name=Admin&password=password123&confirmPassword=password123"
+	req := httptest.NewRequest(http.MethodPost, "http://0.0.0.0:7777/setup", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"Setup complete",
+		"ak_",
+		"http://127.0.0.1:7777/mcp?token=ak_",
+		".mcp.json",
+		"codex mcp add agen8 --url",
+		"claude mcp add --transport http --scope user agen8",
+		"agen8 skill install --harness codex",
+		"agen8.sessionToken",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("setup form response missing %q", want)
+		}
+	}
+}
+
+func TestMCPAcceptsBearerAuthorizationToken(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupReq.Header.Set("Accept", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setupResult struct {
+		APIKey struct {
+			Secret string `json:"secret"`
+		} `json:"apiKey"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	if setupResult.APIKey.Secret == "" {
+		t.Fatal("setup response missing api key secret")
+	}
+
+	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(initializeBody))
+	req.Header.Set("Authorization", "Bearer "+setupResult.APIKey.Secret)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mcp initialize status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

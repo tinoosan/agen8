@@ -54,6 +54,22 @@ type CreateAPIKeyResult struct {
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
+type APIKeyView struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Prefix    string     `json:"prefix"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	RevokedAt *time.Time `json:"revokedAt,omitempty"`
+	Active    bool       `json:"active"`
+}
+
+type ListAPIKeysParams struct{}
+
+type ListAPIKeysResult struct {
+	Keys []APIKeyView `json:"keys"`
+}
+
 type RevokeAPIKeyParams struct {
 	ID string `json:"id"`
 }

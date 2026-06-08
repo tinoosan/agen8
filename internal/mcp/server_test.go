@@ -64,3 +64,21 @@ func TestNewMCPHTTPServerUsesReadHeaderTimeout(t *testing.T) {
 		t.Fatalf("ReadHeaderTimeout=%s want %s", got, want)
 	}
 }
+
+func TestTokenFromRequestPrefersQueryToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/mcp?token=query-token", nil)
+	req.Header.Set("Authorization", "Bearer header-token")
+
+	if got := tokenFromRequest(req); got != "query-token" {
+		t.Fatalf("tokenFromRequest=%q want query-token", got)
+	}
+}
+
+func TestTokenFromRequestReadsBearerHeader(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req.Header.Set("Authorization", "bearer header-token")
+
+	if got := tokenFromRequest(req); got != "header-token" {
+		t.Fatalf("tokenFromRequest=%q want header-token", got)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
 	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
@@ -103,15 +104,49 @@ func (h *Handler) CreateAPIKey(ctx context.Context, p CreateAPIKeyParams) (Creat
 	}, nil
 }
 
+func (h *Handler) ListAPIKeys(ctx context.Context, _ ListAPIKeysParams) (ListAPIKeysResult, error) {
+	identity, err := h.identity(ctx)
+	if err != nil {
+		return ListAPIKeysResult{}, mapAuthError(err)
+	}
+	userID, err := user.NewID(identity.UserID)
+	if err != nil {
+		return ListAPIKeysResult{}, rpcError{code: -32602, message: "identity user id is required"}
+	}
+	keys, err := h.svc.ListAPIKeys(ctx, userID)
+	if err != nil {
+		return ListAPIKeysResult{}, mapAuthError(err)
+	}
+	now := time.Now().UTC()
+	views := make([]APIKeyView, 0, len(keys))
+	for _, key := range keys {
+		views = append(views, APIKeyView{
+			ID:        key.ID.String(),
+			Name:      key.Name,
+			Prefix:    key.Prefix,
+			CreatedAt: key.CreatedAt,
+			ExpiresAt: key.ExpiresAt,
+			RevokedAt: key.RevokedAt,
+			Active:    key.IsActive(now),
+		})
+	}
+	return ListAPIKeysResult{Keys: views}, nil
+}
+
 func (h *Handler) RevokeAPIKey(ctx context.Context, p RevokeAPIKeyParams) (RevokeAPIKeyResult, error) {
-	if _, err := h.identity(ctx); err != nil {
+	identity, err := h.identity(ctx)
+	if err != nil {
 		return RevokeAPIKeyResult{}, err
+	}
+	userID, err := user.NewID(identity.UserID)
+	if err != nil {
+		return RevokeAPIKeyResult{}, rpcError{code: -32602, message: "identity user id is required"}
 	}
 	id, err := apikey.NewID(p.ID)
 	if err != nil {
 		return RevokeAPIKeyResult{}, rpcError{code: -32602, message: "api key id is required"}
 	}
-	if err := h.svc.RevokeAPIKey(ctx, id); err != nil {
+	if err := h.svc.RevokeUserAPIKey(ctx, userID, id); err != nil {
 		return RevokeAPIKeyResult{}, mapAuthError(err)
 	}
 	return RevokeAPIKeyResult{Revoked: true}, nil

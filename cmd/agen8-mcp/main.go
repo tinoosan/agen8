@@ -19,7 +19,7 @@ import (
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "agen8-mcp: %v\n", err)
+		fmt.Fprintf(os.Stderr, "agen8: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -31,7 +31,7 @@ func run(args []string) error {
 	switch args[0] {
 	case "version", "--version", "-v":
 		info := buildinfo.Current()
-		fmt.Printf("agen8-mcp %s\ncommit: %s\n", info.Version, info.Commit)
+		fmt.Printf("agen8 %s\ncommit: %s\n", info.Version, info.Commit)
 		if info.BuildDate != "" {
 			fmt.Printf("built: %s\n", info.BuildDate)
 		}
@@ -45,7 +45,7 @@ func run(args []string) error {
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 	if len(args) < 2 || args[1] != "start" {
-		return fmt.Errorf("usage: agen8-mcp daemon start [--data-dir DIR] [--listener http] [--http-addr ADDR]")
+		return fmt.Errorf("usage: agen8 daemon start [--data-dir DIR] [--listener http] [--http-addr ADDR]")
 	}
 	return runDaemonStart(args[2:])
 }
@@ -57,14 +57,14 @@ func run(args []string) error {
 // stdout (see internal/claudehook).
 func runClaude(args []string) error {
 	if len(args) == 0 || args[0] != "hook" {
-		return fmt.Errorf("usage: agen8-mcp claude hook")
+		return fmt.Errorf("usage: agen8 claude hook")
 	}
 	return claudehook.Run(os.Stdin, os.Stdout, os.Stderr)
 }
 
 func runSkill(args []string) error {
 	if len(args) == 0 || args[0] != "install" {
-		return fmt.Errorf("usage: agen8-mcp skill install --harness codex|claude-cli [--home DIR]")
+		return fmt.Errorf("usage: agen8 skill install --harness codex|claude-cli [--home DIR]")
 	}
 	fs := flag.NewFlagSet("skill install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -81,7 +81,7 @@ func runSkill(args []string) error {
 		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	if strings.TrimSpace(harness) == "" {
-		return fmt.Errorf("usage: agen8-mcp skill install --harness codex|claude-cli [--home DIR]")
+		return fmt.Errorf("usage: agen8 skill install --harness codex|claude-cli [--home DIR]")
 	}
 	result, err := skillinstaller.Install(skillinstaller.Options{
 		Harness: skillinstaller.Harness(harness),
