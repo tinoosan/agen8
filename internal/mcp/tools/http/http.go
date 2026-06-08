@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	nethttp "net/http"
 	"net/url"
 	"strings"
@@ -45,6 +46,12 @@ type Result struct {
 	Structured any
 }
 
+type injectedHTTPCredential struct {
+	headerNames map[string]struct{}
+	queryKeys   map[string]struct{}
+	values      []string
+}
+
 type Handler struct {
 	client           *nethttp.Client
 	noRedirectClient *nethttp.Client
@@ -52,13 +59,23 @@ type Handler struct {
 	maxBytes         int
 }
 
+var lookupHostIPs = net.LookupIP
+
 func NewHandler() Handler {
+	checkRedirect := func(req *nethttp.Request, via []*nethttp.Request) error {
+		return validateRedirectTarget(req, via, nil)
+	}
+	transport := newValidatedHTTPTransport()
+
 	return Handler{
 		client: &nethttp.Client{
-			Timeout: defaultTimeout,
+			Timeout:       defaultTimeout,
+			Transport:     transport,
+			CheckRedirect: checkRedirect,
 		},
 		noRedirectClient: &nethttp.Client{
-			Timeout: defaultTimeout,
+			Timeout:   defaultTimeout,
+			Transport: transport,
 			CheckRedirect: func(*nethttp.Request, []*nethttp.Request) error {
 				return nethttp.ErrUseLastResponse
 			},
@@ -66,6 +83,39 @@ func NewHandler() Handler {
 		defaultMaxBytes: defaultHTTPMaxBytes,
 		maxBytes:        maxHTTPMaxBytes,
 	}
+}
+
+func newValidatedHTTPTransport() *nethttp.Transport {
+	transport, ok := nethttp.DefaultTransport.(*nethttp.Transport)
+	if !ok {
+		return &nethttp.Transport{DialContext: validatedDialContext(&net.Dialer{})}
+	}
+	t := transport.Clone()
+	t.DialContext = validatedDialContext(&net.Dialer{})
+	return t
+}
+
+func validatedDialContext(dialer *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	if dialer == nil {
+		dialer = &net.Dialer{}
+	}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if err := validateDialTarget(addr); err != nil {
+			return nil, err
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+}
+
+func validateDialTarget(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("http: invalid dial target %q: %w", addr, err)
+	}
+	if err := validateRequestHost(host); err != nil {
+		return fmt.Errorf("http: unsafe dial target host %q: %w", host, err)
+	}
+	return nil
 }
 
 func (h Handler) Schema() json.RawMessage {
@@ -114,6 +164,9 @@ func (h Handler) run(ctx context.Context, call CallContext, input requestInput) 
 	if strings.TrimSpace(parsedURL.Host) == "" {
 		return Result{}, fmt.Errorf("http: url host is required")
 	}
+	if err := validateRequestHost(parsedURL.Hostname()); err != nil {
+		return Result{}, fmt.Errorf("http: unsafe target host %q: %w", strings.TrimSpace(parsedURL.Hostname()), err)
+	}
 	if len(input.Params) > 0 {
 		queryValues := parsedURL.Query()
 		for key, value := range input.Params {
@@ -125,7 +178,7 @@ func (h Handler) run(ctx context.Context, call CallContext, input requestInput) 
 	headers := cloneHeaderMap(input.Headers)
 	requestURL := parsedURL.String()
 	safeInputURL := sanitizeURLString(requestURL)
-	injected, injectedValues, err := h.injectCredential(ctx, call, parsedURL.Hostname(), &requestURL, headers)
+	injected, injectedValues, injectedCred, err := h.injectCredential(ctx, call, parsedURL.Hostname(), &requestURL, headers)
 	if err != nil {
 		return Result{}, err
 	}
@@ -167,6 +220,8 @@ func (h Handler) run(ctx context.Context, call CallContext, input requestInput) 
 	client := h.client
 	if !input.FollowRedirects {
 		client = h.noRedirectClient
+	} else if injected {
+		client = withInjectedRedirectScrubber(client, injectedCred)
 	}
 	httpResp, err := client.Do(httpReq)
 	if err != nil {
@@ -349,36 +404,41 @@ func mustHTTPSchema() json.RawMessage {
 	return body
 }
 
-func (h Handler) injectCredential(ctx context.Context, call CallContext, host string, requestURL *string, headers map[string]string) (bool, []string, error) {
+func (h Handler) injectCredential(ctx context.Context, call CallContext, host string, requestURL *string, headers map[string]string) (bool, []string, *injectedHTTPCredential, error) {
 	record, found, err := resolveCredentialRecord(ctx, call, host)
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 	if !found {
-		return false, nil, nil
+		return false, nil, nil, nil
 	}
+	injected := &injectedHTTPCredential{headerNames: map[string]struct{}{}, queryKeys: map[string]struct{}{}, values: nil}
 	if len(record.Headers) > 0 {
 		injectedValues := make([]string, 0, len(record.Headers))
 		for key, value := range record.Headers {
 			headerName := strings.TrimSpace(key)
 			headerValue := strings.TrimSpace(value)
 			if headerName == "" || headerValue == "" {
-				return false, nil, fmt.Errorf("http: multi-header credential requires header names and values")
+				return false, nil, nil, fmt.Errorf("http: multi-header credential requires header names and values")
 			}
 			headers[headerName] = headerValue
 			injectedValues = append(injectedValues, headerValue)
+			injected.headerNames[headerName] = struct{}{}
 		}
-		return true, injectedValues, nil
+		injected.values = injectedValues
+		return true, injectedValues, injected, nil
 	}
 	switch record.Injection {
 	case credentialdomain.InjectionBearer:
 		token := credentialValue(record.Values, "value", "token", "api_key", "apikey", "key", "secret")
 		if token == "" {
-			return false, nil, fmt.Errorf("http: bearer credential requires value")
+			return false, nil, nil, fmt.Errorf("http: bearer credential requires value")
 		}
 		value := "Bearer " + token
 		headers["Authorization"] = value
-		return true, []string{token, value}, nil
+		injected.headerNames["Authorization"] = struct{}{}
+		injected.values = []string{token, value}
+		return true, injected.values, injected, nil
 	case credentialdomain.InjectionHeader:
 		headerName := strings.TrimSpace(record.FieldName)
 		if headerName == "" {
@@ -386,10 +446,12 @@ func (h Handler) injectCredential(ctx context.Context, call CallContext, host st
 		}
 		value := credentialValue(record.Values, "value", "token", "api_key", "apikey", "key", "secret")
 		if headerName == "" || value == "" {
-			return false, nil, fmt.Errorf("http: header credential requires fieldName and value")
+			return false, nil, nil, fmt.Errorf("http: header credential requires fieldName and value")
 		}
 		headers[headerName] = value
-		return true, []string{value}, nil
+		injected.headerNames[headerName] = struct{}{}
+		injected.values = []string{value}
+		return true, injected.values, injected, nil
 	case credentialdomain.InjectionQuery:
 		paramName := strings.TrimSpace(record.FieldName)
 		if paramName == "" {
@@ -397,22 +459,106 @@ func (h Handler) injectCredential(ctx context.Context, call CallContext, host st
 		}
 		value := credentialValue(record.Values, "value", "token", "api_key", "apikey", "key", "secret")
 		if paramName == "" {
-			return false, nil, fmt.Errorf("http: query credential requires fieldName")
+			return false, nil, nil, fmt.Errorf("http: query credential requires fieldName")
 		}
 		if value == "" {
-			return false, nil, fmt.Errorf("http: query credential requires value")
+			return false, nil, nil, fmt.Errorf("http: query credential requires value")
 		}
 		parsedURL, err := url.Parse(strings.TrimSpace(*requestURL))
 		if err != nil {
-			return false, nil, fmt.Errorf("http: credential query injection: %w", err)
+			return false, nil, nil, fmt.Errorf("http: credential query injection: %w", err)
 		}
 		queryValues := parsedURL.Query()
 		queryValues.Set(paramName, value)
 		parsedURL.RawQuery = queryValues.Encode()
 		*requestURL = parsedURL.String()
-		return true, []string{value}, nil
+		injected.queryKeys[paramName] = struct{}{}
+		injected.values = []string{value}
+		return true, injected.values, injected, nil
 	default:
-		return false, nil, fmt.Errorf("http: unsupported credential injection %q", record.Injection)
+		return false, nil, nil, fmt.Errorf("http: unsupported credential injection %q", record.Injection)
+	}
+}
+
+func withInjectedRedirectScrubber(client *nethttp.Client, injected *injectedHTTPCredential) *nethttp.Client {
+	if client == nil || injected == nil || len(injected.values) == 0 {
+		return client
+	}
+	dup := *client
+	dup.CheckRedirect = func(req *nethttp.Request, via []*nethttp.Request) error {
+		return validateRedirectTarget(req, via, injected)
+	}
+	return &dup
+}
+
+func validateRedirectTarget(req *nethttp.Request, via []*nethttp.Request, injected *injectedHTTPCredential) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("http: too many redirects")
+	}
+	if req == nil || req.URL == nil {
+		return nil
+	}
+	host := strings.TrimSpace(req.URL.Hostname())
+	if host == "" {
+		return nil
+	}
+	if err := validateRequestHost(host); err != nil {
+		return fmt.Errorf("http: unsafe redirect target host %q: %w", host, err)
+	}
+	if injected == nil {
+		return nil
+	}
+	return scrubRedirectCredentials(req, via, injected)
+}
+
+func scrubRedirectCredentials(req *nethttp.Request, via []*nethttp.Request, injected *injectedHTTPCredential) error {
+	if injected == nil {
+		return nil
+	}
+	if len(via) == 0 {
+		return nil
+	}
+	previous := via[len(via)-1]
+	if previous.URL == nil || req.URL == nil {
+		return nil
+	}
+	if !sameRedirectAuthority(previous.URL, req.URL) {
+		scrubHeaderCredentials(req.Header, injected)
+		removeInjectedQueryParams(req, injected)
+	}
+	return nil
+}
+
+func sameRedirectAuthority(a, b *url.URL) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
+func scrubHeaderCredentials(headers nethttp.Header, injected *injectedHTTPCredential) {
+	if headers == nil || injected == nil || len(injected.headerNames) == 0 {
+		return
+	}
+	for key := range injected.headerNames {
+		headers.Del(key)
+	}
+}
+
+func removeInjectedQueryParams(req *nethttp.Request, injected *injectedHTTPCredential) {
+	if req == nil || req.URL == nil || injected == nil || len(injected.queryKeys) == 0 {
+		return
+	}
+	query := req.URL.Query()
+	changed := false
+	for key := range injected.queryKeys {
+		if query.Get(key) != "" {
+			changed = true
+		}
+		query.Del(key)
+	}
+	if changed {
+		req.URL.RawQuery = query.Encode()
 	}
 }
 
@@ -469,6 +615,72 @@ func sanitizeURLString(raw string) string {
 	}
 	parsedURL.User = nil
 	return parsedURL.String()
+}
+
+func validateRequestHost(host string) error {
+	// validateRequestHost is the SSRF boundary for outbound HTTP targets.
+	// It rejects ambiguous host forms and any host that resolves to a non
+	// global endpoint (loopback/private/link-local/multicast/reserved).
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "" {
+		return fmt.Errorf("host is required")
+	}
+	// Host parsing in net/url is intentionally strict for percent-encoded forms.
+	// We only support plain host names and literal IPs here, so any `%`-encoding
+	// is rejected as an unsupported and ambiguous input form.
+	if strings.Contains(host, "%") {
+		return fmt.Errorf("host contains percent-encoding, which is not supported")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return validateTargetIP(host, ip)
+	}
+	ips, err := lookupHostIPs(host)
+	if err != nil {
+		return fmt.Errorf("resolve failed: %w", err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("host has no IP records")
+	}
+	return validateResolvedIPs(host, ips)
+}
+
+func validateResolvedIPs(host string, ips []net.IP) error {
+	for _, ip := range ips {
+		if err := validateTargetIP(host, ip); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTargetIP(host string, ip net.IP) error {
+	if ip == nil {
+		return fmt.Errorf("%s has an invalid resolved IP", host)
+	}
+	if ip.IsUnspecified() {
+		return fmt.Errorf("%s resolves to unspecified IP", host)
+	}
+	if ip.IsLoopback() {
+		return fmt.Errorf("%s resolves to loopback IP %q", host, ip)
+	}
+	if ip.IsPrivate() {
+		return fmt.Errorf("%s resolves to private IP %q", host, ip)
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return fmt.Errorf("%s resolves to link-local IP %q", host, ip)
+	}
+	if ip.IsMulticast() || ip.IsInterfaceLocalMulticast() {
+		return fmt.Errorf("%s resolves to multicast IP %q", host, ip)
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 0 {
+			return fmt.Errorf("%s resolves to reserved IPv4 %q", host, ip)
+		}
+	}
+	if !ip.IsGlobalUnicast() {
+		return fmt.Errorf("%s resolves to non-global IP %q", host, ip)
+	}
+	return nil
 }
 
 func credentialValue(values map[string]string, keys ...string) string {
@@ -539,12 +751,7 @@ func redactStructured(value map[string]any, injectedValues []string) {
 		return
 	}
 	for key, item := range value {
-		switch typed := item.(type) {
-		case string:
-			value[key] = redactString(typed, injectedValues)
-		case map[string][]string:
-			value[key] = redactHeaderValues(typed, injectedValues)
-		}
+		value[key] = redactValue(item, injectedValues)
 	}
 }
 
@@ -563,15 +770,85 @@ func redactHeaderValues(headers map[string][]string, injectedValues []string) ma
 	return out
 }
 
+func redactValue(value any, injectedValues []string) any {
+	switch typed := value.(type) {
+	case string:
+		return redactString(typed, injectedValues)
+	case map[string][]string:
+		return redactHeaderValues(typed, injectedValues)
+	case map[string]any:
+		redactStructured(typed, injectedValues)
+		return typed
+	case map[string]string:
+		out := make(map[string]string, len(typed))
+		for key, entry := range typed {
+			out[key] = redactString(entry, injectedValues)
+		}
+		return out
+	case []string:
+		if len(typed) == 0 {
+			return typed
+		}
+		out := make([]string, 0, len(typed))
+		for _, entry := range typed {
+			out = append(out, redactString(entry, injectedValues))
+		}
+		return out
+	case []any:
+		if len(typed) == 0 {
+			return typed
+		}
+		out := make([]any, 0, len(typed))
+		for _, entry := range typed {
+			out = append(out, redactValue(entry, injectedValues))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
 func redactString(value string, injectedValues []string) string {
 	if value == "" || len(injectedValues) == 0 {
 		return value
 	}
 	redacted := value
 	for _, secret := range dedupeValues(injectedValues) {
-		redacted = strings.ReplaceAll(redacted, secret, "<redacted>")
+		for _, variant := range redactionCandidates(secret) {
+			redacted = strings.ReplaceAll(redacted, variant, "<redacted>")
+		}
 	}
 	return redacted
+}
+
+func redactionCandidates(secret string) []string {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return nil
+	}
+	out := make([]string, 0, 6)
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, exists := seen[value]; exists {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+
+	add(secret)
+	add(url.QueryEscape(secret))
+	add(url.PathEscape(secret))
+	add(strings.ToLower(url.QueryEscape(secret)))
+	add(strings.ToUpper(url.QueryEscape(secret)))
+	if unesc, err := url.QueryUnescape(secret); err == nil {
+		add(unesc)
+	}
+	return out
 }
 
 func dedupeValues(values []string) []string {

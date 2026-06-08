@@ -147,6 +147,28 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
   <tr><td><code>timeoutMs</code></td><td>Optional per-request timeout. Zero uses the package default client timeout.</td></tr>
 </table>
 
+<h2>Outbound target validation</h2>
+
+<p>The handler performs strict target validation before request execution to limit SSRF risk:</p>
+
+<ul>
+  <li>Hostnames are normalized and must be non-empty.</li>
+  <li>Percent-encoded hostnames are rejected as unsupported/ambiguous inputs.</li>
+  <li>The host is resolved via DNS (or parsed directly for literal IPs), then every resolved address is checked.</li>
+  <li>Rejected classes include:</li>
+</ul>
+
+<ul>
+  <li>unspecified IPs</li>
+  <li>loopback IPs (<code>127.0.0.1</code>, <code>::1</code>, local aliases)</li>
+  <li>private IPs</li>
+  <li>link-local IPs</li>
+  <li>multicast IPs</li>
+  <li>non-global or reserved IPv4 ranges</li>
+</ul>
+
+<p>When a host is rejected, the tool returns a hard error with the reason rather than silently proceeding.</p>
+
 <h2>Credential lookup</h2>
 
 <p>Credentials are resolved by request host. The handler checks the project-scoped credential first, then the global credential. Anonymous HTTP remains valid when no credential exists; malformed credential records fail loudly.</p>
@@ -178,6 +200,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
   <tr><td>Binary response bodies are omitted explicitly.</td><td>Agents see <code>bodyOmitted=true</code> and a reason, not corrupted text.</td></tr>
   <tr><td>Credentials are never echoed.</td><td>Result metadata may say whether credentials were injected, but not their values.</td></tr>
   <tr><td>Credential lookup failures fail loudly except not-found.</td><td>Missing credentials means anonymous request; broken credential storage means a real error.</td></tr>
+  <tr><td>Unsafe outbound targets are rejected before send.</td><td>Host validation blocks loopback/private/link-local/unspecified/multicast/non-global targets at validation time to constrain egress.</td></tr>
 </table>
 
 <h2>Code layout</h2>
