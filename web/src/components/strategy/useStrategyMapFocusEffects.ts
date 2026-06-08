@@ -10,7 +10,7 @@ import type { SetCenterFn } from './strategyMapControls'
  * Two concerns that both revolve around focus:
  *
  *  1. Deep-link focus — read a ?focus= query param on mount (and watch the
- *     store's pendingFocusNodeId set by the command palette), then select +
+ *     store's pendingFocusNodeId set by map-search entrypoints), then select +
  *     center that node once it appears in the graph.
  *  2. Store mirroring — push React-owned render state into the Zustand store
  *     so node/edge components can subscribe to individual fields via selectors
@@ -66,7 +66,7 @@ export function useStrategyMapFocusEffects({
     }
   }, [])
 
-  // Watch both the ref (URL param on mount) and the store (command palette while on map)
+  // Watch both the ref (URL param on mount) and the store (map search deep-link/entrypoint while on map)
   const storePendingFocus = useStrategyMapStore((s) => s.pendingFocusNodeId)
   // Tracks the target we've already tried to reveal by enabling the archived
   // view, so a genuinely-missing node enables archived at most once instead of

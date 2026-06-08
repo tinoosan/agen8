@@ -26,7 +26,7 @@
       <li><a href="#pin-lifecycle">Pin lifecycle and persistence</a></li>
       <li><a href="#cache-semantics">Cache semantics</a></li>
       <li><a href="#mission-list-surface">Mission list surface behavior</a></li>
-      <li><a href="#palette-search">Command palette search behavior</a></li>
+      <li><a href="#palette-search">Search ranking behavior</a></li>
       <li><a href="#strategy-map-search">Strategy Map mobile search behavior</a></li>
       <li><a href="#strategy-map-interaction">Strategy Map interaction model</a></li>
       <li><a href="#mission-lifecycle">Mission lifecycle and delete semantics</a></li>
@@ -64,7 +64,7 @@
     <li>Pin affordance remains mission-centric here; new pinnable node types flow through the same hook contract.</li>
   </ul>
 
-  <h2 id="palette-search">4. Command palette search behavior</h2>
+  <h2 id="palette-search">4. Search ranking behavior</h2>
   <p>Search ranking uses non-invasive pin boosting:</p>
   <ul>
     <li><code>pinned keyword</code> is injected into command keywords for pinned mission rows only.</li>
@@ -74,7 +74,8 @@
   </ul>
   <p>Implementation reference:</p>
   <ul>
-    <li><a href="../web/src/components/CommandPalette.tsx">web/src/components/CommandPalette.tsx</a></li>
+    <li><a href="../docs/architecture/pin-service.html">Pin service ranking contract</a></li>
+    <li><a href="../internal/services/graph/app/search.go">internal/services/graph/app/search.go</a></li>
   </ul>
 
   <h2 id="strategy-map-search">5. Strategy Map search behavior (desktop + mobile)</h2>
@@ -82,7 +83,7 @@
   <ul>
     <li><strong>Keyboard</strong>: <code>/</code> focuses/open the node-search dialog inside <code>StrategyMapSearch</code>.</li>
     <li><strong>Mobile top bar</strong>: tapping the app top-bar search icon while <code>activeView === 'strategy'</code> opens the same strategy-map node-search dialog via global store state.</li>
-    <li>For all other views, the top-bar search icon opens the command palette.</li>
+    <li>For non-map and non-dashboard views, the top-bar search icon is intentionally hidden and does not open any alternate search surface.</li>
     <li>Open state is stored in <code>strategySearchOpen</code> so it can be controlled from components outside the page tree.</li>
     <li>The map page does not force-reset this flag on unmount; the shared modal close path clears it on actual close so stale-open state is avoided without disrupting StrictMode mount/unmount cycles.</li>
   </ul>

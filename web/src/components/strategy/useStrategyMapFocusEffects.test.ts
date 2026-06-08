@@ -6,9 +6,9 @@ import { useStrategyMapStore } from './strategyMapStore'
 
 /* ── Fixtures ──────────────────────────────────────────────────────────────
  * These tests pin the archived-retry branch added so that deep-linking
- * (?focus= / command palette) to an archived mission or KR — which the map
- * hides by default — auto-enables the archived view exactly once, while a
- * deep link to a not-yet-rendered task/decision leaf never toggles archived.
+ * (?focus=) to an archived mission or KR — which the map hides by default —
+ * auto-enables the archived view exactly once, while a deep link to a not-yet-rendered
+ * task/decision leaf never toggles archived.
  */
 function missionNode(id: string): Node {
   return { id, type: 'mission', position: { x: 0, y: 0 }, data: {} }

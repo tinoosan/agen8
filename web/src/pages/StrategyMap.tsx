@@ -221,7 +221,7 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
     setSelectedNodeId,
   })
 
-  // Deep-link focus (?focus= / command palette) + mirror render state into the
+  // Deep-link focus (?focus=) + mirror render state into the
   // Zustand store so node/edge components can subscribe to individual fields.
   useStrategyMapFocusEffects({
     displayNodes,

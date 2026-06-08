@@ -210,7 +210,7 @@
     </g>
   </svg>
 
-  <p>Pinned status is a primary sort key in the graph results: pinned hits surface ahead of unpinned ones while relevance and recency still order within each group. The dependency is optional and degrades safely — if the pin lookup is absent or errors, the graph service treats the pinned set as empty and ranks purely by relevance. A pin boost re-ranks the candidate set a search already matched; it does not resurrect a node the query did not match. The frontend applies the same idea in the command palette (see the frontend behavior doc).</p>
+  <p>Pinned status is a primary sort key in the graph results: pinned hits surface ahead of unpinned ones while relevance and recency still order within each group. The dependency is optional and degrades safely — if the pin lookup is absent or errors, the graph service treats the pinned set as empty and ranks purely by relevance. A pin boost re-ranks the candidate set a search already matched; it does not resurrect a node the query did not match. The frontend applies the same idea in node-ranking surfaces, including the strategy-map search UI.</p>
 
   <h2 id="invariants">8. Invariants</h2>
 

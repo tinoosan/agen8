@@ -34,7 +34,7 @@ export interface StrategyMapStoreState {
   clusterNodeIds: ReadonlySet<string> | null
   directEdgeIds: ReadonlySet<string> | null
   clusterEdgeIds: ReadonlySet<string> | null
-  /** Set by external surfaces (command palette) to request focus on a node. */
+  /** Set by external surfaces (deep-link/search entrypoints) to request focus on a node. */
   pendingFocusNodeId: string | null
   /** Active smart filter preset (in_motion/blocked/done/decisions/trace). */
   activeFilter: FilterPreset | null

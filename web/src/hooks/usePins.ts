@@ -84,9 +84,9 @@ export function usePins(projectId: string | null): UsePinsResult {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(key, ctx.prev)
     },
-    // Invalidate the shared pin root to force every pin consumer to re-query after a mutation.
-    // This is deliberately broad (`pin.list`) so Dashboard rows and command palette both
-    // absorb write outcomes from the same write-behind source of truth.
+  // Invalidate the shared pin root to force every pin consumer to re-query after a mutation.
+  // This is deliberately broad (`pin.list`) so Dashboard rows and map-search surfaces
+  // both absorb write outcomes from the same write-behind source of truth.
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: qk.pinsAll })
     },
