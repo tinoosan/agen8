@@ -9,7 +9,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Agen8",
-    "shortDescription": "Connect Codex to local Agen8 work memory.",
+    "shortDescription": "Connect Codex to Agen8 work memory.",
     "longDescription": "Agen8 gives Codex a durable local work-context layer for projects, missions, key results, tasks, decisions, and graph-backed context.",
     "developerName": "Agen8",
     "category": "Productivity",
