@@ -93,6 +93,10 @@ func (t Transport) ListDir(ctx context.Context, location locationdomain.Location
 func (t Transport) StatFile(ctx context.Context, location locationdomain.Location, path string) (filedomain.Info, error) {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		path, err := validateLocalPath(path)
+		if err != nil {
+			return filedomain.Info{}, err
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return filedomain.Info{}, err
@@ -108,6 +112,10 @@ func (t Transport) StatFile(ctx context.Context, location locationdomain.Locatio
 func (t Transport) ListFiles(ctx context.Context, location locationdomain.Location, path string) ([]filedomain.Entry, error) {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		path, err := validateLocalPath(path)
+		if err != nil {
+			return nil, err
+		}
 		return listLocalFiles(path)
 	case locationdomain.KindSSH:
 		return t.listSSHFiles(ctx, location, path)
@@ -119,6 +127,10 @@ func (t Transport) ListFiles(ctx context.Context, location locationdomain.Locati
 func (t Transport) ReadFile(ctx context.Context, location locationdomain.Location, path string, maxBytes int64) (filedomain.Content, error) {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		path, err := validateLocalPath(path)
+		if err != nil {
+			return filedomain.Content{}, err
+		}
 		return readLocalFile(path, maxBytes)
 	case locationdomain.KindSSH:
 		return t.readSSHFile(ctx, location, path, maxBytes)
@@ -130,6 +142,10 @@ func (t Transport) ReadFile(ctx context.Context, location locationdomain.Locatio
 func (t Transport) CreateDir(ctx context.Context, location locationdomain.Location, path string) error {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		path, err := validateLocalPath(path)
+		if err != nil {
+			return err
+		}
 		return os.MkdirAll(path, 0o755)
 	case locationdomain.KindSSH:
 		return t.createSSHDir(ctx, location, path)
@@ -141,6 +157,10 @@ func (t Transport) CreateDir(ctx context.Context, location locationdomain.Locati
 func (t Transport) CreateFile(ctx context.Context, location locationdomain.Location, path string) error {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		path, err := validateLocalPath(path)
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
@@ -159,6 +179,14 @@ func (t Transport) CreateFile(ctx context.Context, location locationdomain.Locat
 func (t Transport) MoveFile(ctx context.Context, location locationdomain.Location, source string, destination string) error {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		source, err := validateLocalPath(source)
+		if err != nil {
+			return err
+		}
+		destination, err := validateLocalPath(destination)
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 			return err
 		}
@@ -173,6 +201,14 @@ func (t Transport) MoveFile(ctx context.Context, location locationdomain.Locatio
 func (t Transport) CopyFile(ctx context.Context, location locationdomain.Location, source string, destination string) error {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		source, err := validateLocalPath(source)
+		if err != nil {
+			return err
+		}
+		destination, err := validateLocalPath(destination)
+		if err != nil {
+			return err
+		}
 		info, err := os.Stat(source)
 		if err != nil {
 			return err
@@ -188,6 +224,10 @@ func (t Transport) CopyFile(ctx context.Context, location locationdomain.Locatio
 func (t Transport) DeleteFile(ctx context.Context, location locationdomain.Location, path string) error {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		path, err := validateLocalPath(path)
+		if err != nil {
+			return err
+		}
 		return os.RemoveAll(path)
 	case locationdomain.KindSSH:
 		return t.deleteSSHFile(ctx, location, path)
@@ -199,6 +239,10 @@ func (t Transport) DeleteFile(ctx context.Context, location locationdomain.Locat
 func (t Transport) WriteFile(ctx context.Context, location locationdomain.Location, path string, contents []byte) error {
 	switch location.Kind() {
 	case locationdomain.KindLocal:
+		path, err := validateLocalPath(path)
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
@@ -481,20 +525,13 @@ func (t Transport) writeSSHFile(ctx context.Context, location locationdomain.Loc
 }
 
 func listLocalDir(path string) ([]locationapp.DirEntry, error) {
-	cleanPath := strings.TrimSpace(path)
-	if cleanPath == "" {
-		return nil, fmt.Errorf("path is required")
-	}
-	if cleanPath == "~" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve home dir: %w", err)
-		}
-		cleanPath = home
-	}
-	entries, err := os.ReadDir(cleanPath)
+	path, err := validateLocalPath(path)
 	if err != nil {
-		return nil, fmt.Errorf("list directory %s: %w", cleanPath, err)
+		return nil, err
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("list directory %s: %w", path, err)
 	}
 	out := make([]locationapp.DirEntry, 0, len(entries))
 	for _, entry := range entries {
@@ -504,7 +541,7 @@ func listLocalDir(path string) ([]locationapp.DirEntry, error) {
 		}
 		out = append(out, locationapp.DirEntry{
 			Name: entry.Name(),
-			Path: filepath.Join(cleanPath, entry.Name()),
+			Path: filepath.Join(path, entry.Name()),
 			Type: dirEntryType(info),
 			Size: info.Size(),
 		})
@@ -514,11 +551,11 @@ func listLocalDir(path string) ([]locationapp.DirEntry, error) {
 }
 
 func listLocalFiles(path string) ([]filedomain.Entry, error) {
-	cleanPath := strings.TrimSpace(path)
-	if cleanPath == "" {
-		return nil, fmt.Errorf("path is required")
+	path, err := validateLocalPath(path)
+	if err != nil {
+		return nil, err
 	}
-	items, err := os.ReadDir(cleanPath)
+	items, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
@@ -535,6 +572,10 @@ func listLocalFiles(path string) ([]filedomain.Entry, error) {
 }
 
 func readLocalFile(path string, maxBytes int64) (filedomain.Content, error) {
+	path, err := validateLocalPath(path)
+	if err != nil {
+		return filedomain.Content{}, err
+	}
 	if maxBytes <= 0 {
 		return filedomain.Content{}, fmt.Errorf("maxBytes is required")
 	}
@@ -559,6 +600,14 @@ func readLocalFile(path string, maxBytes int64) (filedomain.Content, error) {
 }
 
 func copyLocalPath(src string, dst string, info os.FileInfo) error {
+	src, err := validateLocalPath(src)
+	if err != nil {
+		return err
+	}
+	dst, err = validateLocalPath(dst)
+	if err != nil {
+		return err
+	}
 	if info.IsDir() {
 		return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
@@ -857,6 +906,42 @@ func localProbeFailure(codex bool) locationdomain.FailureCode {
 		return ""
 	}
 	return locationdomain.FailureCodeCodexMissing
+}
+
+func validateLocalPath(path string) (string, error) {
+	// validateLocalPath enforces a conservative file-system contract for local
+	// location operations. It rejects null-bytes and traversal-style segments,
+	// requires absolute paths, and resolves home shorthand before clean.
+	// This keeps all local filesystem operations deterministic and bounded.
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if strings.Contains(trimmed, "\x00") {
+		return "", fmt.Errorf("invalid path")
+	}
+	for _, segment := range strings.Split(filepath.ToSlash(trimmed), "/") {
+		if segment == ".." {
+			return "", fmt.Errorf("path traversal is not allowed")
+		}
+	}
+	if trimmed == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home dir: %w", err)
+		}
+		trimmed = home
+	}
+	clean := filepath.Clean(trimmed)
+	if !filepath.IsAbs(clean) {
+		return "", fmt.Errorf("path must be absolute")
+	}
+	for _, segment := range strings.Split(filepath.ToSlash(clean), "/") {
+		if segment == ".." {
+			return "", fmt.Errorf("path traversal is not allowed")
+		}
+	}
+	return clean, nil
 }
 
 func cleanPath(path string) string {

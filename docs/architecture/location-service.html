@@ -123,6 +123,8 @@
   <h2 id="filesystem">4. Filesystem contract</h2>
   <p>Filesystem calls are location-scoped. Clients send a location id plus a path or a project-scoped virtual path. Local locations read through the daemon filesystem. SSH locations read through the SSH/SFTP transport using the referenced credential. The service normalizes paths and returns structured entries, not shell output. File previews are owned by the file service; location only answers discovery and addressability questions.</p>
 
+  <p>Local path inputs are validated before every filesystem operation. Path strings must be absolute after normalization, must not contain null bytes, and may use <code>~</code> to resolve to the daemon home directory only. Relative inputs and traversal-looking segments (such as <code>..</code>) are rejected so local operations remain bounded and predictable.</p>
+
   <table>
     <thead><tr><th>Operation</th><th>Purpose</th><th>Boundary</th></tr></thead>
     <tbody>
@@ -148,6 +150,7 @@
       <tr><td>Location browsing is not harness execution.</td><td>Location service</td><td>Agen8 remains the context layer, not a replacement harness UI.</td></tr>
       <tr><td>Secrets are referenced, not stored on locations.</td><td>Credential service</td><td>Location records stay safe to display and export.</td></tr>
       <tr><td>Remote support must fail loudly when not ready.</td><td>Location service</td><td>Work should never silently run against the daemon checkout or the wrong machine.</td></tr>
+      <tr><td>Local filesystem inputs are validated before execution.</td><td>Location service</td><td>Null-byte, traversal, and non-absolute path classes are rejected before operation.</td></tr>
     </tbody>
   </table>
 </div>
