@@ -584,6 +584,9 @@ func TestCreateKeyResultPublishesCreatedEventAfterPersistence(t *testing.T) {
 		"status":          string(got.Status),
 		"measurementType": string(got.MeasurementType),
 		"progressPercent": "0",
+		// Regression guard: KR events must carry projectId (resolved from the
+		// mission) or the SSE fan-out drops them — ef824e74 removed this.
+		"projectId": "project-1",
 	} {
 		if event.Data[key] != want {
 			t.Fatalf("event Data[%q]=%q want %q", key, event.Data[key], want)

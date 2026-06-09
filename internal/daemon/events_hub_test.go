@@ -101,6 +101,31 @@ func TestBuildNotificationsCarryTypeAndProject(t *testing.T) {
 		}
 	})
 
+	t.Run("kr record carries projectId from Data", func(t *testing.T) {
+		payload, _ := json.Marshal(types.EventRecord{
+			Type: "kr.progress_updated",
+			Data: map[string]string{"projectId": "proj-1", "missionId": "mission-7", "keyResultId": "kr-3", "progressPercent": "85"},
+		})
+		project, notif, err := h.buildRecordNotification(payload)
+		if err != nil || project != "proj-1" {
+			t.Fatalf("project=%q err=%v", project, err)
+		}
+		event := decodeNotification(t, notif)
+		if event["type"] != "kr.progress_updated" || event["keyResultId"] != "kr-3" {
+			t.Fatalf("event = %v", event)
+		}
+	})
+
+	t.Run("record without projectId errors", func(t *testing.T) {
+		payload, _ := json.Marshal(types.EventRecord{
+			Type: "kr.progress_updated",
+			Data: map[string]string{"missionId": "mission-7", "keyResultId": "kr-3"},
+		})
+		if _, _, err := h.buildRecordNotification(payload); err == nil {
+			t.Fatal("expected error for record missing projectId")
+		}
+	})
+
 	t.Run("malformed payload errors", func(t *testing.T) {
 		if _, _, err := h.buildTaskNotification([]byte("{not json")); err == nil {
 			t.Fatal("expected decode error")
@@ -157,6 +182,50 @@ func TestHubFansOutMultipleTopics(t *testing.T) {
 	}
 	if !got["decision.logged"] || !got["mission.activated"] {
 		t.Fatalf("missing events, got %v", got)
+	}
+}
+
+// TestHubDropsPoisonEventWithoutBlocking guards against the redelivery loop:
+// a build failure (here, a KR record missing projectId) must be acked and
+// dropped, not nacked. If it were nacked, the in-memory bus would redeliver the
+// same poison message forever on this topic's consumer and the later good event
+// would never arrive.
+func TestHubDropsPoisonEventWithoutBlocking(t *testing.T) {
+	bus := eventbus.New(nil)
+	t.Cleanup(func() { _ = bus.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := newEventsHub(bus, nil)
+	go func() { _ = hub.Run(ctx) }()
+
+	select {
+	case <-hub.Running():
+	case <-time.After(2 * time.Second):
+		t.Fatal("hub did not become ready")
+	}
+
+	events, unregister := hub.Register("proj-1")
+	defer unregister()
+
+	// Poison: a KR record with no projectId — build() fails on it.
+	if err := bus.Publish(eventbus.TopicKRProgress, types.EventRecord{Type: "kr.progress_updated", Data: map[string]string{"keyResultId": "kr-poison"}}); err != nil {
+		t.Fatalf("publish poison: %v", err)
+	}
+	// Good: a KR record on the SAME topic that must still get through.
+	if err := bus.Publish(eventbus.TopicKRProgress, types.EventRecord{Type: "kr.progress_updated", Data: map[string]string{"projectId": "proj-1", "keyResultId": "kr-good"}}); err != nil {
+		t.Fatalf("publish good: %v", err)
+	}
+
+	select {
+	case payload := <-events:
+		event := decodeNotification(t, payload)
+		if event["keyResultId"] != "kr-good" {
+			t.Fatalf("unexpected event: %v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("good event never arrived — poison event likely blocked the topic (nack loop)")
 	}
 }
 
