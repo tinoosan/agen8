@@ -368,6 +368,71 @@ func (s *sqlStore) UpdateLinkToken(ctx context.Context, record linktoken.LinkTok
 	return requireAffected(result, "link token")
 }
 
+func (s *sqlStore) ListLinkTokens(ctx context.Context, filter linktoken.Filter) ([]linktoken.LinkToken, error) {
+	query := `
+		SELECT link_token_id, user_id, project_id, workspace_id, label, prefix, token_hash, expires_at, revoked_at, created_at
+		FROM auth_link_tokens
+	`
+	var conds []string
+	var args []any
+	if pid := strings.TrimSpace(filter.ProjectID); pid != "" {
+		conds = append(conds, "project_id = ?")
+		args = append(args, pid)
+	}
+	if uid := strings.TrimSpace(filter.UserID); uid != "" {
+		conds = append(conds, "user_id = ?")
+		args = append(args, uid)
+	}
+	if len(conds) > 0 {
+		query += " WHERE " + strings.Join(conds, " AND ")
+	}
+	// Newest first: the link dialog wants the most recently minted token at the
+	// top. link_token_id is a stable tiebreaker so equal timestamps don't reorder
+	// between reads.
+	query += " ORDER BY created_at DESC, link_token_id DESC"
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+		if filter.Offset > 0 {
+			query += " OFFSET ?"
+			args = append(args, filter.Offset)
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, s.rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list link tokens: %w", err)
+	}
+	defer rows.Close()
+	var out []linktoken.LinkToken
+	for rows.Next() {
+		var rawID, rawUserID, projectID, workspaceID, label, prefix, tokenHash, createdAt string
+		var expiresAt, revokedAt sql.NullString
+		if err := rows.Scan(
+			&rawID,
+			&rawUserID,
+			&projectID,
+			&workspaceID,
+			&label,
+			&prefix,
+			&tokenHash,
+			&expiresAt,
+			&revokedAt,
+			&createdAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan link token: %w", err)
+		}
+		token, err := scanLinkToken(rawID, rawUserID, projectID, workspaceID, label, prefix, tokenHash, expiresAt, revokedAt, createdAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, token)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate link tokens: %w", err)
+	}
+	return out, nil
+}
+
 func (s *sqlStore) queryLinkToken(ctx context.Context, query string, args ...any) (linktoken.LinkToken, error) {
 	var rawID, rawUserID, projectID, workspaceID, label, prefix, tokenHash, createdAt string
 	var expiresAt, revokedAt sql.NullString

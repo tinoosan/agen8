@@ -1,4 +1,4 @@
-import { rpcCall, rpcUnwrap } from './rpc'
+import { rpcCall, rpcUnwrap, rpcUnwrapList } from './rpc'
 import type { Project, ProjectCustomization } from './types'
 
 // Result of `project.linkToken.create`. The wlt_ `token` is server-minted and
@@ -14,6 +14,21 @@ export interface LinkTokenResult {
   createdAt?: string
 }
 
+// Safe-to-display view of a minted link token. Carries the prefix and lifecycle
+// timestamps but never the raw token or hash. `status` collapses the server's
+// (active, revokedAt, expiresAt) evaluation into one word the UI renders directly.
+export interface LinkTokenSummary {
+  id: string
+  prefix: string
+  projectId: string
+  workspaceId?: string
+  label?: string
+  status: 'active' | 'revoked' | 'expired'
+  expiresAt?: string
+  revokedAt?: string
+  createdAt?: string
+}
+
 /**
  * Mints a wlt_ link token bound to the caller-owned project. The server gates
  * this on project ownership, so a non-owner (or unauthenticated caller) is
@@ -26,6 +41,30 @@ export async function createLinkToken(projectId: string, label?: string): Promis
   const trimmedLabel = label?.trim()
   if (trimmedLabel) params.label = trimmedLabel
   return rpcCall<LinkTokenResult>('project.linkToken.create', params)
+}
+
+/**
+ * Lists the link tokens bound to a caller-owned project. Summaries carry no
+ * secret, so the server gates this on ownership only: a non-owner cannot
+ * enumerate a project's tokens. Returns [] when the project has none.
+ */
+export async function listLinkTokens(projectId: string): Promise<LinkTokenSummary[]> {
+  const id = projectId.trim()
+  if (!id) throw new Error('project id is required to list link tokens')
+  return rpcUnwrapList<LinkTokenSummary>('project.linkToken.list', { projectId: id }, 'tokens')
+}
+
+/**
+ * Revokes one of a caller-owned project's link tokens. The server re-derives the
+ * project's own token set and rejects a tokenId that is not in it, so a caller
+ * who owns project A can never revoke project B's token by guessing its id.
+ */
+export async function revokeLinkToken(projectId: string, tokenId: string): Promise<void> {
+  const id = projectId.trim()
+  if (!id) throw new Error('project id is required to revoke a link token')
+  const token = tokenId.trim()
+  if (!token) throw new Error('token id is required to revoke a link token')
+  await rpcCall<Record<string, never>>('project.linkToken.revoke', { projectId: id, tokenId: token })
 }
 
 /**

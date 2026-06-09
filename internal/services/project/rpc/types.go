@@ -3,6 +3,7 @@ package rpc
 import (
 	"time"
 
+	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
@@ -128,6 +129,59 @@ type LinkTokenCreateResult struct {
 	CreatedAt   *time.Time `json:"createdAt,omitempty"`
 }
 
+type ProjectLinkTokenListParams struct {
+	ProjectID string `json:"projectId"`
+}
+
+// LinkTokenSummaryView is the safe-to-display view of a minted link token: it
+// carries the prefix and lifecycle timestamps but never the raw token or hash.
+// Status collapses the (Active, RevokedAt, ExpiresAt) triple the server already
+// evaluated into a single word the UI can render directly.
+type LinkTokenSummaryView struct {
+	ID          string     `json:"id"`
+	Prefix      string     `json:"prefix"`
+	ProjectID   string     `json:"projectId"`
+	WorkspaceID string     `json:"workspaceId,omitempty"`
+	Label       string     `json:"label,omitempty"`
+	Status      string     `json:"status"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	RevokedAt   *time.Time `json:"revokedAt,omitempty"`
+	CreatedAt   *time.Time `json:"createdAt,omitempty"`
+}
+
+func newLinkTokenSummaryView(s projectapp.LinkTokenSummary) LinkTokenSummaryView {
+	status := "active"
+	if !s.Active {
+		// A revoked token has an explicit RevokedAt; anything else inactive aged
+		// past its expiry.
+		if s.RevokedAt != nil {
+			status = "revoked"
+		} else {
+			status = "expired"
+		}
+	}
+	return LinkTokenSummaryView{
+		ID:          s.ID,
+		Prefix:      s.Prefix,
+		ProjectID:   s.ProjectID,
+		WorkspaceID: s.WorkspaceID,
+		Label:       s.Label,
+		Status:      status,
+		ExpiresAt:   cloneTimePtr(s.ExpiresAt),
+		RevokedAt:   cloneTimePtr(s.RevokedAt),
+		CreatedAt:   cloneTime(s.CreatedAt),
+	}
+}
+
+type ProjectLinkTokenListResult struct {
+	Tokens []LinkTokenSummaryView `json:"tokens"`
+}
+
+type ProjectLinkTokenRevokeParams struct {
+	ProjectID string `json:"projectId"`
+	TokenID   string `json:"tokenId"`
+}
+
 type MemberView struct {
 	ID               string     `json:"id"`
 	UserID           string     `json:"userId,omitempty"`
@@ -213,5 +267,13 @@ func cloneTime(t time.Time) *time.Time {
 		return nil
 	}
 	cp := t
+	return &cp
+}
+
+func cloneTimePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	cp := *t
 	return &cp
 }

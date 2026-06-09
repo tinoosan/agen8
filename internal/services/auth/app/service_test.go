@@ -518,6 +518,20 @@ func (r *memoryLinkTokenRepo) Get(_ context.Context, id linktoken.ID) (linktoken
 	return linktoken.LinkToken{}, auth.ErrTokenNotFound
 }
 
+func (r *memoryLinkTokenRepo) List(_ context.Context, filter linktoken.Filter) ([]linktoken.LinkToken, error) {
+	var out []linktoken.LinkToken
+	for _, record := range r.records {
+		if filter.ProjectID != "" && record.ProjectID != filter.ProjectID {
+			continue
+		}
+		if filter.UserID != "" && record.UserID.String() != filter.UserID {
+			continue
+		}
+		out = append(out, record)
+	}
+	return out, nil
+}
+
 func (r *memoryLinkTokenRepo) Create(_ context.Context, record linktoken.LinkToken) error {
 	r.records[record.TokenHash] = record
 	return nil

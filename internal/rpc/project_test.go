@@ -459,3 +459,11 @@ func (rpcProjectLinkTokenIssuer) IssueLinkToken(_ context.Context, req projectap
 		Label:     req.Label,
 	}, nil
 }
+
+func (rpcProjectLinkTokenIssuer) ListLinkTokens(_ context.Context, _ string) ([]projectapp.LinkTokenSummary, error) {
+	return nil, nil
+}
+
+func (rpcProjectLinkTokenIssuer) RevokeLinkToken(_ context.Context, _ string) error {
+	return nil
+}

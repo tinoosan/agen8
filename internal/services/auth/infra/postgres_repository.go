@@ -104,6 +104,10 @@ func (r *postgresLinkTokenRepository) Get(ctx context.Context, id linktoken.ID) 
 	return r.store.GetLinkToken(ctx, id)
 }
 
+func (r *postgresLinkTokenRepository) List(ctx context.Context, filter linktoken.Filter) ([]linktoken.LinkToken, error) {
+	return r.store.ListLinkTokens(ctx, filter)
+}
+
 func (r *postgresLinkTokenRepository) Create(ctx context.Context, token linktoken.LinkToken) error {
 	return r.store.CreateLinkToken(ctx, token)
 }

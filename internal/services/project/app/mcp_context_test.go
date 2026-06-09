@@ -42,13 +42,21 @@ type noopPublisher struct{}
 
 func (noopPublisher) Publish(string, any) error { return nil }
 
-// fakeLinkTokenIssuer stands in for the auth-backed issuer. It records the last
-// request so tests can assert the ownership-verified binding flowed through, and
-// echoes a wlt_-prefixed token. Set err to exercise the failure path.
+// fakeLinkTokenIssuer stands in for the auth-backed link token service. It
+// records the last issue request so tests can assert the ownership-verified
+// binding flowed through, and echoes a wlt_-prefixed token. The summaries slice
+// is what ListLinkTokens returns (keyed by no project — the project service has
+// already owner-gated by the time it calls), and revoked records the ids passed
+// to RevokeLinkToken. Set err to exercise the issue failure path; listErr and
+// revokeErr exercise the list/revoke failure paths.
 type fakeLinkTokenIssuer struct {
-	last  LinkTokenRequest
-	calls int
-	err   error
+	last      LinkTokenRequest
+	calls     int
+	err       error
+	summaries []LinkTokenSummary
+	listErr   error
+	revoked   []string
+	revokeErr error
 }
 
 func (f *fakeLinkTokenIssuer) IssueLinkToken(_ context.Context, req LinkTokenRequest) (LinkTokenIssued, error) {
@@ -72,6 +80,21 @@ func (f *fakeLinkTokenIssuer) IssueLinkToken(_ context.Context, req LinkTokenReq
 		ExpiresAt: req.ExpiresAt,
 		CreatedAt: time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC),
 	}, nil
+}
+
+func (f *fakeLinkTokenIssuer) ListLinkTokens(_ context.Context, _ string) ([]LinkTokenSummary, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.summaries, nil
+}
+
+func (f *fakeLinkTokenIssuer) RevokeLinkToken(_ context.Context, tokenID string) error {
+	if f.revokeErr != nil {
+		return f.revokeErr
+	}
+	f.revoked = append(f.revoked, tokenID)
+	return nil
 }
 
 func TestRegisterMCPContextReusesExistingMemberWithoutRenaming(t *testing.T) {

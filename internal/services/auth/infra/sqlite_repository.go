@@ -104,6 +104,10 @@ func (r *sqliteLinkTokenRepository) Get(ctx context.Context, id linktoken.ID) (l
 	return r.store.GetLinkToken(ctx, id)
 }
 
+func (r *sqliteLinkTokenRepository) List(ctx context.Context, filter linktoken.Filter) ([]linktoken.LinkToken, error) {
+	return r.store.ListLinkTokens(ctx, filter)
+}
+
 func (r *sqliteLinkTokenRepository) Create(ctx context.Context, token linktoken.LinkToken) error {
 	return r.store.CreateLinkToken(ctx, token)
 }

@@ -402,6 +402,30 @@ func (s *Service) ValidateLinkToken(ctx context.Context, token string) (LinkToke
 	}, nil
 }
 
+// ListLinkTokensParams narrows which link tokens to return. ProjectID is the
+// field the project service sets once it has confirmed the caller owns that
+// project; the auth service does not re-check ownership, it just lists.
+type ListLinkTokensParams struct {
+	ProjectID string
+	UserID    user.ID
+	Limit     int
+	Offset    int
+}
+
+// ListLinkTokens returns every link token matching the filter, including
+// revoked and expired ones. The caller (the project service) decides how to
+// present state; auth's job is only to surface the rows. The raw secret is
+// never recoverable here — only the hash is stored — so summaries are safe to
+// hand back.
+func (s *Service) ListLinkTokens(ctx context.Context, params ListLinkTokensParams) ([]linktoken.LinkToken, error) {
+	return s.linkTokens.List(ctx, linktoken.Filter{
+		ProjectID: strings.TrimSpace(params.ProjectID),
+		UserID:    strings.TrimSpace(params.UserID.String()),
+		Limit:     params.Limit,
+		Offset:    params.Offset,
+	})
+}
+
 func (s *Service) RevokeLinkToken(ctx context.Context, id linktoken.ID) error {
 	record, err := s.linkTokens.Get(ctx, id)
 	if err != nil {

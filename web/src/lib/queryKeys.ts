@@ -105,6 +105,9 @@ export const qk = {
   projectMembersAll: ['project.member.list'] as const,
   projectMembers: (projectId: string | null) =>
     ['project.member.list', projectId ?? ''] as const,
+  linkTokensAll: ['project.linkToken.list'] as const,
+  linkTokens: (projectId: string | null) =>
+    ['project.linkToken.list', projectId ?? ''] as const,
 
   // ── locations ─────────────────────────────────────────
   locations: ['location.list'] as const,

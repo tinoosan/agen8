@@ -23,7 +23,7 @@ type Service struct {
 	projects   project.Repository
 	members    member.Repository
 	workspaces workspace.Repository
-	linkTokens LinkTokenIssuer
+	linkTokens LinkTokenService
 	clock      Clock
 	caller     caller.Resolver
 	configs    ConfigValidator
@@ -37,7 +37,7 @@ type Config struct {
 	Projects   project.Repository
 	Members    member.Repository
 	Workspaces workspace.Repository
-	LinkTokens LinkTokenIssuer
+	LinkTokens LinkTokenService
 	Clock      Clock
 	Caller     caller.Resolver
 	Configs    ConfigValidator

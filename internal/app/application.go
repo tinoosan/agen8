@@ -14,6 +14,7 @@ import (
 	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
 	authdomain "github.com/tinoosan/agen8/internal/services/auth/domain"
 	authinfra "github.com/tinoosan/agen8/internal/services/auth/infra"
+	linktoken "github.com/tinoosan/agen8/internal/services/auth/linktoken"
 	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
 	credentialinfra "github.com/tinoosan/agen8/internal/services/credential/infra"
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
@@ -411,6 +412,46 @@ func (a linkTokenIssuerAdapter) IssueLinkToken(ctx context.Context, req projecta
 		ExpiresAt:   lt.ExpiresAt,
 		CreatedAt:   lt.CreatedAt,
 	}, nil
+}
+
+func (a linkTokenIssuerAdapter) ListLinkTokens(ctx context.Context, projectID string) ([]projectapp.LinkTokenSummary, error) {
+	if a.auth == nil {
+		return nil, fmt.Errorf("auth service is required")
+	}
+	records, err := a.auth.ListLinkTokens(ctx, authapp.ListLinkTokensParams{ProjectID: projectID})
+	if err != nil {
+		return nil, err
+	}
+	// Wall-clock now is the right basis for active/expired here: link-token
+	// expiry is real elapsed time, and this composition-root adapter is the layer
+	// that owns translation between the two services.
+	now := time.Now().UTC()
+	summaries := make([]projectapp.LinkTokenSummary, 0, len(records))
+	for _, lt := range records {
+		summaries = append(summaries, projectapp.LinkTokenSummary{
+			ID:          lt.ID.String(),
+			Prefix:      lt.Prefix,
+			ProjectID:   lt.ProjectID,
+			WorkspaceID: lt.WorkspaceID,
+			Label:       lt.Label,
+			ExpiresAt:   lt.ExpiresAt,
+			RevokedAt:   lt.RevokedAt,
+			CreatedAt:   lt.CreatedAt,
+			Active:      lt.IsActive(now),
+		})
+	}
+	return summaries, nil
+}
+
+func (a linkTokenIssuerAdapter) RevokeLinkToken(ctx context.Context, tokenID string) error {
+	if a.auth == nil {
+		return fmt.Errorf("auth service is required")
+	}
+	id, err := linktoken.NewID(tokenID)
+	if err != nil {
+		return fmt.Errorf("link token id: %w", err)
+	}
+	return a.auth.RevokeLinkToken(ctx, id)
 }
 
 type graphServiceLinkPort struct {

@@ -117,6 +117,99 @@ func TestCreateLinkTokenPropagatesIssuerError(t *testing.T) {
 	}
 }
 
+func TestListLinkTokensOwnerSeesSummaries(t *testing.T) {
+	t.Parallel()
+	issuer := &fakeLinkTokenIssuer{summaries: []LinkTokenSummary{{ID: "tok-1", Prefix: "wlt_abc", Active: true}}}
+	svc := newProjectServiceWithIssuer(t, issuer)
+	ownerCtx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+	proj, err := svc.CreateProject(ownerCtx, CreateProjectInput{Root: "/work/app"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	summaries, err := svc.ListLinkTokens(ownerCtx, proj.ID())
+	if err != nil {
+		t.Fatalf("ListLinkTokens: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != "tok-1" {
+		t.Fatalf("summaries=%+v want one tok-1", summaries)
+	}
+}
+
+func TestListLinkTokensRejectsNonOwner(t *testing.T) {
+	t.Parallel()
+	issuer := &fakeLinkTokenIssuer{summaries: []LinkTokenSummary{{ID: "tok-1"}}}
+	svc := newProjectServiceWithIssuer(t, issuer)
+	ownerCtx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+	proj, err := svc.CreateProject(ownerCtx, CreateProjectInput{Root: "/work/app"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	intruderCtx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-intruder"})
+	if _, err := svc.ListLinkTokens(intruderCtx, proj.ID()); err == nil {
+		t.Fatal("expected non-owner to be denied the token list")
+	}
+}
+
+func TestRevokeLinkTokenOwnerRevokesOwnedToken(t *testing.T) {
+	t.Parallel()
+	issuer := &fakeLinkTokenIssuer{summaries: []LinkTokenSummary{{ID: "tok-1"}}}
+	svc := newProjectServiceWithIssuer(t, issuer)
+	ownerCtx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+	proj, err := svc.CreateProject(ownerCtx, CreateProjectInput{Root: "/work/app"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	if err := svc.RevokeLinkToken(ownerCtx, proj.ID(), "tok-1"); err != nil {
+		t.Fatalf("RevokeLinkToken: %v", err)
+	}
+	if len(issuer.revoked) != 1 || issuer.revoked[0] != "tok-1" {
+		t.Fatalf("issuer.revoked=%v want [tok-1]", issuer.revoked)
+	}
+}
+
+func TestRevokeLinkTokenRejectsCrossProjectToken(t *testing.T) {
+	t.Parallel()
+	// The project's own token set contains only tok-1. A caller who owns this
+	// project must not be able to revoke some other project's token by guessing
+	// its id — the re-list gate rejects any id outside the project's set.
+	issuer := &fakeLinkTokenIssuer{summaries: []LinkTokenSummary{{ID: "tok-1"}}}
+	svc := newProjectServiceWithIssuer(t, issuer)
+	ownerCtx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+	proj, err := svc.CreateProject(ownerCtx, CreateProjectInput{Root: "/work/app"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	if err := svc.RevokeLinkToken(ownerCtx, proj.ID(), "tok-other-project"); err == nil {
+		t.Fatal("expected revoke of a token outside the project's set to be rejected")
+	}
+	if len(issuer.revoked) != 0 {
+		t.Fatalf("issuer must not revoke a foreign token, revoked=%v", issuer.revoked)
+	}
+}
+
+func TestRevokeLinkTokenRejectsNonOwner(t *testing.T) {
+	t.Parallel()
+	issuer := &fakeLinkTokenIssuer{summaries: []LinkTokenSummary{{ID: "tok-1"}}}
+	svc := newProjectServiceWithIssuer(t, issuer)
+	ownerCtx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+	proj, err := svc.CreateProject(ownerCtx, CreateProjectInput{Root: "/work/app"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	intruderCtx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-intruder"})
+	if err := svc.RevokeLinkToken(intruderCtx, proj.ID(), "tok-1"); err == nil {
+		t.Fatal("expected non-owner revoke to be denied")
+	}
+	if len(issuer.revoked) != 0 {
+		t.Fatalf("issuer must not revoke for a non-owner, revoked=%v", issuer.revoked)
+	}
+}
+
 func TestNewServiceRequiresLinkTokenIssuer(t *testing.T) {
 	t.Parallel()
 	projects, members, workspaces := openProjectReposForTest(t)
@@ -138,7 +231,7 @@ func TestNewServiceRequiresLinkTokenIssuer(t *testing.T) {
 	}
 }
 
-func newProjectServiceWithIssuer(t *testing.T, issuer LinkTokenIssuer) *Service {
+func newProjectServiceWithIssuer(t *testing.T, issuer LinkTokenService) *Service {
 	t.Helper()
 	projects, members, workspaces := openProjectReposForTest(t)
 	service, err := NewService(Config{

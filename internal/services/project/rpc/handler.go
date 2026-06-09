@@ -168,6 +168,37 @@ func (h *Handler) LinkTokenCreate(ctx context.Context, p LinkTokenCreateParams) 
 	}, nil
 }
 
+func (h *Handler) LinkTokenList(ctx context.Context, p ProjectLinkTokenListParams) (ProjectLinkTokenListResult, error) {
+	projectID, err := requireProjectID(p.ProjectID)
+	if err != nil {
+		return ProjectLinkTokenListResult{}, err
+	}
+	summaries, err := h.svc.ListLinkTokens(ctx, projectID)
+	if err != nil {
+		return ProjectLinkTokenListResult{}, internalError("list link tokens", err)
+	}
+	views := make([]LinkTokenSummaryView, 0, len(summaries))
+	for _, summary := range summaries {
+		views = append(views, newLinkTokenSummaryView(summary))
+	}
+	return ProjectLinkTokenListResult{Tokens: views}, nil
+}
+
+func (h *Handler) LinkTokenRevoke(ctx context.Context, p ProjectLinkTokenRevokeParams) (struct{}, error) {
+	projectID, err := requireProjectID(p.ProjectID)
+	if err != nil {
+		return struct{}{}, err
+	}
+	tokenID := strings.TrimSpace(p.TokenID)
+	if tokenID == "" {
+		return struct{}{}, invalidParams("tokenId is required")
+	}
+	if err := h.svc.RevokeLinkToken(ctx, projectID, tokenID); err != nil {
+		return struct{}{}, internalError("revoke link token", err)
+	}
+	return struct{}{}, nil
+}
+
 func (h *Handler) MemberRegister(ctx context.Context, p MemberRegisterParams) (MemberRegisterResult, error) {
 	projectID := strings.TrimSpace(p.ProjectID)
 	if projectID == "" {

@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Check, Copy, FolderDown, KeyRound, Link, TriangleAlert } from 'lucide-react'
+import { Ban, Check, Copy, FolderDown, KeyRound, Link, TriangleAlert } from 'lucide-react'
 import type { Project } from '../../lib/types'
 import { projectDisplayName } from '../../lib/projectHelpers'
 import { copyText } from '../../lib/utils'
-import { createLinkToken, type LinkTokenResult } from '../../lib/projectClient'
+import { formatDate, formatRelative } from '../../lib/format'
+import { qk } from '../../lib/queryKeys'
+import { createLinkToken, type LinkTokenResult, type LinkTokenSummary } from '../../lib/projectClient'
+import { useLinkTokens, useRevokeLinkToken } from '../../hooks/useLinkTokens'
 import {
   buildMarkerFiles, MARKER_DIR, supportsDirectoryPicker, writeMarkerToDirectory, type MarkerFile,
 } from '../../lib/linkMarker'
@@ -12,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
+import ConfirmationDialog from '../ConfirmationDialog'
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false)
@@ -53,6 +58,64 @@ function FileBlock({ file }: { file: MarkerFile }) {
   )
 }
 
+// Maps a token's server-evaluated status to a label and color. The server
+// already collapsed (active, revokedAt, expiresAt) into one word, so the UI just
+// renders it — no client-side clock logic that could disagree with the server.
+const STATUS_STYLE: Record<LinkTokenSummary['status'], { label: string; color: string }> = {
+  active: { label: 'Active', color: 'var(--green)' },
+  revoked: { label: 'Revoked', color: 'var(--text-3)' },
+  expired: { label: 'Expired', color: 'var(--amber)' },
+}
+
+function TokenRow({
+  token,
+  onRevoke,
+  revoking,
+}: {
+  token: LinkTokenSummary
+  onRevoke: (token: LinkTokenSummary) => void
+  revoking: boolean
+}) {
+  const style = STATUS_STYLE[token.status] ?? STATUS_STYLE.expired
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[0.75rem] text-[var(--text-1)]">{token.prefix}…</span>
+          {token.label && (
+            <span className="truncate text-[0.75rem] text-[var(--text-2)]">{token.label}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-[0.6875rem] text-[var(--text-3)]">
+          <span
+            className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[0.625rem] font-medium"
+            style={{ color: style.color, backgroundColor: `color-mix(in srgb, ${style.color} 14%, transparent)` }}
+          >
+            {style.label}
+          </span>
+          <span>created {formatRelative(token.createdAt, { fallback: 'unknown' })}</span>
+          {token.status === 'expired' && token.expiresAt && (
+            <span>· expired {formatDate(token.expiresAt)}</span>
+          )}
+        </div>
+      </div>
+      {token.status === 'active' && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 shrink-0 gap-1.5 text-[0.6875rem] text-[var(--red)] hover:text-[var(--red)]"
+          disabled={revoking}
+          onClick={() => onRevoke(token)}
+        >
+          <Ban size={12} />
+          Revoke
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export default function LinkFolderDialog({
   project,
   onClose,
@@ -64,7 +127,13 @@ export default function LinkFolderDialog({
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [revokeTarget, setRevokeTarget] = useState<LinkTokenSummary | null>(null)
   const canPick = useMemo(() => supportsDirectoryPicker(), [])
+
+  const queryClient = useQueryClient()
+  const tokensQuery = useLinkTokens(project.id)
+  const revoke = useRevokeLinkToken()
+  const tokens = tokensQuery.data ?? []
 
   // Compose the marker once a token is minted. A build failure (blank inputs) is
   // surfaced as an error rather than emitting a half-written marker.
@@ -84,6 +153,9 @@ export default function LinkFolderDialog({
     try {
       const result = await createLinkToken(project.id)
       setIssued(result)
+      // The freshly minted token should appear in the list when the user steps
+      // back to manage links (or reopens the dialog).
+      queryClient.invalidateQueries({ queryKey: qk.linkTokensAll })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mint link token')
     } finally {
@@ -104,6 +176,22 @@ export default function LinkFolderDialog({
     } finally {
       setSaving(false)
     }
+  }
+
+  function confirmRevoke() {
+    if (!revokeTarget) return
+    revoke.mutate(
+      { projectId: project.id, tokenId: revokeTarget.id },
+      {
+        onSuccess: () => {
+          toast.success('Link token revoked')
+          setRevokeTarget(null)
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : 'Failed to revoke link token')
+        },
+      },
+    )
   }
 
   const locked = busy || saving
@@ -127,6 +215,39 @@ export default function LinkFolderDialog({
           {!issued ? (
             /* ── Mint step ─────────────────────────────── */
             <div className="flex flex-col gap-4">
+              {/* Current link state: lets the owner see whether this project is
+                  already linked and revoke a token they no longer trust. */}
+              <div className="flex flex-col gap-2">
+                <div className="text-[0.6875rem] font-semibold uppercase tracking-wide text-[var(--text-3)]">
+                  Existing link tokens
+                </div>
+                {tokensQuery.isLoading ? (
+                  <div className="flex items-center gap-2 text-[0.75rem] text-[var(--text-3)]">
+                    <span className="spinner spinner-sm" />
+                    Loading…
+                  </div>
+                ) : tokensQuery.isError ? (
+                  <div className="text-[0.75rem] text-[var(--red)]">
+                    {tokensQuery.error instanceof Error ? tokensQuery.error.message : 'Failed to load link tokens'}
+                  </div>
+                ) : tokens.length === 0 ? (
+                  <div className="rounded-[var(--r-md)] border border-dashed border-[var(--border)] px-3 py-2.5 text-[0.75rem] text-[var(--text-3)]">
+                    No link tokens yet — this project isn&apos;t linked to a folder.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {tokens.map((token) => (
+                      <TokenRow
+                        key={token.id}
+                        token={token}
+                        onRevoke={setRevokeTarget}
+                        revoking={revoke.isPending}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 text-[0.8125rem] leading-[1.6] text-[var(--text-2)]">
                 Generating a link token mints a secret that binds this folder to the project.
                 The token is shown <span className="font-semibold text-[var(--text-1)]">once</span> —
@@ -143,7 +264,7 @@ export default function LinkFolderDialog({
                 ) : (
                   <>
                     <KeyRound size={13} />
-                    Generate link token
+                    {tokens.some((t) => t.status === 'active') ? 'Generate another token' : 'Generate link token'}
                   </>
                 )}
               </Button>
@@ -168,11 +289,13 @@ export default function LinkFolderDialog({
                 </div>
               </div>
 
-              {/* Placement instructions */}
+              {/* Placement instructions. The folder's path is whatever the user
+                  picks below — the project root is workspace-sourced and not known
+                  here, so we never print a stale path. */}
               <div className="text-[0.8125rem] leading-[1.6] text-[var(--text-2)]">
-                Place these files in{' '}
-                <span className="font-mono text-[0.75rem] text-[var(--text-1)]">{project.root}/{MARKER_DIR}/</span>.
-                Commit <span className="font-mono text-[0.75rem]">workspace.json</span> and{' '}
+                Place these files in an <span className="font-mono text-[0.75rem] text-[var(--text-1)]">{MARKER_DIR}/</span>{' '}
+                folder at the root of the folder you&apos;re linking. Commit{' '}
+                <span className="font-mono text-[0.75rem]">workspace.json</span> and{' '}
                 <span className="font-mono text-[0.75rem]">.gitignore</span>; the{' '}
                 <span className="font-mono text-[0.75rem]">token</span> stays local.
               </div>
@@ -194,15 +317,16 @@ export default function LinkFolderDialog({
                     )}
                   </Button>
                   <span className="text-[0.6875rem] text-[var(--text-3)]">
-                    Pick your project folder; <span className="font-mono">{MARKER_DIR}/</span> is created inside it.
+                    Pick the folder you&apos;re linking; <span className="font-mono">{MARKER_DIR}/</span> is created inside it.
                   </span>
                 </div>
               ) : (
                 <div className="flex items-start gap-2 rounded-[var(--r-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-[0.75rem] text-[var(--text-3)]">
                   <TriangleAlert size={13} className="mt-0.5 shrink-0 text-[var(--amber)]" />
                   <span>
-                    This browser can&apos;t write folders directly. Create{' '}
-                    <span className="font-mono">{project.root}/{MARKER_DIR}/</span> and copy each file below into it.
+                    This browser can&apos;t write folders directly. Create an{' '}
+                    <span className="font-mono">{MARKER_DIR}/</span> folder at the root of the folder you&apos;re
+                    linking and copy each file below into it.
                   </span>
                 </div>
               )}
@@ -224,6 +348,20 @@ export default function LinkFolderDialog({
           </Button>
         </div>
       </DialogContent>
+
+      <ConfirmationDialog
+        open={revokeTarget !== null}
+        title="Revoke link token"
+        message={
+          `Revoking ${revokeTarget?.prefix ?? ''}… immediately breaks any folder bound with it. ` +
+          'Sessions using this token can no longer reach the project; you can mint a new one to re-link.'
+        }
+        confirmLabel="Revoke token"
+        tone="danger"
+        busy={revoke.isPending}
+        onClose={() => { if (!revoke.isPending) setRevokeTarget(null) }}
+        onConfirm={confirmRevoke}
+      />
     </Dialog>
   )
 }
