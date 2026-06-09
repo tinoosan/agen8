@@ -17,6 +17,12 @@
       "port": 5173
     },
     {
+      "name": "web-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "web", "run", "dev", "--", "--port", "5290", "--strictPort"],
+      "port": 5290
+    },
+    {
       "name": "mockup",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "4599", "--directory", "/tmp/agen8-cred-mockup"],
