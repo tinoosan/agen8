@@ -31,7 +31,16 @@ func (h *Handler) ProjectGet(ctx context.Context, p ProjectGetParams) (ProjectGe
 	if err != nil {
 		return ProjectGetResult{}, err
 	}
-	return ProjectGetResult{Project: NewProjectView(project)}, nil
+	return ProjectGetResult{Project: h.projectView(ctx, project)}, nil
+}
+
+// projectView builds a ProjectView whose root is the project's effective
+// (workspace-sourced) root rather than the stored seed, so reads reflect where
+// the project currently lives on disk.
+func (h *Handler) projectView(ctx context.Context, p projectdomain.Project) ProjectView {
+	view := NewProjectView(p)
+	view.Root = h.svc.ResolveRoot(ctx, p)
+	return view
 }
 
 func (h *Handler) ProjectCreate(ctx context.Context, p ProjectCreateParams) (ProjectCreateResult, error) {
@@ -107,7 +116,7 @@ func (h *Handler) ProjectList(ctx context.Context, p ProjectListParams) (Project
 	}
 	views := make([]ProjectView, 0, len(projects))
 	for _, project := range projects {
-		views = append(views, NewProjectView(project))
+		views = append(views, h.projectView(ctx, project))
 	}
 	return ProjectListResult{Projects: views}, nil
 }

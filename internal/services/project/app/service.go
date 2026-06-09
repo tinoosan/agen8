@@ -236,6 +236,79 @@ func (s *Service) ListProjects(ctx context.Context, filter project.Filter) ([]pr
 	return out, nil
 }
 
+// ResolveRoot returns the effective filesystem root for a project.
+//
+// A project's stored root is only a seed: the live location is whichever
+// workspace the project was most recently seen connecting from. So we prefer
+// the root of the most-recently-seen active workspace (constrained to the
+// project's own location, since a root is only interpretable within its
+// location), and fall back to the stored project.root when no such workspace
+// exists.
+//
+// This is deliberately read-only: we never write the resolved root back onto
+// the project record. Persisting on resolve would make two machines fight over
+// the stored root, each overwriting the other on connect. Keeping the seed
+// immutable lets every workspace own its own path without that flip-flop.
+func (s *Service) ResolveRoot(ctx context.Context, p project.Project) string {
+	stored := strings.TrimSpace(p.Root())
+	if s == nil || s.workspaces == nil {
+		return stored
+	}
+	projectID := strings.TrimSpace(string(p.ID()))
+	if projectID == "" {
+		return stored
+	}
+	records, err := s.workspaces.List(ctx, workspace.Filter{
+		ProjectID:      projectID,
+		LifecycleState: workspace.LifecycleActive,
+	})
+	if err != nil || len(records) == 0 {
+		return stored
+	}
+	projectLoc := normalizeLocationID(string(p.LocationID()))
+	bestRoot := ""
+	var bestSeen time.Time
+	for _, r := range records {
+		root := strings.TrimSpace(r.Root)
+		if root == "" {
+			continue
+		}
+		if normalizeLocationID(r.LocationID) != projectLoc {
+			continue
+		}
+		seen := workspaceLastSeen(r)
+		if bestRoot == "" || seen.After(bestSeen) {
+			bestRoot = root
+			bestSeen = seen
+		}
+	}
+	if bestRoot == "" {
+		return stored
+	}
+	return bestRoot
+}
+
+// workspaceLastSeen reports when a workspace was last seen connecting, falling
+// back to UpdatedAt for records that predate last-seen tracking so they still
+// sort sensibly against newer rows.
+func workspaceLastSeen(r workspace.Record) time.Time {
+	if r.LastSeenAt != nil {
+		return *r.LastSeenAt
+	}
+	return r.UpdatedAt
+}
+
+// normalizeLocationID folds the empty location and the explicit "local"
+// sentinel together, so a project stored without a location still matches its
+// local workspaces.
+func normalizeLocationID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "local"
+	}
+	return id
+}
+
 func (s *Service) ArchiveProject(ctx context.Context, projectID types.ProjectID) (project.Project, error) {
 	if s == nil {
 		return project.Project{}, fmt.Errorf("project service is nil")

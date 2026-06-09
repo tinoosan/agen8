@@ -110,6 +110,10 @@ func (l rpcFileProjectLoader) GetProject(_ context.Context, projectID types.Proj
 	return projectdomain.Project{}, os.ErrNotExist
 }
 
+func (l rpcFileProjectLoader) ResolveRoot(_ context.Context, p projectdomain.Project) string {
+	return p.Root()
+}
+
 func (l rpcFileProjectLoader) ListProjects(context.Context, projectdomain.Filter) ([]projectdomain.Project, error) {
 	project, err := projectdomain.New(projectdomain.NewInput{
 		ID:        types.ProjectID("project-test"),

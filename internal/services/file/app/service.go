@@ -303,7 +303,10 @@ func (s *Service) validProject(ctx context.Context, projectID types.ProjectID, r
 		if locationID == "" {
 			locationID = "local"
 		}
-		return projectContext{id: project.ID(), root: strings.TrimSpace(project.Root()), locationID: locationID}, nil
+		// Resolve against the live workspace root rather than the stored seed so
+		// file ops follow a folder that was moved or renamed after first link.
+		effectiveRoot := strings.TrimSpace(s.projects.ResolveRoot(ctx, project))
+		return projectContext{id: project.ID(), root: effectiveRoot, locationID: locationID}, nil
 	}
 	root = strings.TrimSpace(root)
 	if root == "" {

@@ -133,6 +133,14 @@ func (l staticProjectLoader) GetProject(_ context.Context, projectID types.Proje
 	return projectdomain.Project{}, fmt.Errorf("project not found")
 }
 
+// ResolveRoot mirrors the production resolver's fallback path: with no
+// workspace records to consult, the effective root is the stored project root.
+// The workspace-sourced override is exercised in the project app tests where
+// the real workspace repository lives.
+func (l staticProjectLoader) ResolveRoot(_ context.Context, p projectdomain.Project) string {
+	return p.Root()
+}
+
 func (l staticProjectLoader) ListProjects(context.Context, projectdomain.Filter) ([]projectdomain.Project, error) {
 	out := make([]projectdomain.Project, 0, len(l.projects))
 	for i, input := range l.projects {
