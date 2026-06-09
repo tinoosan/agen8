@@ -124,11 +124,13 @@ func TestDeriveStaleAndOverrun(t *testing.T) {
 	// Two stale-queued specs (stale + verystale), fresh excluded.
 	stale := 0
 	var veryStaleSeverity Severity
+	var veryStaleMeta map[string]string
 	for _, s := range specs {
 		if s.Trigger == TriggerTaskStale {
 			stale++
 			if s.SubjectID == "verystale" {
 				veryStaleSeverity = s.Severity
+				veryStaleMeta = s.Metadata
 			}
 		}
 	}
@@ -138,6 +140,13 @@ func TestDeriveStaleAndOverrun(t *testing.T) {
 	if veryStaleSeverity != SeverityCritical {
 		t.Fatalf("verystale severity = %q, want critical (>= 2x threshold)", veryStaleSeverity)
 	}
+	// Structured metadata lets compact surfaces lead with the task name.
+	if veryStaleMeta["taskTitle"] != "Forgotten" {
+		t.Fatalf("stale taskTitle metadata = %q, want Forgotten", veryStaleMeta["taskTitle"])
+	}
+	if veryStaleMeta["duration"] != "3h" {
+		t.Fatalf("stale duration metadata = %q, want 3h", veryStaleMeta["duration"])
+	}
 
 	overrun, ok := specByTrigger(specs, TriggerTaskOverrun)
 	if !ok {
@@ -145,6 +154,12 @@ func TestDeriveStaleAndOverrun(t *testing.T) {
 	}
 	if overrun.Kind != KindStanding {
 		t.Fatalf("overrun should be standing")
+	}
+	if overrun.Metadata["taskTitle"] != "Churning" {
+		t.Fatalf("overrun taskTitle metadata = %q, want Churning", overrun.Metadata["taskTitle"])
+	}
+	if overrun.Metadata["duration"] != "2h" {
+		t.Fatalf("overrun duration metadata = %q, want 2h", overrun.Metadata["duration"])
 	}
 }
 

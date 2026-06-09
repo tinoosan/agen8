@@ -142,7 +142,6 @@ export default function TaskSummary({ projectId }: { projectId: string | null })
             <ListChecks size={14} className="text-[var(--accent)]" />
             <span className="dashboard-section-title">Tasks</span>
           </div>
-          <p className="dashboard-section-caption">The work in flight, grouped by where it stands.</p>
         </div>
         <div className="dashboard-section-meta">
           <span className="dashboard-section-counter">{tasks.length} total</span>

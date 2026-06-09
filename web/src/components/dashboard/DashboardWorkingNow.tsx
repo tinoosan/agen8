@@ -191,7 +191,6 @@ function Heading({ count }: { count: number | null }) {
           <Activity size={14} className="text-[var(--accent)]" />
           <span className="dashboard-section-title">Working now</span>
         </div>
-        <p className="dashboard-section-caption">Who&apos;s on what, right now.</p>
       </div>
       {count !== null && (
         <div className="dashboard-section-meta">

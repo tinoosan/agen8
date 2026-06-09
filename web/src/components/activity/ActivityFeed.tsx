@@ -200,7 +200,6 @@ export default function ActivityFeed({ projectId }: { projectId: string | null }
             <Activity size={14} className="text-[var(--accent)]" />
             <span className="dashboard-section-title">Activity</span>
           </div>
-          <p className="dashboard-section-caption">What agents have done, newest first.</p>
         </div>
       </div>
 

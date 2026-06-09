@@ -1789,13 +1789,6 @@ body {
   color: var(--text-1);
 }
 
-.dashboard-section-caption {
-  margin: 4px 0 0;
-  font-size: 0.6875rem;
-  line-height: 1.35;
-  color: color-mix(in srgb, var(--text-2) 72%, var(--text-3));
-}
-
 .dashboard-section-meta {
   display: flex;
   align-items: center;

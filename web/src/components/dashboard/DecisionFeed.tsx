@@ -357,7 +357,6 @@ export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = 
                 {safeDecisions.length} latest
               </span>
             </div>
-            <p className="dashboard-section-caption">What changed, and who shaped it.</p>
           </div>
         </div>
       )}

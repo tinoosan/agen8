@@ -274,9 +274,6 @@ export default function MissionSummary({ projectId, mode = 'inMotion' }: { proje
 
   const activeCount = missions.filter(m => m.status === 'active').length
   const title = mode === 'active' ? 'Active Missions' : 'Missions in Motion'
-  const caption = mode === 'active'
-    ? 'The outcomes currently moving under the decision log.'
-    : 'The outcomes being pushed forward, and the progress holding them together.'
 
   return (
     <section className="dashboard-section">
@@ -288,7 +285,6 @@ export default function MissionSummary({ projectId, mode = 'inMotion' }: { proje
               {title}
             </span>
           </div>
-          <p className="dashboard-section-caption">{caption}</p>
         </div>
         <div className="dashboard-section-meta">
           {activeCount > 0 && (

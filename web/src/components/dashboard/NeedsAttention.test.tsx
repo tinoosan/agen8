@@ -4,7 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { NotificationItem, NotificationsListResult } from '../../lib/types'
 
 /* The card reads the notification list and marks rows read; mock the hook
- * module so we render the real card against controlled data. */
+ * module so we render the real card against controlled data. The card groups
+ * standing alerts by trigger type, names the type once per group, and leads each
+ * task row with the task name carried in structured metadata — so these tests
+ * assert group headers + metadata-driven rows, not per-row titles. */
 const mockList = vi.fn()
 const markRead = vi.fn()
 
@@ -72,13 +75,13 @@ describe('NeedsAttention', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows only standing alerts and excludes one-off events', () => {
+  it('groups standing alerts by type, names the type once, and leads rows with the task name', () => {
     mockList.mockReturnValue(
       ok({
         notifications: [
-          notif({ id: 'a1', trigger: 'task.stale_queued', title: 'Task stuck in the queue' }),
-          notif({ id: 'a2', trigger: 'backlog.high', title: 'Backlog is high' }),
-          notif({ id: 'a3', trigger: 'task.overrun', title: 'Task overrunning' }),
+          notif({ id: 'a1', trigger: 'task.stale_queued', metadata: { taskTitle: 'Build pipeline', duration: '2h' } }),
+          notif({ id: 'a2', trigger: 'task.stale_queued', metadata: { taskTitle: 'Indexer job', duration: '1h' } }),
+          notif({ id: 'b1', trigger: 'backlog.high', body: 'Backlog is high' }),
           notif({ id: 'e1', trigger: 'task.completed', title: 'A task completed' }),
           notif({ id: 'e2', trigger: 'task.in_review', title: 'Awaiting review' }),
         ],
@@ -86,44 +89,98 @@ describe('NeedsAttention', () => {
       }),
     )
     renderCard()
+
     expect(screen.getByText('Needs attention')).toBeInTheDocument()
+    // Total counts every standing alert (2 stale + 1 backlog), not the groups.
     expect(screen.getByText('3 alerts')).toBeInTheDocument()
-    expect(screen.getByText('Task stuck in the queue')).toBeInTheDocument()
-    expect(screen.getByText('Backlog is high')).toBeInTheDocument()
-    expect(screen.getByText('Task overrunning')).toBeInTheDocument()
+
+    // The type is stated exactly once as a group header, not repeated per row.
+    expect(screen.getAllByText('Stuck in the queue')).toHaveLength(1)
+    expect(screen.getByText('Backlog')).toBeInTheDocument()
+
+    // Rows lead with the task name from structured metadata.
+    expect(screen.getByText('Build pipeline')).toBeInTheDocument()
+    expect(screen.getByText('Indexer job')).toBeInTheDocument()
+    // ...and surface the duration alongside it.
+    expect(screen.getByText('2h')).toBeInTheDocument()
+
+    // One-off events never appear in the attention card.
     expect(screen.queryByText('A task completed')).not.toBeInTheDocument()
     expect(screen.queryByText('Awaiting review')).not.toBeInTheDocument()
   })
 
-  it('orders critical alerts before warnings', () => {
+  it('shows a per-group count for groups with more than one alert', () => {
     mockList.mockReturnValue(
       ok({
         notifications: [
-          notif({ id: 'w1', trigger: 'task.stale_queued', severity: 'warning', title: 'Warn alert' }),
-          notif({ id: 'c1', trigger: 'backlog.high', severity: 'critical', title: 'Critical alert' }),
+          notif({ id: 'a1', trigger: 'task.stale_queued', metadata: { taskTitle: 'Task A' } }),
+          notif({ id: 'a2', trigger: 'task.stale_queued', metadata: { taskTitle: 'Task B' } }),
+          notif({ id: 'a3', trigger: 'task.stale_queued', metadata: { taskTitle: 'Task C' } }),
+        ],
+        unreadCount: 3,
+      }),
+    )
+    renderCard()
+    // The group header carries a count pill of "3" for the three-item group.
+    expect(screen.getByText('Stuck in the queue')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
+  })
+
+  it('orders critical groups before warning groups', () => {
+    mockList.mockReturnValue(
+      ok({
+        notifications: [
+          notif({ id: 'w1', trigger: 'task.stale_queued', severity: 'warning', metadata: { taskTitle: 'Warn task' } }),
+          notif({ id: 'c1', trigger: 'backlog.high', severity: 'critical', body: 'Critical backlog' }),
         ],
         unreadCount: 2,
       }),
     )
     renderCard()
-    const titles = screen.getAllByText(/alert$/i).map((el) => el.textContent)
-    expect(titles[0]).toBe('Critical alert')
-    expect(titles[1]).toBe('Warn alert')
+    // Group headers, in DOM order: the critical backlog group sorts first.
+    const headers = screen.getAllByText(/^(Backlog|Stuck in the queue)$/).map((el) => el.textContent)
+    expect(headers[0]).toBe('Backlog')
+    expect(headers[1]).toBe('Stuck in the queue')
   })
 
   it('uses singular label for a single alert', () => {
     mockList.mockReturnValue(
-      ok({ notifications: [notif({ id: 'a1' })], unreadCount: 1 }),
+      ok({ notifications: [notif({ id: 'a1', metadata: { taskTitle: 'Lone task' } })], unreadCount: 1 }),
     )
     renderCard()
     expect(screen.getByText('1 alert')).toBeInTheDocument()
+  })
+
+  it('caps rows per group and reveals the rest behind a "+N more" toggle', () => {
+    const many = Array.from({ length: 7 }, (_, i) =>
+      notif({ id: `s${i}`, trigger: 'task.stale_queued', metadata: { taskTitle: `Task ${i}` } }),
+    )
+    mockList.mockReturnValue(ok({ notifications: many, unreadCount: 7 }))
+    renderCard()
+
+    expect(screen.getByText('7 alerts')).toBeInTheDocument()
+    // Only the first four rows render; the rest are collapsed.
+    expect(screen.getByText('Task 0')).toBeInTheDocument()
+    expect(screen.getByText('Task 3')).toBeInTheDocument()
+    expect(screen.queryByText('Task 4')).not.toBeInTheDocument()
+
+    // The overflow affordance expands the group, then collapses it again.
+    fireEvent.click(screen.getByText('+3 more'))
+    expect(screen.getByText('Task 4')).toBeInTheDocument()
+    expect(screen.getByText('Task 6')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Show less'))
+    expect(screen.queryByText('Task 4')).not.toBeInTheDocument()
   })
 
   it('marks read and deep-links when a linked alert is clicked', () => {
     mockList.mockReturnValue(
       ok({
         notifications: [
-          notif({ id: 'a9', title: 'Stuck task', link: { surface: 'task', url: '/project/p1/tasks/t9' } }),
+          notif({
+            id: 'a9',
+            metadata: { taskTitle: 'Stuck task' },
+            link: { surface: 'task', url: '/project/p1/tasks/t9' },
+          }),
         ],
         unreadCount: 1,
       }),

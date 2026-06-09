@@ -66,6 +66,10 @@ func Derive(projectID string, tasks []TaskSnapshot, now time.Time, cfg DeriveCon
 						LinkSurface: "task",
 						LinkURL:     taskLink(t),
 						ThrottleKey: "task.stale:" + t.ID,
+						// Structured fields so compact surfaces (the dashboard
+						// "Needs attention" card) can lead with the task name and
+						// duration instead of re-parsing the prose body.
+						Metadata: map[string]string{"taskTitle": taskTitlePlain(t), "duration": formatCoarseDuration(age)},
 					})
 				}
 			}
@@ -84,6 +88,7 @@ func Derive(projectID string, tasks []TaskSnapshot, now time.Time, cfg DeriveCon
 						LinkSurface: "task",
 						LinkURL:     taskLink(t),
 						ThrottleKey: "task.overrun:" + t.ID,
+						Metadata:    map[string]string{"taskTitle": taskTitlePlain(t), "duration": formatCoarseDuration(dur)},
 					})
 				}
 			}
@@ -173,6 +178,15 @@ func withinLookback(ts *time.Time, now time.Time, lookback time.Duration) bool {
 func taskLabel(t TaskSnapshot) string {
 	if title := strings.TrimSpace(t.Title); title != "" {
 		return "\"" + title + "\""
+	}
+	return "A task"
+}
+
+// taskTitlePlain is the unquoted task title for structured metadata, falling
+// back to a generic label when a task carries no title.
+func taskTitlePlain(t TaskSnapshot) string {
+	if title := strings.TrimSpace(t.Title); title != "" {
+		return title
 	}
 	return "A task"
 }

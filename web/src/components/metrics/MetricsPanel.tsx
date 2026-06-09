@@ -88,13 +88,11 @@ function SuccessPill({ rate }: { rate: number | null }) {
 
 function Leaderboard({
   title,
-  caption,
   icon: Icon,
   unitLabel,
   entries,
 }: {
   title: string
-  caption: string
   icon: typeof LayoutGrid
   unitLabel: string
   entries: LeaderboardEntry[]
@@ -110,7 +108,6 @@ function Leaderboard({
             <Icon size={14} className="text-[var(--accent)]" />
             <span className="dashboard-section-title">{title}</span>
           </div>
-          <p className="dashboard-section-caption">{caption}</p>
         </div>
       </div>
 
@@ -277,7 +274,6 @@ export default function MetricsPanel({ projectId }: { projectId: string | null }
               <BarChart3 size={14} className="text-[var(--accent)]" />
               <span className="dashboard-section-title">Throughput</span>
             </div>
-            <p className="dashboard-section-caption">Backlog now, and average times across recent work.</p>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2.5 @min-[680px]:grid-cols-4">
@@ -308,7 +304,6 @@ export default function MetricsPanel({ projectId }: { projectId: string | null }
 
       <Leaderboard
         title="Harness leaderboard"
-        caption="Which harness performs best for this project's work."
         icon={LayoutGrid}
         unitLabel="Harness"
         entries={harnessLeaderboard}
