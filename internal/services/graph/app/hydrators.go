@@ -82,6 +82,8 @@ func (h taskHydrator) Fetch(ctx context.Context, projectID string, nodeID string
 			"createdByLabel":       strings.TrimSpace(task.CreatedByLabel),
 			"taskKind":             strings.TrimSpace(task.TaskKind),
 			"dueDate":              taskDueDate(task),
+			"keyResultRef":         strings.TrimSpace(task.KeyResultRef),
+			"missionRef":           taskMissionRef(task),
 		},
 	}, nil
 }
@@ -409,6 +411,23 @@ func taskCreatedAt(task taskdomain.Task) (time.Time, error) {
 		return task.CreatedAt.UTC(), nil
 	}
 	return time.Time{}, fmt.Errorf("task %q missing createdAt", strings.TrimSpace(string(task.ID)))
+}
+
+// taskMissionRef reads the task's mission ref out of metadata. Tasks store the
+// mission link in metadata (under any of these aliases) rather than a dedicated
+// field, so the structural resolver and graph_query consumers read it here.
+func taskMissionRef(task taskdomain.Task) string {
+	if task.Metadata == nil {
+		return ""
+	}
+	for _, key := range []string{"mission_ref", "missionRef", "mission_id", "missionId"} {
+		if raw, ok := task.Metadata[key]; ok {
+			if value, ok := raw.(string); ok {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
 }
 
 func taskDueDate(task taskdomain.Task) string {

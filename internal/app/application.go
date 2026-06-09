@@ -260,6 +260,10 @@ func NewApplication(cfg Config) (*Application, error) {
 		return nil, fmt.Errorf("build graph service: %w", err)
 	}
 	graphLinks.svc = graphSvc
+	// The graph derives its structural skeleton (mission -> KR -> task ->
+	// decision lineage) from entity refs at read time, so structure is owned by
+	// the backend and never re-derived by each consumer.
+	graphSvc.SetStructuralResolver(graphapp.NewStructuralResolver(taskSvc, decisionSvc, missionSvc))
 
 	pinRepo, err := pininfra.NewRepository(handle)
 	if err != nil {

@@ -25,6 +25,7 @@ type Service struct {
 	hydrators     map[string]domain.NodeHydrator
 	searchTimeout time.Duration
 	pinReader     PinReader
+	structural    StructuralEdgeResolver
 }
 
 type Linker interface {
@@ -74,6 +75,13 @@ func NewService(contextLinks contextlink.Repository, hydrators []domain.NodeHydr
 // in search. Safe to leave unset — search degrades to unboosted ordering.
 func (s *Service) SetPinReader(reader PinReader) {
 	s.pinReader = reader
+}
+
+// SetStructuralResolver wires the (optional) resolver that derives the
+// structural skeleton (hierarchy + lineage) from entity refs at read time. Safe
+// to leave unset — node topology then comes only from stored context links.
+func (s *Service) SetStructuralResolver(resolver StructuralEdgeResolver) {
+	s.structural = resolver
 }
 
 // pinnedRefs returns the set of pinned node refs for a project. Pins are only a
@@ -157,10 +165,18 @@ func (s *Service) nodeOneHop(ctx context.Context, projectID, nodeType, nodeID st
 	if err != nil {
 		return domain.GraphNodeDetail{}, []domain.GraphWarning{}, fmt.Errorf("graph_query: linked entities for %s/%s: %w", core.Type, core.ID, err)
 	}
-	edges := make([]domain.GraphEdge, 0, len(links))
+	contextEdges := make([]domain.GraphEdge, 0, len(links))
 	for _, link := range links {
-		edges = append(edges, graphEdgeFromLink(link, ""))
+		contextEdges = append(contextEdges, graphEdgeFromLink(link, ""))
 	}
+	structuralEdges, err := s.structuralEdges(ctx, projectID, core)
+	if err != nil {
+		return domain.GraphNodeDetail{}, []domain.GraphWarning{}, err
+	}
+	// Structural edges (derived from refs) are authoritative for topology a ref
+	// already implies. A stored context link that restates a structural edge is
+	// dropped here; genuine cross-tree context links survive.
+	edges := mergeStructuralAndContextEdges(structuralEdges, contextEdges)
 
 	neighbourIDs := map[string]map[string]struct{}{}
 	for _, edge := range edges {
@@ -699,6 +715,37 @@ func inferEndpointTypeFromID(fieldName, nodeID string) (string, error) {
 		return "", fmt.Errorf("graph_query: %s is required when node id prefix is not recognized: %q", strings.TrimSpace(fieldName), strings.TrimSpace(nodeID))
 	}
 	return nodeType, nil
+}
+
+func (s *Service) structuralEdges(ctx context.Context, projectID string, core domain.GraphNodeCore) ([]domain.GraphEdge, error) {
+	if s.structural == nil {
+		return nil, nil
+	}
+	return s.structural.Edges(ctx, projectID, core)
+}
+
+// mergeStructuralAndContextEdges keeps every structural edge and appends only the
+// context edges that don't restate one (same source, target, and edge type).
+func mergeStructuralAndContextEdges(structural, context []domain.GraphEdge) []domain.GraphEdge {
+	out := make([]domain.GraphEdge, 0, len(structural)+len(context))
+	seen := make(map[string]struct{}, len(structural)+len(context))
+	for _, group := range [][]domain.GraphEdge{structural, context} {
+		for _, edge := range group {
+			key := edgeIdentityKey(edge)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, edge)
+		}
+	}
+	return out
+}
+
+func edgeIdentityKey(edge domain.GraphEdge) string {
+	return strings.ToLower(strings.TrimSpace(edge.SourceType)) + "/" + strings.TrimSpace(edge.SourceID) +
+		"|" + strings.ToLower(strings.TrimSpace(edge.EdgeType)) + "|" +
+		strings.ToLower(strings.TrimSpace(edge.TargetType)) + "/" + strings.TrimSpace(edge.TargetID)
 }
 
 func graphEdgeFromLink(link contextlink.Link, operation string) domain.GraphEdge {
