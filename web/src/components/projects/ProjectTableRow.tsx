@@ -13,6 +13,7 @@ import {
 import { Archive, Link as LinkIcon, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import type { Project } from '../../lib/types'
 import type { ProjectRemoveAction } from './RemoveProjectDialog'
+import { ProjectAvatar } from './ProjectAvatar'
 
 /* ── A single row in the projects table ───────────────────────
    Click navigates into the project (unless archived); the kebab
@@ -52,20 +53,23 @@ export default function ProjectTableRow({
         />
       </TableCell>
 
-      {/* Project name + path (stacked) */}
+      {/* Project avatar + name + path (stacked) */}
       <TableCell className="px-3 py-2.5">
-        <div className="min-w-0">
-          <div className={cn(
-            'truncate text-[0.8125rem] font-semibold leading-tight',
-            archived ? 'text-[var(--text-3)]' : 'text-[var(--text-1)]',
-          )}>
-            {projectDisplayName(project)}
-          </div>
-          <div
-            className="mt-0.5 truncate font-mono text-[0.6875rem] leading-tight text-[var(--text-3)]"
-            title={project.root}
-          >
-            {shortenPath(project.root)}
+        <div className="flex min-w-0 items-center gap-2.5">
+          <ProjectAvatar project={project} size={26} className={cn(archived && 'opacity-70')} />
+          <div className="min-w-0">
+            <div className={cn(
+              'truncate text-[0.8125rem] font-semibold leading-tight',
+              archived ? 'text-[var(--text-3)]' : 'text-[var(--text-1)]',
+            )}>
+              {projectDisplayName(project)}
+            </div>
+            <div
+              className="mt-0.5 truncate font-mono text-[0.6875rem] leading-tight text-[var(--text-3)]"
+              title={project.root}
+            >
+              {shortenPath(project.root)}
+            </div>
           </div>
         </div>
       </TableCell>
@@ -107,7 +111,7 @@ export default function ProjectTableRow({
               <>
                 <DropdownMenuItem onSelect={onEdit}>
                   <Pencil size={12} className="mr-2" />
-                  Rename project
+                  Edit project
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={onLink}>
                   <LinkIcon size={12} className="mr-2" />

@@ -5,13 +5,14 @@
 import { useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { useQuery } from '@tanstack/react-query'
-import { Clock, CircleCheck, CircleAlert, Target, FolderOpen } from 'lucide-react'
+import { Clock, CircleCheck, CircleAlert, Target } from 'lucide-react'
 import { rpcUnwrapList } from '../../lib/rpc'
 import { qk } from '../../lib/queryKeys'
 import { dashboardLink, missionDetailLink } from '../../lib/routing'
 import { useProjects } from '../../hooks/useProjects'
 import type { MissionView } from '../../lib/types'
 import { projectDisplayName } from '../../lib/projectHelpers'
+import { ProjectAvatar } from '../projects/ProjectAvatar'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /* ── Mission status icon (mirrors MissionSection) ────── */
@@ -123,7 +124,7 @@ export function GlobalSidebarContent() {
               style={{ letterSpacing: '-0.08px' }}
               onClick={() => navigate(dashboardLink(project.id))}
             >
-              <FolderOpen size={13} className="shrink-0 text-[var(--text-3)]" />
+              <ProjectAvatar project={project} size={18} />
               <span className="flex-1 min-w-0 truncate">{projectDisplayName(project)}</span>
             </button>
           ))}
