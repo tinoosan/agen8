@@ -12,6 +12,7 @@ import DecisionFeed from '../components/dashboard/DecisionFeed'
 import MissionSummary from '../components/dashboard/MissionSummary'
 import TaskSummary from '../components/dashboard/TaskSummary'
 import DashboardWorkingNow from '../components/dashboard/DashboardWorkingNow'
+import NeedsAttention from '../components/dashboard/NeedsAttention'
 import DashboardContextPanel from '../components/dashboard/DashboardContextPanel'
 import { StrategyMapSearch } from '../components/strategy/StrategyMapSearch'
 import { useStrategyGraph } from '../components/strategy/useStrategyGraph'
@@ -232,6 +233,8 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        <NeedsAttention projectId={projectId} />
 
         <div className="mb-8">
           <TaskSummary projectId={projectId} />

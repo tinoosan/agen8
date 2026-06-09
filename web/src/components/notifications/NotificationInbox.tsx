@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLocation } from 'wouter'
-import { Bell, Check, X, AlertTriangle, AlertCircle, Info } from 'lucide-react'
+import { Bell, Check, X } from 'lucide-react'
 import {
   Popover,
   PopoverContent,
@@ -9,24 +9,14 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { formatRelative } from '../../lib/format'
-import type { NotificationItem, NotificationSeverity } from '../../lib/types'
+import type { NotificationItem } from '../../lib/types'
+import { SEVERITY_META } from './severity'
 import {
   useNotifications,
   useMarkNotificationRead,
   useMarkAllNotificationsRead,
   useDismissNotification,
 } from '../../hooks/useNotifications'
-
-/* Severity → icon + accent color. Mirrors the badge variants used elsewhere so
- * the inbox reads with the same visual language as the rest of the app. */
-const SEVERITY_META: Record<
-  NotificationSeverity,
-  { Icon: typeof Info; color: string }
-> = {
-  info: { Icon: Info, color: 'var(--blue)' },
-  warning: { Icon: AlertTriangle, color: 'var(--amber)' },
-  critical: { Icon: AlertCircle, color: 'var(--red)' },
-}
 
 function NotificationRow({
   item,
