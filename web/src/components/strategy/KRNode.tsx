@@ -56,8 +56,7 @@ export const KRNode = memo(function KRNode({ data, selected, id }: NodeProps) {
   // (selectedNodeId), so the focused node stays lit while the panel is closed.
   const isActiveFromStore = useStrategyMapStore((s) => s.focusNodeId === id)
   const isActive = selected || isActiveFromStore
-  const isTraced = useStrategyMapStore((s) => s.activeFilter === 'trace') && !isDimmed
-  const nebulaOpacity = isActive ? 0.24 : isTraced ? 0.18 : isZooming ? 0.015 : 0.1
+  const nebulaOpacity = isActive ? 0.24 : isZooming ? 0.015 : 0.1
   const nebulaTransition = isZooming
     ? 'opacity 90ms linear, box-shadow 90ms linear'
     : 'opacity 280ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 360ms cubic-bezier(0.22, 1, 0.36, 1)'

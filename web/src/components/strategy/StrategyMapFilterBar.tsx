@@ -1,24 +1,19 @@
 import { memo } from 'react'
-import { Activity, Ban, CheckCircle2, Diamond, GitBranch, Minus, Plus, Search } from 'lucide-react'
+import { Activity, Ban, CheckCircle2, Diamond, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { FilterPreset } from './strategyMapFilters'
-import { TRACE_MIN_DEPTH, TRACE_MAX_DEPTH } from './strategyMapFilters'
 
 interface FilterButton {
   key: FilterPreset
   label: string
   icon: typeof Activity
   color: string
-  visible: boolean
 }
 
 interface Props {
   activeFilter: FilterPreset | null
   onFilterChange: (filter: FilterPreset | null) => void
-  hasFocusedNode: boolean
   matchCount: number
-  contextDepth: number
-  onContextDepthChange: (depth: number) => void
   /** Open the node-search panel. Gives touch users (iPad, where the mobile top
    *  bar is hidden and there's no keyboard for "/") a reachable way in, and
    *  makes search discoverable for everyone. */
@@ -28,21 +23,15 @@ interface Props {
 export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
   activeFilter,
   onFilterChange,
-  hasFocusedNode,
   matchCount,
-  contextDepth,
-  onContextDepthChange,
   onOpenSearch,
 }: Props) {
   const buttons: FilterButton[] = [
-    { key: 'in_motion', label: 'In Motion', icon: Activity, color: 'var(--blue)', visible: true },
-    { key: 'blocked', label: 'Blocked', icon: Ban, color: 'var(--amber)', visible: true },
-    { key: 'done', label: 'Done', icon: CheckCircle2, color: 'var(--green)', visible: true },
-    { key: 'decisions', label: 'Decisions', icon: Diamond, color: 'var(--accent)', visible: true },
-    { key: 'trace', label: 'Trace Path', icon: GitBranch, color: 'var(--accent)', visible: hasFocusedNode },
+    { key: 'in_motion', label: 'In Motion', icon: Activity, color: 'var(--blue)' },
+    { key: 'blocked', label: 'Blocked', icon: Ban, color: 'var(--amber)' },
+    { key: 'done', label: 'Done', icon: CheckCircle2, color: 'var(--green)' },
+    { key: 'decisions', label: 'Decisions', icon: Diamond, color: 'var(--accent)' },
   ]
-
-  const isTraceActive = activeFilter === 'trace'
 
   return (
     <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5">
@@ -72,7 +61,6 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
       </button>
 
       {buttons.map((btn) => {
-        if (!btn.visible) return null
         const isActive = activeFilter === btn.key
         const Icon = btn.icon
         return (
@@ -123,58 +111,6 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
           </button>
         )
       })}
-
-      {/* Context depth control — appears when trace is active */}
-      {isTraceActive && (
-        <div
-          className="inline-flex items-center gap-1 transition-all duration-200"
-          style={{
-            padding: '4px 5px',
-            borderRadius: 20,
-            border: '1px solid var(--border)',
-            background: 'var(--bg-panel)',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => onContextDepthChange(Math.max(TRACE_MIN_DEPTH, contextDepth - 1))}
-            disabled={contextDepth <= TRACE_MIN_DEPTH}
-            className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full transition-colors hover:bg-[var(--bg-surface)] disabled:opacity-25 focus:outline-none"
-            style={{ color: 'var(--text-3)' }}
-          >
-            <Minus size={10} />
-          </button>
-
-          {/* Depth dots — visual indicator of context expansion */}
-          <div className="flex items-center gap-[3px] px-1">
-            {Array.from({ length: TRACE_MAX_DEPTH }, (_, i) => (
-              <div
-                key={i}
-                className="rounded-full transition-all duration-200"
-                style={{
-                  width: 6,
-                  height: 6,
-                  background: i < contextDepth
-                    ? 'var(--accent)'
-                    : 'var(--border)',
-                  opacity: i < contextDepth ? 1 : 0.5,
-                }}
-              />
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onContextDepthChange(Math.min(TRACE_MAX_DEPTH, contextDepth + 1))}
-            disabled={contextDepth >= TRACE_MAX_DEPTH}
-            className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full transition-colors hover:bg-[var(--bg-surface)] disabled:opacity-25 focus:outline-none"
-            style={{ color: 'var(--text-3)' }}
-          >
-            <Plus size={10} />
-          </button>
-        </div>
-      )}
     </div>
   )
 })

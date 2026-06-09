@@ -2,14 +2,12 @@ import { useEffect } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { Node } from '@xyflow/react'
 import type { FilterPreset } from './strategyMapFilters'
-import { TRACE_MIN_DEPTH, TRACE_MAX_DEPTH, TRACE_INITIAL_DEPTH } from './strategyMapFilters'
 import type { FitViewFn, GetZoomFn, SetCenterFn, ZoomFn } from './strategyMapControls'
 
 /**
  * All keyboard interaction for the strategy map: the bubble-phase handler
  * (selection/zoom/filter shortcuts + spatial arrow/Tab navigation) and the
- * capture-phase handler for keys ReactFlow would otherwise swallow (Escape,
- * and the `[` / `]` context-depth controls while tracing).
+ * capture-phase handler for keys ReactFlow would otherwise swallow (Escape).
  */
 export function useStrategyMapKeyboardNav({
   effectiveFocusNodeId,
@@ -33,7 +31,6 @@ export function useStrategyMapKeyboardNav({
   setHelpOpen,
   setSearchOpen,
   setActiveFilter,
-  setContextDepth,
 }: {
   effectiveFocusNodeId: string | null
   displayNodes: Node[]
@@ -58,7 +55,6 @@ export function useStrategyMapKeyboardNav({
   // than a React state dispatcher — the hook only ever calls it with a boolean.
   setSearchOpen: (open: boolean) => void
   setActiveFilter: Dispatch<SetStateAction<FilterPreset | null>>
-  setContextDepth: Dispatch<SetStateAction<number>>
 }) {
   useEffect(() => {
     // Move the focus cursor to a node and recenter it. Traversal moves focus
@@ -152,20 +148,6 @@ export function useStrategyMapKeyboardNav({
         setActiveFilter((f) => f === 'decisions' ? null : 'decisions')
         return
       }
-      // T = toggle Trace Path (only when a node is focused — the panel can be
-      // closed). Entering trace seeds the first ring so the focused node's
-      // neighbours light up.
-      if ((e.key === 't' || e.key === 'T') && effectiveFocusNodeId) {
-        e.preventDefault()
-        setActiveFilter((f) => {
-          const next = f === 'trace' ? null : 'trace'
-          if (next === 'trace') setContextDepth(TRACE_INITIAL_DEPTH)
-          return next
-        })
-        return
-      }
-      // [ / ] handled in capture-phase handler above
-
       // Shift+F fits the entire map into the viewport (global reset).
       // Plain F fits just the current cluster (handled further down).
       if ((e.key === 'f' || e.key === 'F') && e.shiftKey) {
@@ -366,20 +348,6 @@ export function useStrategyMapKeyboardNav({
           e.stopPropagation()
           setFocusNodeId(null)
         }
-        return
-      }
-
-      // Context depth [ / ] — must be in capture phase to beat ReactFlow
-      if (e.key === '[' && activeFilter === 'trace') {
-        e.preventDefault()
-        e.stopPropagation()
-        setContextDepth((d) => Math.max(TRACE_MIN_DEPTH, d - 1))
-        return
-      }
-      if (e.key === ']' && activeFilter === 'trace') {
-        e.preventDefault()
-        e.stopPropagation()
-        setContextDepth((d) => Math.min(TRACE_MAX_DEPTH, d + 1))
         return
       }
     }

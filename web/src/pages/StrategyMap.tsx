@@ -22,7 +22,7 @@ import { StrategyMapFilterBar } from '../components/strategy/StrategyMapFilterBa
 import { StrategyMapLegend } from '../components/strategy/StrategyMapLegend'
 import { StrategyMapZoomControls } from '../components/strategy/StrategyMapZoomControls'
 import { StrategyMapCanvas } from '../components/strategy/StrategyMapCanvas'
-import { type FilterPreset, TRACE_INITIAL_DEPTH } from '../components/strategy/strategyMapFilters'
+import { type FilterPreset } from '../components/strategy/strategyMapFilters'
 import {
   getNextDisplayMode,
   useDeferredStrategyGraph,
@@ -52,7 +52,6 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState<FilterPreset | null>(null)
-  const [contextDepth, setContextDepth] = useState(0)
   const [helpOpen, setHelpOpen] = useState(false)
   // Search-open lives in the global store so search can be opened from outside
   // this page — the mobile top-bar button and the dashboard search icon both
@@ -103,29 +102,8 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
     activeFilter,
     displayNodes,
     displayEdges,
-    contextDepth,
     effectiveFocusNodeId,
   })
-
-  // Clear trace and reset depth when the focus cursor clears (e.g. a pane
-  // click). Trace anchors on the cursor now, not the panel — so closing the
-  // panel while a node stays focused must keep the trace alive.
-  useEffect(() => {
-    if (!effectiveFocusNodeId && activeFilter === 'trace') {
-      queueMicrotask(() => {
-        setActiveFilter(null)
-        setContextDepth(0)
-      })
-    }
-  }, [effectiveFocusNodeId, activeFilter])
-
-  // Toggling a filter from the bar. Entering trace seeds the first ring so the
-  // map lights the selected node's immediate neighbours (depth 0 would show only
-  // the selected node — useless); the +/- stepper then walks the rings outward.
-  const handleFilterChange = useCallback((filter: FilterPreset | null) => {
-    setActiveFilter(filter)
-    if (filter === 'trace') setContextDepth(TRACE_INITIAL_DEPTH)
-  }, [])
 
   const markInteraction = useCallback((settleDelay = 180) => {
     setIsInteracting(true)
@@ -200,7 +178,6 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
     setHelpOpen,
     setSearchOpen,
     setActiveFilter,
-    setContextDepth,
   })
 
   const {
@@ -275,11 +252,8 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
 
         <StrategyMapFilterBar
           activeFilter={activeFilter}
-          onFilterChange={handleFilterChange}
-          hasFocusedNode={!!effectiveFocusNodeId}
+          onFilterChange={setActiveFilter}
           matchCount={filterResult?.matchCount ?? 0}
-          contextDepth={contextDepth}
-          onContextDepthChange={setContextDepth}
           onOpenSearch={() => setSearchOpen(true)}
         />
 

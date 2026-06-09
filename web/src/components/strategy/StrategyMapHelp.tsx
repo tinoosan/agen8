@@ -38,9 +38,6 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['B'], desc: 'Toggle Blocked lens (stuck / at-risk work)', group: 'Filters' },
   { keys: ['D'], desc: 'Toggle Done lens (highlight finished work)', group: 'Filters' },
   { keys: ['R'], desc: 'Toggle Decisions lens (reasoning links)', group: 'Filters' },
-  { keys: ['T'], desc: 'Toggle Trace Path from focused node', group: 'Filters' },
-  { keys: ['['], desc: 'Shrink trace radius (fewer rings)', group: 'Filters' },
-  { keys: [']'], desc: 'Expand trace radius (more rings)', group: 'Filters' },
 
   // Search
   { keys: ['/'], desc: 'Search for a node by name', group: 'Search' },

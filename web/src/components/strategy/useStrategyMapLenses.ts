@@ -5,7 +5,6 @@ import {
   computeBlockedFilter,
   computeDecisionsFilter,
   computeDoneFilter,
-  computeTraceFilter,
   type FilterPreset,
 } from './strategyMapFilters'
 
@@ -24,13 +23,11 @@ export function useStrategyMapLenses({
   activeFilter,
   displayNodes,
   displayEdges,
-  contextDepth,
   effectiveFocusNodeId,
 }: {
   activeFilter: FilterPreset | null
   displayNodes: Node[]
   displayEdges: Edge[]
-  contextDepth: number
   effectiveFocusNodeId: string | null
 }) {
   // Highlight lenses — compute a match set that dims everything else.
@@ -40,13 +37,8 @@ export function useStrategyMapLenses({
     if (activeFilter === 'blocked') return computeBlockedFilter(displayNodes, displayEdges)
     if (activeFilter === 'decisions') return computeDecisionsFilter(displayNodes, displayEdges)
     if (activeFilter === 'done') return computeDoneFilter(displayNodes, displayEdges)
-    // Trace anchors on the focus cursor (not the panel), so it's reachable on
-    // the first touch and re-roots as the cursor hops along the graph.
-    if (activeFilter === 'trace' && effectiveFocusNodeId) {
-      return computeTraceFilter(effectiveFocusNodeId, displayEdges, contextDepth)
-    }
     return null
-  }, [activeFilter, displayNodes, displayEdges, effectiveFocusNodeId, contextDepth])
+  }, [activeFilter, displayNodes, displayEdges])
 
   // ── Highlighting logic (1-hop neighborhood focus) ─────────────────────
   // When a node is focused, we compute a visual hierarchy:
@@ -72,19 +64,11 @@ export function useStrategyMapLenses({
       // blocked / done / decisions) can match the entire decision web at once —
       // flagging every matched edge as direct sprays hundreds of label portals
       // and infinite animations and crashes the browser's render process
-      // (Safari shows "a problem repeatedly occurred"). For those filters we
-      // highlight via opacity contrast only: matched edges stay in
-      // clusterEdgeIds (ambient), nothing is "direct".
-      //
-      // Trace keeps direct edges, but only the STRUCTURAL ones it nominates
-      // (computeTraceFilter excludes context links from directEdgeIds for the
-      // same crash reason — a high-degree node has far too many context links to
-      // animate). Context links revealed by trace stay ambient via edgeIds.
-      const directEdgeIds = activeFilter === 'trace'
-        ? (filterResult.directEdgeIds ?? NO_DIRECT_EDGES)
-        : NO_DIRECT_EDGES
+      // (Safari shows "a problem repeatedly occurred"). So set filters highlight
+      // via opacity contrast only: matched edges stay in clusterEdgeIds
+      // (ambient), nothing is "direct".
       return {
-        directEdgeIds,
+        directEdgeIds: NO_DIRECT_EDGES,
         clusterNodeIds: filterResult.nodeIds,
         clusterEdgeIds: filterResult.edgeIds,
       }
@@ -110,7 +94,7 @@ export function useStrategyMapLenses({
       // render-memory budget can't survive, so the iPad crashes on select.
       // Context links touching the focus stay AMBIENT: they're still revealed
       // via clusterEdgeIds below (both endpoints land in the neighborhood),
-      // just never animated. This mirrors what the trace lens already does.
+      // just never animated.
       if (edge.type === 'statusEdge') dEdges.add(edge.id)
     }
 
@@ -122,7 +106,7 @@ export function useStrategyMapLenses({
     }
 
     return { directEdgeIds: dEdges, clusterNodeIds: neighborIds, clusterEdgeIds: cEdges }
-  }, [effectiveFocusNodeId, displayEdges, filterResult, activeFilter])
+  }, [effectiveFocusNodeId, displayEdges, filterResult])
 
   return {
     filterResult,

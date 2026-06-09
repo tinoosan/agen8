@@ -5,7 +5,6 @@ import {
   computeBlockedFilter,
   computeDoneFilter,
   computeDecisionsFilter,
-  computeTraceFilter,
 } from './strategyMapFilters'
 
 /* ── Fixture builders ─────────────────────────────────────────────────────
@@ -171,86 +170,5 @@ describe('computeDecisionsFilter (reference model — show these)', () => {
     expect(result.nodeIds.has('D')).toBe(true)
     expect(result.nodeIds.has('T1')).toBe(true) // made_during target
     expect(result.matchCount).toBe(1) // one decision
-  })
-})
-
-describe('computeTraceFilter (alternating structural ↔ context)', () => {
-  /* buildGraph() adjacency:
-   *   structural:  M ── K1 ── {T1, T2, T3}
-   *   context:     D ── T1,  T3 ── T1
-   * From T1 the stepper alternates phases:
-   *   step 1 (structural ring 1): K1
-   *   step 2 (context pass 1):    D, T3
-   *   step 3 (structural ring 2): M, T2
-   */
-
-  it('step 1 reveals the structural ring only — no context links yet', () => {
-    const { edges } = buildGraph()
-    const result = computeTraceFilter('T1', edges, 1)
-    expect(result.nodeIds.has('T1')).toBe(true) // the selected node
-    expect(result.nodeIds.has('K1')).toBe(true) // straight edge to immediate neighbour
-    // Context-linked nodes wait for the next (even) step.
-    expect(result.nodeIds.has('D')).toBe(false)
-    expect(result.nodeIds.has('T3')).toBe(false)
-    // 2nd structural hop also waits.
-    expect(result.nodeIds.has('M')).toBe(false)
-    expect(result.nodeIds.has('T2')).toBe(false)
-  })
-
-  it('step 2 layers in context links off everything shown so far', () => {
-    const { edges } = buildGraph()
-    const result = computeTraceFilter('T1', edges, 2)
-    expect(result.nodeIds.has('D')).toBe(true)  // T1 —made_during→ D
-    expect(result.nodeIds.has('T3')).toBe(true) // T1 —blocked_by→ T3
-    // The 2nd structural hop is still not revealed (that's step 3).
-    expect(result.nodeIds.has('M')).toBe(false)
-    expect(result.nodeIds.has('T2')).toBe(false)
-  })
-
-  it('step 3 grows the structural skeleton by another hop', () => {
-    const { edges } = buildGraph()
-    const result = computeTraceFilter('T1', edges, 3)
-    expect(result.nodeIds.has('M')).toBe(true)  // T1→K1→M
-    expect(result.nodeIds.has('T2')).toBe(true) // T1→K1→T2
-  })
-
-  it('step 0 lights only the selected node (no edges)', () => {
-    const { edges } = buildGraph()
-    const result = computeTraceFilter('T1', edges, 0)
-    expect(result.nodeIds.size).toBe(1)
-    expect(result.nodeIds.has('T1')).toBe(true)
-    expect(result.edgeIds.size).toBe(0)
-  })
-
-  it('marks only STRUCTURAL edges as direct — never context links (crash regression)', () => {
-    // A direct context edge spawns a label portal + infinite animation; lighting
-    // many at once crashes the render process. Trace must keep context ambient.
-    const { edges } = buildGraph()
-    for (const depth of [1, 2, 3, 4, 5, 6]) {
-      const result = computeTraceFilter('T1', edges, depth)
-      for (const id of result.directEdgeIds ?? []) {
-        expect(id.startsWith('c:')).toBe(false)
-      }
-    }
-    // And the structural path edge IS direct from step 1.
-    expect(computeTraceFilter('T1', edges, 1).directEdgeIds?.has('s:K1->T1')).toBe(true)
-  })
-
-  it('cluster edgeIds include revealed context links even though they are ambient', () => {
-    const { edges } = buildGraph()
-    const result = computeTraceFilter('T1', edges, 2)
-    // Context links are in edgeIds (so they render + dim correctly)...
-    expect(result.edgeIds.has('c:D->T1')).toBe(true)
-    expect(result.edgeIds.has('c:T3->T1')).toBe(true)
-    // ...but NOT in directEdgeIds (ambient, no animation).
-    expect(result.directEdgeIds?.has('c:D->T1')).toBe(false)
-    expect(result.directEdgeIds?.has('c:T3->T1')).toBe(false)
-  })
-
-  it('matchCount equals the number of revealed nodes', () => {
-    const { edges } = buildGraph()
-    expect(computeTraceFilter('T1', edges, 1).matchCount).toBe(2) // T1,K1
-    expect(computeTraceFilter('T1', edges, 2).matchCount).toBe(4) // + D,T3
-    expect(computeTraceFilter('T1', edges, 3).matchCount).toBe(6) // + M,T2
   })
 })

@@ -104,8 +104,7 @@ export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps
   // (selectedNodeId), so the focused node stays lit while the panel is closed.
   const isActiveFromStore = useStrategyMapStore((s) => s.focusNodeId === id)
   const isActive = selected || isActiveFromStore
-  const isTraced = useStrategyMapStore((s) => s.activeFilter === 'trace') && !isDimmed
-  const showNebula = isActive || isTraced
+  const showNebula = isActive
   const showDot = !isActive && leafPhase === 'dot'
   const showFull = isActive || leafPhase !== 'dot'
   const isEntering = !isActive && leafPhase === 'toFull'
