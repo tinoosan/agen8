@@ -84,6 +84,39 @@ func TestSQLiteRepositoryUpdatePersistsLifecycle(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryPersistsPreferences(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	record := userRecord(t, "user-1", "admin@example.com")
+	record.Preferences = user.Preferences{
+		Theme:              "nebula",
+		LastDarkTheme:      "nebula",
+		LastLightTheme:     "sepia",
+		DefaultProjectView: "strategy",
+		FontFamily:         "fraunces",
+		FontScale:          18,
+	}
+	if err := repo.Create(context.Background(), record); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := repo.Get(context.Background(), record.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Preferences.Theme != "nebula" {
+		t.Fatalf("theme=%q want nebula", got.Preferences.Theme)
+	}
+	if got.Preferences.DefaultProjectView != "strategy" {
+		t.Fatalf("default project view=%q want strategy", got.Preferences.DefaultProjectView)
+	}
+	if got.Preferences.FontFamily != "fraunces" {
+		t.Fatalf("font family=%q want fraunces", got.Preferences.FontFamily)
+	}
+	if got.Preferences.FontScale != 18 {
+		t.Fatalf("font scale=%d want 18", got.Preferences.FontScale)
+	}
+}
+
 func TestSQLiteRepositoryMissingUserFailsLoudly(t *testing.T) {
 	repo := newSQLiteRepositoryForTest(t)
 	id, err := user.NewID("missing-user")

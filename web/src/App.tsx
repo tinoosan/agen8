@@ -133,11 +133,27 @@ const AppShell = () => (
 )
 
 export default function App() {
-  const { theme, fontFamily, fontScale, resetEphemeral } = useStore()
+  const {
+    theme,
+    lastDarkTheme,
+    lastLightTheme,
+    defaultProjectView,
+    fontFamily,
+    fontScale,
+    applyUserPreferences,
+    resetEphemeral,
+  } = useStore()
   const { projectId } = useNavigation()
   const auth = useAuth()
   const [location, navigate] = useLocation()
   const isAuthRoute = location === '/login'
+  const hydratedUserRef = useRef<string | null>(null)
+  const lastSavedPreferencesRef = useRef('')
+  const updateProfileRef = useRef(auth.updateProfile)
+
+  useEffect(() => {
+    updateProfileRef.current = auth.updateProfile
+  }, [auth.updateProfile])
 
   // One EventSource consumer for the whole app: keep every TanStack cache fresh
   // off the live event stream. Gated on auth so we don't open /events (which
@@ -158,6 +174,48 @@ export default function App() {
     root.setAttribute('data-font-family', fontFamily)
     root.style.setProperty('--app-font-scale', `${fontScale}px`)
   }, [fontFamily, fontScale])
+
+  useEffect(() => {
+    const user = auth.user
+    if (!auth.isAuthenticated || !user?.id || hydratedUserRef.current === user.id) return
+    hydratedUserRef.current = user.id
+    if (user.preferences) {
+      applyUserPreferences(user.preferences)
+    }
+    const current = useStore.getState()
+    lastSavedPreferencesRef.current = JSON.stringify({
+      theme: current.theme,
+      lastDarkTheme: current.lastDarkTheme,
+      lastLightTheme: current.lastLightTheme,
+      defaultProjectView: current.defaultProjectView,
+      fontFamily: current.fontFamily,
+      fontScale: current.fontScale,
+    })
+  }, [applyUserPreferences, auth.isAuthenticated, auth.user])
+
+  useEffect(() => {
+    if (!auth.isAuthenticated || !auth.user?.id || hydratedUserRef.current !== auth.user.id) return
+    const preferences = {
+      theme,
+      lastDarkTheme,
+      lastLightTheme,
+      defaultProjectView,
+      fontFamily,
+      fontScale,
+    }
+    const key = JSON.stringify(preferences)
+    if (key === lastSavedPreferencesRef.current) return
+    const timeout = window.setTimeout(() => {
+      updateProfileRef.current({ preferences })
+        .then(() => {
+          lastSavedPreferencesRef.current = key
+        })
+        .catch(() => {
+          // Preference saves should never block the app shell.
+        })
+    }, 400)
+    return () => window.clearTimeout(timeout)
+  }, [auth.isAuthenticated, auth.user?.id, defaultProjectView, fontFamily, fontScale, lastDarkTheme, lastLightTheme, theme])
 
   /* Reset ephemeral UI (panels, pickers) when the focused workspace changes */
   const prevFocusKey = useRef(`${projectId}`)

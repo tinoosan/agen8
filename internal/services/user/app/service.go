@@ -111,9 +111,10 @@ func (s *Service) FirstActive(ctx context.Context) (user.User, error) {
 }
 
 type UpdateProfileParams struct {
-	UserID user.ID
-	Email  *string
-	Name   *string
+	UserID      user.ID
+	Email       *string
+	Name        *string
+	Preferences *user.Preferences
 }
 
 func (s *Service) UpdateProfile(ctx context.Context, params UpdateProfileParams) (user.User, error) {
@@ -128,6 +129,9 @@ func (s *Service) UpdateProfile(ctx context.Context, params UpdateProfileParams)
 	if params.Name != nil {
 		next.Name = strings.TrimSpace(*params.Name)
 	}
+	if params.Preferences != nil {
+		next.Preferences = mergePreferences(next.Preferences, *params.Preferences)
+	}
 	if strings.TrimSpace(next.Email) == "" {
 		return user.User{}, fmt.Errorf("user email is required")
 	}
@@ -140,6 +144,49 @@ func (s *Service) UpdateProfile(ctx context.Context, params UpdateProfileParams)
 	}
 	s.logger.Info("user profile updated", "user_id", next.ID.String())
 	return next, nil
+}
+
+var (
+	allowedThemes = map[string]struct{}{
+		"dark": {}, "midnight": {}, "dim": {}, "nebula": {}, "nord": {}, "rose": {}, "forest": {}, "ember": {},
+		"light": {}, "sepia": {}, "solarized": {},
+	}
+	allowedFontFamilies = map[string]struct{}{
+		"inter": {}, "geist": {}, "figtree": {}, "space-grotesk": {}, "atkinson": {},
+		"system": {}, "serif": {}, "lora": {}, "fraunces": {}, "mono": {},
+	}
+	allowedDefaultProjectViews = map[string]struct{}{"dashboard": {}, "strategy": {}}
+)
+
+func mergePreferences(current user.Preferences, incoming user.Preferences) user.Preferences {
+	next := current
+	if validChoice(incoming.Theme, allowedThemes) {
+		next.Theme = incoming.Theme
+	}
+	if validChoice(incoming.LastDarkTheme, allowedThemes) {
+		next.LastDarkTheme = incoming.LastDarkTheme
+	}
+	if validChoice(incoming.LastLightTheme, allowedThemes) {
+		next.LastLightTheme = incoming.LastLightTheme
+	}
+	if validChoice(incoming.DefaultProjectView, allowedDefaultProjectViews) {
+		next.DefaultProjectView = incoming.DefaultProjectView
+	}
+	if validChoice(incoming.FontFamily, allowedFontFamilies) {
+		next.FontFamily = incoming.FontFamily
+	}
+	if incoming.FontScale >= 13 && incoming.FontScale <= 20 {
+		next.FontScale = incoming.FontScale
+	}
+	return next
+}
+
+func validChoice(value string, allowed map[string]struct{}) bool {
+	if strings.TrimSpace(value) == "" {
+		return false
+	}
+	_, ok := allowed[value]
+	return ok
 }
 
 func (s *Service) SuspendUser(ctx context.Context, id user.ID) (user.User, error) {

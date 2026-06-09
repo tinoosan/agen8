@@ -665,7 +665,7 @@ export function AccountPreferencesSection() {
     <section id="settings-preferences" className="grid gap-4">
       <div>
         <h2 className="m-0 text-[1.0625rem] font-semibold text-[var(--text-1)]">Preferences</h2>
-        <p className="mt-1 mb-0 text-[0.8125rem] text-[var(--text-3)]">Personal defaults saved in this browser.</p>
+        <p className="mt-1 mb-0 text-[0.8125rem] text-[var(--text-3)]">Personal defaults saved to your account.</p>
       </div>
       <SettingsPanel>
         <SettingsRow title="Theme" description="Pick a palette. Changes apply instantly across the app.">

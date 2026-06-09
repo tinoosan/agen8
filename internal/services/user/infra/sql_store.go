@@ -30,7 +30,7 @@ func (s *sqlStore) Get(ctx context.Context, id user.ID) (user.User, error) {
 		return user.User{}, fmt.Errorf("user id is required")
 	}
 	return s.queryOne(ctx, `
-		SELECT user_id, email, name, role, lifecycle, created_at, updated_at
+		SELECT user_id, email, name, role, lifecycle, preferences_json, created_at, updated_at
 		FROM users
 		WHERE user_id = ?
 	`, id.String())
@@ -42,7 +42,7 @@ func (s *sqlStore) GetByEmail(ctx context.Context, email string) (user.User, err
 		return user.User{}, fmt.Errorf("user email is required")
 	}
 	return s.queryOne(ctx, `
-		SELECT user_id, email, name, role, lifecycle, created_at, updated_at
+		SELECT user_id, email, name, role, lifecycle, preferences_json, created_at, updated_at
 		FROM users
 		WHERE email = ?
 	`, email)
@@ -50,7 +50,7 @@ func (s *sqlStore) GetByEmail(ctx context.Context, email string) (user.User, err
 
 func (s *sqlStore) FirstActive(ctx context.Context) (user.User, error) {
 	return s.queryOne(ctx, `
-		SELECT user_id, email, name, role, lifecycle, created_at, updated_at
+		SELECT user_id, email, name, role, lifecycle, preferences_json, created_at, updated_at
 		FROM users
 		WHERE lifecycle = ?
 		ORDER BY created_at ASC, user_id ASC
@@ -70,20 +70,24 @@ func (s *sqlStore) Create(ctx context.Context, record user.User) error {
 	if err := validateUserRecord(record); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, s.rebind(`
+	preferences, err := preferencesString(record.Preferences)
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, s.rebind(`
 		INSERT INTO users (
-			user_id, email, name, role, lifecycle, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+			user_id, email, name, role, lifecycle, preferences_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		record.ID.String(),
 		normalizeEmail(record.Email),
 		strings.TrimSpace(record.Name),
 		string(record.Role),
 		string(record.Lifecycle),
+		preferences,
 		timeString(record.CreatedAt),
 		timeString(record.UpdatedAt),
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("create user %s: %w", record.ID.String(), mapEmailUniqueError(err))
 	}
 	return nil
@@ -93,15 +97,20 @@ func (s *sqlStore) Update(ctx context.Context, record user.User) error {
 	if err := validateUserRecord(record); err != nil {
 		return err
 	}
+	preferences, err := preferencesString(record.Preferences)
+	if err != nil {
+		return err
+	}
 	result, err := s.db.ExecContext(ctx, s.rebind(`
 		UPDATE users
-		SET email = ?, name = ?, role = ?, lifecycle = ?, updated_at = ?
+		SET email = ?, name = ?, role = ?, lifecycle = ?, preferences_json = ?, updated_at = ?
 		WHERE user_id = ?
 	`),
 		normalizeEmail(record.Email),
 		strings.TrimSpace(record.Name),
 		string(record.Role),
 		string(record.Lifecycle),
+		preferences,
 		timeString(record.UpdatedAt),
 		record.ID.String(),
 	)
@@ -125,6 +134,7 @@ func (s *sqlStore) queryOne(ctx context.Context, query string, args ...any) (use
 		name      string
 		role      string
 		lifecycle string
+		rawPrefs  string
 		createdAt string
 		updatedAt string
 	)
@@ -134,6 +144,7 @@ func (s *sqlStore) queryOne(ctx context.Context, query string, args ...any) (use
 		&name,
 		&role,
 		&lifecycle,
+		&rawPrefs,
 		&createdAt,
 		&updatedAt,
 	)
@@ -155,14 +166,19 @@ func (s *sqlStore) queryOne(ctx context.Context, query string, args ...any) (use
 	if err != nil {
 		return user.User{}, fmt.Errorf("scan user updated at: %w", err)
 	}
+	preferences, err := parsePreferences(rawPrefs)
+	if err != nil {
+		return user.User{}, fmt.Errorf("scan user preferences: %w", err)
+	}
 	record := user.User{
-		ID:        id,
-		Email:     email,
-		Name:      name,
-		Role:      user.Role(role),
-		Lifecycle: user.Lifecycle(lifecycle),
-		CreatedAt: created,
-		UpdatedAt: updated,
+		ID:          id,
+		Email:       email,
+		Name:        name,
+		Role:        user.Role(role),
+		Lifecycle:   user.Lifecycle(lifecycle),
+		Preferences: preferences,
+		CreatedAt:   created,
+		UpdatedAt:   updated,
 	}
 	if err := validateUserRecord(record); err != nil {
 		return user.User{}, fmt.Errorf("scan user record: %w", err)
@@ -178,14 +194,58 @@ func (s *sqlStore) ensureSchema(ctx context.Context) error {
 			name TEXT NOT NULL,
 			role TEXT NOT NULL,
 			lifecycle TEXT NOT NULL,
+			preferences_json TEXT NOT NULL DEFAULT '{}',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)
 	`)); err != nil {
 		return fmt.Errorf("ensure users table: %w", err)
 	}
+	if err := s.ensurePreferencesColumn(ctx); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)`); err != nil {
 		return fmt.Errorf("ensure users email index: %w", err)
+	}
+	return nil
+}
+
+func (s *sqlStore) ensurePreferencesColumn(ctx context.Context) error {
+	if s.driver == storagedb.DriverPostgres {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			return fmt.Errorf("ensure users preferences column: add postgres column: %w", err)
+		}
+		return nil
+	}
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(users)`)
+	if err != nil {
+		return fmt.Errorf("ensure users preferences column: table info: %w", err)
+	}
+	hasColumn := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("ensure users preferences column: scan table info: %w", err)
+		}
+		if strings.TrimSpace(name) == "preferences_json" {
+			hasColumn = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("ensure users preferences column: iterate table info: %w", err)
+	}
+	rows.Close()
+	if hasColumn {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN preferences_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+		return fmt.Errorf("ensure users preferences column: add column: %w", err)
 	}
 	return nil
 }

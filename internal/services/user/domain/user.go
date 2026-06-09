@@ -22,13 +22,23 @@ const (
 )
 
 type User struct {
-	ID        ID
-	Email     string
-	Name      string
-	Role      Role
-	Lifecycle Lifecycle
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          ID
+	Email       string
+	Name        string
+	Role        Role
+	Lifecycle   Lifecycle
+	Preferences Preferences
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type Preferences struct {
+	Theme              string `json:"theme,omitempty"`
+	LastDarkTheme      string `json:"lastDarkTheme,omitempty"`
+	LastLightTheme     string `json:"lastLightTheme,omitempty"`
+	DefaultProjectView string `json:"defaultProjectView,omitempty"`
+	FontFamily         string `json:"fontFamily,omitempty"`
+	FontScale          int    `json:"fontScale,omitempty"`
 }
 
 type NewInput struct {

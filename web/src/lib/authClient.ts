@@ -1,5 +1,6 @@
 import { clearStoredSessionToken, getStoredSessionToken, rpcCall, setStoredSessionToken } from './rpc'
 import type { AuthAPIKey, AuthStatus, AuthUser } from './types'
+import type { UserPreferences } from './store'
 
 export interface LoginInput {
   email: string
@@ -12,8 +13,9 @@ export interface AuthResult {
 }
 
 export interface UpdateProfileInput {
-  email: string
-  name: string
+  email?: string
+  name?: string
+  preferences?: UserPreferences
 }
 
 export interface CreateAPIKeyResult {

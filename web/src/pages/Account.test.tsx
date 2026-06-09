@@ -56,6 +56,8 @@ describe('Account page', () => {
     useStore.setState({
       theme: 'dark',
       defaultProjectView: 'dashboard',
+      fontFamily: 'inter',
+      fontScale: 16,
     })
     mockUpdateProfile.mockResolvedValue(undefined)
     mockCreateAPIKey.mockResolvedValue({
@@ -96,6 +98,7 @@ describe('Account page', () => {
     expect(screen.getByRole('heading', { name: 'MCP access' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /generate mcp key/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Agen8 skill' })).toBeInTheDocument()
+    expect(screen.getByText('Personal defaults saved to your account.')).toBeInTheDocument()
     expect(screen.getByText('agen8 skill install --harness codex')).toBeInTheDocument()
     expect(screen.getByText('agen8 skill install --harness claude-cli')).toBeInTheDocument()
     expect(screen.queryByText(/auth\.status/i)).not.toBeInTheDocument()

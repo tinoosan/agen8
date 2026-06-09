@@ -81,10 +81,16 @@ func (h *Handler) UpdateProfile(ctx context.Context, p UpdateProfileParams) (Upd
 	if err != nil {
 		return UpdateProfileResult{}, err
 	}
+	var preferences *user.Preferences
+	if p.Preferences != nil {
+		value := p.Preferences.domain()
+		preferences = &value
+	}
 	record, err := h.svc.UpdateProfile(ctx, userapp.UpdateProfileParams{
-		UserID: id,
-		Email:  p.Email,
-		Name:   p.Name,
+		UserID:      id,
+		Email:       p.Email,
+		Name:        p.Name,
+		Preferences: preferences,
 	})
 	if err != nil {
 		return UpdateProfileResult{}, internalError("update user profile", err)

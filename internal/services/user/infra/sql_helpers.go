@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -56,6 +57,26 @@ func parseTime(value string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return t.UTC(), nil
+}
+
+func preferencesString(preferences user.Preferences) (string, error) {
+	data, err := json.Marshal(preferences)
+	if err != nil {
+		return "", fmt.Errorf("marshal user preferences: %w", err)
+	}
+	return string(data), nil
+}
+
+func parsePreferences(value string) (user.Preferences, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return user.Preferences{}, nil
+	}
+	var preferences user.Preferences
+	if err := json.Unmarshal([]byte(value), &preferences); err != nil {
+		return user.Preferences{}, err
+	}
+	return preferences, nil
 }
 
 func mapEmailUniqueError(err error) error {

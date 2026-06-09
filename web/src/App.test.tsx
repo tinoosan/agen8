@@ -56,6 +56,11 @@ function resetStore() {
       artifactsOpen: false,
       strategySearchOpen: false,
       theme: 'dark',
+      lastDarkTheme: 'dark',
+      lastLightTheme: 'light',
+      defaultProjectView: 'dashboard',
+      fontFamily: 'inter',
+      fontScale: 16,
     })
   })
 }
@@ -167,6 +172,56 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(document.documentElement.getAttribute('data-theme')).toBe('dim')
+    })
+  })
+
+  it('syncs signed-in user preferences through the account profile', async () => {
+    const updateProfile = vi.fn().mockResolvedValue(undefined)
+    mockUseAuth.mockReturnValue({
+      isLoading: false,
+      isHosted: false,
+      isAuthenticated: true,
+      status: { enabled: true, hostedMode: false, authenticated: true },
+      user: {
+        id: 'user-1',
+        email: 'tino@example.com',
+        name: 'Tino',
+        createdAt: '2026-04-28T12:00:00Z',
+        preferences: {
+          theme: 'rose',
+          lastDarkTheme: 'rose',
+          lastLightTheme: 'sepia',
+          defaultProjectView: 'strategy',
+          fontFamily: 'lora',
+          fontScale: 18,
+        },
+      },
+      updateProfile,
+    })
+    renderWithRouter('/')
+
+    await waitFor(() => {
+      expect(useStore.getState().theme).toBe('rose')
+    })
+    expect(useStore.getState().fontFamily).toBe('lora')
+    expect(useStore.getState().fontScale).toBe(18)
+    expect(updateProfile).not.toHaveBeenCalled()
+
+    act(() => {
+      useStore.getState().setTheme('forest')
+    })
+
+    await waitFor(() => {
+      expect(updateProfile).toHaveBeenCalledWith({
+        preferences: expect.objectContaining({
+          theme: 'forest',
+          lastDarkTheme: 'forest',
+          lastLightTheme: 'sepia',
+          defaultProjectView: 'strategy',
+          fontFamily: 'lora',
+          fontScale: 18,
+        }),
+      })
     })
   })
 

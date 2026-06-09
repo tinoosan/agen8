@@ -52,6 +52,15 @@ export const FONT_SCALE_MAX = 20
 export const FONT_SCALE_DEFAULT = 16
 export const FONT_SCALE_STEP = 1
 
+export interface UserPreferences {
+  theme?: Theme
+  lastDarkTheme?: Theme
+  lastLightTheme?: Theme
+  defaultProjectView?: DefaultProjectView
+  fontFamily?: FontFamily
+  fontScale?: number
+}
+
 function clampFontScale(value: number): number {
   if (!Number.isFinite(value)) return FONT_SCALE_DEFAULT
   return Math.min(FONT_SCALE_MAX, Math.max(FONT_SCALE_MIN, Math.round(value)))
@@ -88,6 +97,8 @@ interface AppStore {
   setFontScale: (fontScale: number) => void
   stepFontScale: (delta: number) => void
   resetFontScale: () => void
+
+  applyUserPreferences: (preferences: UserPreferences) => void
 
   /** Reset ephemeral UI state (called on navigation changes) */
   resetEphemeral: () => void
@@ -215,6 +226,56 @@ export const useStore = create<AppStore>((set, get) => ({
   resetFontScale: () => {
     persistFontScale(FONT_SCALE_DEFAULT)
     set({ fontScale: FONT_SCALE_DEFAULT })
+  },
+
+  applyUserPreferences: (preferences) => {
+    const next: Partial<AppStore> = {}
+    if (preferences.theme && (THEMES as string[]).includes(preferences.theme)) {
+      next.theme = preferences.theme
+      try {
+        localStorage.setItem('agen8-theme', preferences.theme)
+      } catch {
+        // Ignore localStorage write failures — state still lives in memory.
+      }
+    }
+    if (preferences.lastDarkTheme && (THEMES as string[]).includes(preferences.lastDarkTheme) && !isLightTheme(preferences.lastDarkTheme)) {
+      next.lastDarkTheme = preferences.lastDarkTheme
+      try {
+        localStorage.setItem('agen8-theme-dark', preferences.lastDarkTheme)
+      } catch {
+        // Ignore localStorage write failures — state still lives in memory.
+      }
+    }
+    if (preferences.lastLightTheme && (THEMES as string[]).includes(preferences.lastLightTheme) && isLightTheme(preferences.lastLightTheme)) {
+      next.lastLightTheme = preferences.lastLightTheme
+      try {
+        localStorage.setItem('agen8-theme-light', preferences.lastLightTheme)
+      } catch {
+        // Ignore localStorage write failures — state still lives in memory.
+      }
+    }
+    if (preferences.defaultProjectView === 'dashboard' || preferences.defaultProjectView === 'strategy') {
+      next.defaultProjectView = preferences.defaultProjectView
+      try {
+        localStorage.setItem('agen8-default-project-view', preferences.defaultProjectView)
+      } catch {
+        // Ignore localStorage write failures — state still lives in memory.
+      }
+    }
+    if (preferences.fontFamily && (FONT_FAMILIES as string[]).includes(preferences.fontFamily)) {
+      next.fontFamily = preferences.fontFamily
+      try {
+        localStorage.setItem('agen8-font-family', preferences.fontFamily)
+      } catch {
+        // Ignore localStorage write failures — state still lives in memory.
+      }
+    }
+    if (preferences.fontScale !== undefined) {
+      const fontScale = clampFontScale(preferences.fontScale)
+      next.fontScale = fontScale
+      persistFontScale(fontScale)
+    }
+    set(next)
   },
 
   resetEphemeral: () => set({

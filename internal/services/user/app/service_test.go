@@ -162,6 +162,51 @@ func TestUpdateProfilePreservesAccountState(t *testing.T) {
 	}
 }
 
+func TestUpdateProfileMergesPreferences(t *testing.T) {
+	record := userRecord(t, "user-1")
+	record.Preferences = user.Preferences{
+		Theme:              "dark",
+		LastDarkTheme:      "dark",
+		LastLightTheme:     "light",
+		DefaultProjectView: "dashboard",
+		FontFamily:         "inter",
+		FontScale:          16,
+	}
+	svc := newServiceForTest(t, newFakeUserRepository(record))
+	preferences := user.Preferences{
+		Theme:              "rose",
+		DefaultProjectView: "strategy",
+		FontFamily:         "lora",
+		FontScale:          18,
+	}
+
+	updated, err := svc.UpdateProfile(context.Background(), UpdateProfileParams{
+		UserID:      record.ID,
+		Preferences: &preferences,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.Email != record.Email || updated.Name != record.Name {
+		t.Fatalf("profile changed unexpectedly: %#v", updated)
+	}
+	if updated.Preferences.Theme != "rose" {
+		t.Fatalf("theme=%q want rose", updated.Preferences.Theme)
+	}
+	if updated.Preferences.LastDarkTheme != "dark" {
+		t.Fatalf("last dark theme=%q want dark", updated.Preferences.LastDarkTheme)
+	}
+	if updated.Preferences.DefaultProjectView != "strategy" {
+		t.Fatalf("default project view=%q want strategy", updated.Preferences.DefaultProjectView)
+	}
+	if updated.Preferences.FontFamily != "lora" {
+		t.Fatalf("font family=%q want lora", updated.Preferences.FontFamily)
+	}
+	if updated.Preferences.FontScale != 18 {
+		t.Fatalf("font scale=%d want 18", updated.Preferences.FontScale)
+	}
+}
+
 func TestSuspendAndCloseUser(t *testing.T) {
 	record := userRecord(t, "user-1")
 	svc := newServiceForTest(t, newFakeUserRepository(record))

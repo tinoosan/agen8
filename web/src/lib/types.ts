@@ -1,4 +1,5 @@
 // Mirrors the Go protocol types used by the web UI.
+import type { UserPreferences } from './store'
 
 // Generic RPC list envelope: a response that carries a single named array
 // field, e.g. RpcList<'tasks', Task> === { tasks: Task[] }. Replaces the
@@ -66,6 +67,7 @@ export interface AuthUser {
   name: string;
   role?: string;
   lifecycle?: string;
+  preferences?: UserPreferences;
   createdAt: string;
   updatedAt?: string;
 }

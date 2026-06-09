@@ -138,6 +138,41 @@ func TestUpdateProfileUsesAuthenticatedUserOnly(t *testing.T) {
 	}
 }
 
+func TestUpdateProfileReturnsPreferences(t *testing.T) {
+	record := userRecord(t, "user-1", user.RoleUser)
+	handler := newHandlerForTest(t, newFakeUserRepository(record), staticIdentity("user-1", "user"))
+	preferences := UserPreferencesView{
+		Theme:              "forest",
+		LastDarkTheme:      "forest",
+		LastLightTheme:     "solarized",
+		DefaultProjectView: "strategy",
+		FontFamily:         "mono",
+		FontScale:          17,
+	}
+
+	result, err := handler.UpdateProfile(context.Background(), UpdateProfileParams{
+		Preferences: &preferences,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if result.User.Preferences.Theme != "forest" {
+		t.Fatalf("theme=%q want forest", result.User.Preferences.Theme)
+	}
+	if result.User.Preferences.LastLightTheme != "solarized" {
+		t.Fatalf("last light theme=%q want solarized", result.User.Preferences.LastLightTheme)
+	}
+	if result.User.Preferences.DefaultProjectView != "strategy" {
+		t.Fatalf("default project view=%q want strategy", result.User.Preferences.DefaultProjectView)
+	}
+	if result.User.Preferences.FontFamily != "mono" {
+		t.Fatalf("font family=%q want mono", result.User.Preferences.FontFamily)
+	}
+	if result.User.Preferences.FontScale != 17 {
+		t.Fatalf("font scale=%d want 17", result.User.Preferences.FontScale)
+	}
+}
+
 func TestSuspendRequiresAdmin(t *testing.T) {
 	record := userRecord(t, "user-1", user.RoleUser)
 	handler := newHandlerForTest(t, newFakeUserRepository(record), staticIdentity("user-1", "user"))
