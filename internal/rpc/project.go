@@ -15,6 +15,7 @@ const (
 	MethodProjectGet     = "project.get"
 	MethodProjectCreate  = "project.create"
 	MethodProjectSave    = "project.save"
+	MethodProjectUpdate  = "project.update"
 	MethodProjectArchive = "project.archive"
 	MethodProjectDelete  = "project.delete"
 	MethodProjectList    = "project.list"
@@ -58,6 +59,9 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service) error {
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectSave, false, withProjectCaller(handler.ProjectSave))
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodProjectUpdate, false, withProjectCaller(handler.ProjectUpdate))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectArchive, false, handler.ProjectArchive)

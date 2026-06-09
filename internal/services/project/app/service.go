@@ -158,6 +158,47 @@ func (s *Service) SaveProject(ctx context.Context, input SaveProjectInput) (proj
 	return project.Wrap(saved)
 }
 
+// UpdateProjectInput is the user-facing edit path: rename and/or recolor a
+// project the caller owns. Title/Customization are pointers so a nil leaves the
+// stored value untouched. ProjectID identifies the target; identity, root,
+// status, owner, and createdAt are never altered here.
+type UpdateProjectInput struct {
+	ProjectID     types.ProjectID
+	Title         *string
+	Customization *project.Customization
+}
+
+// UpdateProject edits the user-editable fields of an owned project. Unlike
+// SaveProject (an upsert that re-owns the caller and clobbers createdAt /
+// customization), this is a load-modify-save that requires the caller to
+// already own the project and preserves everything it does not explicitly
+// change. This is the path the UI rename/recolor affordance calls.
+func (s *Service) UpdateProject(ctx context.Context, input UpdateProjectInput) (project.Project, error) {
+	if s == nil {
+		return project.Project{}, fmt.Errorf("project service is nil")
+	}
+	c, err := s.resolveCaller(ctx)
+	if err != nil {
+		return project.Project{}, err
+	}
+	current, err := s.GetProject(ctx, input.ProjectID)
+	if err != nil {
+		return project.Project{}, err
+	}
+	if err := requireOwnedProject(c, current); err != nil {
+		return project.Project{}, err
+	}
+	updated := current.Update(project.UpdateInput{
+		Title:         input.Title,
+		Customization: input.Customization,
+	}, s.now())
+	saved, err := s.projects.Save(ctx, updated.Record())
+	if err != nil {
+		return project.Project{}, err
+	}
+	return project.Wrap(saved)
+}
+
 func (s *Service) GetProject(ctx context.Context, projectID types.ProjectID) (project.Project, error) {
 	if s == nil {
 		return project.Project{}, fmt.Errorf("project service is nil")

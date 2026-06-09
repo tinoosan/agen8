@@ -8,6 +8,7 @@ import { projectDisplayName } from '@/lib/projectHelpers'
 import { Plus, Search } from 'lucide-react'
 import type { Project } from '../lib/types'
 import LinkFolderDialog from '../components/projects/LinkFolderDialog'
+import EditProjectDialog from '../components/projects/EditProjectDialog'
 import CreateProjectDialog from '../components/projects/CreateProjectDialog'
 import ProjectTableRow from '../components/projects/ProjectTableRow'
 import RemoveProjectDialog, { type ProjectRemoveAction } from '../components/projects/RemoveProjectDialog'
@@ -68,6 +69,7 @@ export default function ProjectPage() {
   )
   const [removeTarget, setRemoveTarget] = useState<{ project: Project; action: ProjectRemoveAction } | null>(null)
   const [linkTarget, setLinkTarget] = useState<Project | null>(null)
+  const [editTarget, setEditTarget] = useState<Project | null>(null)
 
   // Filter projects by status + search
   const filteredProjects = useMemo(() => {
@@ -227,6 +229,7 @@ export default function ProjectPage() {
                       project={project}
                       onRemove={(action) => setRemoveTarget({ project, action })}
                       onLink={() => setLinkTarget(project)}
+                      onEdit={() => setEditTarget(project)}
                     />
                   ))}
                 </TableBody>
@@ -286,6 +289,18 @@ export default function ProjectPage() {
           <LinkFolderDialog
             project={linkTarget}
             onClose={() => setLinkTarget(null)}
+          />
+        )}
+
+        {editTarget && (
+          <EditProjectDialog
+            project={editTarget}
+            onClose={() => setEditTarget(null)}
+            onSaved={(updated) => {
+              setEditTarget(null)
+              queryClient.invalidateQueries({ queryKey: qk.projectsAll })
+              toast.success(`Project renamed to "${projectDisplayName(updated)}"`)
+            }}
           />
         )}
       </div>

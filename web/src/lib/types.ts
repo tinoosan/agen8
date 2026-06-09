@@ -9,12 +9,20 @@ export type RpcList<K extends string, T> = { [P in K]: T[] };
 
 export type ProjectStatus = "open" | "archived";
 
+// Optional per-project presentation. Persisted server-side; both fields are
+// optional so an un-customized project carries no customization at all.
+export interface ProjectCustomization {
+  icon?: string;
+  color?: string;
+}
+
 export interface Project {
   id: string;
   locationId: string;
   root: string;
   title?: string;
   status: ProjectStatus;
+  customization?: ProjectCustomization;
   createdAt?: string;
   updatedAt?: string;
 }

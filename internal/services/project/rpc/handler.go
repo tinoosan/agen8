@@ -73,6 +73,29 @@ func (h *Handler) ProjectSave(ctx context.Context, p ProjectSaveParams) (Project
 	return ProjectSaveResult{Project: NewProjectView(project)}, nil
 }
 
+func (h *Handler) ProjectUpdate(ctx context.Context, p ProjectUpdateParams) (ProjectUpdateResult, error) {
+	projectID, err := requireProjectID(p.ProjectID)
+	if err != nil {
+		return ProjectUpdateResult{}, err
+	}
+	input := projectapp.UpdateProjectInput{ProjectID: projectID}
+	if p.Title != nil {
+		title := strings.TrimSpace(*p.Title)
+		input.Title = &title
+	}
+	if p.Customization != nil {
+		input.Customization = &projectdomain.Customization{
+			Icon:  strings.TrimSpace(p.Customization.Icon),
+			Color: strings.TrimSpace(p.Customization.Color),
+		}
+	}
+	project, err := h.svc.UpdateProject(ctx, input)
+	if err != nil {
+		return ProjectUpdateResult{}, internalError("update project", err)
+	}
+	return ProjectUpdateResult{Project: NewProjectView(project)}, nil
+}
+
 func (h *Handler) ProjectList(ctx context.Context, p ProjectListParams) (ProjectListResult, error) {
 	projects, err := h.svc.ListProjects(ctx, projectdomain.Filter{
 		Status: projectdomain.Status(strings.TrimSpace(p.Status)),

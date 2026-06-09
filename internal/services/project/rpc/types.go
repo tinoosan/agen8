@@ -7,26 +7,40 @@ import (
 	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
+type CustomizationView struct {
+	Icon  string `json:"icon,omitempty"`
+	Color string `json:"color,omitempty"`
+}
+
 type ProjectView struct {
-	ID         string     `json:"id"`
-	LocationID string     `json:"locationId"`
-	Root       string     `json:"root"`
-	Title      string     `json:"title,omitempty"`
-	Status     string     `json:"status"`
-	CreatedAt  *time.Time `json:"createdAt,omitempty"`
-	UpdatedAt  *time.Time `json:"updatedAt,omitempty"`
+	ID            string             `json:"id"`
+	LocationID    string             `json:"locationId"`
+	Root          string             `json:"root"`
+	Title         string             `json:"title,omitempty"`
+	Status        string             `json:"status"`
+	Customization *CustomizationView `json:"customization,omitempty"`
+	CreatedAt     *time.Time         `json:"createdAt,omitempty"`
+	UpdatedAt     *time.Time         `json:"updatedAt,omitempty"`
 }
 
 func NewProjectView(p projectdomain.Project) ProjectView {
 	return ProjectView{
-		ID:         string(p.ID()),
-		LocationID: string(p.LocationID()),
-		Root:       p.Root(),
-		Title:      p.Title(),
-		Status:     string(p.Status()),
-		CreatedAt:  cloneTime(p.CreatedAt()),
-		UpdatedAt:  cloneTime(p.UpdatedAt()),
+		ID:            string(p.ID()),
+		LocationID:    string(p.LocationID()),
+		Root:          p.Root(),
+		Title:         p.Title(),
+		Status:        string(p.Status()),
+		Customization: newCustomizationView(p.Customization()),
+		CreatedAt:     cloneTime(p.CreatedAt()),
+		UpdatedAt:     cloneTime(p.UpdatedAt()),
 	}
+}
+
+func newCustomizationView(c *projectdomain.Customization) *CustomizationView {
+	if c == nil {
+		return nil
+	}
+	return &CustomizationView{Icon: c.Icon, Color: c.Color}
 }
 
 type ProjectGetParams struct {
@@ -57,6 +71,19 @@ type ProjectSaveParams struct {
 }
 
 type ProjectSaveResult struct {
+	Project ProjectView `json:"project"`
+}
+
+// ProjectUpdateParams edits an owned project's user-facing fields. Title and
+// Customization are pointers so an omitted field is left unchanged on the
+// server (nil = "leave alone", present = "set to this").
+type ProjectUpdateParams struct {
+	ProjectID     string             `json:"projectId"`
+	Title         *string            `json:"title,omitempty"`
+	Customization *CustomizationView `json:"customization,omitempty"`
+}
+
+type ProjectUpdateResult struct {
 	Project ProjectView `json:"project"`
 }
 

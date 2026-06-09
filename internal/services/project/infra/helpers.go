@@ -2,6 +2,7 @@ package infra
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -46,6 +47,44 @@ func timeString(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// customizationToJSON serializes the optional customization for storage. A nil
+// customization is stored as an empty string (not "null"), so an unset project
+// round-trips back to nil rather than a zero-valued struct.
+func customizationToJSON(c *project.Customization) (string, error) {
+	if c == nil {
+		return "", nil
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		return "", fmt.Errorf("encode project customization: %w", err)
+	}
+	return string(b), nil
+}
+
+// customizationFromJSON is the inverse: empty/blank decodes to nil so legacy
+// rows written before the column existed (default '') present as "no
+// customization" rather than an error.
+func customizationFromJSON(value string) (*project.Customization, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	var c project.Customization
+	if err := json.Unmarshal([]byte(value), &c); err != nil {
+		return nil, fmt.Errorf("decode project customization: %w", err)
+	}
+	return &c, nil
+}
+
+// isDuplicateColumnError tolerates the additive ALTER TABLE ADD COLUMN run on
+// every boot: a database that already has the column reports a duplicate, which
+// is the no-op success case for an idempotent migration.
+func isDuplicateColumnError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate column") ||
+		strings.Contains(msg, "already exists")
+}
+
 func parseTime(value string) time.Time {
 	if strings.TrimSpace(value) == "" {
 		return time.Time{}
@@ -75,13 +114,18 @@ func projectWhere(filter project.Filter) (string, []any, error) {
 
 func scanProject(scanner interface{ Scan(dest ...any) error }) (project.Record, error) {
 	var record project.Record
-	var createdAt, updatedAt string
-	if err := scanner.Scan(&record.ID, &record.LocationID, &record.Root, &record.Title, &record.Status, &createdAt, &updatedAt, &record.UserID); err != nil {
+	var createdAt, updatedAt, customization string
+	if err := scanner.Scan(&record.ID, &record.LocationID, &record.Root, &record.Title, &record.Status, &createdAt, &updatedAt, &record.UserID, &customization); err != nil {
 		return project.Record{}, err
 	}
 	record.UserID = strings.TrimSpace(record.UserID)
 	record.CreatedAt = parseTime(createdAt)
 	record.UpdatedAt = parseTime(updatedAt)
+	custom, err := customizationFromJSON(customization)
+	if err != nil {
+		return project.Record{}, err
+	}
+	record.Customization = custom
 	return validateProject(record)
 }
 

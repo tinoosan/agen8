@@ -18,13 +18,14 @@ func TestSQLiteRepository_ProjectLifecycle(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 
 	saved, err := repo.Save(ctx, project.Record{
-		ID:         "project-1",
-		LocationID: "local",
-		Root:       "/tmp/project-1",
-		Title:      "Project One",
-		Status:     project.StatusOpen,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:            "project-1",
+		LocationID:    "local",
+		Root:          "/tmp/project-1",
+		Title:         "Project One",
+		Status:        project.StatusOpen,
+		Customization: &project.Customization{Icon: "rocket", Color: "#abcdef"},
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	})
 	if err != nil {
 		t.Fatalf("Save: %v", err)
@@ -39,6 +40,10 @@ func TestSQLiteRepository_ProjectLifecycle(t *testing.T) {
 	}
 	if loaded.Title != "Project One" {
 		t.Fatalf("loaded project = %+v", loaded)
+	}
+	// Customization must survive the save -> load round-trip through the column.
+	if c := loaded.Customization; c == nil || c.Icon != "rocket" || c.Color != "#abcdef" {
+		t.Fatalf("loaded customization = %+v want rocket/#abcdef", c)
 	}
 
 	updated := loaded

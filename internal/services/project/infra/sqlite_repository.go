@@ -32,7 +32,7 @@ func (r *SQLiteRepository) Get(ctx context.Context, id types.ProjectID) (project
 		return project.Record{}, fmt.Errorf("project id is required")
 	}
 	row := r.db.QueryRowContext(ctx, `
-		SELECT project_id, location_id, root, title, status, created_at, updated_at, user_id
+		SELECT project_id, location_id, root, title, status, created_at, updated_at, user_id, customization
 		FROM projects
 		WHERE project_id = ?
 	`, id)
@@ -52,7 +52,7 @@ func (r *SQLiteRepository) List(ctx context.Context, filter project.Filter) ([]p
 		return nil, err
 	}
 	query := `
-		SELECT project_id, location_id, root, title, status, created_at, updated_at, user_id
+		SELECT project_id, location_id, root, title, status, created_at, updated_at, user_id, customization
 		FROM projects` + where + `
 		ORDER BY updated_at DESC, project_id ASC`
 	if filter.Limit > 0 {
@@ -76,17 +76,22 @@ func (r *SQLiteRepository) Save(ctx context.Context, record project.Record) (pro
 	if err != nil {
 		return project.Record{}, err
 	}
+	customization, err := customizationToJSON(record.Customization)
+	if err != nil {
+		return project.Record{}, err
+	}
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO projects (project_id, location_id, root, title, status, user_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO projects (project_id, location_id, root, title, status, user_id, created_at, updated_at, customization)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id) DO UPDATE SET
 			location_id = excluded.location_id,
 			root = excluded.root,
 			title = excluded.title,
 			status = excluded.status,
 			user_id = excluded.user_id,
-			updated_at = excluded.updated_at
-	`, record.ID, record.LocationID, record.Root, record.Title, record.Status, record.UserID, timeString(record.CreatedAt), timeString(record.UpdatedAt))
+			updated_at = excluded.updated_at,
+			customization = excluded.customization
+	`, record.ID, record.LocationID, record.Root, record.Title, record.Status, record.UserID, timeString(record.CreatedAt), timeString(record.UpdatedAt), customization)
 	if err != nil {
 		return project.Record{}, fmt.Errorf("save project %s: %w", record.ID, err)
 	}
@@ -122,10 +127,16 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 			status TEXT NOT NULL,
 			user_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+			updated_at TEXT NOT NULL,
+			customization TEXT NOT NULL DEFAULT ''
 		)
 	`); err != nil {
 		return fmt.Errorf("ensure projects table: %w", err)
+	}
+	// Additive migration for databases created before the customization column
+	// existed. A duplicate-column error is the idempotent no-op case.
+	if _, err := r.db.ExecContext(ctx, `ALTER TABLE projects ADD COLUMN customization TEXT NOT NULL DEFAULT ''`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("ensure projects customization column: %w", err)
 	}
 	for _, stmt := range []string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_location_root ON projects(location_id, root)`,

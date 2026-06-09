@@ -134,6 +134,37 @@ func (p Project) Customization() *Customization { return p.customization }
 func (p Project) CreatedAt() time.Time          { return p.createdAt }
 func (p Project) UpdatedAt() time.Time          { return p.updatedAt }
 
+// UpdateInput carries the user-editable fields of a project. Each field is a
+// pointer so a nil leaves the existing value untouched: a caller can rename
+// without disturbing customization, or recolor without retitling. This is the
+// "set vs leave alone" distinction a flat struct cannot express.
+type UpdateInput struct {
+	Title         *string
+	Customization *Customization
+}
+
+// Update applies user-editable changes (title, customization) and bumps
+// updatedAt when anything actually changed. Identity is deliberately immutable
+// here: id, root, status, owner, and createdAt are never touched, so a
+// rename/recolor can never re-key the project, change who owns it, or rewrite
+// its history. Title is allowed to be blank (it is optional everywhere).
+func (p Project) Update(input UpdateInput, now time.Time) Project {
+	next := p
+	changed := false
+	if input.Title != nil {
+		next.title = strings.TrimSpace(*input.Title)
+		changed = true
+	}
+	if input.Customization != nil {
+		next.customization = input.Customization
+		changed = true
+	}
+	if changed {
+		next.updatedAt = now.UTC()
+	}
+	return next
+}
+
 // Close moves an active project to closed.
 func (p Project) Close(now time.Time) (Project, error) {
 	return p.transition(StatusClosed, now)

@@ -10,7 +10,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Archive, Link as LinkIcon, MoreHorizontal, Trash2 } from 'lucide-react'
+import { Archive, Link as LinkIcon, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import type { Project } from '../../lib/types'
 import type { ProjectRemoveAction } from './RemoveProjectDialog'
 
@@ -22,10 +22,12 @@ export default function ProjectTableRow({
   project,
   onRemove,
   onLink,
+  onEdit,
 }: {
   project: Project
   onRemove: (action: ProjectRemoveAction) => void
   onLink: () => void
+  onEdit: () => void
 }) {
   const [, navigate] = useLocation()
   const active = project.status === 'open'
@@ -103,6 +105,10 @@ export default function ProjectTableRow({
           <DropdownMenuContent align="end" className="text-xs min-w-[160px]">
             {!archived && (
               <>
+                <DropdownMenuItem onSelect={onEdit}>
+                  <Pencil size={12} className="mr-2" />
+                  Rename project
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={onLink}>
                   <LinkIcon size={12} className="mr-2" />
                   Link this folder
