@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
-	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
 )
 
 func TestLogPersistsContextThroughDomainPayload(t *testing.T) {
@@ -14,7 +13,6 @@ func TestLogPersistsContextThroughDomainPayload(t *testing.T) {
 	service, err := NewService(
 		repo,
 		fixedClock{now: time.Date(2026, 6, 5, 21, 15, 0, 0, time.UTC)},
-		noopLinks{},
 		noopLinks{},
 		noopEvents{},
 		nil,
@@ -95,10 +93,6 @@ func (r *recordingRepository) DeleteDecision(context.Context, domain.DecisionID)
 }
 
 type noopLinks struct{}
-
-func (noopLinks) Link(context.Context, graphdomain.GraphLinkRequest) (graphdomain.GraphEdge, []graphdomain.GraphWarning, error) {
-	return graphdomain.GraphEdge{}, nil, nil
-}
 
 func (noopLinks) DeleteLinksForNode(context.Context, string, string) error {
 	return nil

@@ -36,7 +36,6 @@ type Service struct {
 	repo        domain.Repository
 	clock       domain.Clock
 	logger      *slog.Logger
-	links       GraphLinkWriter
 	linkDeleter GraphLinkDeleter
 	events      EventPublisher
 	tasks       TaskKeyResultReader
@@ -75,10 +74,6 @@ type Result struct {
 	SourceType             string
 }
 
-type GraphLinkWriter interface {
-	Link(ctx context.Context, req graphdomain.GraphLinkRequest) (graphdomain.GraphEdge, []graphdomain.GraphWarning, error)
-}
-
 type GraphLinkDeleter interface {
 	DeleteLinksForNode(ctx context.Context, nodeType string, nodeID string) error
 }
@@ -102,7 +97,6 @@ type MemberDisplayLookup interface {
 func NewService(
 	repo domain.Repository,
 	clock domain.Clock,
-	links GraphLinkWriter,
 	linkDeleter GraphLinkDeleter,
 	events EventPublisher,
 	tasks TaskKeyResultReader,
@@ -115,8 +109,6 @@ func NewService(
 		return nil, errors.New("decision service: repository is required")
 	case clock == nil:
 		return nil, errors.New("decision service: clock is required")
-	case links == nil:
-		return nil, errors.New("decision service: graph link writer is required")
 	case linkDeleter == nil:
 		return nil, errors.New("decision service: graph link deleter is required")
 	case events == nil:
@@ -129,7 +121,6 @@ func NewService(
 		repo:        repo,
 		clock:       clock,
 		logger:      logger,
-		links:       links,
 		linkDeleter: linkDeleter,
 		events:      events,
 		tasks:       tasks,
@@ -145,9 +136,10 @@ func NewService(
 const dedupWindow = 60 * time.Second
 
 // resolveDecisionRefs walks task → KR → mission, filling in any missing
-// upstream refs so the graph edge fan-out below has the full set of
-// targets. This means a caller who only supplied TaskRef gets the
-// (decision)→(KR) and (decision)→(mission) edges automatically.
+// upstream refs so the decision is stored with its full lineage. A caller who
+// supplies only TaskRef gets KeyResultRef and MissionRef populated, which the
+// map uses to place the decision in the structural tree (under its nearest
+// origin) and which lifecycle events carry to subscribers.
 func (s *Service) resolveDecisionRefs(ctx context.Context, d *domain.Decision) error {
 	if d == nil {
 		return errors.New("resolve decision refs: decision is nil")
@@ -217,10 +209,6 @@ func (s *Service) Create(ctx context.Context, d domain.Decision) (domain.Decisio
 		return domain.Decision{}, fmt.Errorf("create decision: %w", err)
 	}
 
-	if err := s.emitContextLinks(ctx, d); err != nil {
-		return domain.Decision{}, err
-	}
-
 	// Publish decision.logged so subscribers (notification evaluator,
 	// future projections) see the new decision. Publish failure is part
 	// of the create operation because missing wake/notification events
@@ -262,42 +250,6 @@ func (s *Service) resolveMemberDisplay(ctx context.Context, memberID string) str
 		return ""
 	}
 	return strings.TrimSpace(name)
-}
-
-// emitContextLinks creates the (decision) → (X) edges for every non-empty
-// FK ref on the decision. This is data-driven on purpose: each entry in
-// the table maps "if this ref is set, emit an edge to this target with
-// this edge type." Adding a new target type means adding one row.
-func (s *Service) emitContextLinks(ctx context.Context, d domain.Decision) error {
-	specs := []struct {
-		targetID, targetType, edge string
-	}{
-		{d.KeyResultRef, graphdomain.NodeTypeKeyResult, graphdomain.EdgeTypeServes},
-		{d.MissionRef, graphdomain.NodeTypeMission, graphdomain.EdgeTypeServes},
-		{d.TaskRef, graphdomain.NodeTypeTask, graphdomain.EdgeTypeMadeDuring},
-	}
-	for _, spec := range specs {
-		if strings.TrimSpace(spec.targetID) == "" {
-			continue
-		}
-		confidence := 1.0
-		_, _, err := s.links.Link(ctx, graphdomain.GraphLinkRequest{
-			ProjectID:  d.ProjectID,
-			SourceType: graphdomain.NodeTypeDecision,
-			SourceID:   string(d.ID),
-			TargetType: spec.targetType,
-			TargetID:   spec.targetID,
-			EdgeType:   spec.edge,
-			Confidence: &confidence,
-			Rationale:  "Decision references this work item.",
-			Origin:     "reference",
-			CreatedBy:  "decision_service",
-		})
-		if err != nil {
-			return fmt.Errorf("create %s link for decision %s: %w", spec.targetType, d.ID, err)
-		}
-	}
-	return nil
 }
 
 // Log records a deliberate "log" decision. This is the agent path -

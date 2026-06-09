@@ -207,7 +207,7 @@ func TestDecisionHydrator_FetchIncludesInvalidationConditions(t *testing.T) {
 		},
 	}}
 	stub := noopDecisionDeps{}
-	decisionSvc, err := decisionapp.NewService(repo, decisiondomain.SystemClock{}, stub, stub, stub, nil, nil, nil, nil)
+	decisionSvc, err := decisionapp.NewService(repo, decisiondomain.SystemClock{}, stub, stub, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}

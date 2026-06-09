@@ -233,7 +233,6 @@ func NewApplication(cfg Config) (*Application, error) {
 	}
 
 	graphLinks := &graphServiceLinkPort{}
-	taskSvc.SetGraphLinkWriter(graphLinks)
 	taskSvc.SetKeyResultMissionReader(missionRefResolver{missions: missionSvc})
 	taskSvc.SetEventPublisher(bus)
 
@@ -241,7 +240,6 @@ func NewApplication(cfg Config) (*Application, error) {
 	decisionSvc, err := decisionapp.NewService(
 		decisionRepo,
 		decisiondomain.SystemClock{},
-		graphLinks,
 		graphLinks,
 		bus,
 		nil,

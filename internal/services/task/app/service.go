@@ -10,7 +10,6 @@ import (
 	"github.com/tinoosan/agen8-mcp-server/internal/caller"
 	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
 	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
-	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
 	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
@@ -22,7 +21,6 @@ type Service struct {
 	caller   caller.Resolver
 	members  MemberLoader
 	projects ProjectLoader
-	links    GraphLinkWriter
 	missions KeyResultMissionReader
 	events   EventPublisher
 	logger   *slog.Logger
@@ -36,10 +34,6 @@ type MemberLoader interface {
 
 type ProjectLoader interface {
 	Get(ctx context.Context, projectID types.ProjectID) (project.Project, error)
-}
-
-type GraphLinkWriter interface {
-	Link(ctx context.Context, req graphdomain.GraphLinkRequest) (graphdomain.GraphEdge, []graphdomain.GraphWarning, error)
 }
 
 type KeyResultMissionReader interface {
@@ -129,17 +123,13 @@ func NewService(
 	}, nil
 }
 
-func (s *Service) SetGraphLinkWriter(links GraphLinkWriter) {
-	s.links = links
-}
-
 func (s *Service) SetKeyResultMissionReader(missions KeyResultMissionReader) {
 	s.missions = missions
 }
 
 // SetEventPublisher wires the bus the service publishes lifecycle transitions to.
-// Mirrors SetGraphLinkWriter: optional dependency injected post-construction so
-// NewService's signature stays stable.
+// Optional dependency injected post-construction so NewService's signature stays
+// stable.
 func (s *Service) SetEventPublisher(events EventPublisher) {
 	s.events = events
 }
@@ -186,7 +176,7 @@ func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.T
 	if err := s.tasks.CreateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("create task: %w", err)
 	}
-	if err := s.emitContextLinks(ctx, next); err != nil {
+	if err := s.validateKeyResultMissionLinkage(ctx, next); err != nil {
 		return domain.Task{}, err
 	}
 	s.logTaskTransition("create", next, caller)
@@ -230,65 +220,36 @@ func (s *Service) Count(ctx context.Context, filter domain.TaskFilter) (int, err
 	return s.tasks.CountTasks(ctx, filter)
 }
 
-func (s *Service) emitContextLinks(ctx context.Context, task domain.Task) error {
+// validateKeyResultMissionLinkage guards the structural tree at create time:
+// a task's key result must resolve to a mission, and any mission ref supplied
+// in metadata must agree with it. A key result without mission linkage, or a
+// contradictory metadata mission ref, would mis-cluster the task on the map.
+//
+// This used to also emit task→KR and task→mission "serves" context links, but
+// those just restated the structural tree (the frontend already draws KR→task
+// structurally), so they were removed. Only the validation remains.
+func (s *Service) validateKeyResultMissionLinkage(ctx context.Context, task domain.Task) error {
 	keyResultRef := strings.TrimSpace(task.KeyResultRef)
+	if keyResultRef == "" {
+		return nil
+	}
 	metadataMissionRef, err := missionRefFromMetadata(task.Metadata)
 	if err != nil {
 		return err
 	}
-	missionRef := metadataMissionRef
-	if keyResultRef != "" {
-		if s.missions == nil {
-			return fmt.Errorf("task service: key result mission reader is required")
-		}
-		resolvedMissionRef, err := s.missions.KeyResultMission(ctx, keyResultRef)
-		if err != nil {
-			return fmt.Errorf("resolve task key result %s mission: %w", keyResultRef, err)
-		}
-		resolvedMissionRef = strings.TrimSpace(resolvedMissionRef)
-		if resolvedMissionRef == "" {
-			return fmt.Errorf("task service: key result %s is missing mission linkage", keyResultRef)
-		}
-		if missionRef != "" && !strings.EqualFold(missionRef, resolvedMissionRef) {
-			return fmt.Errorf("task service: key result %s belongs to mission %s, but metadata provided %s", keyResultRef, resolvedMissionRef, missionRef)
-		}
-		missionRef = resolvedMissionRef
+	if s.missions == nil {
+		return fmt.Errorf("task service: key result mission reader is required")
 	}
-	if keyResultRef == "" && missionRef == "" {
-		return nil
+	resolvedMissionRef, err := s.missions.KeyResultMission(ctx, keyResultRef)
+	if err != nil {
+		return fmt.Errorf("resolve task key result %s mission: %w", keyResultRef, err)
 	}
-	if s.links == nil {
-		return fmt.Errorf("task service: graph link writer is required")
+	resolvedMissionRef = strings.TrimSpace(resolvedMissionRef)
+	if resolvedMissionRef == "" {
+		return fmt.Errorf("task service: key result %s is missing mission linkage", keyResultRef)
 	}
-	projectID := strings.TrimSpace(string(task.ProjectID))
-	if projectID == "" {
-		return fmt.Errorf("task service: task %s is missing project id", task.ID)
-	}
-	specs := []struct {
-		targetID, targetType, edge string
-	}{
-		{keyResultRef, graphdomain.NodeTypeKeyResult, graphdomain.EdgeTypeServes},
-		{missionRef, graphdomain.NodeTypeMission, graphdomain.EdgeTypeServes},
-	}
-	for _, spec := range specs {
-		if strings.TrimSpace(spec.targetID) == "" {
-			continue
-		}
-		confidence := 1.0
-		if _, _, err := s.links.Link(ctx, graphdomain.GraphLinkRequest{
-			ProjectID:  projectID,
-			SourceType: graphdomain.NodeTypeTask,
-			SourceID:   string(task.ID),
-			TargetType: spec.targetType,
-			TargetID:   spec.targetID,
-			EdgeType:   spec.edge,
-			Confidence: &confidence,
-			Rationale:  "Task references this work item.",
-			Origin:     "reference",
-			CreatedBy:  "task_service",
-		}); err != nil {
-			return fmt.Errorf("create %s link for task %s: %w", spec.targetType, task.ID, err)
-		}
+	if metadataMissionRef != "" && !strings.EqualFold(metadataMissionRef, resolvedMissionRef) {
+		return fmt.Errorf("task service: key result %s belongs to mission %s, but metadata provided %s", keyResultRef, resolvedMissionRef, metadataMissionRef)
 	}
 	return nil
 }
