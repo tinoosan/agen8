@@ -212,7 +212,7 @@ The binary embeds the freshly built bundle at `make build` time. Publish
 ## Initial Repository Shape
 
 ```text
-cmd/agen8-mcp/               # daemon CLI entrypoint
+cmd/agen8/                   # daemon CLI entrypoint
 internal/app/                # retained service graph construction
 internal/daemon/             # HTTP daemon, setup, web serving, MCP mount
 internal/mcp/                # retained MCP tool definitions and dispatch

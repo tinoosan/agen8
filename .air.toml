@@ -2,9 +2,9 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  bin = "./tmp/agen8-mcp"
-  full_bin = "AGEN8_DAEMON_LISTENER=http AGEN8_HTTP_ADDR=127.0.0.1:7777 AGEN8_DEV_WEB_URL=http://127.0.0.1:5173 ./tmp/agen8-mcp daemon start --listener http --http-addr 127.0.0.1:7777"
-  cmd = "go build -o ./tmp/agen8-mcp ./cmd/agen8-mcp"
+  bin = "./tmp/agen8"
+  full_bin = "AGEN8_DAEMON_LISTENER=http AGEN8_HTTP_ADDR=127.0.0.1:7777 AGEN8_DEV_WEB_URL=http://127.0.0.1:5173 ./tmp/agen8 daemon start --listener http --http-addr 127.0.0.1:7777"
+  cmd = "go build -o ./tmp/agen8 ./cmd/agen8"
   delay = 1000
   exclude_dir = ["tmp", "web", "node_modules", "vendor", ".git", "data", "bin", ".claude"]
   exclude_regex = ["_test\\.go$"]

@@ -39,8 +39,8 @@ jobs:
       - name: Run Go tests
         run: go test ./... -count=1
 
-      - name: Build agen8-mcp binary
-        run: go build -o bin/agen8-mcp ./cmd/agen8-mcp
+      - name: Build agen8 binary
+        run: go build -o bin/agen8 ./cmd/agen8
 
   web:
     runs-on: ubuntu-latest

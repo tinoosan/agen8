@@ -51,7 +51,7 @@ web-build: web-install
 
 build-go:
 	@mkdir -p ./bin
-	@go build -ldflags "$(GO_LDFLAGS)" -o bin/agen8 ./cmd/agen8-mcp
+	@go build -ldflags "$(GO_LDFLAGS)" -o bin/agen8 ./cmd/agen8
 
 # Build the full binary (requires web assets to be built first)
 build: web-build build-go
@@ -113,7 +113,7 @@ remote: dev-remote
 daemon-remote:
 	@AGEN8_DAEMON_LISTENER=http \
 	AGEN8_HTTP_ADDR="$(HTTP_ADDR)" \
-	go run ./cmd/agen8-mcp daemon start $(DATA_DIR_FLAG) --listener http --http-addr "$(HTTP_ADDR)"
+	go run ./cmd/agen8 daemon start $(DATA_DIR_FLAG) --listener http --http-addr "$(HTTP_ADDR)"
 
 dev-remote: ensure-air web-install
 	@set -e; \
