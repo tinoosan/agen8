@@ -25,10 +25,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
-	graphdomain "github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/eventbus"
+	"github.com/tinoosan/agen8/internal/services/decision/domain"
+	graphdomain "github.com/tinoosan/agen8/internal/services/graph/domain"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 // Service orchestrates decision creation with side effects.

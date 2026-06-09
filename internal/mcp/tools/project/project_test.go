@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/caller"
+	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 type stubMemberDirectory struct {

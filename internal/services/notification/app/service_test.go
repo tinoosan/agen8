@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/notification/domain"
+	"github.com/tinoosan/agen8/internal/services/notification/domain"
 )
 
 // --- fakes ------------------------------------------------------------------

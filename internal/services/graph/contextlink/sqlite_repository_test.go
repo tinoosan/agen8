@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 const migrationSQL = `

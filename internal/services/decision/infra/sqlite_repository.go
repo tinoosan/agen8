@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/services/decision/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 var _ domain.Repository = (*SQLiteRepository)(nil)

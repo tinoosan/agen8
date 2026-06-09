@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	filedomain "github.com/tinoosan/agen8-mcp-server/internal/services/file/domain/file"
+	filedomain "github.com/tinoosan/agen8/internal/services/file/domain/file"
 )
 
 type LocalRepository struct{}

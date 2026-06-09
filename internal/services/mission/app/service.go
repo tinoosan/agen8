@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
+	"github.com/tinoosan/agen8/internal/caller"
+	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
+	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 type Service struct {

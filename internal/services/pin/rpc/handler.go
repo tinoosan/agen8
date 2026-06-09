@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	pinapp "github.com/tinoosan/agen8-mcp-server/internal/services/pin/app"
-	pindomain "github.com/tinoosan/agen8-mcp-server/internal/services/pin/domain"
+	pinapp "github.com/tinoosan/agen8/internal/services/pin/app"
+	pindomain "github.com/tinoosan/agen8/internal/services/pin/domain"
 )
 
 // Handler adapts the pin application service to RPC protocol types.

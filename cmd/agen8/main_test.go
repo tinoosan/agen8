@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
+	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
 
 func TestRunVersionPrintsBuildInfo(t *testing.T) {

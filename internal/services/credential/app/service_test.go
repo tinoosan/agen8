@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	credentialdomain "github.com/tinoosan/agen8-mcp-server/internal/services/credential/domain"
+	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
 
 func TestCreateCredentialStoresMetadataAndMaterial(t *testing.T) {

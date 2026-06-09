@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	graphapp "github.com/tinoosan/agen8-mcp-server/internal/services/graph/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/contextlink"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	graphrpc "github.com/tinoosan/agen8-mcp-server/internal/services/graph/rpc"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	graphapp "github.com/tinoosan/agen8/internal/services/graph/app"
+	"github.com/tinoosan/agen8/internal/services/graph/contextlink"
+	"github.com/tinoosan/agen8/internal/services/graph/domain"
+	graphrpc "github.com/tinoosan/agen8/internal/services/graph/rpc"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 type rpcGraphHydrator struct{}

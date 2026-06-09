@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
+	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 type Handler struct{}

@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
-	decisiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
-	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
-	implstore "github.com/tinoosan/agen8-mcp-server/internal/store"
+	"github.com/tinoosan/agen8/internal/core/types"
+	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
+	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
+	"github.com/tinoosan/agen8/internal/services/graph/domain"
+	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
+	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
+	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
+	implstore "github.com/tinoosan/agen8/internal/store"
 )
 
 type TaskReader interface {

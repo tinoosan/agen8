@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
+	"github.com/tinoosan/agen8/internal/core/types"
+	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
 )
 
 type MissionEventKind string

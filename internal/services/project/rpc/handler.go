@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
-	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8/internal/core/types"
+	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
+	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 type Handler struct {

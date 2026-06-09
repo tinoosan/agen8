@@ -3,9 +3,9 @@ package infra
 import (
 	"testing"
 
-	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
+	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
+	"github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	"github.com/tinoosan/agen8/internal/services/mission/domain/mission"
 )
 
 func TestRepositoryInterfaces(t *testing.T) {

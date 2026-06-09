@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/caller"
+	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 type recordingDecisionService struct {

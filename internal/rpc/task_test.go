@@ -8,17 +8,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
-	projectinfra "github.com/tinoosan/agen8-mcp-server/internal/services/project/infra"
-	taskapp "github.com/tinoosan/agen8-mcp-server/internal/services/task/app"
-	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
-	taskinfra "github.com/tinoosan/agen8-mcp-server/internal/services/task/infra"
-	taskrpc "github.com/tinoosan/agen8-mcp-server/internal/services/task/rpc"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
+	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/services/project/domain/project"
+	projectinfra "github.com/tinoosan/agen8/internal/services/project/infra"
+	taskapp "github.com/tinoosan/agen8/internal/services/task/app"
+	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
+	taskinfra "github.com/tinoosan/agen8/internal/services/task/infra"
+	taskrpc "github.com/tinoosan/agen8/internal/services/task/rpc"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 func TestRegisterTaskListResolvesLegacyLabelsAfterMCPRehome(t *testing.T) {

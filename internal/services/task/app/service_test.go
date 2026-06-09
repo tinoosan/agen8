@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
-	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
+	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 type testMemberLoader struct {

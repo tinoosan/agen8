@@ -3,7 +3,7 @@ package rpc
 import (
 	"time"
 
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 type UserView struct {

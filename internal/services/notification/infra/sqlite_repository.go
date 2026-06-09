@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/notification/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/services/notification/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 var _ domain.Repository = (*SQLiteRepository)(nil)

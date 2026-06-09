@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/workspace"
+	"github.com/tinoosan/agen8/internal/services/project/domain/workspace"
 )
 
 // UpsertWorkspaceParams records one place a project is linked: a

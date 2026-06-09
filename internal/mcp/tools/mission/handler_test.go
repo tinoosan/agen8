@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
-	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/caller"
+	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
+	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 var missionTestTime = time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC)

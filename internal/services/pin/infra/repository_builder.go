@@ -3,8 +3,8 @@ package infra
 import (
 	"fmt"
 
-	pindomain "github.com/tinoosan/agen8-mcp-server/internal/services/pin/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	pindomain "github.com/tinoosan/agen8/internal/services/pin/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 // NewRepository selects the dialect-specific pin repository for the handle's

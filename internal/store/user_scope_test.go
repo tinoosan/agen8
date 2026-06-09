@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/config"
-	"github.com/tinoosan/agen8-mcp-server/internal/userctx"
+	"github.com/tinoosan/agen8/internal/config"
+	"github.com/tinoosan/agen8/internal/userctx"
 )
 
 func TestEffectiveUserID_PrefersContextUser(t *testing.T) {

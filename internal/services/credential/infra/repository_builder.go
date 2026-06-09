@@ -3,8 +3,8 @@ package infra
 import (
 	"fmt"
 
-	credentialdomain "github.com/tinoosan/agen8-mcp-server/internal/services/credential/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 func NewRepository(handle *storagedb.Handle, dataDir string) (credentialdomain.Repository, error) {

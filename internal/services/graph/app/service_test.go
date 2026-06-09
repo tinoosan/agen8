@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/contextlink"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/services/graph/contextlink"
+	"github.com/tinoosan/agen8/internal/services/graph/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 // stubPinReader is a test double for the graph service's PinReader port.

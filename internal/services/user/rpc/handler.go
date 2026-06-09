@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	userapp "github.com/tinoosan/agen8-mcp-server/internal/services/user/app"
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	userapp "github.com/tinoosan/agen8/internal/services/user/app"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 type Identity struct {

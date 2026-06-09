@@ -3,8 +3,8 @@ package rpc
 import (
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
-	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
+	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 type ProjectView struct {

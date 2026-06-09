@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 type PostgresRepository struct {

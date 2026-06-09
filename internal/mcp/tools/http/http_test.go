@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	credentialdomain "github.com/tinoosan/agen8-mcp-server/internal/services/credential/domain"
+	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
 
 type testHTTPRoundTripper func(*nethttp.Request) (*nethttp.Response, error)

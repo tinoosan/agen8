@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 // TestReconcileDuplicateMembersRetiresForksKeepsEarliest seeds the exact mess the old

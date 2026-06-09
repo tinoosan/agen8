@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/config"
-	"github.com/tinoosan/agen8-mcp-server/internal/mcp"
-	"github.com/tinoosan/agen8-mcp-server/internal/rpc"
-	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
-	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
-	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
+	"github.com/tinoosan/agen8/internal/config"
+	"github.com/tinoosan/agen8/internal/mcp"
+	"github.com/tinoosan/agen8/internal/rpc"
+	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
+	auth "github.com/tinoosan/agen8/internal/services/auth/domain"
+	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
 
 func TestSetupRejectsMismatchedPasswordConfirmation(t *testing.T) {

@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
-	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
+	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
+	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 type Handler struct{}

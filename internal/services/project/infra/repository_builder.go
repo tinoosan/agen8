@@ -3,10 +3,10 @@ package infra
 import (
 	"fmt"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/workspace"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8/internal/services/project/domain/workspace"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 // NewRepository is the storage-strategy entry point used by the composition

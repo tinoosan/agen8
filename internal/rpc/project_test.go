@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	projectapp "github.com/tinoosan/agen8-mcp-server/internal/services/project/app"
-	projectinfra "github.com/tinoosan/agen8-mcp-server/internal/services/project/infra"
-	projectrpc "github.com/tinoosan/agen8-mcp-server/internal/services/project/rpc"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/caller"
+	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
+	projectinfra "github.com/tinoosan/agen8/internal/services/project/infra"
+	projectrpc "github.com/tinoosan/agen8/internal/services/project/rpc"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 func TestRegisterProjectDispatchCreateAndList(t *testing.T) {

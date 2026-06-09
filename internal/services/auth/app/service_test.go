@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
-	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/apikey"
+	auth "github.com/tinoosan/agen8/internal/services/auth/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/linktoken"
+	"github.com/tinoosan/agen8/internal/services/auth/password"
+	"github.com/tinoosan/agen8/internal/services/auth/session"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 var authTestNow = time.Date(2026, 5, 17, 16, 0, 0, 0, time.UTC)

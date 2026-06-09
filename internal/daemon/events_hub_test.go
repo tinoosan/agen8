@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
+	"github.com/tinoosan/agen8/internal/core/types"
+	"github.com/tinoosan/agen8/internal/eventbus"
 )
 
 // decodeNotification unwraps the event.append envelope the hub fans out so tests

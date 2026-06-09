@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
-	pindomain "github.com/tinoosan/agen8-mcp-server/internal/services/pin/domain"
+	"github.com/tinoosan/agen8/internal/eventbus"
+	pindomain "github.com/tinoosan/agen8/internal/services/pin/domain"
 )
 
 // fakeRepo is an in-memory pin repository keyed by (projectID, nodeRef).

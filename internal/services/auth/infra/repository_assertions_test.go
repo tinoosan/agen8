@@ -3,9 +3,9 @@ package infra
 import (
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
+	"github.com/tinoosan/agen8/internal/services/auth/apikey"
+	"github.com/tinoosan/agen8/internal/services/auth/password"
+	"github.com/tinoosan/agen8/internal/services/auth/session"
 )
 
 func TestRepositoryCompileTimeAssertions(t *testing.T) {

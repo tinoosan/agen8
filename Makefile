@@ -7,7 +7,7 @@ DATA_DIR_FLAG := $(if $(strip $(DATA_DIR)),--data-dir "$(DATA_DIR)",)
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-GO_LDFLAGS := -X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.Version=$(VERSION) -X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.Commit=$(COMMIT) -X github.com/tinoosan/agen8-mcp-server/pkg/buildinfo.BuildDate=$(BUILD_DATE)
+GO_LDFLAGS := -X github.com/tinoosan/agen8/pkg/buildinfo.Version=$(VERSION) -X github.com/tinoosan/agen8/pkg/buildinfo.Commit=$(COMMIT) -X github.com/tinoosan/agen8/pkg/buildinfo.BuildDate=$(BUILD_DATE)
 WEB_NPM := npm
 AIR ?= air
 GO_PACKAGES ?= ./cmd/... ./internal/... ./pkg/...

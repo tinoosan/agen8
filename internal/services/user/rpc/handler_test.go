@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	userapp "github.com/tinoosan/agen8-mcp-server/internal/services/user/app"
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	userapp "github.com/tinoosan/agen8/internal/services/user/app"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 var rpcNow = time.Date(2026, 5, 17, 14, 0, 0, 0, time.UTC)

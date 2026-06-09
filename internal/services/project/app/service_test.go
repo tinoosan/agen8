@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 // A project is owned by a user. SaveProject - and CreateProject, which delegates

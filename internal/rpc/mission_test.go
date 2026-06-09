@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
-	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	missioninfra "github.com/tinoosan/agen8-mcp-server/internal/services/mission/infra"
-	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
-	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
+	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
+	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
+	missioninfra "github.com/tinoosan/agen8/internal/services/mission/infra"
+	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
+	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 var rpcMissionTestNow = time.Date(2026, 5, 26, 9, 0, 0, 0, time.UTC)

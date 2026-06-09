@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 func TestWrapMember_EmptyLifecycleDefaultsToActive(t *testing.T) {

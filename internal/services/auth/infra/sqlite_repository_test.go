@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
-	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/services/auth/apikey"
+	auth "github.com/tinoosan/agen8/internal/services/auth/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/password"
+	"github.com/tinoosan/agen8/internal/services/auth/session"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 var authInfraNow = time.Date(2026, 5, 17, 17, 0, 0, 0, time.UTC)

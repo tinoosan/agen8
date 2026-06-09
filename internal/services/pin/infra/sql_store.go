@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	pindomain "github.com/tinoosan/agen8-mcp-server/internal/services/pin/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	pindomain "github.com/tinoosan/agen8/internal/services/pin/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 // sqlStore is the dialect-neutral pin store. The sqlite and postgres

@@ -9,8 +9,8 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill/message"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
+	"github.com/tinoosan/agen8/internal/core/types"
+	"github.com/tinoosan/agen8/internal/eventbus"
 )
 
 const eventAppendMethod = "event.append"

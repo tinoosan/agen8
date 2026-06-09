@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	credentialapp "github.com/tinoosan/agen8-mcp-server/internal/services/credential/app"
-	credentialdomain "github.com/tinoosan/agen8-mcp-server/internal/services/credential/domain"
+	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
+	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
 
 func TestCredentialCreateReturnsRedactedView(t *testing.T) {

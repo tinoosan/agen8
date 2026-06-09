@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
+	"github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 func taskWhere(filter domain.TaskFilter) (string, []any, error) {

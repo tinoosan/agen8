@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
+	"github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	"github.com/tinoosan/agen8/internal/services/mission/domain/mission"
 )
 
 func missionWhere(filter mission.MissionFilter) (string, []any) {

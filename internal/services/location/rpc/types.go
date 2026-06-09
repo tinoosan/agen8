@@ -2,7 +2,7 @@ package rpc
 
 import "time"
 
-import locationdomain "github.com/tinoosan/agen8-mcp-server/internal/services/location/domain"
+import locationdomain "github.com/tinoosan/agen8/internal/services/location/domain"
 
 const (
 	LocationKindLocal   = "local"

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
+	"github.com/tinoosan/agen8/internal/services/decision/domain"
 )
 
 func TestLogPersistsContextThroughDomainPayload(t *testing.T) {

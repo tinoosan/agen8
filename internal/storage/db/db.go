@@ -15,7 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
-	"github.com/tinoosan/agen8-mcp-server/pkg/fsutil"
+	"github.com/tinoosan/agen8/pkg/fsutil"
 )
 
 type Driver string

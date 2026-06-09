@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	notificationapp "github.com/tinoosan/agen8-mcp-server/internal/services/notification/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/notification/domain"
+	"github.com/tinoosan/agen8/internal/caller"
+	notificationapp "github.com/tinoosan/agen8/internal/services/notification/app"
+	"github.com/tinoosan/agen8/internal/services/notification/domain"
 )
 
 // JSON-RPC error codes mirrored from the transport layer so this package stays

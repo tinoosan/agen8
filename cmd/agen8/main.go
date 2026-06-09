@@ -10,11 +10,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/claudehook"
-	"github.com/tinoosan/agen8-mcp-server/internal/config"
-	"github.com/tinoosan/agen8-mcp-server/internal/daemon"
-	"github.com/tinoosan/agen8-mcp-server/internal/skillinstaller"
-	"github.com/tinoosan/agen8-mcp-server/pkg/buildinfo"
+	"github.com/tinoosan/agen8/internal/claudehook"
+	"github.com/tinoosan/agen8/internal/config"
+	"github.com/tinoosan/agen8/internal/daemon"
+	"github.com/tinoosan/agen8/internal/skillinstaller"
+	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
 
 func main() {

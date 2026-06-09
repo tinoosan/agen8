@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
-	decisionrpc "github.com/tinoosan/agen8-mcp-server/internal/services/decision/rpc"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
-	userapp "github.com/tinoosan/agen8-mcp-server/internal/services/user/app"
+	"github.com/tinoosan/agen8/internal/caller"
+	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
+	decisionrpc "github.com/tinoosan/agen8/internal/services/decision/rpc"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
+	userapp "github.com/tinoosan/agen8/internal/services/user/app"
 )
 
 const (

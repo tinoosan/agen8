@@ -3,9 +3,9 @@ package rpc
 import (
 	"fmt"
 
-	graphapp "github.com/tinoosan/agen8-mcp-server/internal/services/graph/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/contextlink"
-	graphrpc "github.com/tinoosan/agen8-mcp-server/internal/services/graph/rpc"
+	graphapp "github.com/tinoosan/agen8/internal/services/graph/app"
+	"github.com/tinoosan/agen8/internal/services/graph/contextlink"
+	graphrpc "github.com/tinoosan/agen8/internal/services/graph/rpc"
 )
 
 const (

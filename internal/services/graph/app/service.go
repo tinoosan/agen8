@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/contextlink"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
+	"github.com/tinoosan/agen8/internal/services/graph/contextlink"
+	"github.com/tinoosan/agen8/internal/services/graph/domain"
 )
 
 const (

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 var userInfraNow = time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)

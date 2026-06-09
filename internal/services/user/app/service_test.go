@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 var serviceNow = time.Date(2026, 5, 17, 13, 0, 0, 0, time.UTC)

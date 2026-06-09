@@ -3,12 +3,12 @@ package app
 import (
 	"context"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
-	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
-	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
+	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
+	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
+	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 type Caller = caller.Caller

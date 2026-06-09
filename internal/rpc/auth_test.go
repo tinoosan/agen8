@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
-	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
-	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
-	authrpc "github.com/tinoosan/agen8-mcp-server/internal/services/auth/rpc"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/apikey"
+	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
+	auth "github.com/tinoosan/agen8/internal/services/auth/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/linktoken"
+	"github.com/tinoosan/agen8/internal/services/auth/password"
+	authrpc "github.com/tinoosan/agen8/internal/services/auth/rpc"
+	"github.com/tinoosan/agen8/internal/services/auth/session"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 var rpcAuthTestNow = time.Date(2026, 5, 17, 18, 0, 0, 0, time.UTC)

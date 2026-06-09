@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
+	"github.com/tinoosan/agen8/internal/services/decision/domain"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 // Handler adapts the decision application service to RPC protocol types.

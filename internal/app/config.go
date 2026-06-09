@@ -3,8 +3,8 @@ package app
 import (
 	"fmt"
 
-	hostconfig "github.com/tinoosan/agen8-mcp-server/internal/config"
-	"github.com/tinoosan/agen8-mcp-server/internal/logging"
+	hostconfig "github.com/tinoosan/agen8/internal/config"
+	"github.com/tinoosan/agen8/internal/logging"
 )
 
 type Config struct {

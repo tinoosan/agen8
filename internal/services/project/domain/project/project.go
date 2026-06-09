@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8/internal/core/types"
 )
 
 type Status string

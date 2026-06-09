@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	locationdomain "github.com/tinoosan/agen8-mcp-server/internal/services/location/domain"
+	locationdomain "github.com/tinoosan/agen8/internal/services/location/domain"
 )
 
 func TestValidateLocalPath(t *testing.T) {

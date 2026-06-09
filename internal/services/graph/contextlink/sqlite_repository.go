@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 // compile-time check

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/services/graph/domain"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 type stubGraphService struct {

@@ -1,4 +1,4 @@
-module github.com/tinoosan/agen8-mcp-server
+module github.com/tinoosan/agen8
 
 go 1.25.11
 

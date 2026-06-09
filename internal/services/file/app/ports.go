@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8/internal/core/types"
+	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 type ProjectLoader interface {

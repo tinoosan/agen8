@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"strings"
 
-	httptool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/http"
-	credentialapp "github.com/tinoosan/agen8-mcp-server/internal/services/credential/app"
-	credentialdomain "github.com/tinoosan/agen8-mcp-server/internal/services/credential/domain"
+	httptool "github.com/tinoosan/agen8/internal/mcp/tools/http"
+	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
+	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
 
 type httpCredentialResolver struct {

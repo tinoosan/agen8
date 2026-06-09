@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	locationapp "github.com/tinoosan/agen8-mcp-server/internal/services/location/app"
-	locationdomain "github.com/tinoosan/agen8-mcp-server/internal/services/location/domain"
-	locationinfra "github.com/tinoosan/agen8-mcp-server/internal/services/location/infra"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	locationapp "github.com/tinoosan/agen8/internal/services/location/app"
+	locationdomain "github.com/tinoosan/agen8/internal/services/location/domain"
+	locationinfra "github.com/tinoosan/agen8/internal/services/location/infra"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 func TestRegisterLocationListAndListDir(t *testing.T) {

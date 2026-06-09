@@ -3,11 +3,11 @@ package infra
 import (
 	"fmt"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/services/auth/apikey"
+	"github.com/tinoosan/agen8/internal/services/auth/linktoken"
+	"github.com/tinoosan/agen8/internal/services/auth/password"
+	"github.com/tinoosan/agen8/internal/services/auth/session"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 type Repositories struct {

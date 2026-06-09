@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
-	krdomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/mission/domain/mission"
+	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
+	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
+	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
 )
 
 type Handler struct {

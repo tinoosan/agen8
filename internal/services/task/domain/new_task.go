@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/core/types"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 // NewTaskInput is the validated input shape for task creation.

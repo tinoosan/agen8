@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	filedomain "github.com/tinoosan/agen8-mcp-server/internal/services/file/domain/file"
-	projectdomain "github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8/internal/core/types"
+	filedomain "github.com/tinoosan/agen8/internal/services/file/domain/file"
+	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 func TestServiceListDirUsesFileRepositoryAfterProjectRootValidation(t *testing.T) {

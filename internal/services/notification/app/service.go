@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/notification/domain"
+	"github.com/tinoosan/agen8/internal/services/notification/domain"
 )
 
 // TaskSource supplies the current task snapshot for a project. The app layer

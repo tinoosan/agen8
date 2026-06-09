@@ -3,8 +3,8 @@ package rpc
 import (
 	"fmt"
 
-	credentialapp "github.com/tinoosan/agen8-mcp-server/internal/services/credential/app"
-	credentialrpc "github.com/tinoosan/agen8-mcp-server/internal/services/credential/rpc"
+	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
+	credentialrpc "github.com/tinoosan/agen8/internal/services/credential/rpc"
 )
 
 const (

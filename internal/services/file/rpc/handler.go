@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	fileapp "github.com/tinoosan/agen8-mcp-server/internal/services/file/app"
+	"github.com/tinoosan/agen8/internal/core/types"
+	fileapp "github.com/tinoosan/agen8/internal/services/file/app"
 )
 
 type Handler struct {

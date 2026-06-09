@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	missionapp "github.com/tinoosan/agen8-mcp-server/internal/services/mission/app"
-	missionrpc "github.com/tinoosan/agen8-mcp-server/internal/services/mission/rpc"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/caller"
+	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
+	missionrpc "github.com/tinoosan/agen8/internal/services/mission/rpc"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	pindomain "github.com/tinoosan/agen8-mcp-server/internal/services/pin/domain"
+	pindomain "github.com/tinoosan/agen8/internal/services/pin/domain"
 )
 
 // JSON-RPC error codes mirrored from the transport layer. Defined locally so

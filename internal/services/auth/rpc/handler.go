@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
-	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
-	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/apikey"
+	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
+	auth "github.com/tinoosan/agen8/internal/services/auth/domain"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 type IdentityProvider func(context.Context) (Identity, error)

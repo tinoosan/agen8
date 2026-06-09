@@ -10,12 +10,12 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
-	auth "github.com/tinoosan/agen8-mcp-server/internal/services/auth/domain"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/password"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/apikey"
+	auth "github.com/tinoosan/agen8/internal/services/auth/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/linktoken"
+	"github.com/tinoosan/agen8/internal/services/auth/password"
+	"github.com/tinoosan/agen8/internal/services/auth/session"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 const (

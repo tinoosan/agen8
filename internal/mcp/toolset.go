@@ -7,13 +7,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	decisiontool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/decision"
-	graphtool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/graph"
-	httptool "github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/http"
-	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/mission"
-	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/project"
-	"github.com/tinoosan/agen8-mcp-server/internal/mcp/tools/task"
+	"github.com/tinoosan/agen8/internal/core/types"
+	decisiontool "github.com/tinoosan/agen8/internal/mcp/tools/decision"
+	graphtool "github.com/tinoosan/agen8/internal/mcp/tools/graph"
+	httptool "github.com/tinoosan/agen8/internal/mcp/tools/http"
+	"github.com/tinoosan/agen8/internal/mcp/tools/mission"
+	"github.com/tinoosan/agen8/internal/mcp/tools/project"
+	"github.com/tinoosan/agen8/internal/mcp/tools/task"
 )
 
 type toolDef struct {

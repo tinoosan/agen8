@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
+	"github.com/tinoosan/agen8/internal/core/types"
 )
 
 type Registry struct {

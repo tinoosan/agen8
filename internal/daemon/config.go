@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/config"
-	"github.com/tinoosan/agen8-mcp-server/internal/logging"
+	"github.com/tinoosan/agen8/internal/config"
+	"github.com/tinoosan/agen8/internal/logging"
 )
 
 const (

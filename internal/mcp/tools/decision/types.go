@@ -3,7 +3,7 @@ package decision
 import (
 	"context"
 
-	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
+	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
 )
 
 type Service interface {

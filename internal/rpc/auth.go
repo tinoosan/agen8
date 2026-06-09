@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	authapp "github.com/tinoosan/agen8-mcp-server/internal/services/auth/app"
-	authrpc "github.com/tinoosan/agen8-mcp-server/internal/services/auth/rpc"
+	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
+	authrpc "github.com/tinoosan/agen8/internal/services/auth/rpc"
 )
 
 const (

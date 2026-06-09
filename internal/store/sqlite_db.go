@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/config"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/config"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 //go:embed migrations/*.sql

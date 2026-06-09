@@ -3,8 +3,8 @@ package rpc
 import (
 	"fmt"
 
-	locationapp "github.com/tinoosan/agen8-mcp-server/internal/services/location/app"
-	locationrpc "github.com/tinoosan/agen8-mcp-server/internal/services/location/rpc"
+	locationapp "github.com/tinoosan/agen8/internal/services/location/app"
+	locationrpc "github.com/tinoosan/agen8/internal/services/location/rpc"
 )
 
 const (

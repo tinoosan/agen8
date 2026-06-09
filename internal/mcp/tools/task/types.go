@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
-	taskapp "github.com/tinoosan/agen8-mcp-server/internal/services/task/app"
-	taskdomain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
+	taskapp "github.com/tinoosan/agen8/internal/services/task/app"
+	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 type Service interface {

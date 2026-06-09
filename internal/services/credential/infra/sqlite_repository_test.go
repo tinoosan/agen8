@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/config"
-	credentialdomain "github.com/tinoosan/agen8-mcp-server/internal/services/credential/domain"
-	implstore "github.com/tinoosan/agen8-mcp-server/internal/store"
+	"github.com/tinoosan/agen8/internal/config"
+	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
+	implstore "github.com/tinoosan/agen8/internal/store"
 )
 
 func TestSQLiteRepositorySavesListsGetsAndDeletesCredential(t *testing.T) {

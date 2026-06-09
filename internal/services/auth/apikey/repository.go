@@ -2,7 +2,7 @@ package apikey
 
 import "context"
 
-import user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+import user "github.com/tinoosan/agen8/internal/services/user/domain"
 
 type Repository interface {
 	Reader

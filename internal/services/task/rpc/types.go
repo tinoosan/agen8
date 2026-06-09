@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	domain "github.com/tinoosan/agen8-mcp-server/internal/services/task/domain"
+	domain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 // TaskView is the task service RPC read model.

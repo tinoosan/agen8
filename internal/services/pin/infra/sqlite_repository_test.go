@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	pindomain "github.com/tinoosan/agen8-mcp-server/internal/services/pin/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	pindomain "github.com/tinoosan/agen8/internal/services/pin/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 func TestSQLiteRepository_PinLifecycle(t *testing.T) {

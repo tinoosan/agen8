@@ -3,8 +3,8 @@ package rpc
 import (
 	"fmt"
 
-	fileapp "github.com/tinoosan/agen8-mcp-server/internal/services/file/app"
-	filerpc "github.com/tinoosan/agen8-mcp-server/internal/services/file/rpc"
+	fileapp "github.com/tinoosan/agen8/internal/services/file/app"
+	filerpc "github.com/tinoosan/agen8/internal/services/file/rpc"
 )
 
 const (

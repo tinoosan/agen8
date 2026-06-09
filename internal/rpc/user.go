@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	userapp "github.com/tinoosan/agen8-mcp-server/internal/services/user/app"
-	userrpc "github.com/tinoosan/agen8-mcp-server/internal/services/user/rpc"
+	userapp "github.com/tinoosan/agen8/internal/services/user/app"
+	userrpc "github.com/tinoosan/agen8/internal/services/user/rpc"
 )
 
 const (

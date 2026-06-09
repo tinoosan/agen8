@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/config"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/notification/domain"
-	implstore "github.com/tinoosan/agen8-mcp-server/internal/store"
+	"github.com/tinoosan/agen8/internal/config"
+	"github.com/tinoosan/agen8/internal/services/notification/domain"
+	implstore "github.com/tinoosan/agen8/internal/store"
 )
 
 func newRepoForTest(t *testing.T) *SQLiteRepository {

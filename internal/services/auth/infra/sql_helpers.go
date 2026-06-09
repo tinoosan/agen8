@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/apikey"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/linktoken"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/auth/session"
-	user "github.com/tinoosan/agen8-mcp-server/internal/services/user/domain"
+	"github.com/tinoosan/agen8/internal/services/auth/apikey"
+	"github.com/tinoosan/agen8/internal/services/auth/linktoken"
+	"github.com/tinoosan/agen8/internal/services/auth/session"
+	user "github.com/tinoosan/agen8/internal/services/user/domain"
 )
 
 func timeString(value time.Time) string {

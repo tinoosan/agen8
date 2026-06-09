@@ -3,7 +3,7 @@ package infra
 import (
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 func TestRepositoryInterfaces(t *testing.T) {

@@ -11,12 +11,12 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/caller"
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	"github.com/tinoosan/agen8-mcp-server/internal/eventbus"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/project"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/workspace"
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
+	"github.com/tinoosan/agen8/internal/eventbus"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/services/project/domain/project"
+	"github.com/tinoosan/agen8/internal/services/project/domain/workspace"
 )
 
 type Service struct {

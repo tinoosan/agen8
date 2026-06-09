@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	graphapp "github.com/tinoosan/agen8-mcp-server/internal/services/graph/app"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/contextlink"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/graph/domain"
+	graphapp "github.com/tinoosan/agen8/internal/services/graph/app"
+	"github.com/tinoosan/agen8/internal/services/graph/contextlink"
+	"github.com/tinoosan/agen8/internal/services/graph/domain"
 )
 
 type Handler struct {

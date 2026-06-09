@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/core/types"
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/member"
+	"github.com/tinoosan/agen8/internal/core/types"
+	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 var fixedTime = time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)

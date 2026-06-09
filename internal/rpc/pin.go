@@ -3,8 +3,8 @@ package rpc
 import (
 	"fmt"
 
-	pinapp "github.com/tinoosan/agen8-mcp-server/internal/services/pin/app"
-	pinrpc "github.com/tinoosan/agen8-mcp-server/internal/services/pin/rpc"
+	pinapp "github.com/tinoosan/agen8/internal/services/pin/app"
+	pinrpc "github.com/tinoosan/agen8/internal/services/pin/rpc"
 )
 
 const (

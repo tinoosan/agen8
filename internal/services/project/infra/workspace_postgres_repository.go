@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/services/project/domain/workspace"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	"github.com/tinoosan/agen8/internal/services/project/domain/workspace"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 type WorkspacePostgresRepository struct {

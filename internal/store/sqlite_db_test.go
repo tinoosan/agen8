@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/agen8-mcp-server/internal/config"
+	"github.com/tinoosan/agen8/internal/config"
 )
 
 func TestSpaceIndexesCreated(t *testing.T) {

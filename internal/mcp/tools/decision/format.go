@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	decisionapp "github.com/tinoosan/agen8-mcp-server/internal/services/decision/app"
-	decisiondomain "github.com/tinoosan/agen8-mcp-server/internal/services/decision/domain"
+	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
+	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
 )
 
 type decisionEntry struct {

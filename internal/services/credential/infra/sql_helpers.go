@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	credentialdomain "github.com/tinoosan/agen8-mcp-server/internal/services/credential/domain"
-	storagedb "github.com/tinoosan/agen8-mcp-server/internal/storage/db"
+	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 func (s *sqlStore) rebind(query string) string {
