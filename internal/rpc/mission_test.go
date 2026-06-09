@@ -14,7 +14,6 @@ import (
 	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
 	missioninfra "github.com/tinoosan/agen8/internal/services/mission/infra"
-	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
@@ -334,7 +333,6 @@ func newRPCMissionService(t *testing.T) *missionapp.Service {
 		repo,
 		rpcMissionClock{},
 		caller.ContextResolver{},
-		rpcMissionProjectLoader{},
 		rpcMissionTaskLoader{},
 		rpcMissionLinkedTaskLoader{},
 		&rpcMissionEventPublisher{},
@@ -349,22 +347,6 @@ func newRPCMissionService(t *testing.T) *missionapp.Service {
 type rpcMissionClock struct{}
 
 func (rpcMissionClock) Now() time.Time { return rpcMissionTestNow }
-
-type rpcMissionProjectLoader struct{}
-
-func (rpcMissionProjectLoader) Get(_ context.Context, projectID types.ProjectID) (projectdomain.Project, error) {
-	if projectID == "" {
-		return projectdomain.Project{}, fmt.Errorf("project id is required")
-	}
-	return projectdomain.New(projectdomain.NewInput{
-		ID:        projectID,
-		Root:      "/tmp/" + string(projectID),
-		Title:     "Research",
-		Status:    projectdomain.StatusOpen,
-		CreatedAt: rpcMissionTestNow,
-		UpdatedAt: rpcMissionTestNow,
-	})
-}
 
 type rpcMissionTaskLoader struct{}
 
@@ -387,7 +369,6 @@ func (*rpcMissionEventPublisher) Append(context.Context, types.EventRecord) erro
 	return nil
 }
 
-var _ missionapp.ProjectLoader = rpcMissionProjectLoader{}
 var _ missionapp.TaskLoader = rpcMissionTaskLoader{}
 var _ missionapp.LinkedTaskLoader = rpcMissionLinkedTaskLoader{}
 var _ missionapp.EventPublisher = (*rpcMissionEventPublisher)(nil)

@@ -223,7 +223,6 @@ func NewApplication(cfg Config) (*Application, error) {
 		missionRepos.LifecycleEvents,
 		missiondomain.SystemClock{},
 		caller.ContextResolver{},
-		projectLoaderAdapter{projects: projectSvc},
 		taskSvc,
 		missionLinkedTaskLoader{},
 		missionEventPublisher{bus: bus},

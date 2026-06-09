@@ -484,7 +484,6 @@ CREATE TABLE IF NOT EXISTS key_results (
     key_result_id TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'open',
-    project_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     completed_at TEXT,
@@ -493,7 +492,6 @@ CREATE TABLE IF NOT EXISTS key_results (
 
 CREATE INDEX IF NOT EXISTS idx_key_results_mission ON key_results(mission_id);
 CREATE INDEX IF NOT EXISTS idx_key_results_status ON key_results(status);
-CREATE INDEX IF NOT EXISTS idx_key_results_project ON key_results(project_id);
 
 CREATE TABLE IF NOT EXISTS key_result_progress_entries (
     progress_entry_id TEXT PRIMARY KEY,

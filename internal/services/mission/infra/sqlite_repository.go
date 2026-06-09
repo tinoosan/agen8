@@ -287,16 +287,15 @@ func (r *SQLiteRepository) saveKeyResult(ctx context.Context, keyResult kr.KeyRe
 	}
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO key_results (
-			key_result_id, mission_id, status, project_id, created_at, updated_at, completed_at, key_result_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			key_result_id, mission_id, status, created_at, updated_at, completed_at, key_result_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(key_result_id) DO UPDATE SET
 			mission_id = excluded.mission_id,
 			status = excluded.status,
-			project_id = excluded.project_id,
 			updated_at = excluded.updated_at,
 			completed_at = excluded.completed_at,
 			key_result_json = excluded.key_result_json
-	`, string(keyResult.ID), string(keyResult.MissionID), string(keyResult.Status), strings.TrimSpace(keyResult.ProjectID), timeString(keyResult.CreatedAt), timeString(keyResult.UpdatedAt), optionalTimeString(keyResult.CompletedAt), string(payload))
+	`, string(keyResult.ID), string(keyResult.MissionID), string(keyResult.Status), timeString(keyResult.CreatedAt), timeString(keyResult.UpdatedAt), optionalTimeString(keyResult.CompletedAt), string(payload))
 	if err != nil {
 		return fmt.Errorf("save key result %s: %w", keyResult.ID, err)
 	}
@@ -308,6 +307,9 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 		return err
 	}
 	if err := r.cutOverLegacyTable(ctx, "key_results", "key_result_json"); err != nil {
+		return err
+	}
+	if err := r.dropKeyResultProjectColumn(ctx); err != nil {
 		return err
 	}
 	for _, stmt := range []string{
@@ -327,7 +329,6 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 			key_result_id TEXT PRIMARY KEY,
 			mission_id TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT '',
-			project_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT,
 			updated_at TEXT,
 			completed_at TEXT,
@@ -335,7 +336,6 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_key_results_mission ON key_results(mission_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_key_results_status ON key_results(status)`,
-		`CREATE INDEX IF NOT EXISTS idx_key_results_project ON key_results(project_id)`,
 		`CREATE TABLE IF NOT EXISTS key_result_progress_entries (
 			progress_entry_id TEXT PRIMARY KEY,
 			key_result_id TEXT NOT NULL DEFAULT '',
@@ -357,6 +357,56 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 		if _, err := r.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("ensure mission schema: %w", err)
 		}
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) dropKeyResultProjectColumn(ctx context.Context) error {
+	exists, err := r.tableExists(ctx, "key_results")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	hasProjectID, err := r.tableHasColumn(ctx, "key_results", "project_id")
+	if err != nil {
+		return err
+	}
+	if !hasProjectID {
+		return nil
+	}
+	if err := r.dropIndexesForTable(ctx, "key_results"); err != nil {
+		return err
+	}
+	legacyName := fmt.Sprintf("key_results_with_project_%d", time.Now().UnixNano())
+	if _, err := r.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE key_results RENAME TO %s", legacyName)); err != nil {
+		return fmt.Errorf("drop key_results project_id: rename existing table: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx, `
+		CREATE TABLE key_results (
+			key_result_id TEXT PRIMARY KEY,
+			mission_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			created_at TEXT,
+			updated_at TEXT,
+			completed_at TEXT,
+			key_result_json TEXT NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("drop key_results project_id: create replacement: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx, fmt.Sprintf(`
+		INSERT INTO key_results (
+			key_result_id, mission_id, status, created_at, updated_at, completed_at, key_result_json
+		)
+		SELECT key_result_id, mission_id, status, created_at, updated_at, completed_at, key_result_json
+		FROM %s
+	`, legacyName)); err != nil {
+		return fmt.Errorf("drop key_results project_id: copy rows: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s", legacyName)); err != nil {
+		return fmt.Errorf("drop key_results project_id: drop legacy table: %w", err)
 	}
 	return nil
 }

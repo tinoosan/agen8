@@ -13,7 +13,6 @@ import (
 	"github.com/tinoosan/agen8/internal/core/types"
 	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
@@ -164,37 +163,6 @@ func (fakeCallerResolver) ResolveCaller(context.Context) (caller.Caller, error) 
 	return caller.Caller{UserID: "user-1"}, nil
 }
 
-type fakeProjectLoader struct{}
-
-func (fakeProjectLoader) Get(context.Context, types.ProjectID) (projectdomain.Project, error) {
-	return projectdomain.Project{}, fmt.Errorf("project not found")
-}
-
-type fakeProject struct {
-	title  string
-	status projectdomain.Status
-}
-
-type fakeProjectLoaderWithProjects struct {
-	projects map[string]fakeProject
-}
-
-func (l fakeProjectLoaderWithProjects) Get(_ context.Context, projectID types.ProjectID) (projectdomain.Project, error) {
-	p, ok := l.projects[string(projectID)]
-	if !ok {
-		return projectdomain.Project{}, fmt.Errorf("project %s not found", projectID)
-	}
-	return projectdomain.New(projectdomain.NewInput{
-		ID:        projectID,
-		Root:      "/tmp/" + string(projectID),
-		UserID:    "user-1",
-		Title:     p.title,
-		Status:    p.status,
-		CreatedAt: serviceTestNow,
-		UpdatedAt: serviceTestNow,
-	})
-}
-
 type fakeTaskLoader struct{}
 
 func (fakeTaskLoader) Get(context.Context, taskdomain.TaskID) (taskdomain.Task, error) {
@@ -309,11 +277,6 @@ func eventMilestones(events []types.EventRecord) []string {
 
 func newServiceForTest(t *testing.T, missions *fakeMissionRepository, keyResults *fakeKeyResultRepository) *Service {
 	t.Helper()
-	return newServiceForTestWithProjects(t, missions, keyResults, fakeProjectLoader{})
-}
-
-func newServiceForTestWithProjects(t *testing.T, missions *fakeMissionRepository, keyResults *fakeKeyResultRepository, projects ProjectLoader) *Service {
-	t.Helper()
 	svc, err := NewService(
 		missions,
 		keyResults,
@@ -321,7 +284,6 @@ func newServiceForTestWithProjects(t *testing.T, missions *fakeMissionRepository
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		projects,
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -353,7 +315,6 @@ func TestCreateMissionLogsTransition(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -475,7 +436,6 @@ func TestDeleteMissionPublishesArchivedEventAfterPersistence(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -515,7 +475,6 @@ func TestHardDeleteMissionRemovesMissionAndPublishesPurgedEvent(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -556,7 +515,6 @@ func TestHardDeleteMissionReturnsErrorForMissingMission(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -587,7 +545,6 @@ func TestCreateKeyResultPublishesCreatedEventAfterPersistence(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -646,7 +603,6 @@ func TestCreateKeyResultRequiresExistingMission(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -683,7 +639,6 @@ func TestCreateKeyResultReactivatesCompletedMission(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -729,7 +684,6 @@ func TestCreateKeyResultDoesNotPublishCreatedEventWhenPersistenceFails(t *testin
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -855,7 +809,6 @@ func TestDeleteKeyResultPublishesDroppedEventAfterPersistence(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -963,7 +916,6 @@ func TestDeleteKeyResultRecomputePublishesMissionLifecycleEvent(t *testing.T) {
 				&fakeLifecycleEventRepository{},
 				fakeClock{now: serviceTestNow},
 				fakeCallerResolver{},
-				fakeProjectLoader{},
 				fakeTaskLoader{},
 				&fakeLinkedTaskLoader{},
 				events,
@@ -1050,7 +1002,6 @@ func TestReopenKeyResultReactivatesCompletedMission(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1140,7 +1091,6 @@ func TestReopenKeyResultReopensDroppedAndResetsProgress(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1188,7 +1138,6 @@ func TestUpdateProgressPersistsKeyResultAndProgressEntry(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -1249,7 +1198,6 @@ func TestUpdateProgressPublishesProgressUpdatedEventAfterPersistence(t *testing.
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1303,7 +1251,6 @@ func TestUpdateProgressDoesNotPublishProgressEventWhenPersistenceFails(t *testin
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1348,7 +1295,6 @@ func TestUpdateProgressCompletesKeyResultWhenLinkedTasksAreTerminal(t *testing.T
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
 			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusSucceeded},
 			"task-2": {ID: "task-2", Status: taskdomain.TaskStatusFailed},
@@ -1403,7 +1349,6 @@ func TestUpdateProgressPublishesCompletedEventWhenProgressCompletesKeyResult(t *
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
 			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusSucceeded},
 		}},
@@ -1467,7 +1412,6 @@ func TestUpdateProgressCompletingLastLiveKeyResultCompletesMission(t *testing.T)
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1520,7 +1464,6 @@ func TestUpdateProgressRejectsDraftMissionBeforeWrite(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1583,7 +1526,6 @@ func TestUpdateProgressDoesNotCompleteMissionWhenAnotherLiveKeyResultIsIncomplet
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1636,7 +1578,6 @@ func TestUpdateProgressPublishesEveryNewlyCrossedMilestoneEvent(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1694,7 +1635,6 @@ func TestUpdateProgressDoesNotRefireAlreadyNotifiedMilestones(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -1742,7 +1682,6 @@ func TestUpdateProgressRejectsKeyResultCompletionWhenLinkedTaskIsNonTerminalBefo
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
 			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusActive},
 		}},
@@ -1798,7 +1737,6 @@ func TestUpdateProgressBelowCompletionDoesNotLoadLinkedTasks(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
 			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusActive},
 		}},
@@ -1845,7 +1783,6 @@ func TestUpdateProgressRejectsCompletedKeyResultBeforeWrite(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -1947,7 +1884,7 @@ func TestUpdateMissionActivationPublishesMissionActivatedEventAfterPersistence(t
 	mission := missionForServiceTest(t, missiondomain.MissionStatusDraft)
 	missions := newFakeMissionRepository(mission)
 	keyResults := newFakeKeyResultRepository(
-		krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-1"},
+		krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen},
 	)
 	events := &fakeEventPublisher{}
 	svc, err := NewService(
@@ -1957,9 +1894,6 @@ func TestUpdateMissionActivationPublishesMissionActivatedEventAfterPersistence(t
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoaderWithProjects{projects: map[string]fakeProject{
-			"project-1": {title: "Research", status: projectdomain.StatusOpen},
-		}},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -2012,15 +1946,12 @@ func TestUpdateMissionActivationDoesNotPublishEventWhenPersistenceFails(t *testi
 	svc, err := NewService(
 		missions,
 		newFakeKeyResultRepository(
-			krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen, ProjectID: "project-1"},
+			krdomain.KeyResult{ID: "kr-1", MissionID: mission.ID, Status: krdomain.KeyResultStatusOpen},
 		),
 		&fakeProgressEntryRepository{},
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoaderWithProjects{projects: map[string]fakeProject{
-			"project-1": {title: "Research", status: projectdomain.StatusOpen},
-		}},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		events,
@@ -2119,7 +2050,6 @@ func TestUpdateMissionPublishesLifecycleEventAfterPersistence(t *testing.T) {
 				&fakeLifecycleEventRepository{},
 				fakeClock{now: serviceTestNow},
 				fakeCallerResolver{},
-				fakeProjectLoader{},
 				fakeTaskLoader{},
 				&fakeLinkedTaskLoader{},
 				events,
@@ -2186,7 +2116,6 @@ func TestUpdateMissionLifecycleIsIdempotent(t *testing.T) {
 				&fakeLifecycleEventRepository{},
 				fakeClock{now: serviceTestNow},
 				fakeCallerResolver{},
-				fakeProjectLoader{},
 				fakeTaskLoader{},
 				&fakeLinkedTaskLoader{},
 				events,
@@ -2254,7 +2183,6 @@ func TestGetLifecycleHistoryReturnsStoredNotes(t *testing.T) {
 		lifecycleEvents,
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -2290,7 +2218,6 @@ func TestIdempotentLifecycleNoteIsRecordedInHistoryOnly(t *testing.T) {
 		lifecycleEvents,
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		&fakeLinkedTaskLoader{},
 		published,

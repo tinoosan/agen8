@@ -21,9 +21,6 @@ type KeyResult struct {
 	CurrentValue          float64
 	ProgressPercent       int
 	Status                KeyResultStatus
-	ProjectID             string
-	OwnerProjectName      string
-	OwnerAssignedAt       *time.Time
 	LastUpdatedBy         string
 	LastUpdateNote        string
 	LastMilestoneNotified int

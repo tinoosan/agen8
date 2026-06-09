@@ -13,7 +13,6 @@ import (
 	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
 	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
@@ -328,7 +327,6 @@ func TestUpdateProgressRejectsDraftMissionKeyResultWithoutWrite(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: rpcTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -415,7 +413,6 @@ func TestLifecycleHistoryUsesMissionService(t *testing.T) {
 		events,
 		fakeClock{now: rpcTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -481,7 +478,6 @@ func newServiceForTestWithProgressAndRepos(t *testing.T, missions *fakeMissionRe
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: rpcTestNow},
 		fakeCallerResolver{},
-		fakeProjectLoader{},
 		fakeTaskLoader{},
 		fakeLinkedTaskLoader{},
 		&fakeEventPublisher{},
@@ -628,20 +624,6 @@ type fakeCallerResolver struct{}
 
 func (fakeCallerResolver) ResolveCaller(context.Context) (caller.Caller, error) {
 	return caller.Caller{UserID: "user-1"}, nil
-}
-
-type fakeProjectLoader struct{}
-
-func (fakeProjectLoader) Get(context.Context, types.ProjectID) (projectdomain.Project, error) {
-	return projectdomain.New(projectdomain.NewInput{
-		ID:        types.ProjectID("project-1"),
-		Root:      "/tmp/project-1",
-		UserID:    "user-1",
-		Title:     "Research",
-		Status:    projectdomain.StatusOpen,
-		CreatedAt: rpcTestNow,
-		UpdatedAt: rpcTestNow,
-	})
 }
 
 type fakeTaskLoader struct{}

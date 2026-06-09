@@ -37,8 +37,6 @@ type keyResultEntry struct {
 	CurrentValue          float64  `json:"currentValue,omitempty"`
 	ProgressPercent       int      `json:"progressPercent"`
 	Status                string   `json:"status,omitempty"`
-	ProjectID             string   `json:"projectId,omitempty"`
-	OwnerProjectName      string   `json:"ownerProjectName,omitempty"`
 	LastMilestoneNotified int      `json:"lastMilestoneNotified,omitempty"`
 	Version               int64    `json:"version,omitempty"`
 }
@@ -278,8 +276,6 @@ func toKeyResultEntry(keyResult krdomain.KeyResult) keyResultEntry {
 		CurrentValue:          keyResult.CurrentValue,
 		ProgressPercent:       keyResult.ProgressPercent,
 		Status:                string(keyResult.Status),
-		ProjectID:             keyResult.ProjectID,
-		OwnerProjectName:      keyResult.OwnerProjectName,
 		LastMilestoneNotified: keyResult.LastMilestoneNotified,
 		Version:               keyResult.Version,
 	}

@@ -314,7 +314,7 @@ func (h keyResultHydrator) Fetch(ctx context.Context, projectID string, nodeID s
 		Type:      domain.NodeTypeKeyResult,
 		Title:     strings.TrimSpace(kr.Title),
 		Status:    strings.TrimSpace(string(kr.Status)),
-		ScopeID:   strings.TrimSpace(kr.ProjectID),
+		ScopeID:   strings.TrimSpace(mission.ProjectID),
 		CreatedAt: kr.CreatedAt.UTC().Format(time.RFC3339Nano),
 		Fields: map[string]any{
 			"measurementType": strings.TrimSpace(string(kr.MeasurementType)),
@@ -354,7 +354,7 @@ func (h keyResultHydrator) Search(ctx context.Context, projectID, query string, 
 				Type:      domain.NodeTypeKeyResult,
 				Title:     strings.TrimSpace(kr.Title),
 				Status:    strings.TrimSpace(string(kr.Status)),
-				ScopeID:   strings.TrimSpace(kr.ProjectID),
+				ScopeID:   strings.TrimSpace(mission.ProjectID),
 				CreatedAt: kr.CreatedAt.UTC().Format(time.RFC3339Nano),
 			})
 			if len(out) >= limit {

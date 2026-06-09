@@ -22,7 +22,6 @@ type Service struct {
 	lifecycleEvents LifecycleEventRepository
 	clock           missiondomain.Clock
 	caller          caller.Resolver
-	projects        ProjectLoader
 	tasks           TaskLoader
 	linkedTasks     LinkedTaskLoader
 	events          EventPublisher
@@ -36,7 +35,6 @@ func NewService(
 	lifecycleEvents LifecycleEventRepository,
 	clock missiondomain.Clock,
 	caller caller.Resolver,
-	projects ProjectLoader,
 	tasks TaskLoader,
 	linkedTasks LinkedTaskLoader,
 	events EventPublisher,
@@ -55,8 +53,6 @@ func NewService(
 		return nil, fmt.Errorf("mission service: clock is required")
 	case caller == nil:
 		return nil, fmt.Errorf("mission service: caller resolver is required")
-	case projects == nil:
-		return nil, fmt.Errorf("mission service: project loader is required")
 	case tasks == nil:
 		return nil, fmt.Errorf("mission service: task loader is required")
 	case linkedTasks == nil:
@@ -74,7 +70,6 @@ func NewService(
 		lifecycleEvents: lifecycleEvents,
 		clock:           clock,
 		caller:          caller,
-		projects:        projects,
 		tasks:           tasks,
 		linkedTasks:     linkedTasks,
 		events:          events,

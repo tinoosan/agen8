@@ -120,9 +120,6 @@ func (s *Service) publishKREventWithData(ctx context.Context, kind MissionEventK
 			"progressPercent": strconv.Itoa(keyResult.ProgressPercent),
 		},
 	}
-	if keyResult.ProjectID != "" {
-		event.Data["projectId"] = keyResult.ProjectID
-	}
 	for key, value := range extra {
 		event.Data[key] = value
 	}

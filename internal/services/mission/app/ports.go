@@ -7,15 +7,10 @@ import (
 	"github.com/tinoosan/agen8/internal/core/types"
 	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 type Caller = caller.Caller
-
-type ProjectLoader interface {
-	Get(ctx context.Context, projectID types.ProjectID) (projectdomain.Project, error)
-}
 
 type TaskLoader interface {
 	Get(ctx context.Context, taskID taskdomain.TaskID) (taskdomain.Task, error)

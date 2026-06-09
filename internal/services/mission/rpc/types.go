@@ -101,8 +101,6 @@ type KeyResultView struct {
 	CurrentValue          float64  `json:"currentValue"`
 	ProgressPercent       int      `json:"progressPercent"`
 	Status                string   `json:"status"`
-	ProjectID             string   `json:"projectId,omitempty"`
-	OwnerProjectName      string   `json:"ownerProjectName,omitempty"`
 	LastMilestoneNotified int      `json:"lastMilestoneNotified"`
 	Version               int64    `json:"version"`
 }

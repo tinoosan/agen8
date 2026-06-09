@@ -511,8 +511,6 @@ func keyResultView(kr krdomain.KeyResult) KeyResultView {
 		CurrentValue:          kr.CurrentValue,
 		ProgressPercent:       kr.ProgressPercent,
 		Status:                string(kr.Status),
-		ProjectID:             kr.ProjectID,
-		OwnerProjectName:      kr.OwnerProjectName,
 		LastMilestoneNotified: kr.LastMilestoneNotified,
 		Version:               kr.Version,
 	}
