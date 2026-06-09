@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strategy Map Lenses — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / strategy-map-lenses</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture · Frontend Behavior</span>
+  <h1>Strategy Map Lenses</h1>
+  <p class="lede">The strategy map uses lenses to reveal work context without turning every relationship into an expensive animated edge.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#model">Lens model</a></li>
+      <li><a href="#set-highlight">Set-highlight filters</a></li>
+      <li><a href="#focus-neighborhood">Focus-neighborhood path</a></li>
+      <li><a href="#trace">Trace stepping model</a></li>
+      <li><a href="#direct-ambient">Direct versus ambient edges</a></li>
+      <li><a href="#invariants">Rendering invariants</a></li>
+      <li><a href="#references">References</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="model">1. Lens model</h2>
+  <p>A strategy-map lens is a derived render state over the current React Flow nodes and edges. It does not change graph data. It returns three sets that node and edge components use to decide opacity, stroke weight, and labels:</p>
+
+  <table>
+    <tr><th>Set</th><th>Meaning</th><th>Effect</th></tr>
+    <tr><td><code>clusterNodeIds</code></td><td>Nodes inside the active lens.</td><td>Nodes outside the set dim.</td></tr>
+    <tr><td><code>clusterEdgeIds</code></td><td>Edges inside the active lens but not necessarily direct.</td><td>Edges render as ambient context: visible, lower emphasis, no forced label portal.</td></tr>
+    <tr><td><code>directEdgeIds</code></td><td>Edges that receive the expensive direct treatment.</td><td>Structural edges become bold. A context edge would also mount a label portal and infinite dash animation, so context edges must never enter this set.</td></tr>
+  </table>
+
+  <div class="callout">
+    <strong>Invariant.</strong> A <code>contextEdge</code> can be visible and ambient, but it is never direct. This is enforced across set-highlight filters, plain node focus, and the trace lens model.
+  </div>
+
+  <h2 id="set-highlight">2. Set-highlight filters</h2>
+  <p>The set-highlight filters are global map lenses selected by preset: <code>in_motion</code>, <code>blocked</code>, <code>done</code>, and <code>decisions</code>. Each preset computes a match set and dims everything else.</p>
+
+  <table>
+    <tr><th>Preset</th><th>Matched nodes</th><th>Edges</th></tr>
+    <tr><td><code>in_motion</code></td><td>Active missions, on-track key results, active tasks, and tasks in review.</td><td>Edges whose endpoints are both inside the matched set, with structural parents included so leaves do not float.</td></tr>
+    <tr><td><code>blocked</code></td><td>Blocked tasks, at-risk key results, paused missions, and both endpoints of <code>blocked_by</code> context links.</td><td>Edges whose endpoints are both inside the matched set, with structural parents included.</td></tr>
+    <tr><td><code>done</code></td><td>Completed or archived missions, completed or dropped key results, and succeeded or canceled tasks.</td><td>Edges whose endpoints are both inside the matched set, with structural parents included.</td></tr>
+    <tr><td><code>decisions</code></td><td>Every decision node plus the far end of context links touching a decision.</td><td>Only context edges that touch a decision. Structural tree edges stay dim so the lens surfaces reasoning rather than relighting the whole tree.</td></tr>
+  </table>
+
+  <p>Set-highlight filters never populate <code>directEdgeIds</code>. In <code>useStrategyMapLenses</code>, a filter result returns <code>directEdgeIds: NO_DIRECT_EDGES</code>, while matched edges stay in <code>clusterEdgeIds</code>. This lets broad filters reveal large slices of the decision web through opacity without mounting hundreds of labels or animations.</p>
+
+  <h2 id="focus-neighborhood">3. Focus-neighborhood path</h2>
+  <p>Plain node selection uses the focus-neighborhood path. A focused node reveals the focused node plus every one-hop neighbor across both structural and context edges. Then every edge whose endpoints both sit in that neighborhood becomes ambient.</p>
+
+  <p>Only structural edges touching the focused node become direct. Context edges touching the focus still appear because both endpoints are in <code>clusterEdgeIds</code>, but they remain ambient. This is the final gap closed by decision <code>dec-a466fd62-b2b3-4048-ab8a-e99056a87d47</code>: before that change, a high-degree node focus could mark many context links as direct and crash iOS WebKit.</p>
+
+  <h2 id="trace">4. Trace stepping model</h2>
+  <p>The trace lens records a progressive path model for walking outward from a focused node one phase at a time. It is anchored on the focus cursor, not the detail panel, so first-touch focus can drive trace without opening the panel.</p>
+
+  <p>The trace model alternates phases:</p>
+  <ol>
+    <li><strong>Odd steps are structural.</strong> The lens expands the structural frontier by one hop along <code>statusEdge</code> lineage.</li>
+    <li><strong>Even steps are context.</strong> The lens layers in <code>contextEdge</code> links from every node already revealed.</li>
+    <li><strong>The structural frontier only advances on structural edges.</strong> Nodes added through context links do not re-root the structural skeleton, so structural ring N remains exactly N structural hops from the anchor.</li>
+  </ol>
+
+  <p>The depth range is bounded by <code>TRACE_MIN_DEPTH</code>, <code>TRACE_INITIAL_DEPTH</code>, and <code>TRACE_MAX_DEPTH</code>. The minimum avoids a useless bare-anchor trace. The initial depth gives the user a meaningful first reveal. The maximum caps the number of alternating structural and context phases so a trace cannot light the whole graph at once.</p>
+
+  <div class="callout">
+    <strong>Current-source note.</strong> The trace implementation has moved during the context-map cleanup. The durable model is captured here from decisions <code>dec-bd487b73-b2bd-48fb-8528-e23eb218380d</code> and <code>dec-a466fd62-b2b3-4048-ab8a-e99056a87d47</code>, and from the strategy-map interaction section in <code>frontend-behavior.html</code>. If trace returns to the UI, this stepping model is the baseline to preserve unless a new decision supersedes it.
+  </div>
+
+  <h2 id="direct-ambient">5. Direct versus ambient edges</h2>
+  <p>The direct/ambient distinction exists because context edges are expensive when direct. <code>ContextEdge.tsx</code> renders direct context edges with:</p>
+
+  <ul>
+    <li>a higher-emphasis stroke;</li>
+    <li>a visible label through <code>EdgeLabelRenderer</code>;</li>
+    <li>an infinite <code>context-dash-flow</code> animation when the map is not actively being dragged or zoomed.</li>
+  </ul>
+
+  <p>That treatment is safe for a handful of structural edges. It is not safe for high-degree context neighborhoods. A direct flood mounts many label portals and perpetual animations, which has repeatedly crashed iOS WebKit with the Safari "a problem repeatedly occurred" failure. Ambient context edges avoid the expensive path: they stay visible through <code>clusterEdgeIds</code>, but they do not force labels or animations.</p>
+
+  <h2 id="invariants">6. Rendering invariants</h2>
+  <table>
+    <tr><th>Invariant</th><th>Why it matters</th></tr>
+    <tr><td>Context edges are never direct.</td><td>Prevents the label-portal and infinite-animation flood that crashes iOS WebKit.</td></tr>
+    <tr><td>Set-highlight filters use opacity contrast, not direct edges.</td><td>Large filters can reveal broad context without turning every matched edge into an animated element.</td></tr>
+    <tr><td>Focus-neighborhood directness is structural-only.</td><td>A node with many decisions or lateral links remains selectable on low-memory clients.</td></tr>
+    <tr><td>Trace expands structure and context in alternating phases.</td><td>The user can read lineage first, then reasoning context, without the structural skeleton being pulled around by decision links.</td></tr>
+    <tr><td>Structural frontier advances only on structural edges.</td><td>Context-added nodes do not create surprise lineage expansion.</td></tr>
+  </table>
+
+  <h2 id="references">7. References</h2>
+  <h3>Source files</h3>
+  <ul>
+    <li><a href="../web/src/components/strategy/strategyMapFilters.ts">web/src/components/strategy/strategyMapFilters.ts</a> — set-highlight filter match sets and structural-parent inclusion.</li>
+    <li><a href="../web/src/components/strategy/useStrategyMapLenses.ts">web/src/components/strategy/useStrategyMapLenses.ts</a> — set-highlight and focus-neighborhood render-state derivation; <code>NO_DIRECT_EDGES</code>; structural-only direct focus edges.</li>
+    <li><a href="../web/src/components/strategy/ContextEdge.tsx">web/src/components/strategy/ContextEdge.tsx</a> — direct context-edge rendering cost: label portal and <code>context-dash-flow</code>.</li>
+    <li><a href="./frontend-behavior.html#strategy-map-interaction">Frontend Behavior: Strategy Map interaction model</a> — broader cursor, panel, and trace interaction behavior.</li>
+  </ul>
+
+  <h3>Decisions</h3>
+  <ul>
+    <li><code>dec-bd487b73-b2bd-48fb-8528-e23eb218380d</code> — trace path alternates structural and context phases; context edges never direct.</li>
+    <li><code>dec-a466fd62-b2b3-4048-ab8a-e99056a87d47</code> — all three map lenses agree that context edges are never direct; focus path was the remaining crash gap.</li>
+  </ul>
+</div>
+</body>
+</html>
