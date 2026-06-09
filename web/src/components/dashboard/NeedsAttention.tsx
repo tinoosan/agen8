@@ -192,30 +192,37 @@ export default function NeedsAttention({ projectId }: { projectId: string | null
   }
 
   return (
-    <section className="dashboard-section @container mb-12" aria-label="Needs attention">
-      <div className="dashboard-section-heading mb-2">
-        <div className="dashboard-section-heading-main">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={14} className="text-[var(--amber)]" />
-            <span className="dashboard-section-title">Needs attention</span>
+    // The margin lives on this wrapper, NOT on .dashboard-section: that class
+    // sets `margin: 0` as unlayered CSS, which beats Tailwind's layered `mb-*`
+    // utility, so a margin on the section itself is silently dropped. The
+    // wrapper sits below the null guards, so an empty card renders nothing and
+    // never leaves a phantom gap.
+    <div className="mb-14">
+      <section className="dashboard-section @container" aria-label="Needs attention">
+        <div className="dashboard-section-heading mb-2">
+          <div className="dashboard-section-heading-main">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} className="text-[var(--amber)]" />
+              <span className="dashboard-section-title">Needs attention</span>
+            </div>
+          </div>
+          <div className="dashboard-section-meta">
+            <span className="dashboard-section-counter">
+              {total} {total === 1 ? 'alert' : 'alerts'}
+            </span>
           </div>
         </div>
-        <div className="dashboard-section-meta">
-          <span className="dashboard-section-counter">
-            {total} {total === 1 ? 'alert' : 'alerts'}
-          </span>
+        <div className="max-w-[720px] max-h-[28rem] overflow-y-auto overflow-x-hidden rounded-[18px] border border-[color-mix(in_srgb,var(--amber)_35%,var(--border))] bg-[var(--bg-elevated)]">
+          {groups.map((g, i) => (
+            <AlertGroupBlock
+              key={g.trigger}
+              group={g}
+              last={i === groups.length - 1}
+              onActivate={handleActivate}
+            />
+          ))}
         </div>
-      </div>
-      <div className="max-w-[720px] max-h-[28rem] overflow-y-auto overflow-x-hidden rounded-[18px] border border-[color-mix(in_srgb,var(--amber)_35%,var(--border))] bg-[var(--bg-elevated)]">
-        {groups.map((g, i) => (
-          <AlertGroupBlock
-            key={g.trigger}
-            group={g}
-            last={i === groups.length - 1}
-            onActivate={handleActivate}
-          />
-        ))}
-      </div>
-    </section>
+      </section>
+    </div>
   )
 }
