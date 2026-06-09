@@ -66,8 +66,8 @@ export default function EditProjectDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent className="max-w-[min(92vw,440px)] rounded-[var(--r-xl)] border-[var(--border)] bg-[var(--bg-panel)] p-0 shadow-[var(--shadow-lg)] gap-0">
-        <DialogHeader className="border-b border-[var(--border)] px-5 pt-5 pb-3">
+      <DialogContent className="flex max-h-[calc(100vh-2rem)] max-w-[min(92vw,440px)] flex-col overflow-hidden rounded-[var(--r-xl)] border-[var(--border)] bg-[var(--bg-panel)] p-0 shadow-[var(--shadow-lg)] gap-0">
+        <DialogHeader className="shrink-0 border-b border-[var(--border)] px-5 pt-5 pb-3">
           <DialogTitle className="flex items-center gap-2 text-[0.9375rem] font-semibold text-[var(--text-1)]">
             <Pencil size={14} className="text-[var(--accent)]" />
             Edit project
@@ -79,7 +79,7 @@ export default function EditProjectDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 px-5 py-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
           {/* Name + live avatar preview */}
           <div className="flex items-end gap-3">
             <span
@@ -202,7 +202,7 @@ export default function EditProjectDialog({
           {error && <div className="text-[0.75rem] text-[var(--red)]">{error}</div>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-5 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--border)] px-5 py-3">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={busy} className="text-[var(--text-3)]">
             Cancel
           </Button>
