@@ -9,7 +9,7 @@ const mockUseTask = vi.fn()
 const mockUseRecentDecisions = vi.fn()
 const mockUseKeyResult = vi.fn()
 const mockUseProjectKRs = vi.fn()
-const mockUseMissions = vi.fn()
+const mockUseMission = vi.fn()
 
 vi.mock('../hooks/useProjectTasks', () => ({
   useTask: (...args: unknown[]) => mockUseTask(...args),
@@ -22,7 +22,7 @@ vi.mock('../hooks/useDecisions', () => ({
 vi.mock('../hooks/useMissions', () => ({
   useKeyResult: (...args: unknown[]) => mockUseKeyResult(...args),
   useProjectKRs: (...args: unknown[]) => mockUseProjectKRs(...args),
-  useMissions: (...args: unknown[]) => mockUseMissions(...args),
+  useMission: (...args: unknown[]) => mockUseMission(...args),
 }))
 
 // The edit/cancel dialogs carry their own mutation hooks; stub them out so the
@@ -52,7 +52,9 @@ describe('TaskDetail related section', () => {
     mockUseRecentDecisions.mockReturnValue({ data: [] })
     mockUseKeyResult.mockReturnValue({ data: undefined })
     mockUseProjectKRs.mockReturnValue({ data: new Map() })
-    mockUseMissions.mockReturnValue({ data: [MISSION] })
+    // useMission resolves the related mission by id (scope-independent), so both
+    // the KR-linked and the directly-linked cases get the mission this way.
+    mockUseMission.mockReturnValue({ data: MISSION })
   })
 
   it('shows the mission for a task linked directly to a mission (no KR)', async () => {

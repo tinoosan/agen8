@@ -44,6 +44,21 @@ export function useMissions(projectId: string | null, status?: MissionStatus) {
   })
 }
 
+// useMission fetches a single mission by id via mission.get. Unlike useMissions
+// (which lists by project), this resolves a mission regardless of its scope —
+// needed when a node references a mission whose scopeId is empty and so never
+// appears in the project-scoped list.
+export function useMission(missionId: string | null) {
+  return useQuery<MissionView>({
+    queryKey: qk.missionGet(missionId),
+    queryFn: async () => {
+      return rpcUnwrap<MissionView>('mission.get', { missionId: missionId ?? '' }, 'mission')
+    },
+    enabled: !!missionId,
+    refetchInterval: 30_000,
+  })
+}
+
 export function useKeyResults(missionId: string | null) {
   return useQuery<KeyResultView[]>({
     queryKey: qk.keyResults(missionId),

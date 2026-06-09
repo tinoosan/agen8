@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { useTask } from '../hooks/useProjectTasks'
 import { useRecentDecisions } from '../hooks/useDecisions'
-import { useKeyResult, useProjectKRs, useMissions } from '../hooks/useMissions'
+import { useKeyResult, useMission, useProjectKRs } from '../hooks/useMissions'
 import { taskStatusLabel, taskStatusColor } from '../lib/statusLabels'
 import { formatRelative } from '@/lib/format'
 import { confidenceColor } from '@/lib/decisionDisplay'
@@ -71,7 +71,16 @@ export default function TaskDetail() {
   const decisionsQuery = useRecentDecisions(projectId)
   const krsQuery = useProjectKRs(projectId)
   const directKrQuery = useKeyResult(task?.keyResultRef ?? null)
-  const missionsQuery = useMissions(projectId)
+  // Resolve the KR (scope-independent direct fetch, falling back to the project
+  // KR map) and, through it or the task's own missionRef, the related mission.
+  // The mission is fetched by id via useMission rather than scanned out of the
+  // project-scoped mission list: a mission with an empty scopeId never appears
+  // in that list, which used to leave a KR-less task's Related section blank.
+  const kr = task?.keyResultRef
+    ? directKrQuery.data ?? krsQuery.data?.get(task.keyResultRef)
+    : undefined
+  const relatedMissionId = kr?.missionId ?? task?.missionRef ?? null
+  const missionQuery = useMission(relatedMissionId)
 
   if (!projectId || !taskId) {
     return <DetailNotFound entity="task" />
@@ -100,17 +109,7 @@ export default function TaskDetail() {
   const createdByLabel = taskCreatedMemberLabel(task)
 
   const taskDecisions = (decisionsQuery.data ?? []).filter((d) => d.taskRef === task.id)
-  const kr = task.keyResultRef
-    ? directKrQuery.data ?? krsQuery.data?.get(task.keyResultRef)
-    : undefined
-  // Resolve the related mission through the KR when there is one; otherwise fall
-  // back to the task's own missionRef. Tasks created with a direct mission_ref
-  // (no KR) are valid — without this fallback their Related section is empty.
-  const mission = kr
-    ? (missionsQuery.data ?? []).find((m) => m.id === kr.missionId)
-    : task.missionRef
-      ? (missionsQuery.data ?? []).find((m) => m.id === task.missionRef)
-      : undefined
+  const mission = missionQuery.data ?? undefined
   const related: RelatedItem[] = []
   if (mission) {
     related.push({ key: 'mission', label: 'Mission', title: mission.title, to: missionDetailLink(projectId, mission.id) })
