@@ -41,6 +41,7 @@ var edgeTypes = []string{
 	"spawned",
 	"child_of",
 	"relates_to",
+	"supersedes",
 }
 
 type Service interface {

@@ -22,6 +22,7 @@ const (
 	EdgeTypeSpawned     = "spawned"
 	EdgeTypeChildOf     = "child_of"
 	EdgeTypeRelatesTo   = "relates_to"
+	EdgeTypeSupersedes  = "supersedes"
 )
 
 type GraphNodeCore struct {

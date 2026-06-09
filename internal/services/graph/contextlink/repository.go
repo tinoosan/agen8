@@ -21,6 +21,7 @@ const (
 	EdgeTypeSpawned     EdgeType = "spawned"
 	EdgeTypeChildOf     EdgeType = "child_of"
 	EdgeTypeRelatesTo   EdgeType = "relates_to"
+	EdgeTypeSupersedes  EdgeType = "supersedes"
 )
 
 var validEdgeTypes = map[EdgeType]struct{}{
@@ -34,6 +35,7 @@ var validEdgeTypes = map[EdgeType]struct{}{
 	EdgeTypeSpawned:     {},
 	EdgeTypeChildOf:     {},
 	EdgeTypeRelatesTo:   {},
+	EdgeTypeSupersedes:  {},
 }
 
 type NodeRef struct {
