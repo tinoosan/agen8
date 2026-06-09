@@ -44,8 +44,8 @@
   <table>
     <thead><tr><th>Surface</th><th>Current release baseline</th></tr></thead>
     <tbody>
-      <tr><td>Binary</td><td><code>agen8-mcp</code></td></tr>
-      <tr><td>Daemon command</td><td><code>agen8-mcp daemon start --listener http --http-addr 127.0.0.1:7777</code></td></tr>
+      <tr><td>Binary</td><td><code>agen8</code></td></tr>
+      <tr><td>Daemon command</td><td><code>agen8 daemon start --listener http --http-addr 127.0.0.1:7777</code></td></tr>
       <tr><td>Web UI</td><td>Served by the daemon. In development, the daemon proxies Vite.</td></tr>
       <tr><td>MCP endpoint</td><td><code>http://127.0.0.1:7777/mcp?token=&lt;initial-api-key&gt;</code></td></tr>
       <tr><td>Retained MCP tools</td><td><code>project</code>, <code>mission</code>, <code>task</code>, <code>decision</code>, <code>graph_query</code>, <code>http</code></td></tr>
@@ -57,7 +57,7 @@
 
 <pre><code class="lang-shell">make dev remote
 make dev remote DATA_DIR=/tmp/agen8-release-check
-agen8-mcp daemon start --data-dir /tmp/agen8-release-check --listener http --http-addr 127.0.0.1:7777</code></pre>
+agen8 daemon start --data-dir /tmp/agen8-release-check --listener http --http-addr 127.0.0.1:7777</code></pre>
 
   <p>The repository should not contain a live <code>agen8.db</code>. Local SQLite files belong in the resolved data directory; use an isolated <code>DATA_DIR</code> or <code>AGEN8_DATA_DIR</code> for clean setup checks.</p>
 
@@ -67,7 +67,7 @@ agen8-mcp daemon start --data-dir /tmp/agen8-release-check --listener http --htt
   <p>The release version source is <code>pkg/buildinfo</code>. Builds set <code>Version</code>, <code>Commit</code>, and <code>BuildDate</code> with Go ldflags. Local development defaults to <code>dev</code> and <code>none</code>.</p>
 
 <pre><code class="lang-shell">make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-./bin/agen8-mcp version
+./bin/agen8 version
 curl http://127.0.0.1:7777/healthz</code></pre>
 
   <p><code>/healthz</code> returns <code>ok</code>, <code>version</code>, <code>commit</code>, and <code>buildDate</code> when the build date is set. The MCP server implementation advertises the same version.</p>
@@ -125,13 +125,13 @@ npm --prefix web run build
 npm --prefix web audit --audit-level=moderate
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-./bin/agen8-mcp version
+./bin/agen8 version
 make dev remote
 # Run retained MCP tool UAT from a real harness connection.</code></pre>
 
   <p>Start and end with <code>git status --short</code>. The release candidate should be clean before tagging. The generated bundle in <code>internal/web/dist</code> is not committed (only the <code>.gitkeep</code> placeholder is tracked), so <code>npm --prefix web run build</code> leaves git status clean; the binary embeds the freshly built bundle at <code>make build</code> time. Keep the real local <code>.mcp.json</code> ignored; publish <code>.mcp.example.json</code> only.</p>
 
-  <p>The release workflow builds <code>agen8-mcp</code> archives for Linux and macOS on version tags matching <code>v*</code>.</p>
+  <p>The release workflow builds <code>agen8</code> archives for Linux and macOS on version tags matching <code>v*</code>.</p>
 
 </div>
 

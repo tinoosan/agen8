@@ -860,8 +860,8 @@ func TestSetupAPIKeyWorksAsMCPTokenAfterRestart(t *testing.T) {
 	if strings.Contains(responseBody, "not registered") || strings.Contains(responseBody, "token is required") {
 		t.Fatalf("mcp rejected setup api key after restart: %s", responseBody)
 	}
-	if !strings.Contains(responseBody, "agen8-mcp") {
-		t.Fatalf("mcp initialize body=%s want agen8-mcp server info", responseBody)
+	if !strings.Contains(responseBody, "agen8") {
+		t.Fatalf("mcp initialize body=%s want agen8 server info", responseBody)
 	}
 }
 

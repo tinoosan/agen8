@@ -214,7 +214,7 @@ func (h Handler) run(ctx context.Context, call CallContext, input requestInput) 
 		httpReq.Header.Set(headerName, strings.TrimSpace(value))
 	}
 	if httpReq.Header.Get("User-Agent") == "" {
-		httpReq.Header.Set("User-Agent", "agen8-mcp.http/0.1")
+		httpReq.Header.Set("User-Agent", "agen8.http/0.1")
 	}
 
 	client := h.client

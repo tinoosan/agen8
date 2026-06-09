@@ -402,7 +402,7 @@ func (s *mcpConnectionState) nativeRefs() (sessionID, threadID string) {
 
 func (s *Server) newMCPServerForConnection(conn *mcpConnectionState, initialSession Session) *mcp.Server {
 	server := mcp.NewServer(
-		&mcp.Implementation{Name: "agen8-mcp", Version: buildinfo.Current().Version},
+		&mcp.Implementation{Name: "agen8", Version: buildinfo.Current().Version},
 		nil,
 	)
 	for _, def := range s.registry.Defs() {

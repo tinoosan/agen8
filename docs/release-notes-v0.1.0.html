@@ -40,11 +40,11 @@
   <table>
     <thead><tr><th>Area</th><th>Release behavior</th></tr></thead>
     <tbody>
-      <tr><td>Daemon</td><td><code>agen8-mcp</code> starts the local HTTP daemon, serves the web UI, exposes <code>/healthz</code>, and hosts the MCP endpoint.</td></tr>
+      <tr><td>Daemon</td><td><code>agen8</code> starts the local HTTP daemon, serves the web UI, exposes <code>/healthz</code>, and hosts the MCP endpoint.</td></tr>
       <tr><td>Local setup</td><td>First-run setup creates the local account, browser session, and initial API key.</td></tr>
       <tr><td>MCP tools</td><td><code>project</code>, <code>mission</code>, <code>task</code>, <code>decision</code>, <code>graph_query</code>, and <code>http</code> are the retained tool surface.</td></tr>
       <tr><td>Work context</td><td>Projects contain members, missions, key results, tasks, decisions, graph links, credentials, files, and locations.</td></tr>
-      <tr><td>Versioning</td><td>Build metadata is exposed through <code>agen8-mcp version</code>, <code>/healthz</code>, and MCP server info.</td></tr>
+      <tr><td>Versioning</td><td>Build metadata is exposed through <code>agen8 version</code>, <code>/healthz</code>, and MCP server info.</td></tr>
       <tr><td>Storage</td><td>Runtime data defaults to <code>~/.agen8</code>. The repository does not own the live SQLite database.</td></tr>
     </tbody>
   </table>
@@ -75,7 +75,7 @@ make dev remote DATA_DIR=/tmp/agen8-v010-check</code></pre>
 
 <pre><code class="lang-shell">go test ./... -count=1
 make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-./bin/agen8-mcp version
+./bin/agen8 version
 make dev remote DATA_DIR=/tmp/agen8-v010-check</code></pre>
 
   <p>Then verify the retained MCP tools through a real harness connection:</p>
