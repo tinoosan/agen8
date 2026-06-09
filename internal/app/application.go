@@ -14,7 +14,7 @@ import (
 	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
 	authdomain "github.com/tinoosan/agen8/internal/services/auth/domain"
 	authinfra "github.com/tinoosan/agen8/internal/services/auth/infra"
-	linktoken "github.com/tinoosan/agen8/internal/services/auth/linktoken"
+	"github.com/tinoosan/agen8/internal/services/auth/linktoken"
 	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
 	credentialinfra "github.com/tinoosan/agen8/internal/services/credential/infra"
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"

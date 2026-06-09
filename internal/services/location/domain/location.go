@@ -156,20 +156,7 @@ func New(input NewInput) (Location, error) {
 }
 
 func Wrap(record Record) (Location, error) {
-	return New(NewInput{
-		ID:             record.ID,
-		Kind:           record.Kind,
-		Label:          record.Label,
-		Address:        record.Address,
-		Status:         record.Status,
-		Ready:          record.Ready,
-		CredentialRef:  record.CredentialRef,
-		Probe:          record.Probe,
-		LastProbeError: record.LastProbeError,
-		LastProbedAt:   record.LastProbedAt,
-		CreatedAt:      record.CreatedAt,
-		UpdatedAt:      record.UpdatedAt,
-	})
+	return New(NewInput(record))
 }
 
 func (l Location) ID() ID               { return l.id }

@@ -72,9 +72,3 @@ func timeString(t time.Time) string {
 	}
 	return t.UTC().Format(time.RFC3339Nano)
 }
-
-func isDuplicateColumnError(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "duplicate column") ||
-		strings.Contains(msg, "already exists")
-}

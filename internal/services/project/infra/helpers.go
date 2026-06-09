@@ -62,7 +62,7 @@ func customizationToJSON(c *project.Customization) (string, error) {
 }
 
 // customizationFromJSON is the inverse: empty/blank decodes to nil so legacy
-// rows written before the column existed (default '') present as "no
+// rows written before the column existed (default empty string) present as "no
 // customization" rather than an error.
 func customizationFromJSON(value string) (*project.Customization, error) {
 	value = strings.TrimSpace(value)

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
-	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
 )
 
 type decisionEntry struct {
@@ -35,23 +34,6 @@ func resultEntry(result decisionapp.Result) decisionEntry {
 		MemberName:             strings.TrimSpace(result.MemberName),
 		SourceType:             strings.TrimSpace(result.SourceType),
 	}
-}
-
-func domainEntry(decision decisiondomain.Decision) decisionEntry {
-	entry := decisionEntry{
-		ID:           strings.TrimSpace(string(decision.ID)),
-		Kind:         strings.TrimSpace(string(decision.Kind())),
-		Title:        strings.TrimSpace(decision.Title),
-		TaskRef:      strings.TrimSpace(decision.TaskRef),
-		KeyResultRef: strings.TrimSpace(decision.KeyResultRef),
-		MissionRef:   strings.TrimSpace(decision.MissionRef),
-		MemberID:     strings.TrimSpace(decision.SourceIdentity),
-		SourceType:   strings.TrimSpace(string(decision.Source)),
-	}
-	if decision.Log != nil {
-		entry.InvalidationConditions = append([]string(nil), decision.Log.InvalidationConditions...)
-	}
-	return entry
 }
 
 func resultFromStructured(structured map[string]any) (Result, error) {

@@ -1587,8 +1587,7 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := d.resolveMCPSession(ctx, tc.token, http.Header{}, tc.body)
-			switch tc.want {
-			case storeMissCollapsed:
+			if tc.want == storeMissCollapsed {
 				assertLoudFailure(t, got, err)
 				// authErr is discarded at daemon.go:281, so the specific auth sentinel must NOT
 				// surface here - failure collapses to the generic mcp store-miss error.

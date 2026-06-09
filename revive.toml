@@ -46,6 +46,10 @@ errorCode = 1
 # The two are incompatible, and the project policy wins.
 [rule.unnecessary-stmt]
 [rule.context-as-argument]   # ctx must be the first parameter
+  # Allow the conventional testing handle (t/b/f) before ctx. Go test style
+  # puts *testing.T first in helpers; forcing ctx ahead of it would be the
+  # less idiomatic ordering, so we exempt only those types.
+  arguments = [{ allowTypesBefore = "*testing.T,*testing.B,*testing.F" }]
 [rule.context-keys-type]     # don't use built-in types as context keys
 [rule.empty-block]
 [rule.redundant-import-alias]

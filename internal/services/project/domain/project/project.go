@@ -111,17 +111,7 @@ func New(input NewInput) (Project, error) {
 }
 
 func Wrap(record Record) (Project, error) {
-	return New(NewInput{
-		ID:            record.ID,
-		LocationID:    record.LocationID,
-		Root:          record.Root,
-		UserID:        record.UserID,
-		Title:         record.Title,
-		Status:        record.Status,
-		Customization: record.Customization,
-		CreatedAt:     record.CreatedAt,
-		UpdatedAt:     record.UpdatedAt,
-	})
+	return New(NewInput(record))
 }
 
 func (p Project) ID() types.ProjectID           { return p.id }

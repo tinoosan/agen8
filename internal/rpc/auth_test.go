@@ -128,8 +128,8 @@ func TestRegisterAuthAPIKeyList(t *testing.T) {
 	account := rpcAuthUserRecord(t, "user-1", user.LifecycleActive)
 	server, _ := newAuthRPCServer(t, account)
 	ctx := ContextWithIdentity(context.Background(), Identity{UserID: "user-1", Role: "admin"})
-	createAPIKeyOverRPC(t, server, ctx, "first")
-	createAPIKeyOverRPC(t, server, ctx, "second")
+	createAPIKeyOverRPC(t, ctx, server, "first")
+	createAPIKeyOverRPC(t, ctx, server, "second")
 
 	raw, err := server.Handle(ctx, []byte(`{
 		"jsonrpc": "2.0",
@@ -163,7 +163,7 @@ func TestRegisterAuthAPIKeyRevokeRejectsOtherUsersKey(t *testing.T) {
 	other := rpcAuthUserRecord(t, "user-2", user.LifecycleActive)
 	server, _ := newAuthRPCServer(t, account, other)
 	otherCtx := ContextWithIdentity(context.Background(), Identity{UserID: "user-2", Role: "admin"})
-	otherKey := createAPIKeyOverRPC(t, server, otherCtx, "other")
+	otherKey := createAPIKeyOverRPC(t, otherCtx, server, "other")
 
 	raw, err := server.Handle(ContextWithIdentity(context.Background(), Identity{UserID: "user-1", Role: "admin"}), []byte(`{
 		"jsonrpc": "2.0",
@@ -180,7 +180,7 @@ func TestRegisterAuthAPIKeyRevokeRejectsOtherUsersKey(t *testing.T) {
 	}
 }
 
-func createAPIKeyOverRPC(t *testing.T, server *Server, ctx context.Context, name string) authrpc.CreateAPIKeyResult {
+func createAPIKeyOverRPC(t *testing.T, ctx context.Context, server *Server, name string) authrpc.CreateAPIKeyResult {
 	t.Helper()
 	raw, err := server.Handle(ctx, []byte(`{
 		"jsonrpc": "2.0",

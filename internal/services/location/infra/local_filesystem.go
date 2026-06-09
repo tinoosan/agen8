@@ -876,38 +876,6 @@ func runSSHCommandWithInput(ctx context.Context, client *ssh.Client, command str
 	}
 }
 
-func localStateDir(name string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
-	}
-	dir := filepath.Join(home, ".agen8", name)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("create setup state dir: %w", err)
-	}
-	return dir, nil
-}
-
-func localLoginOutput(pidFile string, logFile string) string {
-	pid, _ := os.ReadFile(pidFile)
-	log, _ := os.ReadFile(logFile)
-	return fmt.Sprintf("pid=%s\nlog=%s\n%s", strings.TrimSpace(string(pid)), logFile, string(log))
-}
-
-func localProbeStatus(codex bool) locationdomain.ProbeStatus {
-	if codex {
-		return locationdomain.ProbeStatusPassed
-	}
-	return locationdomain.ProbeStatusFailed
-}
-
-func localProbeFailure(codex bool) locationdomain.FailureCode {
-	if codex {
-		return ""
-	}
-	return locationdomain.FailureCodeCodexMissing
-}
-
 func validateLocalPath(path string) (string, error) {
 	// validateLocalPath enforces a conservative file-system contract for local
 	// location operations. It rejects null-bytes and traversal-style segments,

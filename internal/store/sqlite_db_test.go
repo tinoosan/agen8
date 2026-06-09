@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"strings"
 	"testing"
 
@@ -185,34 +184,6 @@ func TestDecisionMemberNameRepairBackfillsFromMemberRecord(t *testing.T) {
 	if got != "Codex backend engineer" {
 		t.Fatalf("member_name=%q want %q", got, "Codex backend engineer")
 	}
-}
-
-func tableColumns(t *testing.T, db *sql.DB, table string) map[string]bool {
-	t.Helper()
-	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		t.Fatalf("pragma %s: %v", table, err)
-	}
-	defer rows.Close()
-	columns := map[string]bool{}
-	for rows.Next() {
-		var (
-			cid     int
-			name    string
-			ctype   string
-			notNull int
-			dflt    sql.NullString
-			pk      int
-		)
-		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
-			t.Fatalf("scan pragma %s: %v", table, err)
-		}
-		columns[name] = true
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("pragma rows %s: %v", table, err)
-	}
-	return columns
 }
 
 func TestGetDBPostgresRequiresReachableDatabase(t *testing.T) {

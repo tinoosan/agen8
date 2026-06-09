@@ -23,7 +23,6 @@ func (f fakeTaskSource) Tasks(_ context.Context, _ string) ([]domain.TaskSnapsho
 // memRepo is an in-memory domain.Repository for service tests.
 type memRepo struct {
 	rows map[string]domain.Notification
-	seq  int
 }
 
 func newMemRepo() *memRepo { return &memRepo{rows: map[string]domain.Notification{}} }

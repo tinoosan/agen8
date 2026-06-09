@@ -514,16 +514,6 @@ func requiredTokenMatches(tokenCount int) int {
 	return 2
 }
 
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 func floatPtrValue(value *float64) any {
 	if value == nil {
 		return nil
@@ -536,16 +526,6 @@ func timePtrRFC3339(value *time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339Nano)
-}
-
-func deadlineHours(createdAt time.Time, deadline *time.Time) any {
-	if deadline == nil || deadline.IsZero() {
-		return nil
-	}
-	if createdAt.IsZero() {
-		return 0
-	}
-	return int(deadline.UTC().Sub(createdAt.UTC()).Hours())
 }
 
 func isNotFoundError(err error) bool {

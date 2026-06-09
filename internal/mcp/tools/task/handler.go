@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/core/types"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
@@ -214,16 +213,19 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		case "approve":
 			task, err = call.Tasks.ApproveReview(taskCtx, params)
 		case "retry":
-			reason, err := requireString(params.Reason, "reason")
-			if err != nil {
-				return Result{}, err
+			// Use a distinct name for the validation error so the outer review
+			// `err` (read by taskResult below) actually receives the RetryReview
+			// result. A `:=` here would shadow it and silently swallow the error.
+			reason, verr := requireString(params.Reason, "reason")
+			if verr != nil {
+				return Result{}, verr
 			}
 			params.Reason = reason
 			task, err = call.Tasks.RetryReview(taskCtx, params)
 		case "fail":
-			reason, err := requireString(params.Reason, "reason")
-			if err != nil {
-				return Result{}, err
+			reason, verr := requireString(params.Reason, "reason")
+			if verr != nil {
+				return Result{}, verr
 			}
 			params.Reason = reason
 			task, err = call.Tasks.FailReview(taskCtx, params)
@@ -350,18 +352,6 @@ func requireString(value, field string) (string, error) {
 		return "", fmt.Errorf("task: %s is required", field)
 	}
 	return value, nil
-}
-
-func parseOptionalUUID(field, value string) (*uuid.UUID, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil, nil
-	}
-	parsed, err := uuid.Parse(value)
-	if err != nil {
-		return nil, fmt.Errorf("task: %s must be a UUID", field)
-	}
-	return &parsed, nil
 }
 
 func parseStatus(value string) (taskdomain.TaskStatus, error) {

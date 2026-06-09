@@ -121,16 +121,6 @@ func getDBHandle(ctx context.Context, cfg config.Config) (*storagedb.Handle, err
 	return nil, err
 }
 
-func getSQLiteDB(cfg config.Config) (*sql.DB, error) {
-	cfg.DBDriver = "sqlite"
-	cfg.DatabaseURL = ""
-	handle, err := getDBHandle(context.Background(), cfg)
-	if err != nil {
-		return nil, err
-	}
-	return handle.DB(), nil
-}
-
 func migratePostgres(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("postgres: db is nil")

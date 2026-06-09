@@ -118,15 +118,7 @@ func New(input NewInput) (Credential, error) {
 }
 
 func Wrap(record Record) (Credential, error) {
-	return New(NewInput{
-		ID:        record.ID,
-		Kind:      record.Kind,
-		Label:     record.Label,
-		Status:    record.Status,
-		Fields:    record.Fields,
-		CreatedAt: record.CreatedAt,
-		UpdatedAt: record.UpdatedAt,
-	})
+	return New(NewInput(record))
 }
 
 func (c Credential) ID() ID               { return c.id }

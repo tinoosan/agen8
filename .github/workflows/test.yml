@@ -5,12 +5,10 @@ on:
   pull_request:
 
 # CI mirrors the documented pre-push gate (see README "Pre-Push Check"):
-# Go format/vet/test/build and web lint/test/build. The checks are inlined
-# here rather than calling helper scripts, because the scripts/ tree was
-# removed in the project-first strip-down. The heavier Go linters
-# (staticcheck, revive) are intentionally not run yet — they carry a
-# pre-existing finding backlog that needs its own cleanup pass before they
-# can gate merges.
+# Go format/vet/staticcheck/revive/test/build and web lint/test/build. The
+# checks are inlined here rather than calling helper scripts, because the
+# scripts/ tree was removed in the project-first strip-down. staticcheck and
+# revive are pinned to specific versions so the gate is reproducible.
 
 jobs:
   go:
@@ -35,6 +33,17 @@ jobs:
 
       - name: Run Go vet
         run: go vet ./...
+
+      - name: Install Go linters
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install github.com/mgechev/revive@v1.15.0
+
+      - name: Run staticcheck
+        run: staticcheck ./...
+
+      - name: Run revive
+        run: revive -config revive.toml -set_exit_status ./...
 
       - name: Run Go tests
         run: go test ./... -count=1

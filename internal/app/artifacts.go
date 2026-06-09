@@ -30,8 +30,6 @@ type Artifact struct {
 	PublishedVPath string
 }
 
-func newArtifactIndex() *ArtifactIndex { return &ArtifactIndex{} }
-
 func (x *ArtifactIndex) ObserveWrite(vpath string) {
 	if x == nil {
 		return
