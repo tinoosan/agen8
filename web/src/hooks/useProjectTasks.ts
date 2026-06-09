@@ -97,3 +97,17 @@ export function useCancelTask() {
     },
   })
 }
+
+// Reassigns a task to another project member. The backend requeues a
+// non-terminal task on reassignment (claim cleared, status back to pending), so
+// the board and the routed detail page both need to refresh.
+export function useAssignTask() {
+  const queryClient = useQueryClient()
+  return useMutation<{ task: Task }, Error, { taskId: string; assignedTo: string }>({
+    mutationFn: (params) => rpcCall<{ task: Task }>('task.assign', params),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: qk.tasksBoardAll })
+      queryClient.invalidateQueries({ queryKey: qk.taskGet(vars.taskId) })
+    },
+  })
+}

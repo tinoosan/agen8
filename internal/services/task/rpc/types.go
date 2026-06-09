@@ -142,6 +142,18 @@ type TaskCancelResult struct {
 	Task TaskView `json:"task"`
 }
 
+// TaskAssignParams reassigns a task to another project member. Reassigning a
+// non-terminal task requeues it: the domain clears the claim and resets status
+// to pending so the new assignee can claim it.
+type TaskAssignParams struct {
+	TaskID     string `json:"taskId"`
+	AssignedTo string `json:"assignedTo"`
+}
+
+type TaskAssignResult struct {
+	Task TaskView `json:"task"`
+}
+
 func cloneTime(value *time.Time) *time.Time {
 	if value == nil {
 		return nil

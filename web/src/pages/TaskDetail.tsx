@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useRoute, useLocation } from 'wouter'
+import { toast } from 'sonner'
 import {
   AlertTriangle,
   Clock,
@@ -7,8 +8,13 @@ import {
   Network,
   Pencil,
   Ban,
+  Check,
+  Plus,
+  X,
 } from 'lucide-react'
-import { useTask } from '../hooks/useProjectTasks'
+import { useTask, useUpdateTask, useAssignTask } from '../hooks/useProjectTasks'
+import { useProjectMembers } from '../hooks/useProjectMembers'
+import { memberDisplayName } from '../lib/memberDisplay'
 import { useRecentDecisions } from '../hooks/useDecisions'
 import { useKeyResult, useMission, useProjectKRs } from '../hooks/useMissions'
 import { taskStatusLabel, taskStatusColor } from '../lib/statusLabels'
@@ -31,15 +37,40 @@ import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
 import { RelatedList, type RelatedItem } from '../components/detail/RelatedList'
-import EditTaskDialog from '../components/task/EditTaskDialog'
 import { CancelTaskDialog } from '../components/task/CancelTaskDialog'
 import { AcceptanceCriteriaList } from '../components/task/AcceptanceCriteriaList'
 import { LatestReviewSection } from '../components/task/LatestReviewSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 
 const TERMINAL_STATUSES = ['succeeded', 'failed', 'canceled']
+
+/* ── Inline-edit acceptance-criteria rows ── */
+
+interface CriterionRow {
+  id: string
+  text: string
+  satisfied: boolean
+}
+
+function newCriterionId(): string {
+  const rand = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2)
+  return `criterion-${rand}`
+}
 
 /* ── Loading skeleton ── */
 
@@ -62,10 +93,22 @@ export default function TaskDetail() {
   const projectId = params?.projectId ? decodeURIComponent(params.projectId) : null
   const taskId = params?.taskId ? decodeURIComponent(params.taskId) : null
 
-  const [editOpen, setEditOpen] = useState(false)
+  // Inline edit state. Edits happen in place on the page (no modal): the title
+  // turns into an input in the header and the description/kind/criteria become
+  // fields in the body, with Save/Cancel living in the action bar. Decision
+  // dec-51c505cd — inline scales better than a modal for this large page.
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editKind, setEditKind] = useState('')
+  const [editCriteria, setEditCriteria] = useState<CriterionRow[]>([])
+  const [editAssignee, setEditAssignee] = useState('')
   const [cancelOpen, setCancelOpen] = useState(false)
+  const updateTask = useUpdateTask()
+  const assignTask = useAssignTask()
 
   const { data: task, isLoading, isError, error } = useTask(taskId)
+  const membersQuery = useProjectMembers(projectId)
 
   // Related-entity lookups — only meaningful once the task is loaded.
   const decisionsQuery = useRecentDecisions(projectId)
@@ -108,6 +151,71 @@ export default function TaskDetail() {
   const claimedByLabel = taskClaimedMemberLabel(task)
   const createdByLabel = taskCreatedMemberLabel(task)
 
+  // Bind the post-guard narrowed task so the edit closures below don't see the
+  // widened `Task | undefined` (TS won't carry the `if (!task)` narrowing in).
+  const taskId_ = task.id
+
+  // Seed the inline edit fields from the current task and switch to edit mode.
+  function beginEdit() {
+    setEditTitle(task!.title ?? '')
+    setEditDescription(task!.description ?? '')
+    setEditKind(task!.taskKind ?? '')
+    setEditAssignee(task!.assignedTo ?? '')
+    setEditCriteria(
+      (task!.acceptanceCriteria ?? []).map((c) => ({ id: c.id, text: c.text, satisfied: c.satisfied })),
+    )
+    setEditing(true)
+  }
+
+  function addCriterion() {
+    setEditCriteria((prev) => [...prev, { id: newCriterionId(), text: '', satisfied: false }])
+  }
+
+  function updateCriterionText(id: string, text: string) {
+    setEditCriteria((prev) => prev.map((c) => (c.id === id ? { ...c, text } : c)))
+  }
+
+  function toggleCriterion(id: string, satisfied: boolean) {
+    setEditCriteria((prev) => prev.map((c) => (c.id === id ? { ...c, satisfied } : c)))
+  }
+
+  function removeCriterion(id: string) {
+    setEditCriteria((prev) => prev.filter((c) => c.id !== id))
+  }
+
+  async function handleSaveEdit() {
+    const trimmedDescription = editDescription.trim()
+    if (!trimmedDescription) {
+      toast.error('Task description is required')
+      return
+    }
+    const acceptanceCriteria = editCriteria
+      .map((c) => ({ id: c.id, text: c.text.trim(), satisfied: c.satisfied }))
+      .filter((c) => c.text)
+    // Reassignment is a distinct verb from update: the backend requeues a
+    // non-terminal task (clears the claim, resets to pending) so the new
+    // assignee can claim it. Only fire it when the picker actually changed.
+    const assigneeChanged = !isTerminal && !!editAssignee && editAssignee !== (task!.assignedTo ?? '')
+    try {
+      await updateTask.mutateAsync({
+        taskId: taskId_,
+        title: editTitle.trim(),
+        description: trimmedDescription,
+        taskKind: editKind.trim(),
+        acceptanceCriteria,
+      })
+      if (assigneeChanged) {
+        await assignTask.mutateAsync({ taskId: taskId_, assignedTo: editAssignee })
+        toast.success('Task updated and reassigned — it returns to the queue for the new assignee')
+      } else {
+        toast.success('Task updated')
+      }
+      setEditing(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update task')
+    }
+  }
+
   const taskDecisions = (decisionsQuery.data ?? []).filter((d) => d.taskRef === task.id)
   const mission = missionQuery.data ?? undefined
   const related: RelatedItem[] = []
@@ -135,12 +243,18 @@ export default function TaskDetail() {
     })
   }
 
+  // Assignee picker options. Active roster only — a removed member should not be
+  // a reassignment target.
+  const activeMembers = (membersQuery.data ?? []).filter((m) => m.lifecycleState === 'active')
+  const membersLoading = membersQuery.isLoading
+  const hasMembers = activeMembers.length > 0
+
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Sticky header */}
       <DetailHeader backTo={tasksPanelLink(projectId)} backLabel="Tasks">
-          <div className="flex items-start gap-3">
-            <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="flex-1 min-w-[220px]">
               <div className="flex items-center gap-2 mb-2">
                 <span className="uppercase" style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', color: 'var(--text-3)' }}>
                   Task
@@ -150,12 +264,31 @@ export default function TaskDetail() {
                   <span style={{ fontSize: '0.625rem', fontFamily: 'monospace' }}>{taskIdShort(task.id)}</span>
                 </span>
               </div>
-              <h1
-                className="m-0 text-[var(--text-1)]"
-                style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.56px', lineHeight: 1.14 }}
-              >
-                {displayTitle}
-              </h1>
+              {editing ? (
+                <Input
+                  aria-label="Task title"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSaveEdit()
+                    } else if (e.key === 'Escape') {
+                      setEditing(false)
+                    }
+                  }}
+                  placeholder="e.g. Wire up the export endpoint"
+                  autoFocus
+                  className="w-full min-w-0 h-auto py-1 text-[1.75rem] font-bold tracking-[-0.56px] leading-[1.14]"
+                />
+              ) : (
+                <h1
+                  className="m-0 text-[var(--text-1)]"
+                  style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.56px', lineHeight: 1.14 }}
+                >
+                  {displayTitle}
+                </h1>
+              )}
               <div className="flex items-center gap-2 mt-3">
                 <Badge
                   variant="outline"
@@ -173,41 +306,71 @@ export default function TaskDetail() {
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-2 shrink-0">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate(strategyMapLink(projectId, mapNodeId('task', task.id)))}
-                className="dashboard-action-button dashboard-action-button-neutral"
-                style={{ letterSpacing: '-0.12px' }}
-                title="View in Context Map"
-                aria-label="View in Context Map"
-              >
-                <Network size={12} className="mr-1" />
-                Map
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setEditOpen(true)}
-                className="dashboard-action-button dashboard-action-button-neutral"
-                style={{ letterSpacing: '-0.12px' }}
-              >
-                <Pencil size={12} className="mr-1" />
-                Edit
-              </Button>
-              {!isTerminal && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCancelOpen(true)}
-                  className="dashboard-action-button"
-                  style={{ letterSpacing: '-0.12px', color: 'var(--red)' }}
-                >
-                  <Ban size={12} className="mr-1" />
-                  Cancel
-                </Button>
+            {/* Actions — Map/Edit/Cancel-task in read mode; Save/Cancel-edit in
+                edit mode. flex-wrap keeps the row from overflowing the header at
+                mobile/iPad widths (wrapping is intrinsic, no breakpoints). */}
+            <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+              {editing ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSaveEdit}
+                    disabled={updateTask.isPending || assignTask.isPending || !editDescription.trim()}
+                    className="dashboard-action-button dashboard-action-button-accent"
+                    style={{ letterSpacing: '-0.12px' }}
+                  >
+                    <Check size={12} className="mr-1" />
+                    {updateTask.isPending || assignTask.isPending ? 'Saving…' : 'Save changes'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditing(false)}
+                    className="dashboard-action-button dashboard-action-button-neutral"
+                    style={{ letterSpacing: '-0.12px' }}
+                  >
+                    <X size={12} className="mr-1" />
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate(strategyMapLink(projectId, mapNodeId('task', task.id)))}
+                    className="dashboard-action-button dashboard-action-button-neutral"
+                    style={{ letterSpacing: '-0.12px' }}
+                    title="View in Context Map"
+                    aria-label="View in Context Map"
+                  >
+                    <Network size={12} className="mr-1" />
+                    Map
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={beginEdit}
+                    className="dashboard-action-button dashboard-action-button-neutral"
+                    style={{ letterSpacing: '-0.12px' }}
+                  >
+                    <Pencil size={12} className="mr-1" />
+                    Edit
+                  </Button>
+                  {!isTerminal && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCancelOpen(true)}
+                      className="dashboard-action-button"
+                      style={{ letterSpacing: '-0.12px', color: 'var(--red)' }}
+                    >
+                      <Ban size={12} className="mr-1" />
+                      Cancel
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -233,16 +396,77 @@ export default function TaskDetail() {
           </div>
         )}
 
-        {/* Description */}
-        {!retry.isRetry && task.description && (
-          <div className="flex flex-col gap-1.5">
-            <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
-              Goal
-            </span>
-            <p className="m-0 text-[var(--text-2)]" style={{ fontSize: '0.875rem', letterSpacing: '-0.14px', lineHeight: 1.55 }}>
-              {task.description}
-            </p>
+        {/* Description + kind — inline editors in edit mode, read-only otherwise */}
+        {editing ? (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-task-desc" style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+                Goal
+              </Label>
+              <Textarea
+                id="edit-task-desc"
+                placeholder="Describe what needs to be done and why…"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                rows={3}
+                className="min-h-[118px] resize-y"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-task-kind" style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+                Kind <span className="text-muted-foreground font-normal lowercase">(optional)</span>
+              </Label>
+              <Input
+                id="edit-task-kind"
+                placeholder="e.g. feature, bugfix, research"
+                value={editKind}
+                onChange={(e) => setEditKind(e.target.value)}
+              />
+            </div>
+            {!isTerminal && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="edit-task-assignee" style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+                  Assignee
+                </Label>
+                <Select value={editAssignee} onValueChange={setEditAssignee} disabled={!hasMembers}>
+                  <SelectTrigger id="edit-task-assignee">
+                    <SelectValue
+                      placeholder={
+                        membersLoading
+                          ? 'Loading members…'
+                          : hasMembers
+                            ? 'Select a project member'
+                            : 'No members available'
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeMembers.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {memberDisplayName(m.displayName, m.id) ?? m.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {editAssignee && editAssignee !== (task.assignedTo ?? '') && (
+                  <span className="text-[var(--text-3)]" style={{ fontSize: '0.6875rem', lineHeight: 1.4 }}>
+                    Reassigning returns this task to the queue for the new member to claim.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
+        ) : (
+          !retry.isRetry && task.description && (
+            <div className="flex flex-col gap-1.5">
+              <span style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+                Goal
+              </span>
+              <p className="m-0 text-[var(--text-2)]" style={{ fontSize: '0.875rem', letterSpacing: '-0.14px', lineHeight: 1.55 }}>
+                {task.description}
+              </p>
+            </div>
+          )
         )}
 
         {/* Summary */}
@@ -321,8 +545,53 @@ export default function TaskDetail() {
           </div>
         </div>
 
-        {/* Acceptance Criteria */}
-        <AcceptanceCriteriaList task={task} />
+        {/* Acceptance Criteria — editable rows in edit mode, read-only otherwise */}
+        {editing ? (
+          <div className="flex flex-col gap-2">
+            <Label style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+              Acceptance criteria <span className="text-muted-foreground font-normal lowercase">(optional)</span>
+            </Label>
+            {editCriteria.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {editCriteria.map((row, index) => (
+                  <div key={row.id} className="flex items-center gap-2">
+                    <Checkbox
+                      checked={row.satisfied}
+                      onCheckedChange={(value) => toggleCriterion(row.id, value === true)}
+                      aria-label="Mark criterion satisfied"
+                      className="shrink-0"
+                    />
+                    <Input
+                      value={row.text}
+                      onChange={(e) => updateCriterionText(row.id, e.target.value)}
+                      placeholder={`Criterion ${index + 1}`}
+                      className="flex-1 min-w-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeCriterion(row.id)}
+                      aria-label="Remove criterion"
+                      className="shrink-0 flex items-center justify-center h-7 w-7 rounded-full border-none cursor-pointer bg-transparent text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={addCriterion}
+              className="inline-flex items-center gap-1.5 self-start border-none cursor-pointer bg-transparent text-[var(--text-2)] hover:text-[var(--text-1)] transition-colors"
+              style={{ fontSize: '0.8125rem', letterSpacing: '-0.08px' }}
+            >
+              <Plus size={13} />
+              Add acceptance criterion
+            </button>
+          </div>
+        ) : (
+          <AcceptanceCriteriaList task={task} />
+        )}
 
         {/* Latest Review */}
         <LatestReviewSection task={task} />
@@ -355,7 +624,6 @@ export default function TaskDetail() {
         )}
       </div>
 
-      <EditTaskDialog task={task} open={editOpen} onOpenChange={setEditOpen} />
       <CancelTaskDialog task={task} open={cancelOpen} onOpenChange={setCancelOpen} />
     </div>
   )

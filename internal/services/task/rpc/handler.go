@@ -148,6 +148,25 @@ func (h *Handler) Cancel(ctx context.Context, p TaskCancelParams) (TaskCancelRes
 	return TaskCancelResult{Task: h.newTaskView(ctx, task)}, nil
 }
 
+func (h *Handler) Assign(ctx context.Context, p TaskAssignParams) (TaskAssignResult, error) {
+	taskID := strings.TrimSpace(p.TaskID)
+	if taskID == "" {
+		return TaskAssignResult{}, invalidParams("taskId is required")
+	}
+	assignedTo := strings.TrimSpace(p.AssignedTo)
+	if assignedTo == "" {
+		return TaskAssignResult{}, invalidParams("assignedTo is required")
+	}
+	task, err := h.svc.Assign(ctx, taskapp.AssignTaskParams{
+		TaskID:     domain.TaskID(taskID),
+		AssignedTo: member.ID(assignedTo),
+	})
+	if err != nil {
+		return TaskAssignResult{}, internalError("assign task", err)
+	}
+	return TaskAssignResult{Task: h.newTaskView(ctx, task)}, nil
+}
+
 func (h *Handler) newTaskView(ctx context.Context, task domain.Task) TaskView {
 	view := NewTaskView(task)
 	if view.AssignedToLabel == "" {
