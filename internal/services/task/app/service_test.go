@@ -398,3 +398,15 @@ func TestAttachArtifactRejectsCanceledTask(t *testing.T) {
 		t.Fatalf("attach persisted despite rejection: %+v", repo.updatedTask)
 	}
 }
+
+func TestAttachArtifactRejectsNonexistentTask(t *testing.T) {
+	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{}}
+	svc := attachTestService(repo, "worker-1")
+	_, err := svc.AttachArtifact(context.Background(), "task-missing", "file:/project/a.png")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not-found rejection, got %v", err)
+	}
+	if repo.updatedTask.ID != "" {
+		t.Fatalf("attach persisted despite missing task: %+v", repo.updatedTask)
+	}
+}

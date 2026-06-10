@@ -27,6 +27,7 @@ type stubService struct {
 	attachRef   string
 	attachErr   error
 	getResp     *taskdomain.Task
+	getErr      error
 	seenCaller  taskapp.Caller
 	called      string
 }
@@ -45,6 +46,9 @@ func (s *stubService) Create(ctx context.Context, req taskapp.CreateTaskParams) 
 
 func (s *stubService) Get(ctx context.Context, id taskdomain.TaskID) (taskdomain.Task, error) {
 	s.capture(ctx, "get")
+	if s.getErr != nil {
+		return taskdomain.Task{}, s.getErr
+	}
 	if s.getResp != nil {
 		return *s.getResp, nil
 	}
@@ -729,6 +733,18 @@ func TestHandleAttachRefusesCanceledTaskBeforeWriting(t *testing.T) {
 	}
 	if len(files.uploads) != 0 {
 		t.Fatalf("file was written for a canceled task: %+v", files.uploads)
+	}
+}
+
+func TestHandleAttachRefusesNonexistentTaskBeforeWriting(t *testing.T) {
+	svc := &stubService{getErr: errors.New("task task-missing not found")}
+	files := &stubFileStore{}
+	_, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), json.RawMessage(`{"action":"attach","task_id":"task-missing","file_name":"a.txt","content":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not-found error, got %v", err)
+	}
+	if len(files.uploads) != 0 {
+		t.Fatalf("file was written for a nonexistent task: %+v", files.uploads)
 	}
 }
 
