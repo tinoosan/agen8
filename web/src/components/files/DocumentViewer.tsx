@@ -3,7 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { prismStyleFor } from './prismTheme'
+import { useStore } from '../../lib/store'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Copy, Download, FileText, AlertTriangle, Pencil, Eye, Save, X, MoreHorizontal } from 'lucide-react'
@@ -59,6 +60,7 @@ export default function DocumentViewer({ file, preview, isLoading, error, varian
   const fileName = basename(filePath)
   const content = preview?.content ?? ''
   const breadcrumbParts = useMemo(() => filePath.split('/').filter(Boolean), [filePath])
+  const theme = useStore((s) => s.theme)
 
   // Custom code renderer with syntax highlighting
   const mdComponents: ComponentProps<typeof ReactMarkdown>['components'] = useMemo(() => ({
@@ -68,7 +70,7 @@ export default function DocumentViewer({ file, preview, isLoading, error, varian
       if (match) {
         return (
           <SyntaxHighlighter
-            style={vscDarkPlus}
+            style={prismStyleFor(theme)}
             language={match[1]}
             PreTag="div"
             customStyle={{
@@ -87,7 +89,7 @@ export default function DocumentViewer({ file, preview, isLoading, error, varian
       }
       return <code className={className} {...props}>{children}</code>
     },
-  }), [])
+  }), [theme])
 
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')

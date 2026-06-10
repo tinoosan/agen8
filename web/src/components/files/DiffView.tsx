@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { diffLines } from 'diff'
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { useStore } from '../../lib/store'
+import { prismStyleFor } from './prismTheme'
 import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
 import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
 import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript'
@@ -106,15 +107,17 @@ const ROW_STYLES: Record<DiffRow['kind'], { background: string; color?: string; 
  * git HEAD baseline. Renders the full file with added/removed highlighting —
  * the Codex-style review view.
  */
+type PrismStyle = ReturnType<typeof prismStyleFor>
+
 /** One diff line, syntax-highlighted when the file's language is known. */
-function DiffLineText({ text, language }: { text: string; language: string | null }) {
+function DiffLineText({ text, language, prismStyle }: { text: string; language: string | null; prismStyle: PrismStyle }) {
   if (!language || text === '') {
     return <>{text}</>
   }
   return (
     <SyntaxHighlighter
       language={language}
-      style={vscDarkPlus}
+      style={prismStyle}
       PreTag="span"
       CodeTag="span"
       customStyle={{
@@ -135,6 +138,8 @@ function DiffLineText({ text, language }: { text: string; language: string | nul
 }
 
 export default function DiffView({ baseline, current, filePath }: DiffViewProps) {
+  const theme = useStore((s) => s.theme)
+  const prismStyle = prismStyleFor(theme)
   const rows = useMemo(() => buildRows(baseline, current), [baseline, current])
   const language = useMemo(() => diffLanguageFor(filePath), [filePath])
   const hasChanges = rows.some((row) => row.kind !== 'context')
@@ -171,7 +176,7 @@ export default function DiffView({ baseline, current, filePath }: DiffViewProps)
                 {ROW_STYLES[row.kind].marker}
               </td>
               <td className="align-top pr-4" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                <DiffLineText text={row.text} language={language} />
+                <DiffLineText text={row.text} language={language} prismStyle={prismStyle} />
               </td>
             </tr>
           ))}
