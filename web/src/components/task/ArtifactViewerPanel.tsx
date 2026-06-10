@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FolderTree, X } from 'lucide-react'
 import { rpcCall } from '../../lib/rpc'
@@ -71,6 +71,14 @@ function dirOf(path: string): string {
 export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: ArtifactViewerPanelProps) {
   const [diffMode, setDiffMode] = useState(false)
   const [browsing, setBrowsing] = useState(false)
+  // The sheet opens via a false->true transition (not mounted-already-open) so
+  // a touch tap that triggered the open isn't caught by Radix's dismiss layer
+  // and used to immediately close it — the iPad/mobile "won't open" bug.
+  const [sheetOpen, setSheetOpen] = useState(false)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setSheetOpen(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
   // The browser can swap which file the viewer shows without remounting the
   // panel, so the shown file is internal state seeded from the opened artifact.
   const [activeVPath, setActiveVPath] = useState(vpath)
@@ -237,9 +245,10 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
   }
 
   return (
-    <Sheet open onOpenChange={(open) => { if (!open) onClose() }}>
+    <Sheet open={sheetOpen} onOpenChange={(open) => { if (!open) onClose() }}>
       <SheetContent
         side="right"
+        onOpenAutoFocus={(e) => e.preventDefault()}
         className="w-screen sm:w-[min(720px,90vw)] sm:max-w-none p-0 gap-0 flex flex-col"
       >
         <SheetHeader className="shrink-0 border-b border-[var(--border)] px-4 py-3 space-y-0">
