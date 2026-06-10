@@ -175,6 +175,12 @@ export default function CodeView({ content, filePath, search: searchQuery }: Cod
         editable={false}
         readOnly
         height="100%"
+        // The height="100%" prop styles .cm-editor, but it resolves against the
+        // wrapper react-codemirror renders, which is auto-height by default — so
+        // the editor grew to full content and got clipped by overflow-hidden.
+        // Forcing the root to 100% gives a definite height chain so .cm-scroller
+        // scrolls internally instead.
+        style={{ height: '100%' }}
       />
     </div>
   )
