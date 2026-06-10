@@ -41,6 +41,7 @@ import { AcceptanceCriteriaList } from '../components/task/AcceptanceCriteriaLis
 import { LatestReviewSection } from '../components/task/LatestReviewSection'
 import { TaskArtifactsSection } from '../components/task/TaskArtifactsSection'
 import { ArtifactViewerPanel } from '../components/task/ArtifactViewerPanel'
+import { ResizeHandle } from '../components/detail/ResizeHandle'
 import { useIsBelow } from '../hooks/use-mobile'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -111,6 +112,21 @@ export default function TaskDetail() {
   // no room for both (dec-e8b58636).
   const [openArtifactVPath, setOpenArtifactVPath] = useState<string | null>(null)
   const viewerAsSheet = useIsBelow(1152)
+  // Persisted, drag-adjustable width of the inline viewer panel.
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    const stored = typeof window !== 'undefined' ? Number(window.localStorage.getItem('task-artifact-panel-width')) : NaN
+    return Number.isFinite(stored) && stored > 0 ? stored : 560
+  })
+  const resizePanel = (deltaX: number) => {
+    setPanelWidth((current) => {
+      // Handle is on the panel's LEFT edge: dragging left (negative delta)
+      // widens the panel. Clamp to a usable range.
+      const max = typeof window !== 'undefined' ? window.innerWidth * 0.75 : 1100
+      const next = Math.min(Math.max(current - deltaX, 360), max)
+      window.localStorage.setItem('task-artifact-panel-width', String(Math.round(next)))
+      return next
+    })
+  }
   const updateTask = useUpdateTask()
   const assignTask = useAssignTask()
 
@@ -617,16 +633,28 @@ export default function TaskDetail() {
       <CancelTaskDialog task={task} open={cancelOpen} onOpenChange={setCancelOpen} />
     </div>
 
-    {openArtifactVPath && (
-      <div className={viewerAsSheet ? undefined : 'w-[min(45%,640px)] shrink-0 h-full min-h-0 flex flex-col'}>
-        <ArtifactViewerPanel
-          key={openArtifactVPath}
-          projectId={projectId}
-          vpath={openArtifactVPath}
-          onClose={() => setOpenArtifactVPath(null)}
-          layout={viewerAsSheet ? 'sheet' : 'inline'}
-        />
-      </div>
+    {openArtifactVPath && viewerAsSheet && (
+      <ArtifactViewerPanel
+        key={openArtifactVPath}
+        projectId={projectId}
+        vpath={openArtifactVPath}
+        onClose={() => setOpenArtifactVPath(null)}
+        layout="sheet"
+      />
+    )}
+    {openArtifactVPath && !viewerAsSheet && (
+      <>
+        <ResizeHandle onResize={resizePanel} aria-label="Resize artifact viewer" />
+        <div className="shrink-0 h-full min-h-0 flex flex-col" style={{ width: panelWidth }}>
+          <ArtifactViewerPanel
+            key={openArtifactVPath}
+            projectId={projectId}
+            vpath={openArtifactVPath}
+            onClose={() => setOpenArtifactVPath(null)}
+            layout="inline"
+          />
+        </div>
+      </>
     )}
     </div>
   )

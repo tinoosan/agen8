@@ -193,16 +193,16 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
     )
   })()
 
-  // With the browser open, the file tree sits to the left of the viewer body.
+  // With the browser open, the file tree sits to the right of the viewer body.
   const bodyWithBrowser = browsing ? (
     <div className="flex h-full min-h-0">
+      <div className="flex-1 min-h-0 flex flex-col">{body}</div>
       <FileBrowserPane
         projectId={projectId}
         initialDir={dirOf(activeVPath)}
         activeVPath={activeVPath}
         onSelectFile={selectFromBrowser}
       />
-      <div className="flex-1 min-h-0 flex flex-col">{body}</div>
     </div>
   ) : (
     body
