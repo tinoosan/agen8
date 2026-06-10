@@ -41,6 +41,24 @@ type keyResultEntry struct {
 	Version               int64    `json:"version,omitempty"`
 }
 
+// leanMissionEntry / leanKeyResultEntry are the mutation + list-row shapes. They
+// drop the description and timestamps the caller already supplied; the KR keeps
+// version so a follow-up kr_progress can pass expected_version.
+type leanMissionEntry struct {
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+type leanKeyResultEntry struct {
+	ID              string `json:"id"`
+	MissionID       string `json:"missionId,omitempty"`
+	Title           string `json:"title,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ProgressPercent int    `json:"progressPercent"`
+	Version         int64  `json:"version,omitempty"`
+}
+
 type progressEntry struct {
 	ID              string  `json:"id"`
 	KeyResultID     string  `json:"keyResultId"`
@@ -74,31 +92,63 @@ type lifecycleHistoryEntry struct {
 	Timestamp       string `json:"timestamp,omitempty"`
 }
 
+// missionResult / keyResultResult return the FULL entry and are used only by the
+// detail fetches (get / kr_get). Mutations and list rows use the lean variants
+// below so the model isn't re-sent the description/timestamps it already holds.
 func missionResult(action string, mission missiondomain.Mission) (Result, error) {
-	structured := map[string]any{
+	return resultFromStructured(map[string]any{
 		"ok":      true,
 		"tool":    Name,
 		"action":  action,
 		"mission": toMissionEntry(mission),
-	}
-	return resultFromStructured(structured)
+	})
 }
 
-func missionResultWithNote(action string, mission missiondomain.Mission, note string) (Result, error) {
+func keyResultResult(action string, keyResult krdomain.KeyResult) (Result, error) {
+	return resultFromStructured(map[string]any{
+		"ok":        true,
+		"tool":      Name,
+		"action":    action,
+		"keyResult": toKeyResultEntry(keyResult),
+	})
+}
+
+// leanMissionResult is the mutation response (create/update/activate/pause/
+// complete/archive): id, title, status, plus an optional lifecycle note.
+func leanMissionResult(action string, mission missiondomain.Mission, note string) (Result, error) {
 	structured := map[string]any{
 		"ok":      true,
 		"tool":    Name,
 		"action":  action,
-		"mission": toMissionEntry(mission),
+		"mission": toLeanMissionEntry(mission),
 	}
 	addNote(structured, note)
 	return resultFromStructured(structured)
 }
 
+// leanKeyResultResult is the mutation response (kr_create/update/progress/drop/
+// reopen). It keeps version so a follow-up kr_progress can pass expected_version.
+func leanKeyResultResult(action string, keyResult krdomain.KeyResult, note string) (Result, error) {
+	structured := map[string]any{
+		"ok":        true,
+		"tool":      Name,
+		"action":    action,
+		"keyResult": toLeanKeyResultEntry(keyResult),
+	}
+	addNote(structured, note)
+	return resultFromStructured(structured)
+}
+
+func addNote(structured map[string]any, note string) {
+	if note != "" {
+		structured["note"] = note
+	}
+}
+
 func missionListResult(missions []missiondomain.Mission, input requestInput) (Result, error) {
-	rows := make([]missionEntry, 0, len(missions))
+	rows := make([]leanMissionEntry, 0, len(missions))
 	for _, mission := range missions {
-		rows = append(rows, toMissionEntry(mission))
+		rows = append(rows, toLeanMissionEntry(mission))
 	}
 	structured := map[string]any{
 		"ok":       true,
@@ -112,37 +162,10 @@ func missionListResult(missions []missiondomain.Mission, input requestInput) (Re
 	return resultFromStructured(structured)
 }
 
-func keyResultResult(action string, keyResult krdomain.KeyResult) (Result, error) {
-	structured := map[string]any{
-		"ok":        true,
-		"tool":      Name,
-		"action":    action,
-		"keyResult": toKeyResultEntry(keyResult),
-	}
-	return resultFromStructured(structured)
-}
-
-func keyResultResultWithNote(action string, keyResult krdomain.KeyResult, note string) (Result, error) {
-	structured := map[string]any{
-		"ok":        true,
-		"tool":      Name,
-		"action":    action,
-		"keyResult": toKeyResultEntry(keyResult),
-	}
-	addNote(structured, note)
-	return resultFromStructured(structured)
-}
-
-func addNote(structured map[string]any, note string) {
-	if note != "" {
-		structured["note"] = note
-	}
-}
-
 func keyResultListResult(keyResults []krdomain.KeyResult, input requestInput) (Result, error) {
-	rows := make([]keyResultEntry, 0, len(keyResults))
+	rows := make([]leanKeyResultEntry, 0, len(keyResults))
 	for _, keyResult := range keyResults {
-		rows = append(rows, toKeyResultEntry(keyResult))
+		rows = append(rows, toLeanKeyResultEntry(keyResult))
 	}
 	structured := map[string]any{
 		"ok":         true,
@@ -259,6 +282,25 @@ func toMissionEntry(mission missiondomain.Mission) missionEntry {
 		UpdatedAt:   formatTime(mission.UpdatedAt),
 		PausedAt:    formatOptionalTime(mission.PausedAt),
 		CompletedAt: formatOptionalTime(mission.CompletedAt),
+	}
+}
+
+func toLeanMissionEntry(mission missiondomain.Mission) leanMissionEntry {
+	return leanMissionEntry{
+		ID:     string(mission.ID),
+		Title:  mission.Title,
+		Status: string(mission.Status),
+	}
+}
+
+func toLeanKeyResultEntry(keyResult krdomain.KeyResult) leanKeyResultEntry {
+	return leanKeyResultEntry{
+		ID:              string(keyResult.ID),
+		MissionID:       string(keyResult.MissionID),
+		Title:           keyResult.Title,
+		Status:          string(keyResult.Status),
+		ProgressPercent: keyResult.ProgressPercent,
+		Version:         keyResult.Version,
 	}
 }
 

@@ -146,7 +146,7 @@ func (h Handler) create(ctx context.Context, call CallContext, input requestInpu
 	if err != nil {
 		return Result{}, err
 	}
-	return missionResult("create", mission)
+	return leanMissionResult("create", mission, "")
 }
 
 func (h Handler) get(ctx context.Context, call CallContext, input requestInput) (Result, error) {
@@ -221,7 +221,7 @@ func (h Handler) update(ctx context.Context, call CallContext, input requestInpu
 	if err != nil {
 		return Result{}, err
 	}
-	return missionResultWithNote(input.Action, mission, input.Note)
+	return leanMissionResult(input.Action, mission, input.Note)
 }
 
 func (h Handler) archive(ctx context.Context, call CallContext, input requestInput) (Result, error) {
@@ -236,7 +236,7 @@ func (h Handler) archive(ctx context.Context, call CallContext, input requestInp
 	if err != nil {
 		return Result{}, err
 	}
-	return missionResultWithNote("archive", mission, input.Note)
+	return leanMissionResult("archive", mission, input.Note)
 }
 
 func (h Handler) history(ctx context.Context, call CallContext, input requestInput) (Result, error) {
@@ -289,7 +289,7 @@ func (h Handler) krCreate(ctx context.Context, call CallContext, input requestIn
 	if err != nil {
 		return Result{}, err
 	}
-	return keyResultResult("kr_create", keyResult)
+	return leanKeyResultResult("kr_create", keyResult, "")
 }
 
 func (h Handler) krGet(ctx context.Context, call CallContext, input requestInput) (Result, error) {
@@ -349,7 +349,7 @@ func (h Handler) krUpdate(ctx context.Context, call CallContext, input requestIn
 	if err != nil {
 		return Result{}, err
 	}
-	return keyResultResult("kr_update", keyResult)
+	return leanKeyResultResult("kr_update", keyResult, "")
 }
 
 func (h Handler) krDrop(ctx context.Context, call CallContext, input requestInput) (Result, error) {
@@ -364,7 +364,7 @@ func (h Handler) krDrop(ctx context.Context, call CallContext, input requestInpu
 	if err != nil {
 		return Result{}, err
 	}
-	return keyResultResultWithNote("kr_drop", keyResult, input.Note)
+	return leanKeyResultResult("kr_drop", keyResult, input.Note)
 }
 
 func (h Handler) krReopen(ctx context.Context, call CallContext, input requestInput) (Result, error) {
@@ -379,7 +379,7 @@ func (h Handler) krReopen(ctx context.Context, call CallContext, input requestIn
 	if err != nil {
 		return Result{}, err
 	}
-	return keyResultResultWithNote("kr_reopen", keyResult, input.Note)
+	return leanKeyResultResult("kr_reopen", keyResult, input.Note)
 }
 
 func (h Handler) krProgress(ctx context.Context, call CallContext, input requestInput) (Result, error) {
@@ -402,7 +402,7 @@ func (h Handler) krProgress(ctx context.Context, call CallContext, input request
 	if err != nil {
 		return Result{}, err
 	}
-	return keyResultResult("kr_progress", keyResult)
+	return leanKeyResultResult("kr_progress", keyResult, "")
 }
 
 func (h Handler) krHistory(ctx context.Context, call CallContext, input requestInput) (Result, error) {
