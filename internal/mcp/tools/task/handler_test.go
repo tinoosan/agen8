@@ -21,6 +21,7 @@ type stubService struct {
 	assignReq   taskapp.AssignTaskParams
 	updateReq   taskapp.UpdateTaskParams
 	reviewReq   taskapp.ReviewTaskParams
+	reviewErr   error
 	seenCaller  taskapp.Caller
 	called      string
 }
@@ -120,12 +121,18 @@ func (s *stubService) ApproveReview(ctx context.Context, req taskapp.ReviewTaskP
 func (s *stubService) RetryReview(ctx context.Context, req taskapp.ReviewTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "retry")
 	s.reviewReq = req
+	if s.reviewErr != nil {
+		return taskdomain.Task{}, s.reviewErr
+	}
 	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: "worker-1", Error: req.Reason, Status: taskdomain.TaskStatusActive}, nil
 }
 
 func (s *stubService) FailReview(ctx context.Context, req taskapp.ReviewTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "fail")
 	s.reviewReq = req
+	if s.reviewErr != nil {
+		return taskdomain.Task{}, s.reviewErr
+	}
 	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: "worker-1", Error: req.Reason, Status: taskdomain.TaskStatusFailed}, nil
 }
 
@@ -602,6 +609,31 @@ func TestHandleReviewRetryFailRequireReason(t *testing.T) {
 	}
 	if svc.called != "" {
 		t.Fatalf("service called without reason: %q", svc.called)
+	}
+}
+
+// Regression guard for the SA4006 shadow fix in the review action: a `:=` on
+// the reason validation would shadow the outer err, so RetryReview/FailReview
+// errors would be swallowed and the review reported as success.
+func TestHandleReviewRetryFailSurfaceServiceErrors(t *testing.T) {
+	for _, tc := range []struct {
+		decision string
+		errMsg   string
+	}{
+		{decision: "retry", errMsg: "retry review rejected by service"},
+		{decision: "fail", errMsg: "fail review rejected by service"},
+	} {
+		svc := &stubService{reviewErr: errors.New(tc.errMsg)}
+		res, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"review","task_id":"task-1","decision":"`+tc.decision+`","reason":"does not meet the bar","criteria":[{"id":"criterion-1","satisfied":false}]}`))
+		if svc.called != tc.decision {
+			t.Fatalf("decision=%s: service called=%q want %q", tc.decision, svc.called, tc.decision)
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.errMsg) {
+			t.Fatalf("decision=%s: service error not surfaced, err=%v result=%+v", tc.decision, err, res)
+		}
+		if res.Text != "" || res.Structured != nil {
+			t.Fatalf("decision=%s: expected empty result alongside error, got %+v", tc.decision, res)
+		}
 	}
 }
 
