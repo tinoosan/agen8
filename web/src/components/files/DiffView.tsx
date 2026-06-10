@@ -1,11 +1,69 @@
 import { useMemo } from 'react'
 import { diffLines } from 'diff'
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript'
+import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx'
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json'
+import go from 'react-syntax-highlighter/dist/esm/languages/prism/go'
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python'
+import rust from 'react-syntax-highlighter/dist/esm/languages/prism/rust'
+import java from 'react-syntax-highlighter/dist/esm/languages/prism/java'
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql'
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash'
+import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
+import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown'
+import css from 'react-syntax-highlighter/dist/esm/languages/prism/css'
+import markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup'
+import { getFileExtension } from './filePreviewUtils'
+
+SyntaxHighlighter.registerLanguage('tsx', tsx)
+SyntaxHighlighter.registerLanguage('typescript', typescript)
+SyntaxHighlighter.registerLanguage('javascript', javascript)
+SyntaxHighlighter.registerLanguage('jsx', jsx)
+SyntaxHighlighter.registerLanguage('json', json)
+SyntaxHighlighter.registerLanguage('go', go)
+SyntaxHighlighter.registerLanguage('python', python)
+SyntaxHighlighter.registerLanguage('rust', rust)
+SyntaxHighlighter.registerLanguage('java', java)
+SyntaxHighlighter.registerLanguage('sql', sql)
+SyntaxHighlighter.registerLanguage('bash', bash)
+SyntaxHighlighter.registerLanguage('yaml', yaml)
+SyntaxHighlighter.registerLanguage('markdown', markdown)
+SyntaxHighlighter.registerLanguage('css', css)
+SyntaxHighlighter.registerLanguage('markup', markup)
+
+/** Extension → Prism language id, mirroring codeViewLanguages.ts coverage. */
+function diffLanguageFor(filePath?: string): string | null {
+  switch (filePath ? getFileExtension(filePath) : '') {
+    case 'ts': return 'typescript'
+    case 'tsx': return 'tsx'
+    case 'js': case 'mjs': case 'cjs': return 'javascript'
+    case 'jsx': return 'jsx'
+    case 'json': return 'json'
+    case 'go': return 'go'
+    case 'py': return 'python'
+    case 'rs': return 'rust'
+    case 'java': return 'java'
+    case 'sql': return 'sql'
+    case 'sh': case 'bash': case 'zsh': return 'bash'
+    case 'yml': case 'yaml': return 'yaml'
+    case 'md': case 'markdown': return 'markdown'
+    case 'css': return 'css'
+    case 'html': case 'xml': case 'svg': return 'markup'
+    default: return null
+  }
+}
 
 interface DiffViewProps {
   /** Committed (git HEAD) content — the "before". */
   baseline: string
   /** Working-tree content — the "after". */
   current: string
+  /** Used to pick the syntax-highlight language by extension. */
+  filePath?: string
 }
 
 interface DiffRow {
@@ -48,8 +106,37 @@ const ROW_STYLES: Record<DiffRow['kind'], { background: string; color?: string; 
  * git HEAD baseline. Renders the full file with added/removed highlighting —
  * the Codex-style review view.
  */
-export default function DiffView({ baseline, current }: DiffViewProps) {
+/** One diff line, syntax-highlighted when the file's language is known. */
+function DiffLineText({ text, language }: { text: string; language: string | null }) {
+  if (!language || text === '') {
+    return <>{text}</>
+  }
+  return (
+    <SyntaxHighlighter
+      language={language}
+      style={vscDarkPlus}
+      PreTag="span"
+      CodeTag="span"
+      customStyle={{
+        display: 'inline',
+        background: 'transparent',
+        padding: 0,
+        margin: 0,
+        fontFamily: 'inherit',
+        fontSize: 'inherit',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+      }}
+      codeTagProps={{ style: { fontFamily: 'inherit', fontSize: 'inherit', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: 'transparent' } }}
+    >
+      {text}
+    </SyntaxHighlighter>
+  )
+}
+
+export default function DiffView({ baseline, current, filePath }: DiffViewProps) {
   const rows = useMemo(() => buildRows(baseline, current), [baseline, current])
+  const language = useMemo(() => diffLanguageFor(filePath), [filePath])
   const hasChanges = rows.some((row) => row.kind !== 'context')
 
   if (!hasChanges) {
@@ -84,7 +171,7 @@ export default function DiffView({ baseline, current }: DiffViewProps) {
                 {ROW_STYLES[row.kind].marker}
               </td>
               <td className="align-top pr-4" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {row.text}
+                <DiffLineText text={row.text} language={language} />
               </td>
             </tr>
           ))}

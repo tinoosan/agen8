@@ -131,7 +131,7 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
       }
       const reason = baselineUnavailableReason(baselineQuery.data, !!baselineQuery.error)
       if (!reason) {
-        return <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} />
+        return <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} filePath={vpath} />
       }
       // Degrade: notice banner + the normal view, never a dead pane.
       return (

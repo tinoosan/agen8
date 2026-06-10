@@ -18,6 +18,26 @@ describe('DiffView', () => {
     expect(screen.getByText('−1')).toBeInTheDocument()
   })
 
+  it('syntax-highlights diff lines when the file language is known', () => {
+    const { container } = render(
+      <DiffView
+        baseline={'func main() {}\n'}
+        current={'func main() {}\nfunc added() {}\n'}
+        filePath="/project/main.go"
+      />,
+    )
+    // PrismLight emits token spans for recognized syntax (e.g. the func keyword).
+    expect(container.querySelectorAll('.token').length).toBeGreaterThan(0)
+  })
+
+  it('falls back to plain text for unknown extensions', () => {
+    const { container } = render(
+      <DiffView baseline={'a\n'} current={'a\nb\n'} filePath="/project/data.weird" />,
+    )
+    expect(container.querySelectorAll('.token').length).toBe(0)
+    expect(screen.getByText('b')).toBeInTheDocument()
+  })
+
   it('shows an explicit no-changes state for identical content', () => {
     render(<DiffView baseline={'same\ncontent\n'} current={'same\ncontent\n'} />)
     expect(screen.getByText(/No uncommitted changes/)).toBeInTheDocument()
