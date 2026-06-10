@@ -163,7 +163,7 @@ func TestApproveReviewRecordsReviewerNote(t *testing.T) {
 	}
 	wantMeta := map[string]string{
 		"reviewDecision": "approve",
-		"reviewFeedback": reviewNote,
+		"reviewReason":   reviewNote,
 		"reviewedBy":     registered.MemberID,
 		"reviewerRole":   "Atlas (Reviewer)",
 		"reviewedAt":     "2026-06-05T12:00:00Z",

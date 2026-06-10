@@ -244,24 +244,29 @@ func TestHandleCreateAssignedToWorkerDoesNotReturnClaimGuidance(t *testing.T) {
 	}
 }
 
-func TestHandleCreateReturnsReadableTaskMemberLabel(t *testing.T) {
+func TestHandleCreateOmitsCardEraLabels(t *testing.T) {
 	svc := &stubService{}
 	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1"}`))
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if !strings.Contains(result.Text, `"assignedToLabel":"Worker engineer"`) {
-		t.Fatalf("result missing assignedToLabel: %s", result.Text)
+	// The model routes by id; the card-era *Label fields are no longer returned.
+	if strings.Contains(result.Text, `Label":`) {
+		t.Fatalf("response should not carry member labels: %s", result.Text)
+	}
+	if !strings.Contains(result.Text, `"assignedToMemberId":"worker-1"`) {
+		t.Fatalf("response missing assignedToMemberId: %s", result.Text)
 	}
 }
 
-func TestHandleListResolvesLegacyTaskMemberLabels(t *testing.T) {
+func TestHandleListReturnsLeanRows(t *testing.T) {
 	svc := &stubService{listResp: []taskdomain.Task{{
-		ID:                "task-legacy",
+		ID:                "task-1",
 		ProjectID:         "space-1",
 		AssignedTo:        "worker-1",
 		ClaimedByMemberID: "worker-1",
 		CreatedBy:         "coord-1",
+		Description:       "a long description that should not appear in list rows",
 		Status:            taskdomain.TaskStatusPending,
 	}}}
 
@@ -269,45 +274,14 @@ func TestHandleListResolvesLegacyTaskMemberLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if !strings.Contains(result.Text, `"assignedToLabel":"Worker"`) {
-		t.Fatalf("result missing resolved assignedToLabel: %s", result.Text)
+	// Lean rows: id + status + member ids, but no labels and no description.
+	if !strings.Contains(result.Text, `"id":"task-1"`) || !strings.Contains(result.Text, `"assignedToMemberId":"worker-1"`) {
+		t.Fatalf("list row missing id/assignee: %s", result.Text)
 	}
-	if !strings.Contains(result.Text, `"claimedByMemberLabel":"Worker"`) {
-		t.Fatalf("result missing resolved claimedByMemberLabel: %s", result.Text)
-	}
-	if !strings.Contains(result.Text, `"createdByLabel":"Coordinator"`) {
-		t.Fatalf("result missing resolved createdByLabel: %s", result.Text)
-	}
-}
-
-func TestHandleListPrefersStampedTaskMemberLabels(t *testing.T) {
-	svc := &stubService{listResp: []taskdomain.Task{{
-		ID:                   "task-stamped",
-		ProjectID:            "space-1",
-		AssignedTo:           "worker-1",
-		AssignedToLabel:      "Original assignee",
-		ClaimedByMemberID:    "worker-1",
-		ClaimedByMemberLabel: "Original claimant",
-		CreatedBy:            "coord-1",
-		CreatedByLabel:       "Original creator",
-		Status:               taskdomain.TaskStatusPending,
-	}}}
-
-	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"list","limit":10}`))
-	if err != nil {
-		t.Fatalf("handle: %v", err)
-	}
-	for _, want := range []string{
-		`"assignedToLabel":"Original assignee"`,
-		`"claimedByMemberLabel":"Original claimant"`,
-		`"createdByLabel":"Original creator"`,
-	} {
-		if !strings.Contains(result.Text, want) {
-			t.Fatalf("result missing stamped label %s: %s", want, result.Text)
+	for _, unwanted := range []string{`Label":`, "a long description"} {
+		if strings.Contains(result.Text, unwanted) {
+			t.Fatalf("lean list row should not contain %q: %s", unwanted, result.Text)
 		}
-	}
-	if strings.Contains(result.Text, `"assignedToLabel":"Worker"`) {
-		t.Fatalf("result overwrote stamped assigned label: %s", result.Text)
 	}
 }
 
@@ -493,8 +467,9 @@ func TestHandleSubmitAcceptsStringMetadata(t *testing.T) {
 	if svc.completeReq.Metadata["commit"] != "abc123" || svc.completeReq.Metadata["decision"] != "dec-1" {
 		t.Fatalf("complete metadata=%+v", svc.completeReq.Metadata)
 	}
-	if !strings.Contains(result.Text, `"metadata":{"commit":"abc123","decision":"dec-1"}`) {
-		t.Fatalf("result missing metadata: %s", result.Text)
+	// The lean mutation response no longer echoes metadata back to the model.
+	if strings.Contains(result.Text, `"metadata"`) {
+		t.Fatalf("lean submit response should not echo metadata: %s", result.Text)
 	}
 }
 

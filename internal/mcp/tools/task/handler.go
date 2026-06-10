@@ -59,7 +59,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			Metadata:           input.Metadata,
 			TaskKind:           input.TaskKind,
 		})
-		return h.taskResultForActor(ctx, call, "create", task, err, map[string]any{"assignee": assignee}, actor)
+		return h.leanTaskResultForActor("create", task, err, map[string]any{"assignee": assignee}, actor)
 	case "get":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -69,28 +69,28 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		if err == nil {
 			err = h.canSeeTask(actor, task)
 		}
-		return h.taskResult(ctx, call, "get", task, err, nil)
+		return h.fullTaskResult("get", task, err)
 	case "list":
 		filter, err := h.listFilter(actor, input)
 		if err != nil {
 			return Result{}, err
 		}
 		tasks, err := call.Tasks.List(taskCtx, filter)
-		return h.listResult(ctx, call, tasks, err, input)
+		return h.listResult(tasks, err, input)
 	case "claim":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
 			return Result{}, err
 		}
 		task, err := call.Tasks.Claim(taskCtx, id)
-		return h.taskResult(ctx, call, "claim", task, err, nil)
+		return h.leanTaskResult("claim", task, err, nil)
 	case "release":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
 			return Result{}, err
 		}
 		task, err := call.Tasks.Release(taskCtx, id)
-		return h.taskResult(ctx, call, "release", task, err, nil)
+		return h.leanTaskResult("release", task, err, nil)
 	case "submit":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -101,7 +101,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		task, err := call.Tasks.Complete(taskCtx, taskapp.CompleteTaskParams{TaskID: id, Summary: summary, Artifacts: input.Artifacts, Metadata: input.Metadata})
-		return h.taskResultForActor(ctx, call, "submit", task, err, nil, actor)
+		return h.leanTaskResultForActor("submit", task, err, nil, actor)
 	case "block":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -112,14 +112,14 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		task, err := call.Tasks.Block(taskCtx, id, reason)
-		return h.taskResult(ctx, call, "block", task, err, nil)
+		return h.leanTaskResult("block", task, err, nil)
 	case "unblock":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
 			return Result{}, err
 		}
 		task, err := call.Tasks.Unblock(taskCtx, id, input.Note)
-		return h.taskResult(ctx, call, "unblock", task, err, nil)
+		return h.leanTaskResult("unblock", task, err, nil)
 	case "reassign":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -130,7 +130,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		task, err := call.Tasks.Assign(taskCtx, taskapp.AssignTaskParams{TaskID: id, AssignedTo: assignee.MemberID})
-		return h.taskResultForActor(ctx, call, "reassign", task, err, map[string]any{"assignee": assignee}, actor)
+		return h.leanTaskResultForActor("reassign", task, err, map[string]any{"assignee": assignee}, actor)
 	case "update":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -185,7 +185,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			params.Metadata = metadata
 		}
 		task, err := call.Tasks.Update(taskCtx, params)
-		return h.taskResult(ctx, call, "update", task, err, nil)
+		return h.leanTaskResult("update", task, err, nil)
 	case "cancel":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -196,7 +196,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		task, err := call.Tasks.Cancel(taskCtx, id, reason)
-		return h.taskResult(ctx, call, "cancel", task, err, nil)
+		return h.leanTaskResult("cancel", task, err, nil)
 	case "review":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -233,7 +233,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		default:
 			return Result{}, fmt.Errorf("task: decision must be approve, retry, or fail")
 		}
-		return h.taskResult(ctx, call, "review", task, err, map[string]any{"decision": input.Decision})
+		return h.leanTaskResult("review", task, err, map[string]any{"decision": input.Decision})
 	case "attach":
 		id, err := requireTaskID(input.TaskID)
 		if err != nil {
@@ -277,7 +277,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			_, _ = call.Files.Delete(taskCtx, fileapp.PathInput{ProjectID: types.ProjectID(call.ProjectID), Path: uploaded.Path})
 			return Result{}, err
 		}
-		return h.taskResult(ctx, call, "attach", task, nil, map[string]any{"artifactRef": ref})
+		return h.leanTaskResult("attach", task, nil, map[string]any{"artifactRef": ref})
 	default:
 		return Result{}, fmt.Errorf("task: unsupported action %q", input.Action)
 	}

@@ -601,13 +601,9 @@ func (s *Service) reviewMetadata(ctx context.Context, caller Caller, projectID t
 	if note = strings.TrimSpace(note); note != "" {
 		meta["reviewNote"] = note
 	}
-	if note != "" {
-		meta["reviewFeedback"] = note
-	} else if summary != "" {
-		meta["reviewFeedback"] = summary
-	} else if reason != "" {
-		meta["reviewFeedback"] = reason
-	}
+	// reviewFeedback was a card-era duplicate of note/summary/reason; the web now
+	// reads reviewSummary/reviewNote/reviewReason directly (boardHelpers.ts), so the
+	// extra copy is dead weight. Its legacy fallback in the web stays for old rows.
 	return meta
 }
 

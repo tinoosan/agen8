@@ -1,7 +1,6 @@
 package task
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,38 +9,51 @@ import (
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
+// taskEntry is the FULL detail returned only by the `get` action — the explicit
+// "I want the details" fetch. Mutations and list return the leaner shapes below.
+// Card-era display labels (assignedToLabel/claimedByMemberLabel/createdByLabel)
+// and the raw metadata echo were dropped: nothing renders them now (the model
+// routes by id), missionRef is surfaced as its own field, and block/fail reasons
+// ride statusReason.
 type taskEntry struct {
 	ID                 string                           `json:"id"`
-	ProjectID          string                           `json:"projectId,omitempty"`
 	Status             string                           `json:"status,omitempty"`
+	StatusReason       string                           `json:"statusReason,omitempty"`
 	Title              string                           `json:"title,omitempty"`
 	Description        string                           `json:"description,omitempty"`
 	AssignedToMemberID string                           `json:"assignedToMemberId,omitempty"`
-	AssignedToLabel    string                           `json:"assignedToLabel,omitempty"`
 	ClaimedByMemberID  string                           `json:"claimedByMemberId,omitempty"`
-	ClaimedByLabel     string                           `json:"claimedByMemberLabel,omitempty"`
 	CreatedBy          string                           `json:"createdBy,omitempty"`
-	CreatedByLabel     string                           `json:"createdByLabel,omitempty"`
 	KeyResultRef       string                           `json:"keyResultRef,omitempty"`
 	MissionRef         string                           `json:"missionRef,omitempty"`
 	TaskKind           string                           `json:"taskKind,omitempty"`
 	AcceptanceCriteria []taskdomain.AcceptanceCriterion `json:"acceptanceCriteria,omitempty"`
 	Summary            string                           `json:"summary,omitempty"`
 	Artifacts          []string                         `json:"artifacts,omitempty"`
-	StatusReason       string                           `json:"statusReason,omitempty"`
-	Metadata           map[string]any                   `json:"metadata,omitempty"`
 }
 
-func (h Handler) taskResult(ctx context.Context, call CallContext, action string, task taskdomain.Task, err error, extra map[string]any) (Result, error) {
-	if err != nil {
-		return Result{}, err
-	}
-	task = h.resolveTaskMemberLabels(ctx, call, task)
+// leanTaskEntry is what mutation actions and list rows return: enough to drive
+// the next action (id, status, statusReason, the refs and member ids) without
+// re-sending the description, acceptance criteria, summary, artifacts, or
+// metadata the caller just supplied or can fetch via `get`.
+type leanTaskEntry struct {
+	ID                 string `json:"id"`
+	Status             string `json:"status,omitempty"`
+	StatusReason       string `json:"statusReason,omitempty"`
+	Title              string `json:"title,omitempty"`
+	AssignedToMemberID string `json:"assignedToMemberId,omitempty"`
+	ClaimedByMemberID  string `json:"claimedByMemberId,omitempty"`
+	KeyResultRef       string `json:"keyResultRef,omitempty"`
+	MissionRef         string `json:"missionRef,omitempty"`
+	TaskKind           string `json:"taskKind,omitempty"`
+}
+
+func encodeTaskResponse(action string, entry any, extra map[string]any) (Result, error) {
 	structured := map[string]any{
 		"ok":     true,
 		"tool":   Name,
 		"action": action,
-		"task":   toTaskEntry(task),
+		"task":   entry,
 	}
 	for key, value := range extra {
 		structured[key] = value
@@ -53,7 +65,26 @@ func (h Handler) taskResult(ctx context.Context, call CallContext, action string
 	return Result{Text: text, Structured: structured}, nil
 }
 
-func (h Handler) taskResultForActor(ctx context.Context, call CallContext, action string, task taskdomain.Task, err error, extra map[string]any, actor actor) (Result, error) {
+// fullTaskResult returns the detailed entry — used only by the `get` action.
+func (h Handler) fullTaskResult(action string, task taskdomain.Task, err error) (Result, error) {
+	if err != nil {
+		return Result{}, err
+	}
+	return encodeTaskResponse(action, toTaskEntry(task), nil)
+}
+
+// leanTaskResult returns the lean entry — used by every mutation action so the
+// model isn't re-sent the full task it just acted on.
+func (h Handler) leanTaskResult(action string, task taskdomain.Task, err error, extra map[string]any) (Result, error) {
+	if err != nil {
+		return Result{}, err
+	}
+	return encodeTaskResponse(action, toLeanTaskEntry(task), extra)
+}
+
+// leanTaskResultForActor adds the actor-specific nextAction/guidance hints, then
+// returns the lean entry (create / submit / reassign).
+func (h Handler) leanTaskResultForActor(action string, task taskdomain.Task, err error, extra map[string]any, actor actor) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
@@ -69,7 +100,7 @@ func (h Handler) taskResultForActor(ctx context.Context, call CallContext, actio
 			extra["guidance"] = guidance
 		}
 	}
-	return h.taskResult(ctx, call, action, task, nil, extra)
+	return h.leanTaskResult(action, task, nil, extra)
 }
 
 func taskResponseGuidance(action string, task taskdomain.Task, actorID member.ID) (string, string) {
@@ -90,14 +121,13 @@ func taskResponseGuidance(action string, task taskdomain.Task, actorID member.ID
 	return "", ""
 }
 
-func (h Handler) listResult(ctx context.Context, call CallContext, tasks []taskdomain.Task, err error, input requestInput) (Result, error) {
+func (h Handler) listResult(tasks []taskdomain.Task, err error, input requestInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	rows := make([]taskEntry, 0, len(tasks))
+	rows := make([]leanTaskEntry, 0, len(tasks))
 	for _, task := range tasks {
-		task = h.resolveTaskMemberLabels(ctx, call, task)
-		rows = append(rows, toTaskEntry(task))
+		rows = append(rows, toLeanTaskEntry(task))
 	}
 	structured := map[string]any{
 		"ok":     true,
@@ -115,57 +145,37 @@ func (h Handler) listResult(ctx context.Context, call CallContext, tasks []taskd
 	return Result{Text: text, Structured: structured}, nil
 }
 
-func (h Handler) resolveTaskMemberLabels(ctx context.Context, call CallContext, task taskdomain.Task) taskdomain.Task {
-	if call.Members == nil {
-		return task
+func toLeanTaskEntry(task taskdomain.Task) leanTaskEntry {
+	return leanTaskEntry{
+		ID:                 strings.TrimSpace(string(task.ID)),
+		Status:             strings.TrimSpace(string(task.Status)),
+		StatusReason:       strings.TrimSpace(task.Error),
+		Title:              strings.TrimSpace(task.Title),
+		AssignedToMemberID: strings.TrimSpace(string(task.AssignedTo)),
+		ClaimedByMemberID:  strings.TrimSpace(string(task.ClaimedByMemberID)),
+		KeyResultRef:       strings.TrimSpace(task.KeyResultRef),
+		MissionRef:         missionRefFromTaskMetadata(task.Metadata),
+		TaskKind:           strings.TrimSpace(task.TaskKind),
 	}
-	if strings.TrimSpace(task.AssignedToLabel) == "" {
-		task.AssignedToLabel = h.resolveMemberLabel(ctx, call, task.AssignedTo)
-	}
-	if strings.TrimSpace(task.ClaimedByMemberLabel) == "" {
-		task.ClaimedByMemberLabel = h.resolveMemberLabel(ctx, call, task.ClaimedByMemberID)
-	}
-	if strings.TrimSpace(task.CreatedByLabel) == "" {
-		task.CreatedByLabel = h.resolveMemberLabel(ctx, call, member.ID(task.CreatedBy))
-	}
-	return task
-}
-
-func (h Handler) resolveMemberLabel(ctx context.Context, call CallContext, memberID member.ID) string {
-	memberID = member.ID(strings.TrimSpace(string(memberID)))
-	if memberID == "" || call.Members == nil {
-		return ""
-	}
-	rosterMember, err := call.Members.GetMember(ctx, memberID)
-	if err != nil {
-		return ""
-	}
-	return memberLabel(rosterMember)
 }
 
 func toTaskEntry(task taskdomain.Task) taskEntry {
-	entry := taskEntry{
+	return taskEntry{
 		ID:                 strings.TrimSpace(string(task.ID)),
-		ProjectID:          strings.TrimSpace(string(task.ProjectID)),
 		Status:             strings.TrimSpace(string(task.Status)),
+		StatusReason:       strings.TrimSpace(task.Error),
 		Title:              strings.TrimSpace(task.Title),
 		Description:        strings.TrimSpace(task.Description),
 		AssignedToMemberID: strings.TrimSpace(string(task.AssignedTo)),
-		AssignedToLabel:    strings.TrimSpace(task.AssignedToLabel),
 		ClaimedByMemberID:  strings.TrimSpace(string(task.ClaimedByMemberID)),
-		ClaimedByLabel:     strings.TrimSpace(task.ClaimedByMemberLabel),
 		CreatedBy:          strings.TrimSpace(task.CreatedBy),
-		CreatedByLabel:     strings.TrimSpace(task.CreatedByLabel),
 		KeyResultRef:       strings.TrimSpace(task.KeyResultRef),
 		MissionRef:         missionRefFromTaskMetadata(task.Metadata),
 		TaskKind:           strings.TrimSpace(task.TaskKind),
 		AcceptanceCriteria: append([]taskdomain.AcceptanceCriterion(nil), task.AcceptanceCriteria...),
 		Summary:            strings.TrimSpace(task.Summary),
 		Artifacts:          append([]string(nil), task.Artifacts...),
-		StatusReason:       strings.TrimSpace(task.Error),
-		Metadata:           task.Metadata,
 	}
-	return entry
 }
 
 func missionRefFromTaskMetadata(metadata map[string]any) string {

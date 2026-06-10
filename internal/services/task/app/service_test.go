@@ -81,8 +81,9 @@ func TestReviewMetadataPersistsReasonSummaryAndNote(t *testing.T) {
 	if got := meta["reviewNote"]; got != "deep verification" {
 		t.Fatalf("reviewNote=%v want deep verification", got)
 	}
-	if got := meta["reviewFeedback"]; got != "deep verification" {
-		t.Fatalf("reviewFeedback=%v want deep verification", got)
+	// reviewFeedback (the card-era duplicate) is no longer written.
+	if _, ok := meta["reviewFeedback"]; ok {
+		t.Fatalf("reviewFeedback should no longer be written: %+v", meta)
 	}
 }
 
