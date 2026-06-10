@@ -91,6 +91,20 @@ func eventCreatedAt(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// keyResultProjectID resolves the owning project for a KR via its mission. The
+// KeyResult aggregate carries no projectId of its own (that field was removed in
+// ef824e74 "Drop dead KR owner project plumbing"), but realtime fan-out keys on
+// EventRecord.Data["projectId"] (internal/daemon/events_hub.go), so KR events
+// must carry it or they get dropped. Best-effort: a lookup miss returns "" and
+// the caller omits the field rather than failing the originating operation.
+func (s *Service) keyResultProjectID(ctx context.Context, keyResult krdomain.KeyResult) string {
+	mission, err := s.missions.GetMission(ctx, keyResult.MissionID)
+	if err != nil {
+		return ""
+	}
+	return mission.ProjectID
+}
+
 func (s *Service) publishKREvent(ctx context.Context, kind MissionEventKind, keyResult krdomain.KeyResult) error {
 	return s.publishKREventWithData(ctx, kind, keyResult, nil)
 }
@@ -119,6 +133,11 @@ func (s *Service) publishKREventWithData(ctx context.Context, kind MissionEventK
 			"measurementType": string(keyResult.MeasurementType),
 			"progressPercent": strconv.Itoa(keyResult.ProgressPercent),
 		},
+	}
+	// Realtime fan-out drops events whose record has no projectId. The KR
+	// aggregate doesn't carry one, so resolve it from the mission.
+	if projectID := s.keyResultProjectID(ctx, keyResult); projectID != "" {
+		event.Data["projectId"] = projectID
 	}
 	for key, value := range extra {
 		event.Data[key] = value
@@ -193,6 +212,9 @@ func (s *Service) recordKRLifecycleNote(ctx context.Context, kind MissionEventKi
 			"measurementType": string(keyResult.MeasurementType),
 			"progressPercent": strconv.Itoa(keyResult.ProgressPercent),
 		},
+	}
+	if projectID := s.keyResultProjectID(ctx, keyResult); projectID != "" {
+		event.Data["projectId"] = projectID
 	}
 	for key, value := range extra {
 		event.Data[key] = value

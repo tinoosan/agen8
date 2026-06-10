@@ -110,8 +110,12 @@ func (h *eventsHub) consume(ctx context.Context, topic string, messages <-chan *
 			}
 			projectID, notification, err := build(msg.Payload)
 			if err != nil {
+				// build() failures are deterministic (decode / missing projectId),
+				// so retrying the same payload can never succeed. Ack to drop the
+				// poison message — Nack would redeliver it forever on the in-memory
+				// GoChannel, flooding the log and pinning a CPU.
 				h.logger.Warn("drop realtime event", "topic", topic, "error", err)
-				msg.Nack()
+				msg.Ack()
 				continue
 			}
 			if projectID != "" && notification != nil {
