@@ -1,33 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Task } from '../../lib/types'
-
-/* The section fetches previews over RPC on click; mock the transport so the
- * real component (including the real ArtifactViewer routing) renders against
- * controlled data without a backend. */
-const mockRpcCall = vi.fn()
-
-vi.mock('../../lib/rpc', () => ({
-  rpcCall: (...args: unknown[]) => mockRpcCall(...args),
-}))
-
-const { TaskArtifactsSection, fileArtifactVPath } = await import('./TaskArtifactsSection')
+import { TaskArtifactsSection, fileArtifactVPath } from './TaskArtifactsSection'
 
 function task(artifacts: string[]): Task {
   return { id: 'task-1', description: 'desc', status: 'in_review', artifacts } as Task
 }
 
-function renderSection(artifacts: string[]) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <TaskArtifactsSection task={task(artifacts)} projectId="proj-1" />
-    </QueryClientProvider>,
-  )
+function renderSection(artifacts: string[], onOpenArtifact = vi.fn()) {
+  render(<TaskArtifactsSection task={task(artifacts)} onOpenArtifact={onOpenArtifact} />)
+  return onOpenArtifact
 }
 
 async function expandArtifacts() {
@@ -35,7 +18,6 @@ async function expandArtifacts() {
 }
 
 beforeEach(() => {
-  mockRpcCall.mockReset()
   localStorage.clear()
 })
 
@@ -68,123 +50,14 @@ describe('TaskArtifactsSection', () => {
   })
 
   it('renders nothing for a task without artifacts', () => {
-    const { container } = renderSection([])
+    const { container } = render(<TaskArtifactsSection task={task([])} onOpenArtifact={vi.fn()} />)
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('opens the viewer and fetches the file over files.get on click', async () => {
-    mockRpcCall.mockResolvedValue({
-      artifact: { nodeKey: 'file:/project/notes.txt', kind: 'file', label: 'notes.txt', vpath: '/project/notes.txt' },
-      content: 'hello from the attachment',
-      contentKind: 'text',
-      contentEncoding: 'utf8',
-      truncated: false,
-      bytesRead: 25,
-    })
-    renderSection(['file:/project/notes.txt'])
+  it('reports the clicked vpath to the parent viewer host', async () => {
+    const onOpen = renderSection(['file:/project/web/src/App.tsx'])
     await expandArtifacts()
-
-    await userEvent.click(screen.getByRole('button', { name: 'View notes.txt' }))
-
-    await waitFor(() => {
-      expect(mockRpcCall).toHaveBeenCalledWith('files.get', {
-        projectId: 'proj-1',
-        path: '/project/notes.txt',
-        maxBytes: 2_000_000,
-      })
-    })
-    // Sheet header carries the file identity (the path may also appear in the
-    // pane chrome, so assert at-least-one rather than exactly-one).
-    expect((await screen.findAllByText('/project/notes.txt')).length).toBeGreaterThan(0)
-    expect(await screen.findByText(/hello from the attachment/)).toBeInTheDocument()
-  })
-
-  it('offers the diff toggle for text files and diffs against the git baseline', async () => {
-    mockRpcCall.mockImplementation(async (method: unknown) => {
-      if (method === 'files.get') {
-        return {
-          artifact: { nodeKey: 'file:/project/main.go', kind: 'file', label: 'main.go', vpath: '/project/main.go' },
-          content: 'line one\nline two changed\n',
-          contentKind: 'text',
-          contentEncoding: 'utf8',
-          truncated: false,
-          bytesRead: 24,
-        }
-      }
-      if (method === 'files.baseline') {
-        return { path: '/project/main.go', tracked: true, content: 'line one\nline two\n' }
-      }
-      throw new Error('unexpected method: ' + String(method))
-    })
-    renderSection(['file:/project/main.go'])
-    await expandArtifacts()
-    await userEvent.click(screen.getByRole('button', { name: 'View main.go' }))
-
-    const diffToggle = await screen.findByRole('button', { name: 'Diff' })
-    await userEvent.click(diffToggle)
-
-    expect(await screen.findByTestId('diff-view')).toBeInTheDocument()
-    expect(screen.getByText('line two')).toBeInTheDocument()
-    expect(screen.getByText('line two changed')).toBeInTheDocument()
-    expect(mockRpcCall).toHaveBeenCalledWith('files.baseline', {
-      projectId: 'proj-1',
-      path: '/project/main.go',
-    })
-  })
-
-  it('never offers the diff toggle for images', async () => {
-    mockRpcCall.mockResolvedValue({
-      artifact: { nodeKey: 'file:/project/shot.png', kind: 'file', label: 'shot.png', vpath: '/project/shot.png' },
-      content: '',
-      contentKind: 'image',
-      contentEncoding: 'base64',
-      bytesB64: 'aGk=',
-      truncated: false,
-      bytesRead: 2,
-    })
-    renderSection(['file:/project/shot.png'])
-    await expandArtifacts()
-    await userEvent.click(screen.getByRole('button', { name: 'View shot.png' }))
-
-    await waitFor(() => expect(mockRpcCall).toHaveBeenCalled())
-    expect(screen.queryByRole('button', { name: 'Diff' })).not.toBeInTheDocument()
-  })
-
-  it('degrades to normal view with a notice when the file has no git baseline', async () => {
-    mockRpcCall.mockImplementation(async (method: unknown) => {
-      if (method === 'files.get') {
-        return {
-          artifact: { nodeKey: 'file:/project/new.txt', kind: 'file', label: 'new.txt', vpath: '/project/new.txt' },
-          content: 'brand new file\n',
-          contentKind: 'text',
-          contentEncoding: 'utf8',
-          truncated: false,
-          bytesRead: 15,
-        }
-      }
-      if (method === 'files.baseline') {
-        return { path: '/project/new.txt', tracked: false }
-      }
-      throw new Error('unexpected method: ' + String(method))
-    })
-    renderSection(['file:/project/new.txt'])
-    await expandArtifacts()
-    await userEvent.click(screen.getByRole('button', { name: 'View new.txt' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Diff' }))
-
-    expect(await screen.findByTestId('diff-unavailable-notice')).toBeInTheDocument()
-    // The normal content is still visible underneath the notice — no dead pane.
-    expect(screen.getByText(/brand new file/)).toBeInTheDocument()
-    expect(screen.queryByTestId('diff-view')).not.toBeInTheDocument()
-  })
-
-  it('shows a calm error state when the file cannot be loaded', async () => {
-    mockRpcCall.mockRejectedValue(new Error('file missing'))
-    renderSection(['file:/project/.agen8/attachments/task-1/gone.png'])
-    await expandArtifacts()
-
-    await userEvent.click(screen.getByRole('button', { name: 'View gone.png' }))
-
-    expect(await screen.findByText('Failed to load file contents.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'View App.tsx' }))
+    expect(onOpen).toHaveBeenCalledWith('/project/web/src/App.tsx')
   })
 })

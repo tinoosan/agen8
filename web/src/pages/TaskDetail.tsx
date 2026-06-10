@@ -40,6 +40,8 @@ import { CancelTaskDialog } from '../components/task/CancelTaskDialog'
 import { AcceptanceCriteriaList } from '../components/task/AcceptanceCriteriaList'
 import { LatestReviewSection } from '../components/task/LatestReviewSection'
 import { TaskArtifactsSection } from '../components/task/TaskArtifactsSection'
+import { ArtifactViewerPanel } from '../components/task/ArtifactViewerPanel'
+import { useIsBelow } from '../hooks/use-mobile'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -104,6 +106,11 @@ export default function TaskDetail() {
   const [editCriteria, setEditCriteria] = useState<CriterionRow[]>([])
   const [editAssignee, setEditAssignee] = useState('')
   const [cancelOpen, setCancelOpen] = useState(false)
+  // Artifact viewer host: a split panel beside the page on wide screens so
+  // the task stays in view while reviewing; an overlay sheet when there is
+  // no room for both (dec-e8b58636).
+  const [openArtifactVPath, setOpenArtifactVPath] = useState<string | null>(null)
+  const viewerAsSheet = useIsBelow(1152)
   const updateTask = useUpdateTask()
   const assignTask = useAssignTask()
 
@@ -250,7 +257,8 @@ export default function TaskDetail() {
   const hasMembers = activeMembers.length > 0
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
+    <div className="flex h-full min-h-0">
+    <div className="flex flex-col h-full overflow-y-auto flex-1 min-w-0">
       {/* Sticky header */}
       <DetailHeader backTo={tasksPanelLink(projectId)} backLabel="Tasks">
           <div className="flex flex-wrap items-start gap-3">
@@ -603,10 +611,23 @@ export default function TaskDetail() {
         <RelatedList items={related} storageKey="task-detail-related" />
 
         {/* Artifacts */}
-        <TaskArtifactsSection task={task} projectId={projectId} />
+        <TaskArtifactsSection task={task} onOpenArtifact={setOpenArtifactVPath} />
       </div>
 
       <CancelTaskDialog task={task} open={cancelOpen} onOpenChange={setCancelOpen} />
+    </div>
+
+    {openArtifactVPath && (
+      <div className={viewerAsSheet ? undefined : 'w-[min(45%,640px)] shrink-0 h-full min-h-0 flex flex-col'}>
+        <ArtifactViewerPanel
+          key={openArtifactVPath}
+          projectId={projectId}
+          vpath={openArtifactVPath}
+          onClose={() => setOpenArtifactVPath(null)}
+          layout={viewerAsSheet ? 'sheet' : 'inline'}
+        />
+      </div>
+    )}
     </div>
   )
 }
