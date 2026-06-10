@@ -611,7 +611,7 @@ export default function TaskDetail() {
         <RelatedList items={related} storageKey="task-detail-related" />
 
         {/* Artifacts */}
-        <TaskArtifactsSection task={task} onOpenArtifact={setOpenArtifactVPath} />
+        <TaskArtifactsSection task={task} projectId={projectId} onOpenArtifact={setOpenArtifactVPath} />
       </div>
 
       <CancelTaskDialog task={task} open={cancelOpen} onOpenChange={setCancelOpen} />

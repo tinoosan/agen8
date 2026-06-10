@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	MethodTaskCreate = "task.create"
-	MethodTaskGet    = "task.get"
-	MethodTaskList   = "task.list"
-	MethodTaskUpdate = "task.update"
-	MethodTaskCancel = "task.cancel"
-	MethodTaskAssign = "task.assign"
+	MethodTaskCreate         = "task.create"
+	MethodTaskGet            = "task.get"
+	MethodTaskList           = "task.list"
+	MethodTaskUpdate         = "task.update"
+	MethodTaskCancel         = "task.cancel"
+	MethodTaskAssign         = "task.assign"
+	MethodTaskAttachArtifact = "task.attachArtifact"
 )
 
 func RegisterTask(reg *Registry, taskSvc *taskapp.Service, members taskrpc.MemberDisplayLookup) error {
@@ -42,6 +43,9 @@ func RegisterTask(reg *Registry, taskSvc *taskapp.Service, members taskrpc.Membe
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodTaskAssign, false, withTaskCaller(handler.Assign))
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodTaskAttachArtifact, false, withTaskCaller(handler.AttachArtifact))
 		},
 	)
 }

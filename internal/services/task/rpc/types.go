@@ -142,6 +142,19 @@ type TaskCancelResult struct {
 	Task TaskView `json:"task"`
 }
 
+// TaskAttachArtifactParams appends one artifact ref to a task. Used by the
+// web upload flow: bytes go through files.upload first, then the resulting
+// file:<vpath> ref is appended here so the client never read-modify-writes
+// the artifacts array.
+type TaskAttachArtifactParams struct {
+	TaskID string `json:"taskId"`
+	Ref    string `json:"ref"`
+}
+
+type TaskAttachArtifactResult struct {
+	Task TaskView `json:"task"`
+}
+
 // TaskAssignParams reassigns a task to another project member. Reassigning a
 // non-terminal task requeues it: the domain clears the claim and resets status
 // to pending so the new assignee can claim it.

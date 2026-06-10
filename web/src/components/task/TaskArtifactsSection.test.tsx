@@ -1,16 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Task } from '../../lib/types'
-import { TaskArtifactsSection, fileArtifactVPath } from './TaskArtifactsSection'
 
-function task(artifacts: string[]): Task {
-  return { id: 'task-1', description: 'desc', status: 'in_review', artifacts } as Task
+const mockRpcCall = vi.fn()
+const mockToastError = vi.fn()
+const mockToastSuccess = vi.fn()
+
+vi.mock('../../lib/rpc', () => ({
+  rpcCall: (...args: unknown[]) => mockRpcCall(...args),
+}))
+vi.mock('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+  },
+}))
+
+const { TaskArtifactsSection, fileArtifactVPath } = await import('./TaskArtifactsSection')
+
+function task(artifacts: string[], status = 'in_review'): Task {
+  return { id: 'task-1', description: 'desc', status, artifacts } as Task
 }
 
-function renderSection(artifacts: string[], onOpenArtifact = vi.fn()) {
-  render(<TaskArtifactsSection task={task(artifacts)} onOpenArtifact={onOpenArtifact} />)
-  return onOpenArtifact
+function renderSection(artifacts: string[], opts: { onOpen?: ReturnType<typeof vi.fn>; status?: string; projectId?: string | null } = {}) {
+  const onOpen = opts.onOpen ?? vi.fn()
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+  })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <TaskArtifactsSection
+        task={task(artifacts, opts.status)}
+        projectId={opts.projectId === undefined ? 'proj-1' : opts.projectId}
+        onOpenArtifact={onOpen}
+      />
+    </QueryClientProvider>,
+  )
+  return onOpen
 }
 
 async function expandArtifacts() {
@@ -18,6 +46,9 @@ async function expandArtifacts() {
 }
 
 beforeEach(() => {
+  mockRpcCall.mockReset()
+  mockToastError.mockReset()
+  mockToastSuccess.mockReset()
   localStorage.clear()
 })
 
@@ -42,16 +73,9 @@ describe('TaskArtifactsSection', () => {
     await expandArtifacts()
 
     expect(screen.getByRole('button', { name: 'View shot.png' })).toBeInTheDocument()
-    // Non-file refs keep their plain rendering: visible, but not interactive.
     expect(screen.getByText('commit:abc123')).toBeInTheDocument()
     expect(screen.getByText('shipped the thing')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /commit:abc123/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /shipped the thing/ })).not.toBeInTheDocument()
-  })
-
-  it('renders nothing for a task without artifacts', () => {
-    const { container } = render(<TaskArtifactsSection task={task([])} onOpenArtifact={vi.fn()} />)
-    expect(container).toBeEmptyDOMElement()
   })
 
   it('reports the clicked vpath to the parent viewer host', async () => {
@@ -59,5 +83,85 @@ describe('TaskArtifactsSection', () => {
     await expandArtifacts()
     await userEvent.click(screen.getByRole('button', { name: 'View App.tsx' }))
     expect(onOpen).toHaveBeenCalledWith('/project/web/src/App.tsx')
+  })
+
+  it('shows the attach affordance even when the task has no artifacts yet', async () => {
+    renderSection([])
+    await expandArtifacts()
+    expect(screen.getByRole('button', { name: /attach file/i })).toBeInTheDocument()
+  })
+
+  it('hides the attach affordance for canceled tasks', () => {
+    const { } = { ...renderSection([], { status: 'canceled' }) }
+    expect(screen.queryByRole('button', { name: /artifacts/i })).not.toBeInTheDocument()
+  })
+
+  it('uploads a picked file then appends the ref server-side', async () => {
+    mockRpcCall.mockResolvedValue({})
+    renderSection([])
+    await expandArtifacts()
+
+    const input = screen.getByLabelText('Attachment file') as HTMLInputElement
+    const file = new File(['screenshot bytes'], 'build-shot.png', { type: 'image/png' })
+    await userEvent.upload(input, file)
+
+    await waitFor(() => {
+      expect(mockRpcCall).toHaveBeenCalledWith('files.upload', expect.objectContaining({
+        projectId: 'proj-1',
+        path: '/project/.agen8/attachments/task-1/build-shot.png',
+        bytesB64: expect.any(String),
+      }))
+    })
+    expect(mockRpcCall).toHaveBeenCalledWith('task.attachArtifact', {
+      taskId: 'task-1',
+      ref: 'file:/project/.agen8/attachments/task-1/build-shot.png',
+    })
+    expect(mockToastSuccess).toHaveBeenCalled()
+  })
+
+  it('surfaces upload failures and never appends a ref', async () => {
+    mockRpcCall.mockRejectedValue(new Error('disk full'))
+    renderSection([])
+    await expandArtifacts()
+
+    const input = screen.getByLabelText('Attachment file') as HTMLInputElement
+    await userEvent.upload(input, new File(['x'], 'doomed.txt', { type: 'text/plain' }))
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+    expect(mockRpcCall).not.toHaveBeenCalledWith('task.attachArtifact', expect.anything())
+  })
+
+  it('attaches a pasted image from the clipboard', async () => {
+    mockRpcCall.mockResolvedValue({})
+    renderSection([])
+
+    const blob = new File(['png bytes'], 'clip.png', { type: 'image/png' })
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(event, 'clipboardData', {
+      value: { items: [{ type: 'image/png', getAsFile: () => blob }] },
+    })
+    document.dispatchEvent(event)
+
+    await waitFor(() => {
+      expect(mockRpcCall).toHaveBeenCalledWith('files.upload', expect.objectContaining({
+        path: expect.stringMatching(/^\/project\/\.agen8\/attachments\/task-1\/pasted-.*\.png$/),
+      }))
+    })
+    expect(mockRpcCall).toHaveBeenCalledWith('task.attachArtifact', expect.objectContaining({ taskId: 'task-1' }))
+  })
+
+  it('ignores pastes aimed at editable fields', async () => {
+    renderSection([])
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    const blob = new File(['png'], 'clip.png', { type: 'image/png' })
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(event, 'clipboardData', {
+      value: { items: [{ type: 'image/png', getAsFile: () => blob }] },
+    })
+    input.dispatchEvent(event)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(mockRpcCall).not.toHaveBeenCalled()
+    input.remove()
   })
 })

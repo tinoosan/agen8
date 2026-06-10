@@ -148,6 +148,22 @@ func (h *Handler) Cancel(ctx context.Context, p TaskCancelParams) (TaskCancelRes
 	return TaskCancelResult{Task: h.newTaskView(ctx, task)}, nil
 }
 
+func (h *Handler) AttachArtifact(ctx context.Context, p TaskAttachArtifactParams) (TaskAttachArtifactResult, error) {
+	taskID := strings.TrimSpace(p.TaskID)
+	if taskID == "" {
+		return TaskAttachArtifactResult{}, invalidParams("taskId is required")
+	}
+	ref := strings.TrimSpace(p.Ref)
+	if ref == "" {
+		return TaskAttachArtifactResult{}, invalidParams("ref is required")
+	}
+	task, err := h.svc.AttachArtifact(ctx, domain.TaskID(taskID), ref)
+	if err != nil {
+		return TaskAttachArtifactResult{}, internalError("attach artifact", err)
+	}
+	return TaskAttachArtifactResult{Task: h.newTaskView(ctx, task)}, nil
+}
+
 func (h *Handler) Assign(ctx context.Context, p TaskAssignParams) (TaskAssignResult, error) {
 	taskID := strings.TrimSpace(p.TaskID)
 	if taskID == "" {
