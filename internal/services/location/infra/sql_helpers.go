@@ -88,17 +88,18 @@ func locationWhere(filter locationdomain.Filter) (string, []any, error) {
 
 func scanLocation(scanner interface{ Scan(dest ...any) error }) (locationdomain.Record, error) {
 	var record locationdomain.Record
-	var ready, reachable, fileBrowsing, execReady, codexReady, claudeReady int
+	var ready, reachable, fileBrowsing, execReady, codexReady, claudeReady, gitDiffEnabled int
 	var lastProbedAt string
 	var createdAt, updatedAt string
 	if err := scanner.Scan(
 		&record.ID, &record.Kind, &record.Label, &record.Address.Host, &record.Address.Port, &record.Address.Username,
 		&record.Status, &ready, &record.CredentialRef, &reachable, &fileBrowsing, &execReady, &codexReady, &claudeReady,
-		&record.LastProbeError, &lastProbedAt, &createdAt, &updatedAt,
+		&gitDiffEnabled, &record.LastProbeError, &lastProbedAt, &createdAt, &updatedAt,
 	); err != nil {
 		return locationdomain.Record{}, err
 	}
 	record.Ready = ready != 0
+	record.GitDiffEnabled = gitDiffEnabled != 0
 	record.Probe = locationdomain.Probe{
 		Reachable:    reachable != 0,
 		FileBrowsing: fileBrowsing != 0,

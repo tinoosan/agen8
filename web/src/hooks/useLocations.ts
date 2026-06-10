@@ -43,6 +43,18 @@ export function useProbeLocation() {
   })
 }
 
+export function useSetLocationGitDiff() {
+  const queryClient = useQueryClient()
+  return useMutation<ExecutionLocation, Error, { locationId: string; gitDiffEnabled: boolean }>({
+    mutationFn: async ({ locationId, gitDiffEnabled }) => {
+      return rpcUnwrap<ExecutionLocation>('location.update', { locationId, gitDiffEnabled }, 'location')
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.locations })
+    },
+  })
+}
+
 export function useDeleteLocation() {
   const queryClient = useQueryClient()
   return useMutation<void, Error, string>({

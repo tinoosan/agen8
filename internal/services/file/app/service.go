@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"log/slog"
 	"mime"
 	"net/http"
-	pathpkg "path"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,14 +25,27 @@ const (
 	previewMaxBytesCap     = 16 * 1024 * 1024
 )
 
+// errGitBaselineNotPermitted aliases the domain sentinel so Baseline can match
+// the capability-denied case from the repository.
+var errGitBaselineNotPermitted = filedomain.ErrGitBaselineNotPermitted
+
+// remoteGitBaseliner is the optional capability a file repository may implement
+// to produce git baselines for files on non-local locations. The repository
+// owns the per-location capability gate; the service only asks.
+type remoteGitBaseliner interface {
+	GitBaseline(ctx context.Context, ref filedomain.Reference, dir, name string) (filedomain.GitBaseline, error)
+}
+
 type Service struct {
 	files    filedomain.Repository
 	projects ProjectLoader
+	logger   *slog.Logger
 }
 
 type Config struct {
 	Files    filedomain.Repository
 	Projects ProjectLoader
+	Logger   *slog.Logger
 }
 
 func NewService(cfg Config) (*Service, error) {
@@ -40,7 +55,11 @@ func NewService(cfg Config) (*Service, error) {
 	if cfg.Projects == nil {
 		return nil, fmt.Errorf("file project loader is required")
 	}
-	return &Service{files: cfg.Files, projects: cfg.Projects}, nil
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default().With("service", "file")
+	}
+	return &Service{files: cfg.Files, projects: cfg.Projects, logger: logger}, nil
 }
 
 type ListDirInput struct {
@@ -243,34 +262,72 @@ func (s *Service) Baseline(ctx context.Context, input GetInput) (BaselineResult,
 	if err != nil {
 		return BaselineResult{}, err
 	}
-	if locationID := strings.TrimSpace(string(resolved.ref.LocationID)); locationID != "" && locationID != "local" {
-		return BaselineResult{
-			Path:        resolved.vpath,
-			Unsupported: "Diff is not available for files on remote locations yet.",
-		}, nil
-	}
 	// `git -C <dir> show HEAD:./<name>` resolves the path relative to the
 	// file's own directory, so it works whether the git root is the project
 	// root or an ancestor of it.
 	dir := filepath.Dir(resolved.ref.Path)
 	name := filepath.Base(resolved.ref.Path)
+
+	if locationID := strings.TrimSpace(string(resolved.ref.LocationID)); locationID != "" && locationID != "local" {
+		return s.remoteBaseline(ctx, resolved, dir, name)
+	}
+
 	out, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:./"+name).Output()
 	if err != nil {
 		// Untracked file, file new in the working tree, or no git repo at
 		// all: there is no baseline to diff against. Degrade, don't fail.
 		return BaselineResult{Path: resolved.vpath, Tracked: false}, nil
 	}
-	result := BaselineResult{Path: resolved.vpath, Tracked: true}
+	return s.baselineFromBytes(resolved.vpath, out), nil
+}
+
+// remoteBaseline produces a git baseline for a file on a non-local location by
+// delegating to a capability-gated remote git runner (the LocationRepository).
+// If the repository doesn't support remote baselines, or the location hasn't
+// been granted the capability, it degrades to a structured Unsupported answer
+// rather than erroring — the viewer shows the reason and falls back to normal
+// view.
+func (s *Service) remoteBaseline(ctx context.Context, resolved resolvedPath, dir, name string) (BaselineResult, error) {
+	baseliner, ok := s.files.(remoteGitBaseliner)
+	if !ok {
+		return BaselineResult{
+			Path:        resolved.vpath,
+			Unsupported: "Diff is not available for files on remote locations.",
+		}, nil
+	}
+	baseline, err := baseliner.GitBaseline(ctx, resolved.ref, dir, name)
+	if err != nil {
+		if errors.Is(err, errGitBaselineNotPermitted) {
+			return BaselineResult{
+				Path:        resolved.vpath,
+				Unsupported: "Diff is off for this location. Enable it on the Locations page to review remote changes.",
+			}, nil
+		}
+		s.logger.Warn("remote git baseline failed", "vpath", resolved.vpath, "err", err)
+		return BaselineResult{
+			Path:        resolved.vpath,
+			Unsupported: "Could not load the remote git baseline.",
+		}, nil
+	}
+	s.logger.Info("remote git baseline", "vpath", resolved.vpath, "tracked", baseline.Tracked, "bytes", len(baseline.Bytes))
+	if !baseline.Tracked {
+		return BaselineResult{Path: resolved.vpath, Tracked: false}, nil
+	}
+	return s.baselineFromBytes(resolved.vpath, baseline.Bytes), nil
+}
+
+func (s *Service) baselineFromBytes(vpath string, out []byte) BaselineResult {
+	result := BaselineResult{Path: vpath, Tracked: true}
 	if len(out) > previewMaxBytesCap {
 		out = out[:previewMaxBytesCap]
 		result.Truncated = true
 	}
 	if !utf8.Valid(out) {
 		result.Binary = true
-		return result, nil
+		return result
 	}
 	result.Content = string(out)
-	return result, nil
+	return result
 }
 
 func (s *Service) CreateDir(ctx context.Context, input PathInput) (PathResult, error) {

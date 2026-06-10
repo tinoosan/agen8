@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -287,6 +288,14 @@ func (t Transport) probeSSH(ctx context.Context, location locationdomain.Locatio
 	_ = sftpClient.Close()
 	result.FileBrowsing = true
 	result.Status = locationdomain.ProbeStatusPassed
+
+	// Detect whether git is available on the host so the UI can show the
+	// git-diff capability as reachable. Detection only — it never enables the
+	// capability; that stays a separate, human-granted opt-in. A fixed,
+	// argument-free command, so there's nothing to escape.
+	if _, err := runSSHCommandOutput(ctx, client, "command -v git"); err == nil {
+		result.Exec = true
+	}
 	return result, nil
 }
 
@@ -835,6 +844,118 @@ func knownHostsCallback() (ssh.HostKeyCallback, error) {
 		return nil, fmt.Errorf("load ssh known_hosts %s: %w", path, err)
 	}
 	return callback, nil
+}
+
+// gitBaselineMaxBytes caps how much committed content a remote baseline will
+// return, matching the local preview cap so a huge file can't exhaust memory.
+const gitBaselineMaxBytes = 16 * 1024 * 1024
+
+// gitBaselineTimeout bounds a single remote git invocation. A wedged remote
+// git (e.g. a giant repo or a hung filesystem) must not pin a daemon goroutine.
+const gitBaselineTimeout = 20 * time.Second
+
+// shellSingleQuote wraps an arbitrary string so a POSIX shell treats it as one
+// literal argument, neutralizing every metacharacter. This is THE injection
+// control for remote command execution: SSH exec passes a single string to the
+// remote login shell (there is no argv-array path like local exec.Command), so
+// any value interpolated into that string MUST go through here. The standard
+// trick: wrap in single quotes and replace each embedded single quote with the
+// four-character sequence '\” (close-quote, escaped-quote, reopen-quote).
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// GitShowBaseline returns the committed (git HEAD) content of a file living on
+// this location, by running a FIXED, read-only git command where the repo
+// lives. dir and name are the file's directory and bare base name; both are
+// shell-quoted before interpolation. There is deliberately no generic remote
+// exec on this transport — only this one capability-scoped, read-only command —
+// so the blast radius of remote execution is bounded to `git show`.
+//
+// A non-zero git exit (untracked file, new file, or not a repo) is a normal
+// answer: GitBaseline.Tracked=false, no error. Errors are reserved for the
+// connection/transport failing.
+func (t Transport) GitShowBaseline(ctx context.Context, location locationdomain.Location, dir, name string) (filedomain.GitBaseline, error) {
+	dir = strings.TrimSpace(dir)
+	name = strings.TrimSpace(name)
+	if dir == "" || name == "" {
+		return filedomain.GitBaseline{}, fmt.Errorf("git baseline requires a directory and file name")
+	}
+	if strings.ContainsAny(name, "/\\") || name == "." || name == ".." || strings.Contains(name, "..") {
+		// Defense in depth: callers already pass a validated bare base name,
+		// but never let a path-shaped name reach the remote command.
+		return filedomain.GitBaseline{}, fmt.Errorf("git baseline file name must be a bare name")
+	}
+	client, err := t.dialSSH(ctx, location)
+	if err != nil {
+		return filedomain.GitBaseline{}, err
+	}
+	defer client.Close()
+
+	runCtx, cancel := context.WithTimeout(ctx, gitBaselineTimeout)
+	defer cancel()
+
+	// `git -C <dir> show HEAD:./<name>` resolves the path relative to the
+	// file's own directory, so it works whether the git root is the project
+	// root or an ancestor. Both interpolated values are single-quoted.
+	command := "git -C " + shellSingleQuote(dir) + " show " + shellSingleQuote("HEAD:./"+name)
+	stdout, runErr := runSSHCommandStdout(runCtx, client, command, gitBaselineMaxBytes)
+	if runErr != nil {
+		if runCtx.Err() != nil {
+			return filedomain.GitBaseline{}, fmt.Errorf("remote git baseline timed out: %w", runCtx.Err())
+		}
+		var exitErr *ssh.ExitError
+		if errors.As(runErr, &exitErr) {
+			// Non-zero exit = untracked/new/not-a-repo: a normal "no baseline".
+			return filedomain.GitBaseline{Tracked: false}, nil
+		}
+		// Anything else (dial already succeeded, so this is a session/IO fault).
+		return filedomain.GitBaseline{}, fmt.Errorf("remote git baseline failed: %w", runErr)
+	}
+	return filedomain.GitBaseline{Tracked: true, Bytes: stdout}, nil
+}
+
+// runSSHCommandStdout runs a command capturing ONLY stdout (stderr is dropped
+// so remote diagnostics never leak into file content or the UI), bounded by ctx
+// and capped at maxBytes. Returns *ssh.ExitError when the remote command exits
+// non-zero, which callers use to distinguish "command ran and said no" from
+// "the connection broke".
+func runSSHCommandStdout(ctx context.Context, client *ssh.Client, command string, maxBytes int64) ([]byte, error) {
+	session, err := client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := session.Start(command); err != nil {
+		return nil, err
+	}
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	done := make(chan readResult, 1)
+	go func() {
+		data, readErr := io.ReadAll(io.LimitReader(stdout, maxBytes))
+		// Wait for the command to finish so we observe its exit status.
+		waitErr := session.Wait()
+		if readErr != nil {
+			done <- readResult{data: data, err: readErr}
+			return
+		}
+		done <- readResult{data: data, err: waitErr}
+	}()
+	select {
+	case <-ctx.Done():
+		_ = session.Signal(ssh.SIGKILL)
+		_ = session.Close()
+		return nil, ctx.Err()
+	case res := <-done:
+		return res.data, res.err
+	}
 }
 
 func runSSHCommand(ctx context.Context, client *ssh.Client, command string) (string, error) {

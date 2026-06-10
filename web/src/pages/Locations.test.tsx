@@ -6,6 +6,7 @@ const mockUseLocations = vi.fn()
 const mockCreateLocation = vi.fn()
 const mockProbeLocation = vi.fn()
 const mockDeleteLocation = vi.fn()
+const mockSetGitDiff = vi.fn()
 const mockCreateCredential = vi.fn()
 
 vi.mock('../hooks/useLocations', () => ({
@@ -21,6 +22,11 @@ vi.mock('../hooks/useLocations', () => ({
   }),
   useDeleteLocation: () => ({
     mutateAsync: mockDeleteLocation,
+    isPending: false,
+    variables: undefined,
+  }),
+  useSetLocationGitDiff: () => ({
+    mutate: mockSetGitDiff,
     isPending: false,
     variables: undefined,
   }),
@@ -160,5 +166,20 @@ describe('Locations page', () => {
     await user.click(screen.getByRole('button', { name: /delete work laptop/i }))
     await user.click(screen.getByRole('button', { name: /^delete$/i }))
     expect(mockDeleteLocation).toHaveBeenCalledWith('loc-ssh')
+  })
+
+  it('grants the remote git-diff capability through the toggle (SSH only)', async () => {
+    const user = userEvent.setup()
+    render(<Locations />)
+
+    // The local location must NOT offer the remote-diff toggle.
+    const toggles = screen.getAllByRole('switch', { name: /allow remote git diff/i })
+    expect(toggles).toHaveLength(1)
+
+    await user.click(toggles[0])
+    expect(mockSetGitDiff).toHaveBeenCalledWith(
+      { locationId: 'loc-ssh', gitDiffEnabled: true },
+      expect.anything(),
+    )
   })
 })

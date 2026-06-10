@@ -302,3 +302,61 @@ func TestBaselineOnRemoteLocationIsUnsupportedNotError(t *testing.T) {
 	require.NotEmpty(t, result.Unsupported)
 	require.False(t, result.Tracked)
 }
+
+// baselinerRepo wraps spyFileRepository with the optional remoteGitBaseliner
+// capability so the service's remote-baseline routing can be exercised.
+type baselinerRepo struct {
+	*spyFileRepository
+	result  filedomain.GitBaseline
+	err     error
+	dir     string
+	name    string
+	called  bool
+}
+
+func (r *baselinerRepo) GitBaseline(_ context.Context, _ filedomain.Reference, dir, name string) (filedomain.GitBaseline, error) {
+	r.called = true
+	r.dir = dir
+	r.name = name
+	return r.result, r.err
+}
+
+func TestBaselineRemoteUnsupportedWhenRepoLacksCapability(t *testing.T) {
+	// Plain spyFileRepository does NOT implement remoteGitBaseliner.
+	svc := newTestServiceWithProjects(t, &spyFileRepository{}, testProject{root: "/srv/app", locationID: "ssh-build"})
+	res, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/main.go"})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Unsupported)
+	require.False(t, res.Tracked)
+}
+
+func TestBaselineRemoteDegradesWhenCapabilityOff(t *testing.T) {
+	repo := &baselinerRepo{spyFileRepository: &spyFileRepository{}, err: filedomain.ErrGitBaselineNotPermitted}
+	svc := newTestServiceWithProjects(t, repo, testProject{root: "/srv/app", locationID: "ssh-build"})
+	res, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/main.go"})
+	require.NoError(t, err)
+	require.True(t, repo.called)
+	require.Contains(t, res.Unsupported, "Locations page")
+	require.False(t, res.Tracked)
+}
+
+func TestBaselineRemoteReturnsTrackedContent(t *testing.T) {
+	repo := &baselinerRepo{spyFileRepository: &spyFileRepository{}, result: filedomain.GitBaseline{Tracked: true, Bytes: []byte("package main\n\nfunc main() {}\n")}}
+	svc := newTestServiceWithProjects(t, repo, testProject{root: "/srv/app", locationID: "ssh-build"})
+	res, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/cmd/main.go"})
+	require.NoError(t, err)
+	require.True(t, res.Tracked)
+	require.Equal(t, "package main\n\nfunc main() {}\n", res.Content)
+	// The service passes the file's own directory + bare name to the baseliner.
+	require.Equal(t, "main.go", repo.name)
+	require.Contains(t, repo.dir, "/cmd")
+}
+
+func TestBaselineRemoteUntrackedDegrades(t *testing.T) {
+	repo := &baselinerRepo{spyFileRepository: &spyFileRepository{}, result: filedomain.GitBaseline{Tracked: false}}
+	svc := newTestServiceWithProjects(t, repo, testProject{root: "/srv/app", locationID: "ssh-build"})
+	res, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/new.go"})
+	require.NoError(t, err)
+	require.False(t, res.Tracked)
+	require.Empty(t, res.Unsupported)
+}

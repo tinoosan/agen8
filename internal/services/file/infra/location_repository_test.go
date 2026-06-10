@@ -74,9 +74,13 @@ func (r locationRepoStub) Delete(context.Context, locationdomain.ID) error {
 }
 
 type locationFileTransportSpy struct {
-	location locationdomain.Location
-	path     string
-	entries  []filedomain.Entry
+	location     locationdomain.Location
+	path         string
+	entries      []filedomain.Entry
+	baselineDir  string
+	baselineName string
+	baseline     filedomain.GitBaseline
+	baselineCall bool
 }
 
 func (t *locationFileTransportSpy) StatFile(_ context.Context, location locationdomain.Location, path string) (filedomain.Info, error) {
@@ -117,6 +121,54 @@ func (t *locationFileTransportSpy) DeleteFile(context.Context, locationdomain.Lo
 
 func (t *locationFileTransportSpy) WriteFile(context.Context, locationdomain.Location, string, []byte) error {
 	return nil
+}
+
+func (t *locationFileTransportSpy) GitShowBaseline(_ context.Context, location locationdomain.Location, dir, name string) (filedomain.GitBaseline, error) {
+	t.location = location
+	t.baselineDir = dir
+	t.baselineName = name
+	t.baselineCall = true
+	return t.baseline, nil
+}
+
+func testLocationRecordGitDiff(id locationdomain.ID, gitDiff bool) locationdomain.Record {
+	record := testLocationRecord(id, true)
+	record.GitDiffEnabled = gitDiff
+	return record
+}
+
+func TestLocationRepositoryGitBaselineRequiresCapability(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	locations := locationRepoStub{records: map[locationdomain.ID]locationdomain.Record{
+		"ssh-build": testLocationRecordGitDiff("ssh-build", false),
+	}}
+	transport := &locationFileTransportSpy{}
+	repo, err := NewLocationRepository(locations, transport)
+	require.NoError(t, err)
+
+	_, err = repo.GitBaseline(ctx, filedomain.Reference{LocationID: "ssh-build", Path: "/srv/app/main.go"}, "/srv/app", "main.go")
+	require.ErrorIs(t, err, filedomain.ErrGitBaselineNotPermitted)
+	require.False(t, transport.baselineCall, "transport must not be reached when the capability is off")
+}
+
+func TestLocationRepositoryGitBaselineRunsWhenGranted(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	locations := locationRepoStub{records: map[locationdomain.ID]locationdomain.Record{
+		"ssh-build": testLocationRecordGitDiff("ssh-build", true),
+	}}
+	transport := &locationFileTransportSpy{baseline: filedomain.GitBaseline{Tracked: true, Bytes: []byte("package main\n")}}
+	repo, err := NewLocationRepository(locations, transport)
+	require.NoError(t, err)
+
+	out, err := repo.GitBaseline(ctx, filedomain.Reference{LocationID: "ssh-build", Path: "/srv/app/main.go"}, "/srv/app", "main.go")
+	require.NoError(t, err)
+	require.True(t, transport.baselineCall)
+	require.Equal(t, "/srv/app", transport.baselineDir)
+	require.Equal(t, "main.go", transport.baselineName)
+	require.True(t, out.Tracked)
+	require.Equal(t, "package main\n", string(out.Bytes))
 }
 
 func testLocationRecord(id locationdomain.ID, ready bool) locationdomain.Record {

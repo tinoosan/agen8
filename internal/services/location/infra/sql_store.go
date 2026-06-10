@@ -31,7 +31,7 @@ func (r *sqlStore) Get(ctx context.Context, id locationdomain.ID) (locationdomai
 	row := r.db.QueryRowContext(ctx, r.rebind(`
 		SELECT location_id, kind, label, host, port, username, status, ready,
 		       credential_ref, reachable, file_browsing, exec_ready, codex_ready, claude_ready,
-		       last_probe_error, last_probed_at, created_at, updated_at
+		       git_diff_enabled, last_probe_error, last_probed_at, created_at, updated_at
 		FROM locations
 		WHERE location_id = ?
 	`), id)
@@ -53,7 +53,7 @@ func (r *sqlStore) List(ctx context.Context, filter locationdomain.Filter) ([]lo
 	query := `
 		SELECT location_id, kind, label, host, port, username, status, ready,
 		       credential_ref, reachable, file_browsing, exec_ready, codex_ready, claude_ready,
-		       last_probe_error, last_probed_at, created_at, updated_at
+		       git_diff_enabled, last_probe_error, last_probed_at, created_at, updated_at
 		FROM locations` + where + `
 		ORDER BY label ASC, location_id ASC`
 	if filter.Limit > 0 {
@@ -81,8 +81,8 @@ func (r *sqlStore) Save(ctx context.Context, record locationdomain.Record) (loca
 		INSERT INTO locations (
 			location_id, kind, label, host, port, username, status, ready,
 			credential_ref, reachable, file_browsing, exec_ready, codex_ready, claude_ready,
-			last_probe_error, last_probed_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			git_diff_enabled, last_probe_error, last_probed_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(location_id) DO UPDATE SET
 			kind = excluded.kind,
 			label = excluded.label,
@@ -97,6 +97,7 @@ func (r *sqlStore) Save(ctx context.Context, record locationdomain.Record) (loca
 			exec_ready = excluded.exec_ready,
 			codex_ready = excluded.codex_ready,
 			claude_ready = excluded.claude_ready,
+			git_diff_enabled = excluded.git_diff_enabled,
 			last_probe_error = excluded.last_probe_error,
 			last_probed_at = excluded.last_probed_at,
 			updated_at = excluded.updated_at
@@ -104,6 +105,7 @@ func (r *sqlStore) Save(ctx context.Context, record locationdomain.Record) (loca
 		record.ID, record.Kind, record.Label, record.Address.Host, record.Address.Port, record.Address.Username,
 		record.Status, boolInt(record.Ready), record.CredentialRef, boolInt(record.Probe.Reachable),
 		boolInt(record.Probe.FileBrowsing), boolInt(record.Probe.Exec), boolInt(record.Probe.Codex), boolInt(record.Probe.Claude),
+		boolInt(record.GitDiffEnabled),
 		record.LastProbeError, formatOptionalTime(record.LastProbedAt), formatTime(record.CreatedAt), formatTime(record.UpdatedAt),
 	)
 	if err != nil {
@@ -148,6 +150,7 @@ func (r *sqlStore) ensureSchema(ctx context.Context) error {
 			exec_ready INTEGER NOT NULL DEFAULT 0,
 			codex_ready INTEGER NOT NULL DEFAULT 0,
 			claude_ready INTEGER NOT NULL DEFAULT 0,
+			git_diff_enabled INTEGER NOT NULL DEFAULT 0,
 			last_probe_error TEXT NOT NULL DEFAULT '',
 			last_probed_at TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
@@ -157,6 +160,9 @@ func (r *sqlStore) ensureSchema(ctx context.Context) error {
 		return fmt.Errorf("ensure locations table: %w", err)
 	}
 	if err := r.ensureColumn(ctx, "locations", "claude_ready", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := r.ensureColumn(ctx, "locations", "git_diff_enabled", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	for _, stmt := range []string{

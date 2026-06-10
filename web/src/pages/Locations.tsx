@@ -13,7 +13,7 @@
  * healthy fleet reads as calm monochrome.
  */
 import { useMemo, useState } from 'react'
-import { AlertTriangle, HardDrive, Plus, RefreshCw, Search, Server, Trash2 } from 'lucide-react'
+import { AlertTriangle, FileDiff, HardDrive, Plus, RefreshCw, Search, Server, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -51,8 +51,10 @@ import {
   useDeleteLocation,
   useLocations,
   useProbeLocation,
+  useSetLocationGitDiff,
   type LocationAuthInput,
 } from '../hooks/useLocations'
+import { Switch } from '@/components/ui/switch'
 import type { ExecutionLocation } from '../lib/types'
 import { locationDescription, locationLabel, locationStatusLabel } from '../lib/projectFormat'
 import { cn } from '@/lib/utils'
@@ -231,6 +233,11 @@ function LocationRow({
   const canDelete = location.kind !== 'local'
   const failed = (location.capabilities ?? []).filter((c) => c.status === 'failed')
   const Icon = location.kind === 'local' ? HardDrive : Server
+  const setGitDiff = useSetLocationGitDiff()
+  // Only SSH locations can run a remote git baseline. gitAvailable reflects the
+  // probe's detection; the toggle is the separate, human-granted opt-in.
+  const isRemote = location.kind === 'ssh'
+  const gitAvailable = (location.capabilities ?? []).some((c) => c.name === 'gitDiff' && c.status === 'passed')
 
   return (
     <div
@@ -270,6 +277,33 @@ function LocationRow({
         ))}
         <span className={cn('text-[0.75rem]', statusTextClass(location))}>{locationStatusLabel(location)}</span>
       </div>
+
+      {/* remote-diff opt-in — only for SSH locations, where running git on the
+          host is a deliberate, granted capability (default off) */}
+      {isRemote && (
+        <div className="flex shrink-0 items-center gap-2 pl-10 @min-[640px]:pl-0">
+          <FileDiff size={13} className="text-[var(--text-3)]" />
+          <Switch
+            checked={!!location.gitDiffEnabled}
+            disabled={setGitDiff.isPending}
+            onCheckedChange={(checked) => {
+              setGitDiff.mutate(
+                { locationId: location.id, gitDiffEnabled: checked },
+                {
+                  onSuccess: () => toast.success(checked ? 'Remote diff enabled' : 'Remote diff disabled'),
+                  onError: (err) => toast.error(`Could not update: ${err.message}`),
+                },
+              )
+            }}
+            aria-label={`Allow remote git diff on ${label}`}
+            title={
+              gitAvailable
+                ? 'Run a read-only git on this host to diff uncommitted changes'
+                : 'git was not detected on this host at the last probe'
+            }
+          />
+        </div>
+      )}
 
       {/* actions — hidden until hover where a pointer can hover; always shown on touch */}
       <div className="flex shrink-0 items-center gap-1 pl-10 transition-opacity focus-within:opacity-100 @min-[640px]:pl-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">

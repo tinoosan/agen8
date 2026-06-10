@@ -235,3 +235,74 @@ type projectCheckerSpy struct {
 func (p projectCheckerSpy) HasProjectsForLocation(context.Context, locationdomain.ID) (bool, error) {
 	return p.hasProjects, nil
 }
+
+func TestServiceUpdateGitDiffToggleKeepsLocationReady(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newLocationRepoSpy()
+	repo.records["ssh-1"] = locationdomain.Record{
+		ID:        "ssh-1",
+		Kind:      locationdomain.KindSSH,
+		Label:     "Remote",
+		Status:    locationdomain.StatusOnline,
+		Ready:     true,
+		Address:   locationdomain.Address{Host: "example.internal", Port: 22, Username: "dev"},
+		CreatedAt: fixedLocationTime,
+		UpdatedAt: fixedLocationTime,
+	}
+	svc := newServiceForTest(t, repo, &transportSpy{}, projectCheckerSpy{})
+
+	enabled := true
+	updated, err := svc.UpdateLocation(ctx, UpdateLocationInput{ID: "ssh-1", GitDiffEnabled: &enabled})
+	if err != nil {
+		t.Fatalf("UpdateLocation: %v", err)
+	}
+	// Granting the capability must NOT take an online location offline.
+	if !updated.GitDiffEnabled() {
+		t.Fatalf("git diff not enabled after grant")
+	}
+	if !updated.Ready() || updated.Status() != locationdomain.StatusOnline {
+		t.Fatalf("toggle forced a re-probe: ready=%v status=%v", updated.Ready(), updated.Status())
+	}
+
+	// Revoking flips it back, still without a re-probe.
+	disabled := false
+	revoked, err := svc.UpdateLocation(ctx, UpdateLocationInput{ID: "ssh-1", GitDiffEnabled: &disabled})
+	if err != nil {
+		t.Fatalf("UpdateLocation revoke: %v", err)
+	}
+	if revoked.GitDiffEnabled() {
+		t.Fatalf("git diff still enabled after revoke")
+	}
+	if !revoked.Ready() {
+		t.Fatalf("revoke forced a re-probe")
+	}
+}
+
+func TestServiceUpdateAddressStillForcesReprobe(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newLocationRepoSpy()
+	repo.records["ssh-1"] = locationdomain.Record{
+		ID:        "ssh-1",
+		Kind:      locationdomain.KindSSH,
+		Label:     "Remote",
+		Status:    locationdomain.StatusOnline,
+		Ready:     true,
+		Address:   locationdomain.Address{Host: "old.internal", Port: 22, Username: "dev"},
+		CreatedAt: fixedLocationTime,
+		UpdatedAt: fixedLocationTime,
+	}
+	svc := newServiceForTest(t, repo, &transportSpy{}, projectCheckerSpy{})
+
+	updated, err := svc.UpdateLocation(ctx, UpdateLocationInput{
+		ID:      "ssh-1",
+		Address: &locationdomain.Address{Host: "new.internal", Port: 22, Username: "dev"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateLocation: %v", err)
+	}
+	if updated.Ready() || updated.Status() != locationdomain.StatusNotReady {
+		t.Fatalf("address change must force re-probe: ready=%v status=%v", updated.Ready(), updated.Status())
+	}
+}

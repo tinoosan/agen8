@@ -22,6 +22,7 @@ type Record struct {
 	Ready          bool
 	CredentialRef  string
 	Probe          Probe
+	GitDiffEnabled bool
 	LastProbeError string
 	LastProbedAt   *time.Time
 	CreatedAt      time.Time

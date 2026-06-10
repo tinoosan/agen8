@@ -19,6 +19,7 @@ type LocationFileTransport interface {
 	CopyFile(ctx context.Context, location locationdomain.Location, source string, destination string) error
 	DeleteFile(ctx context.Context, location locationdomain.Location, path string) error
 	WriteFile(ctx context.Context, location locationdomain.Location, path string, contents []byte) error
+	GitShowBaseline(ctx context.Context, location locationdomain.Location, dir, name string) (filedomain.GitBaseline, error)
 }
 
 type LocationRepository struct {
@@ -114,6 +115,22 @@ func (r *LocationRepository) WriteFile(ctx context.Context, ref filedomain.Refer
 		return err
 	}
 	return r.transport.WriteFile(ctx, location, ref.Path, contents)
+}
+
+// GitBaseline runs the read-only remote git baseline for a file, but only if
+// the location has been granted the git-diff capability. The capability gate
+// lives here (default-off, human-granted) so the file service never reaches a
+// remote command without an explicit opt-in. Returns ErrGitBaselineNotPermitted
+// when the grant is absent.
+func (r *LocationRepository) GitBaseline(ctx context.Context, ref filedomain.Reference, dir, name string) (filedomain.GitBaseline, error) {
+	location, err := r.location(ctx, ref)
+	if err != nil {
+		return filedomain.GitBaseline{}, err
+	}
+	if !location.GitDiffEnabled() {
+		return filedomain.GitBaseline{}, filedomain.ErrGitBaselineNotPermitted
+	}
+	return r.transport.GitShowBaseline(ctx, location, dir, name)
 }
 
 func (r *LocationRepository) location(ctx context.Context, ref filedomain.Reference) (locationdomain.Location, error) {

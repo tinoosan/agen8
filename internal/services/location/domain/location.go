@@ -81,6 +81,7 @@ type Location struct {
 	ready          bool
 	credentialRef  string
 	probe          Probe
+	gitDiffEnabled bool
 	lastProbeError string
 	lastProbedAt   *time.Time
 	createdAt      time.Time
@@ -96,6 +97,7 @@ type NewInput struct {
 	Ready          bool
 	CredentialRef  string
 	Probe          Probe
+	GitDiffEnabled bool
 	LastProbeError string
 	LastProbedAt   *time.Time
 	CreatedAt      time.Time
@@ -148,6 +150,7 @@ func New(input NewInput) (Location, error) {
 		ready:          input.Ready,
 		credentialRef:  strings.TrimSpace(input.CredentialRef),
 		probe:          input.Probe,
+		gitDiffEnabled: input.GitDiffEnabled,
 		lastProbeError: strings.TrimSpace(input.LastProbeError),
 		lastProbedAt:   lastProbedAt,
 		createdAt:      createdAt.UTC(),
@@ -168,6 +171,20 @@ func (l Location) Ready() bool          { return l.ready }
 func (l Location) CreatedAt() time.Time { return l.createdAt }
 func (l Location) UpdatedAt() time.Time { return l.updatedAt }
 
+// GitDiffEnabled reports whether the human has granted this location permission
+// to run the read-only remote git baseline command. Default false: a location
+// is file-only until explicitly opted in.
+func (l Location) GitDiffEnabled() bool { return l.gitDiffEnabled }
+
+// WithGitDiffEnabled returns a copy with the git-diff capability set. Used by
+// the update path to grant or revoke the opt-in without rebuilding the record.
+func (l Location) WithGitDiffEnabled(enabled bool, now time.Time) Location {
+	next := l
+	next.gitDiffEnabled = enabled
+	next.updatedAt = now.UTC()
+	return next
+}
+
 func (l Location) Record() Record {
 	return Record{
 		ID:             l.id,
@@ -178,6 +195,7 @@ func (l Location) Record() Record {
 		Ready:          l.ready,
 		CredentialRef:  l.credentialRef,
 		Probe:          l.probe,
+		GitDiffEnabled: l.gitDiffEnabled,
 		LastProbeError: l.lastProbeError,
 		LastProbedAt:   l.lastProbedAt,
 		CreatedAt:      l.createdAt,

@@ -60,10 +60,11 @@ type LocationCreateParams struct {
 }
 
 type LocationUpdateParams struct {
-	LocationID string               `json:"locationId"`
-	Label      string               `json:"label,omitempty"`
-	Address    *LocationAddressView `json:"address,omitempty"`
-	Auth       *LocationAuthView    `json:"auth,omitempty"`
+	LocationID     string               `json:"locationId"`
+	Label          string               `json:"label,omitempty"`
+	Address        *LocationAddressView `json:"address,omitempty"`
+	Auth           *LocationAuthView    `json:"auth,omitempty"`
+	GitDiffEnabled *bool                `json:"gitDiffEnabled,omitempty"`
 }
 
 type LocationDeleteParams struct {
@@ -75,17 +76,18 @@ type LocationProbeParams struct {
 }
 
 type LocationView struct {
-	ID           string               `json:"id"`
-	Kind         string               `json:"kind"`
-	Label        string               `json:"label"`
-	Address      *LocationAddressView `json:"address,omitempty"`
-	Status       string               `json:"status"`
-	Ready        bool                 `json:"ready"`
-	Capabilities []CapabilityView     `json:"capabilities,omitempty"`
-	Auth         LocationAuthView     `json:"auth,omitempty"`
-	LastProbe    *ProbeView           `json:"lastProbe,omitempty"`
-	CreatedAt    *time.Time           `json:"createdAt,omitempty"`
-	UpdatedAt    *time.Time           `json:"updatedAt,omitempty"`
+	ID             string               `json:"id"`
+	Kind           string               `json:"kind"`
+	Label          string               `json:"label"`
+	Address        *LocationAddressView `json:"address,omitempty"`
+	Status         string               `json:"status"`
+	Ready          bool                 `json:"ready"`
+	Capabilities   []CapabilityView     `json:"capabilities,omitempty"`
+	GitDiffEnabled bool                 `json:"gitDiffEnabled"`
+	Auth           LocationAuthView     `json:"auth,omitempty"`
+	LastProbe      *ProbeView           `json:"lastProbe,omitempty"`
+	CreatedAt      *time.Time           `json:"createdAt,omitempty"`
+	UpdatedAt      *time.Time           `json:"updatedAt,omitempty"`
 }
 
 type LocationAddressView struct {
@@ -140,13 +142,14 @@ func NewLocationView(location locationdomain.Location) LocationView {
 		addressPtr = &address
 	}
 	view := LocationView{
-		ID:           string(record.ID),
-		Kind:         string(record.Kind),
-		Label:        record.Label,
-		Address:      addressPtr,
-		Status:       string(record.Status),
-		Ready:        record.Ready,
-		Capabilities: capabilityViews(record.Probe),
+		ID:             string(record.ID),
+		Kind:           string(record.Kind),
+		Label:          record.Label,
+		Address:        addressPtr,
+		Status:         string(record.Status),
+		Ready:          record.Ready,
+		Capabilities:   capabilityViews(record.Probe),
+		GitDiffEnabled: record.GitDiffEnabled,
 		Auth: LocationAuthView{
 			CredentialID:  record.CredentialRef,
 			HasCredential: record.CredentialRef != "",
@@ -168,6 +171,7 @@ func capabilityViews(probe locationdomain.Probe) []CapabilityView {
 	return []CapabilityView{
 		{Name: "reachable", Status: boolStatus(probe.Reachable)},
 		{Name: "fileBrowsing", Status: boolStatus(probe.FileBrowsing)},
+		{Name: "gitDiff", Status: boolStatus(probe.Exec)},
 	}
 }
 

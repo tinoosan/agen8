@@ -59,6 +59,8 @@ export interface ExecutionLocation {
   status: LocationStatus;
   ready: boolean;
   capabilities?: LocationCapability[];
+  /** Human-granted opt-in to run the read-only remote git baseline for diffs. */
+  gitDiffEnabled?: boolean;
   auth?: {
     mode?: string;
     credentialId?: string;

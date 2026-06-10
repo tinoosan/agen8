@@ -86,10 +86,11 @@ func (h *Handler) LocationUpdate(ctx context.Context, p LocationUpdateParams) (L
 		address = &converted
 	}
 	location, err := h.service.UpdateLocation(ctx, locationapp.UpdateLocationInput{
-		ID:            id,
-		Label:         strings.TrimSpace(p.Label),
-		Address:       address,
-		CredentialRef: credentialRefPtr(p.Auth),
+		ID:             id,
+		Label:          strings.TrimSpace(p.Label),
+		Address:        address,
+		CredentialRef:  credentialRefPtr(p.Auth),
+		GitDiffEnabled: p.GitDiffEnabled,
 	})
 	if err != nil {
 		return LocationResult{}, internalError("update location", err)

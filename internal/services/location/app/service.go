@@ -87,10 +87,11 @@ type CreateLocationInput struct {
 }
 
 type UpdateLocationInput struct {
-	ID            locationdomain.ID
-	Label         string
-	Address       *locationdomain.Address
-	CredentialRef *string
+	ID             locationdomain.ID
+	Label          string
+	Address        *locationdomain.Address
+	CredentialRef  *string
+	GitDiffEnabled *bool
 }
 
 func (s *Service) EnsureLocal(ctx context.Context) (locationdomain.Location, error) {
@@ -205,14 +206,25 @@ func (s *Service) UpdateLocation(ctx context.Context, input UpdateLocationInput)
 	if strings.TrimSpace(input.Label) != "" {
 		record.Label = strings.TrimSpace(input.Label)
 	}
+	// Only address/credential changes invalidate a probe and force the location
+	// back to not-ready. A label edit or a git-diff capability toggle leaves the
+	// connection untouched, so don't take an online location offline for them.
+	connectionChanged := false
 	if input.Address != nil {
 		record.Address = *input.Address
+		connectionChanged = true
 	}
 	if input.CredentialRef != nil {
 		record.CredentialRef = strings.TrimSpace(*input.CredentialRef)
+		connectionChanged = true
 	}
-	record.Status = locationdomain.StatusNotReady
-	record.Ready = false
+	if input.GitDiffEnabled != nil {
+		record.GitDiffEnabled = *input.GitDiffEnabled
+	}
+	if connectionChanged {
+		record.Status = locationdomain.StatusNotReady
+		record.Ready = false
+	}
 	record.UpdatedAt = s.now()
 	saved, err := s.locations.Save(ctx, record)
 	if err != nil {
