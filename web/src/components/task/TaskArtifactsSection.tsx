@@ -10,11 +10,42 @@ import type { Task } from '../../lib/types'
 
 const FILE_REF_PREFIX = 'file:'
 
-/** Extracts the vpath from a file:<vpath> artifact ref, or null for any other ref shape. */
+/**
+ * Resolves an artifact ref to an openable file vpath, or null when it isn't a
+ * file. Handles three shapes:
+ *  - file:<vpath>            explicit ref (what attach mints)
+ *  - /project/.. /workspace/..   already a vpath
+ *  - bare project-relative path  what agents store for files they edited
+ *    (e.g. internal/services/file/app/service.go) -> /project/<rel>
+ * Scheme refs (commit:, http:, …) and prose (anything with whitespace) stay
+ * non-file so they keep their plain rendering.
+ */
 export function fileArtifactVPath(ref: string): string | null {
-  if (!ref.startsWith(FILE_REF_PREFIX)) return null
-  const vpath = ref.slice(FILE_REF_PREFIX.length).trim()
-  return vpath ? vpath : null
+  const trimmed = ref.trim()
+  if (!trimmed) return null
+  // Agents commonly store "path (note)" — the path then a human note. Resolve
+  // off the first whitespace-delimited token; the rest is shown as context.
+  const token = trimmed.split(/\s/)[0]
+  if (token.startsWith(FILE_REF_PREFIX)) {
+    const vpath = token.slice(FILE_REF_PREFIX.length).trim()
+    return vpath || null
+  }
+  // Already a project/workspace vpath.
+  if (token.startsWith('/project/') || token.startsWith('/workspace/')) return token
+  // Any other scheme ref (commit:, http:, agen8:, …) is not a file.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(token)) return null
+  // A bare relative path: has a directory separator, or a real (alpha-led) file
+  // extension so "v2.0" / "1.5" prose tokens don't get mistaken for files.
+  const looksLikePath = token.includes('/') || /\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(token)
+  if (!looksLikePath) return null
+  return '/project/' + token.replace(/^\.?\/+/, '')
+}
+
+/** The human note an agent appended after the path, e.g. "(reason …)" — or '' . */
+export function artifactNote(ref: string): string {
+  const trimmed = ref.trim()
+  const firstSpace = trimmed.search(/\s/)
+  return firstSpace === -1 ? '' : trimmed.slice(firstSpace).trim()
 }
 
 /** Bare file name for the attachment path: no separators, no traversal. */
@@ -100,33 +131,31 @@ export function TaskArtifactsSection({ task, projectId, onOpenArtifact }: TaskAr
       <div style={{ borderTop: artifacts.length > 0 ? '1px solid var(--border)' : 'none' }}>
         {artifacts.map((ref, i) => {
           const vpath = fileArtifactVPath(ref)
-          return (
-            <div
+          const note = artifactNote(ref)
+          const borderBottom = i < artifacts.length - 1 ? '1px solid var(--border)' : 'none'
+          return vpath ? (
+            // The button IS the row, so the whole comfortable-height area is the
+            // tap target — a finger on touch can't miss it (the old layout left
+            // the padding on a non-clickable wrapper, ~16px button, untappable).
+            <button
               key={i}
-              style={{
-                paddingTop: 8,
-                paddingBottom: 8,
-                borderBottom: i < artifacts.length - 1 ? '1px solid var(--border)' : 'none',
-              }}
+              type="button"
+              onClick={() => onOpenArtifact(vpath)}
+              className="group flex w-full items-start gap-1.5 border-none cursor-pointer bg-transparent text-left"
+              style={{ paddingTop: 8, paddingBottom: 8, borderBottom }}
+              aria-label={`View ${basename(vpath)}`}
             >
-              {vpath ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenArtifact(vpath)}
-                  className="group inline-flex items-start gap-1.5 border-none cursor-pointer bg-transparent p-0 text-left"
-                  aria-label={`View ${basename(vpath)}`}
-                >
-                  <FileText size={13} className="shrink-0 mt-px text-[var(--text-3)] group-hover:text-[var(--text-1)] transition-colors" />
-                  <span style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>
-                    <span className="text-[var(--accent)] group-hover:underline underline-offset-2" style={{ fontFamily: 'monospace' }}>
-                      {basename(vpath)}
-                    </span>
-                    <span className="text-[var(--text-3)]" style={{ fontFamily: 'monospace' }}> {vpath}</span>
-                  </span>
-                </button>
-              ) : (
-                <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{ref}</span>
-              )}
+              <FileText size={13} className="shrink-0 mt-px text-[var(--text-3)] group-hover:text-[var(--text-1)] transition-colors" />
+              <span style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>
+                <span className="text-[var(--accent)] group-hover:underline underline-offset-2" style={{ fontFamily: 'monospace' }}>
+                  {basename(vpath)}
+                </span>
+                <span className="text-[var(--text-3)]" style={{ fontFamily: 'monospace' }}> {note || vpath}</span>
+              </span>
+            </button>
+          ) : (
+            <div key={i} style={{ paddingTop: 8, paddingBottom: 8, borderBottom }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{ref}</span>
             </div>
           )
         })}

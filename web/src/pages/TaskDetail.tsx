@@ -294,8 +294,8 @@ export default function TaskDetail() {
   const hasMembers = activeMembers.length > 0
 
   return (
-    <div ref={splitRowRef} className="flex h-full min-h-0">
-    <div className="flex flex-col h-full overflow-y-auto flex-1 min-w-0">
+    <div ref={splitRowRef} className="flex h-full min-h-0 overflow-hidden">
+    <div className="flex flex-col h-full overflow-y-auto overflow-x-hidden flex-1 min-w-0">
       {/* Sticky header */}
       <DetailHeader backTo={tasksPanelLink(projectId)} backLabel="Tasks">
           <div className="flex flex-wrap items-start gap-3">
@@ -324,12 +324,13 @@ export default function TaskDetail() {
                   }}
                   placeholder="e.g. Wire up the export endpoint"
                   autoFocus
-                  className="w-full min-w-0 h-auto py-1 text-[1.75rem] font-bold tracking-[-0.56px] leading-[1.14]"
+                  className="w-full min-w-0 h-auto py-1 font-bold tracking-[-0.56px] leading-[1.14]"
+                  style={{ fontSize: 'clamp(1.25rem, 5vw, 1.75rem)' }}
                 />
               ) : (
                 <h1
                   className="m-0 text-[var(--text-1)]"
-                  style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.56px', lineHeight: 1.14 }}
+                  style={{ fontSize: 'clamp(1.25rem, 5vw, 1.75rem)', fontWeight: 700, letterSpacing: '-0.56px', lineHeight: 1.14 }}
                 >
                   {displayTitle}
                 </h1>

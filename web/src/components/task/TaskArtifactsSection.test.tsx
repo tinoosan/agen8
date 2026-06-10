@@ -18,7 +18,7 @@ vi.mock('sonner', () => ({
   },
 }))
 
-const { TaskArtifactsSection, fileArtifactVPath } = await import('./TaskArtifactsSection')
+const { TaskArtifactsSection, fileArtifactVPath, artifactNote } = await import('./TaskArtifactsSection')
 
 function task(artifacts: string[], status = 'in_review'): Task {
   return { id: 'task-1', description: 'desc', status, artifacts } as Task
@@ -53,13 +53,41 @@ beforeEach(() => {
 })
 
 describe('fileArtifactVPath', () => {
-  it('extracts the vpath from file: refs and rejects everything else', () => {
+  it('extracts the vpath from file: refs', () => {
     expect(fileArtifactVPath('file:/project/.agen8/attachments/task-1/shot.png'))
       .toBe('/project/.agen8/attachments/task-1/shot.png')
-    expect(fileArtifactVPath('commit:abc123')).toBeNull()
-    expect(fileArtifactVPath('plain prose artifact')).toBeNull()
     expect(fileArtifactVPath('file:')).toBeNull()
     expect(fileArtifactVPath('file:   ')).toBeNull()
+  })
+
+  it('passes through strings that are already vpaths', () => {
+    expect(fileArtifactVPath('/project/web/src/App.tsx')).toBe('/project/web/src/App.tsx')
+    expect(fileArtifactVPath('/workspace/notes.md')).toBe('/workspace/notes.md')
+  })
+
+  it('resolves bare agent relative paths to /project vpaths', () => {
+    expect(fileArtifactVPath('internal/services/file/app/service.go'))
+      .toBe('/project/internal/services/file/app/service.go')
+    expect(fileArtifactVPath('web/src/App.tsx')).toBe('/project/web/src/App.tsx')
+    expect(fileArtifactVPath('./web/src/x.ts')).toBe('/project/web/src/x.ts')
+    expect(fileArtifactVPath('README.md')).toBe('/project/README.md') // root file via extension
+  })
+
+  it('resolves the leading path token from a "path (note)" artifact', () => {
+    expect(fileArtifactVPath('internal/services/mission/app/events.go (keyResultProjectID + projectId in KR events)'))
+      .toBe('/project/internal/services/mission/app/events.go')
+    expect(artifactNote('internal/services/mission/app/events.go (keyResultProjectID in KR events)'))
+      .toBe('(keyResultProjectID in KR events)')
+  })
+
+  it('rejects scheme refs and prose', () => {
+    expect(fileArtifactVPath('commit:abc123')).toBeNull()
+    expect(fileArtifactVPath('https://example.com/x')).toBeNull()
+    expect(fileArtifactVPath('plain prose artifact')).toBeNull()
+    expect(fileArtifactVPath('shipped the thing')).toBeNull()
+    expect(fileArtifactVPath('Makefile')).toBeNull() // no slash, no extension -> not resolved
+    expect(fileArtifactVPath('commit ecfbe914 fix(web): restore margin')).toBeNull() // prose starting with a word
+    expect(fileArtifactVPath('decision dec-97f32d57 made during review')).toBeNull()
   })
 })
 
