@@ -32,20 +32,23 @@ type taskEntry struct {
 	Artifacts          []string                         `json:"artifacts,omitempty"`
 }
 
-// leanTaskEntry is what mutation actions and list rows return: enough to drive
-// the next action (id, status, statusReason, the refs and member ids) without
-// re-sending the description, acceptance criteria, summary, artifacts, or
-// metadata the caller just supplied or can fetch via `get`.
+// taskAck is the mutation response — just what changed. The caller already holds
+// the title, refs, kind, and member ids (it created the task or is acting on one
+// it's working), so a mutation only needs to confirm the new status (and any
+// status reason). Detail is a `get` away.
+type taskAck struct {
+	ID           string `json:"id"`
+	Status       string `json:"status,omitempty"`
+	StatusReason string `json:"statusReason,omitempty"`
+}
+
+// leanTaskEntry is a list/scan row: enough to recognize and triage a task
+// without fetching each one. Mutations use taskAck; get returns the full entry.
 type leanTaskEntry struct {
 	ID                 string `json:"id"`
 	Status             string `json:"status,omitempty"`
-	StatusReason       string `json:"statusReason,omitempty"`
 	Title              string `json:"title,omitempty"`
 	AssignedToMemberID string `json:"assignedToMemberId,omitempty"`
-	ClaimedByMemberID  string `json:"claimedByMemberId,omitempty"`
-	KeyResultRef       string `json:"keyResultRef,omitempty"`
-	MissionRef         string `json:"missionRef,omitempty"`
-	TaskKind           string `json:"taskKind,omitempty"`
 }
 
 func encodeTaskResponse(action string, entry any, extra map[string]any) (Result, error) {
@@ -73,17 +76,17 @@ func (h Handler) fullTaskResult(action string, task taskdomain.Task, err error) 
 	return encodeTaskResponse(action, toTaskEntry(task), nil)
 }
 
-// leanTaskResult returns the lean entry — used by every mutation action so the
-// model isn't re-sent the full task it just acted on.
+// leanTaskResult returns the mutation ack — used by every mutation action so the
+// model isn't re-sent the task it just acted on.
 func (h Handler) leanTaskResult(action string, task taskdomain.Task, err error, extra map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return encodeTaskResponse(action, toLeanTaskEntry(task), extra)
+	return encodeTaskResponse(action, toTaskAck(task), extra)
 }
 
 // leanTaskResultForActor adds the actor-specific nextAction/guidance hints, then
-// returns the lean entry (create / submit / reassign).
+// returns the mutation ack (create / submit / reassign).
 func (h Handler) leanTaskResultForActor(action string, task taskdomain.Task, err error, extra map[string]any, actor actor) (Result, error) {
 	if err != nil {
 		return Result{}, err
@@ -145,17 +148,20 @@ func (h Handler) listResult(tasks []taskdomain.Task, err error, input requestInp
 	return Result{Text: text, Structured: structured}, nil
 }
 
+func toTaskAck(task taskdomain.Task) taskAck {
+	return taskAck{
+		ID:           strings.TrimSpace(string(task.ID)),
+		Status:       strings.TrimSpace(string(task.Status)),
+		StatusReason: strings.TrimSpace(task.Error),
+	}
+}
+
 func toLeanTaskEntry(task taskdomain.Task) leanTaskEntry {
 	return leanTaskEntry{
 		ID:                 strings.TrimSpace(string(task.ID)),
 		Status:             strings.TrimSpace(string(task.Status)),
-		StatusReason:       strings.TrimSpace(task.Error),
 		Title:              strings.TrimSpace(task.Title),
 		AssignedToMemberID: strings.TrimSpace(string(task.AssignedTo)),
-		ClaimedByMemberID:  strings.TrimSpace(string(task.ClaimedByMemberID)),
-		KeyResultRef:       strings.TrimSpace(task.KeyResultRef),
-		MissionRef:         missionRefFromTaskMetadata(task.Metadata),
-		TaskKind:           strings.TrimSpace(task.TaskKind),
 	}
 }
 

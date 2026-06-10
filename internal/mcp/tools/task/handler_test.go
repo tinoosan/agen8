@@ -244,18 +244,21 @@ func TestHandleCreateAssignedToWorkerDoesNotReturnClaimGuidance(t *testing.T) {
 	}
 }
 
-func TestHandleCreateOmitsCardEraLabels(t *testing.T) {
+func TestHandleCreateReturnsUltraLeanAck(t *testing.T) {
 	svc := &stubService{}
 	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1"}`))
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	// The model routes by id; the card-era *Label fields are no longer returned.
-	if strings.Contains(result.Text, `Label":`) {
-		t.Fatalf("response should not carry member labels: %s", result.Text)
+	// A mutation ack is just {id, status} — the caller already holds everything
+	// else. No assignee echo, no labels, no title/refs/kind, no description.
+	if !strings.Contains(result.Text, `"id":"task-1"`) || !strings.Contains(result.Text, `"status":"pending"`) {
+		t.Fatalf("create ack missing id/status: %s", result.Text)
 	}
-	if !strings.Contains(result.Text, `"assignedToMemberId":"worker-1"`) {
-		t.Fatalf("response missing assignedToMemberId: %s", result.Text)
+	for _, unwanted := range []string{`"assignee"`, `Label`, `"assignedToMemberId"`, `"title"`, `"description"`, `"keyResultRef"`} {
+		if strings.Contains(result.Text, unwanted) {
+			t.Fatalf("create ack should not contain %q: %s", unwanted, result.Text)
+		}
 	}
 }
 

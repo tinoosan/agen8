@@ -1850,9 +1850,8 @@ func createTaskOverWireForSession(t *testing.T, handler http.Handler, token, ses
 	text := wireToolSuccessText(t, postMCPToolCall(t, handler, token, body), "task.create")
 	var created struct {
 		Task struct {
-			ID                 string `json:"id"`
-			Status             string `json:"status"`
-			AssignedToMemberID string `json:"assignedToMemberId"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
 		} `json:"task"`
 	}
 	if err := json.Unmarshal([]byte(text), &created); err != nil {
@@ -1864,9 +1863,8 @@ func createTaskOverWireForSession(t *testing.T, handler http.Handler, token, ses
 	if created.Task.Status != "pending" {
 		t.Fatalf("new task status=%q want pending", created.Task.Status)
 	}
-	if created.Task.AssignedToMemberID != assigneeMemberID {
-		t.Fatalf("new task assignedTo=%q want %q", created.Task.AssignedToMemberID, assigneeMemberID)
-	}
+	// The create ack is ultra-lean (id+status); assignee correctness is verified
+	// via task.get in the tests that care (the binding gate reads claimedBy back).
 	return created.Task.ID
 }
 
@@ -2014,8 +2012,7 @@ func TestMCPWireBindingGateOnTaskClaim(t *testing.T) {
 	okText := wireToolSuccessText(t, postMCPToolCall(t, handler, apiKey, claimTaskBodyForSession(claimantSession, taskID)), "task.claim by bound member")
 	var claimed struct {
 		Task struct {
-			Status            string `json:"status"`
-			ClaimedByMemberID string `json:"claimedByMemberId"`
+			Status string `json:"status"`
 		} `json:"task"`
 	}
 	if err := json.Unmarshal([]byte(okText), &claimed); err != nil {
@@ -2024,7 +2021,18 @@ func TestMCPWireBindingGateOnTaskClaim(t *testing.T) {
 	if claimed.Task.Status != "active" {
 		t.Fatalf("claimed task status=%q want active", claimed.Task.Status)
 	}
-	if claimed.Task.ClaimedByMemberID != claimant {
-		t.Fatalf("claimed task claimedBy=%q want %q (the bound member must thread through as the actor)", claimed.Task.ClaimedByMemberID, claimant)
+	// The claim ack is lean (status only). Read the task back to prove the bound
+	// member threaded through as the actor: claimedBy == the claimant.
+	afterClaim := wireToolSuccessText(t, postMCPToolCall(t, handler, apiKey, getTaskBodyForSession(claimantSession, taskID)), "task.get after successful claim")
+	var afterClaimTask struct {
+		Task struct {
+			ClaimedByMemberID string `json:"claimedByMemberId"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(afterClaim), &afterClaimTask); err != nil {
+		t.Fatalf("decode task.get content %q: %v", afterClaim, err)
+	}
+	if afterClaimTask.Task.ClaimedByMemberID != claimant {
+		t.Fatalf("claimed task claimedBy=%q want %q (the bound member must thread through as the actor)", afterClaimTask.Task.ClaimedByMemberID, claimant)
 	}
 }
