@@ -5132,3 +5132,23 @@ button[disabled] {
   background: color-mix(in oklab, var(--red) 7%, transparent);
   padding: 12px;
 }
+
+/* Touch + Apple Pencil: comfortable tap targets on coarse pointers only.
+   Capability-based (pointer: coarse) — fine-pointer (mouse) UIs are completely
+   unchanged. Helps any touch/pen device, not just iPad. */
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="option"],
+  [role="tab"],
+  summary {
+    min-height: 2.25rem;
+  }
+  /* Icon-led buttons get a square-ish minimum so a fingertip/pencil lands. */
+  button:has(> svg),
+  [role="button"]:has(> svg) {
+    min-width: 2.25rem;
+  }
+}
