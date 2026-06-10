@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRoute, useLocation } from 'wouter'
 import { toast } from 'sonner'
 import {
@@ -117,16 +117,37 @@ export default function TaskDetail() {
     const stored = typeof window !== 'undefined' ? Number(window.localStorage.getItem('task-artifact-panel-width')) : NaN
     return Number.isFinite(stored) && stored > 0 ? stored : 560
   })
+  // The flex row holding the task content + the viewer panel. Measured so the
+  // panel's max width can leave a minimum task column (the sidebar is outside
+  // this row, so window.innerWidth would over-estimate the available space).
+  const splitRowRef = useRef<HTMLDivElement | null>(null)
+  const MIN_TASK_WIDTH = 375 // mobile floor: the task content never goes narrower
+  const MIN_PANEL_WIDTH = 360
+  const RESIZE_HANDLE_WIDTH = 4 // the w-1 handle sits between content and panel
+  const clampPanelWidth = (width: number) => {
+    const rowWidth = splitRowRef.current?.getBoundingClientRect().width ?? window.innerWidth
+    const max = Math.max(MIN_PANEL_WIDTH, rowWidth - MIN_TASK_WIDTH - RESIZE_HANDLE_WIDTH)
+    return Math.min(Math.max(width, MIN_PANEL_WIDTH), max)
+  }
   const resizePanel = (deltaX: number) => {
     setPanelWidth((current) => {
       // Handle is on the panel's LEFT edge: dragging left (negative delta)
-      // widens the panel. Clamp to a usable range.
-      const max = typeof window !== 'undefined' ? window.innerWidth * 0.75 : 1100
-      const next = Math.min(Math.max(current - deltaX, 360), max)
+      // widens the panel. Cap so the task column keeps at least MIN_TASK_WIDTH.
+      const next = clampPanelWidth(current - deltaX)
       window.localStorage.setItem('task-artifact-panel-width', String(Math.round(next)))
       return next
     })
   }
+  // Re-clamp when the available row width changes (mount, viewport resize) so a
+  // width saved on a wide screen can't crush the task column on a narrow one.
+  useEffect(() => {
+    if (viewerAsSheet || !openArtifactVPath) return
+    const reclamp = () => setPanelWidth((w) => clampPanelWidth(w))
+    reclamp()
+    window.addEventListener('resize', reclamp)
+    return () => window.removeEventListener('resize', reclamp)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewerAsSheet, openArtifactVPath])
   const updateTask = useUpdateTask()
   const assignTask = useAssignTask()
 
@@ -273,7 +294,7 @@ export default function TaskDetail() {
   const hasMembers = activeMembers.length > 0
 
   return (
-    <div className="flex h-full min-h-0">
+    <div ref={splitRowRef} className="flex h-full min-h-0">
     <div className="flex flex-col h-full overflow-y-auto flex-1 min-w-0">
       {/* Sticky header */}
       <DetailHeader backTo={tasksPanelLink(projectId)} backLabel="Tasks">
