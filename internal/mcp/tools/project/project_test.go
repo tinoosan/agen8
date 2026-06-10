@@ -406,11 +406,13 @@ func TestHandleCreateMemberUsesSessionActorAndRegistrar(t *testing.T) {
 	if structured["action"] != "member_create" {
 		t.Fatalf("action=%v want member_create", structured["action"])
 	}
-	memberResult, ok := structured["member"].(memberEntry)
+	// member_create returns a lean ack: the model supplied the display name, so
+	// it only needs the new id (and lifecycle state) back.
+	memberResult, ok := structured["member"].(memberAck)
 	if !ok {
 		t.Fatalf("member payload type %T", structured["member"])
 	}
-	if memberResult.ID != "member-worker" || memberResult.DisplayName != "Backend lead" {
+	if memberResult.ID != "member-worker" {
 		t.Fatalf("member result=%+v", memberResult)
 	}
 }

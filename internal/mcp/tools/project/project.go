@@ -265,9 +265,9 @@ func (h Handler) memberList(ctx context.Context, call CallContext, projectID str
 	if err != nil {
 		return Result{}, fmt.Errorf("project: list members: %w", err)
 	}
-	entries := make([]memberEntry, 0, len(members))
+	entries := make([]memberRow, 0, len(members))
 	for _, item := range members {
-		entries = append(entries, toMemberEntry(item))
+		entries = append(entries, toMemberRow(item))
 	}
 	structured := map[string]any{
 		"ok":        true,
@@ -331,7 +331,7 @@ func (h Handler) createMember(ctx context.Context, call CallContext, projectID s
 		"tool":              Name,
 		"action":            "member_create",
 		"projectId":         projectID,
-		"member":            toMemberEntry(result.Member),
+		"member":            toMemberAck(result.Member),
 		"grantedMemberType": strings.TrimSpace(result.GrantedMemberType),
 	}
 	text, err := encodeText(structured)
@@ -353,7 +353,7 @@ func (h Handler) memberUpdate(ctx context.Context, call CallContext, input reque
 		"ok":     true,
 		"tool":   Name,
 		"action": "member_update",
-		"member": toMemberEntry(updated),
+		"member": toMemberAck(updated),
 	}
 	text, err := encodeText(structured)
 	if err != nil {
@@ -374,7 +374,7 @@ func (h Handler) memberRemove(ctx context.Context, call CallContext, memberID st
 		"ok":     true,
 		"tool":   Name,
 		"action": "member_remove",
-		"member": toMemberEntry(removed),
+		"member": toMemberAck(removed),
 	}
 	text, err := encodeText(structured)
 	if err != nil {
@@ -604,6 +604,42 @@ func toMemberEntry(item member.Record) memberEntry {
 		RegisteredAt:     item.RegisteredAt,
 		UpdatedAt:        item.UpdatedAt,
 		LastSeenAt:       item.LastSeenAt,
+	}
+}
+
+// memberAck is the member-mutation response (create/update/remove): the model
+// supplied the change, so it only needs the id and resulting lifecycle state.
+type memberAck struct {
+	ID             string `json:"id"`
+	LifecycleState string `json:"lifecycleState,omitempty"`
+}
+
+func toMemberAck(item member.Record) memberAck {
+	return memberAck{
+		ID:             strings.TrimSpace(string(item.ID)),
+		LifecycleState: strings.TrimSpace(item.LifecycleState),
+	}
+}
+
+// memberRow is a member_list scan row — enough to recognize and route to a
+// member; full detail (session refs, channel, timestamps) is a member_get away.
+// harnessKind is kept intentionally: it's auto-determined server-side and drives
+// the roster + harness leaderboard (model/effort stay hidden by design).
+type memberRow struct {
+	ID             string `json:"id"`
+	DisplayName    string `json:"displayName,omitempty"`
+	MemberType     string `json:"memberType,omitempty"`
+	HarnessKind    string `json:"harnessKind,omitempty"`
+	LifecycleState string `json:"lifecycleState,omitempty"`
+}
+
+func toMemberRow(item member.Record) memberRow {
+	return memberRow{
+		ID:             strings.TrimSpace(string(item.ID)),
+		DisplayName:    strings.TrimSpace(item.DisplayName),
+		MemberType:     strings.TrimSpace(item.MemberType),
+		HarnessKind:    strings.TrimSpace(item.HarnessKind),
+		LifecycleState: strings.TrimSpace(item.LifecycleState),
 	}
 }
 
