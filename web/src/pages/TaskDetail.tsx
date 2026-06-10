@@ -31,7 +31,6 @@ import {
   parseRetryTask,
 } from './boardHelpers'
 import { tasksPanelLink, missionDetailLink, decisionsLink, strategyMapLink, mapNodeId } from '../lib/routing'
-import { CollapsibleSection } from '../components/strategy/CollapsibleSection'
 import { StatItem } from '../components/detail/StatItem'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
@@ -40,6 +39,7 @@ import { RelatedList, type RelatedItem } from '../components/detail/RelatedList'
 import { CancelTaskDialog } from '../components/task/CancelTaskDialog'
 import { AcceptanceCriteriaList } from '../components/task/AcceptanceCriteriaList'
 import { LatestReviewSection } from '../components/task/LatestReviewSection'
+import { TaskArtifactsSection } from '../components/task/TaskArtifactsSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -603,28 +603,7 @@ export default function TaskDetail() {
         <RelatedList items={related} storageKey="task-detail-related" />
 
         {/* Artifacts */}
-        {task.artifacts && task.artifacts.length > 0 && (
-          <CollapsibleSection
-            storageKey="task-detail-artifacts"
-            defaultOpen={false}
-            label={<>Artifacts <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>({task.artifacts.length})</span></>}
-          >
-            <div style={{ borderTop: '1px solid var(--border)' }}>
-              {task.artifacts.map((a, i) => (
-                <div
-                  key={i}
-                  style={{
-                    paddingTop: 8,
-                    paddingBottom: 8,
-                    borderBottom: i < task.artifacts!.length - 1 ? '1px solid var(--border)' : 'none',
-                  }}
-                >
-                  <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{a}</span>
-                </div>
-              ))}
-            </div>
-          </CollapsibleSection>
-        )}
+        <TaskArtifactsSection task={task} projectId={projectId} />
       </div>
 
       <CancelTaskDialog task={task} open={cancelOpen} onOpenChange={setCancelOpen} />
