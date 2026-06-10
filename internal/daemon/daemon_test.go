@@ -1708,7 +1708,7 @@ func TestMCPWireHappyPathForBoundMemberVerb(t *testing.T) {
 	// Register the member whose session_id the verb will carry. Registration creates
 	// the project from project_root, so the resolved session has a bound project too.
 	const sessionID = "kr3-happy-session"
-	memberID := registerSessionMemberForTest(t, handler, apiKey, projectRoot, sessionID, "KR3 Happy Worker")
+	registerSessionMemberForTest(t, handler, apiKey, projectRoot, sessionID, "KR3 Happy Worker")
 
 	// Drive decision.log end to end over the wire, carrying only arguments.session_id.
 	body := decisionLogBodyForSession(sessionID, "KR3 wire-path proof", "Driven end to end through /mcp to prove the pipeline composes for a bound-member verb.")
@@ -1741,24 +1741,23 @@ func TestMCPWireHappyPathForBoundMemberVerb(t *testing.T) {
 		t.Fatalf("decision.log missing result content: %s", rec.Body.String())
 	}
 
-	// The content text is the decision tool's structured JSON. A server-generated dec-
-	// id proves the decision service ran; memberId == the registered member proves the
-	// resolved member was threaded through CallContext as the actor. decision.log
-	// hard-requires an actor, so neither field could be satisfied by a member-less call.
+	// The content text is the decision tool's (lean) structured JSON: just the new
+	// decision id. decision.log hard-requires an actor, so a server-generated dec- id
+	// can ONLY exist if arguments.session_id resolved to the registered member AND that
+	// member threaded through CallContext as the actor — a member-less call returns
+	// "member_id is required" with no id. With a single registered member here, the id
+	// alone proves the end-to-end actor binding. (Exact session->own-member resolution
+	// under contention is covered by TestConcurrentSessionsResolveToOwnMember.)
 	var logged struct {
 		Decision struct {
-			ID       string `json:"id"`
-			MemberID string `json:"memberId"`
+			ID string `json:"id"`
 		} `json:"decision"`
 	}
 	if err := json.Unmarshal([]byte(resp.Result.Content[0].Text), &logged); err != nil {
 		t.Fatalf("decode decision content %q: %v", resp.Result.Content[0].Text, err)
 	}
 	if !strings.HasPrefix(logged.Decision.ID, "dec-") {
-		t.Fatalf("decision id=%q want dec- prefix (a server-generated id proves the service ran)", logged.Decision.ID)
-	}
-	if logged.Decision.MemberID != memberID {
-		t.Fatalf("decision memberId=%q want %q (the resolved member must thread through CallContext as the actor)", logged.Decision.MemberID, memberID)
+		t.Fatalf("decision id=%q want dec- prefix (only an actor-bound call produces one)", logged.Decision.ID)
 	}
 }
 

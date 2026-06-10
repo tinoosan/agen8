@@ -8,31 +8,18 @@ import (
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
 )
 
+// decisionEntry is the model-facing response for decision.log. It carries only
+// the new decision id — everything else the previous shape echoed (title,
+// invalidationConditions, the refs, member id/name) was input the model just
+// supplied, or a constant (kind="log", sourceType="agent"). The decision is
+// still recorded in full server-side; the web reads its own DecisionView.
 type decisionEntry struct {
-	ID                     string   `json:"id"`
-	Kind                   string   `json:"kind"`
-	Title                  string   `json:"title"`
-	InvalidationConditions []string `json:"invalidationConditions,omitempty"`
-	TaskRef                string   `json:"taskRef,omitempty"`
-	KeyResultRef           string   `json:"keyResultRef,omitempty"`
-	MissionRef             string   `json:"missionRef,omitempty"`
-	MemberID               string   `json:"memberId,omitempty"`
-	MemberName             string   `json:"memberName,omitempty"`
-	SourceType             string   `json:"sourceType,omitempty"`
+	ID string `json:"id"`
 }
 
 func resultEntry(result decisionapp.Result) decisionEntry {
 	return decisionEntry{
-		ID:                     strings.TrimSpace(result.ID),
-		Kind:                   strings.TrimSpace(result.Kind),
-		Title:                  strings.TrimSpace(result.Title),
-		InvalidationConditions: append([]string(nil), result.InvalidationConditions...),
-		TaskRef:                strings.TrimSpace(result.TaskRef),
-		KeyResultRef:           strings.TrimSpace(result.KeyResultRef),
-		MissionRef:             strings.TrimSpace(result.MissionRef),
-		MemberID:               strings.TrimSpace(result.MemberID),
-		MemberName:             strings.TrimSpace(result.MemberName),
-		SourceType:             strings.TrimSpace(result.SourceType),
+		ID: strings.TrimSpace(result.ID),
 	}
 }
 
