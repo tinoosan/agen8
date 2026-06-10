@@ -54,6 +54,20 @@ func (h *Handler) Get(ctx context.Context, p GetParams) (fileapp.GetResult, erro
 	})
 }
 
+func (h *Handler) Baseline(ctx context.Context, p GetParams) (fileapp.BaselineResult, error) {
+	if strings.TrimSpace(p.ProjectID) == "" && strings.TrimSpace(p.ProjectRoot) == "" {
+		return fileapp.BaselineResult{}, invalidParams("projectId is required")
+	}
+	if strings.TrimSpace(p.Path) == "" {
+		return fileapp.BaselineResult{}, invalidParams("path is required")
+	}
+	return h.svc.Baseline(ctx, fileapp.GetInput{
+		ProjectID:   cleanProjectID(p.ProjectID),
+		ProjectRoot: p.ProjectRoot,
+		Path:        p.Path,
+	})
+}
+
 func (h *Handler) CreateDir(ctx context.Context, p PathParams) (fileapp.PathResult, error) {
 	if err := requirePathParams(p); err != nil {
 		return fileapp.PathResult{}, err

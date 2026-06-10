@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -238,4 +240,56 @@ func TestUploadGetRoundTripsPNGAttachment(t *testing.T) {
 	roundTripped, err := base64.StdEncoding.DecodeString(got.BytesB64)
 	require.NoError(t, err)
 	require.Equal(t, sha256.Sum256(pngBytes), sha256.Sum256(roundTripped), "bytes must round-trip identically")
+}
+
+// TestBaselineReturnsCommittedContent exercises the real git path: a repo
+// with a committed file that has uncommitted working-tree changes must yield
+// the HEAD version, while untracked files and non-repos degrade to
+// tracked=false rather than erroring.
+func TestBaselineReturnsCommittedContent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	projectRoot := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", projectRoot, "-c", "user.email=test@test", "-c", "user.name=test"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	committed := "package main\n\nfunc main() {}\n"
+	require.NoError(t, os.WriteFile(projectRoot+"/main.go", []byte(committed), 0o644))
+	run("add", "main.go")
+	run("commit", "-q", "-m", "initial")
+	// Uncommitted working-tree change — the thing the diff view reviews.
+	require.NoError(t, os.WriteFile(projectRoot+"/main.go", []byte(committed+"\nfunc added() {}\n"), 0o644))
+	// An untracked file has no baseline.
+	require.NoError(t, os.WriteFile(projectRoot+"/untracked.txt", []byte("new"), 0o644))
+
+	svc := newTestService(t, projectRoot, fileinfra.NewLocalRepository())
+
+	tracked, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/main.go"})
+	require.NoError(t, err)
+	require.True(t, tracked.Tracked)
+	require.False(t, tracked.Binary)
+	require.Equal(t, committed, tracked.Content, "baseline must be the HEAD version, not the working tree")
+
+	untracked, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/untracked.txt"})
+	require.NoError(t, err)
+	require.False(t, untracked.Tracked)
+	require.Empty(t, untracked.Content)
+}
+
+func TestBaselineOutsideGitRepoIsUntracked(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	projectRoot := t.TempDir()
+	require.NoError(t, os.WriteFile(projectRoot+"/loose.txt", []byte("no repo here"), 0o644))
+	svc := newTestService(t, projectRoot, fileinfra.NewLocalRepository())
+	result, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/loose.txt"})
+	require.NoError(t, err)
+	require.False(t, result.Tracked)
 }

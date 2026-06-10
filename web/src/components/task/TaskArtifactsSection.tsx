@@ -5,6 +5,7 @@ import { rpcCall } from '../../lib/rpc'
 import { qk } from '../../lib/queryKeys'
 import { basename } from '../files/filePreviewUtils'
 import ArtifactViewer from '../files/ArtifactViewer'
+import DiffView from '../files/DiffView'
 import { CollapsibleSection } from '../strategy/CollapsibleSection'
 import {
   Sheet,
@@ -21,6 +22,15 @@ const ARTIFACT_PREVIEW_MAX_BYTES = 2_000_000
 
 const FILE_REF_PREFIX = 'file:'
 
+/** files.baseline response: the git HEAD version of a file, when one exists. */
+interface FileBaselineResult {
+  path: string
+  tracked: boolean
+  binary?: boolean
+  content?: string
+  truncated?: boolean
+}
+
 /** Extracts the vpath from a file:<vpath> artifact ref, or null for any other ref shape. */
 export function fileArtifactVPath(ref: string): string | null {
   if (!ref.startsWith(FILE_REF_PREFIX)) return null
@@ -33,8 +43,22 @@ interface TaskArtifactsSectionProps {
   projectId: string | null
 }
 
+/**
+ * Why diff mode cannot show a diff for this file, or null when it can.
+ * A non-null reason degrades the viewer to normal view with a notice banner
+ * rather than a dead diff pane.
+ */
+function baselineUnavailableReason(baseline: FileBaselineResult | undefined, error: boolean): string | null {
+  if (error) return 'Could not load the git baseline for this file; showing normal view.'
+  if (!baseline) return null
+  if (!baseline.tracked) return 'No git baseline — this file is new or untracked, so there is nothing to diff against. Showing normal view.'
+  if (baseline.binary) return 'The committed version of this file is binary; diff view is unavailable. Showing normal view.'
+  return null
+}
+
 export function TaskArtifactsSection({ task, projectId }: TaskArtifactsSectionProps) {
   const [openVPath, setOpenVPath] = useState<string | null>(null)
+  const [diffMode, setDiffMode] = useState(false)
 
   const previewQuery = useQuery<ArtifactGetResult>({
     queryKey: qk.filePreview(projectId, null, openVPath),
@@ -48,6 +72,26 @@ export function TaskArtifactsSection({ task, projectId }: TaskArtifactsSectionPr
     retry: false,
     staleTime: 30_000,
   })
+
+  // Diff only applies to text content; the baseline is fetched lazily the
+  // first time the toggle is used for this file.
+  const diffable = previewQuery.data?.contentKind === 'text'
+  const baselineQuery = useQuery<FileBaselineResult>({
+    queryKey: ['files.baseline', projectId, openVPath],
+    queryFn: async () =>
+      rpcCall<FileBaselineResult>('files.baseline', {
+        projectId: projectId ?? undefined,
+        path: openVPath,
+      }),
+    enabled: !!projectId && !!openVPath && diffMode && diffable,
+    retry: false,
+    staleTime: 30_000,
+  })
+
+  const openArtifact = (vpath: string) => {
+    setOpenVPath(vpath)
+    setDiffMode(false)
+  }
 
   if (!task.artifacts || task.artifacts.length === 0) return null
 
@@ -83,7 +127,7 @@ export function TaskArtifactsSection({ task, projectId }: TaskArtifactsSectionPr
                 {vpath ? (
                   <button
                     type="button"
-                    onClick={() => setOpenVPath(vpath)}
+                    onClick={() => openArtifact(vpath)}
                     className="group inline-flex items-start gap-1.5 border-none cursor-pointer bg-transparent p-0 text-left"
                     aria-label={`View ${basename(vpath)}`}
                   >
@@ -110,23 +154,73 @@ export function TaskArtifactsSection({ task, projectId }: TaskArtifactsSectionPr
           className="w-screen sm:w-[min(720px,90vw)] sm:max-w-none p-0 gap-0 flex flex-col"
         >
           <SheetHeader className="shrink-0 border-b border-[var(--border)] px-4 py-3 space-y-0">
-            <SheetTitle className="text-[13px] font-semibold tracking-[-0.02em] truncate pr-8">
-              {openVPath ? basename(openVPath) : ''}
-            </SheetTitle>
+            <div className="flex items-center gap-2 pr-8">
+              <SheetTitle className="text-[13px] font-semibold tracking-[-0.02em] truncate flex-1 min-w-0">
+                {openVPath ? basename(openVPath) : ''}
+              </SheetTitle>
+              {diffable && (
+                <div className="flex shrink-0 rounded-[var(--r-md)] border border-[var(--border)] overflow-hidden" role="group" aria-label="View mode">
+                  <button
+                    type="button"
+                    onClick={() => setDiffMode(false)}
+                    aria-pressed={!diffMode}
+                    className="px-2 py-0.5 text-[11px] cursor-pointer border-none transition-colors"
+                    style={{ background: diffMode ? 'transparent' : 'var(--bg-elevated)', color: diffMode ? 'var(--text-3)' : 'var(--text-1)' }}
+                  >
+                    Normal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiffMode(true)}
+                    aria-pressed={diffMode}
+                    className="px-2 py-0.5 text-[11px] cursor-pointer border-none transition-colors"
+                    style={{ background: diffMode ? 'var(--bg-elevated)' : 'transparent', color: diffMode ? 'var(--text-1)' : 'var(--text-3)' }}
+                  >
+                    Diff
+                  </button>
+                </div>
+              )}
+            </div>
             <SheetDescription className="text-[11px] text-[var(--text-3)] truncate" style={{ fontFamily: 'monospace' }}>
               {openVPath ?? ''}
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 min-h-0">
-            {viewerFile && (
-              <ArtifactViewer
-                file={viewerFile}
-                preview={previewQuery.data}
-                isLoading={previewQuery.isLoading}
-                error={!!previewQuery.error}
-                variant="slideover"
-              />
-            )}
+          <div className="flex-1 min-h-0 flex flex-col">
+            {viewerFile && (() => {
+              if (diffMode && diffable) {
+                if (baselineQuery.isLoading) {
+                  return (
+                    <div className="flex items-center justify-center h-full">
+                      <span className="spinner spinner-md" />
+                    </div>
+                  )
+                }
+                const reason = baselineUnavailableReason(baselineQuery.data, !!baselineQuery.error)
+                if (!reason) {
+                  return <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} />
+                }
+                // Degrade: notice banner + the normal view, never a dead pane.
+                return (
+                  <>
+                    <div className="shrink-0 px-4 py-2 text-[11px] text-[var(--text-3)] border-b border-[var(--border)]" data-testid="diff-unavailable-notice">
+                      {reason}
+                    </div>
+                    <div className="flex-1 min-h-0">
+                      <ArtifactViewer file={viewerFile} preview={previewQuery.data} isLoading={previewQuery.isLoading} error={!!previewQuery.error} variant="slideover" />
+                    </div>
+                  </>
+                )
+              }
+              return (
+                <ArtifactViewer
+                  file={viewerFile}
+                  preview={previewQuery.data}
+                  isLoading={previewQuery.isLoading}
+                  error={!!previewQuery.error}
+                  variant="slideover"
+                />
+              )
+            })()}
           </div>
         </SheetContent>
       </Sheet>

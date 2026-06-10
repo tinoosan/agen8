@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	pathpkg "path"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -208,6 +209,59 @@ func (s *Service) Get(ctx context.Context, input GetInput) (GetResult, error) {
 	if contentKind == "text" {
 		result.Content = string(raw)
 	}
+	return result, nil
+}
+
+// BaselineResult carries the git HEAD version of a file so the web can diff
+// the working tree against it. Tracked=false (new/untracked file, or no git
+// repo) is a normal answer, not an error — the viewer degrades to normal view.
+type BaselineResult struct {
+	Path      string `json:"path"`
+	Tracked   bool   `json:"tracked"`
+	Binary    bool   `json:"binary,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// Baseline returns the committed (git HEAD) content of a file for diffing.
+// v1 supports local locations only: the daemon shells out to git on its own
+// host, which says nothing about a file on a remote SSH location.
+func (s *Service) Baseline(ctx context.Context, input GetInput) (BaselineResult, error) {
+	project, err := s.validProject(ctx, input.ProjectID, input.ProjectRoot)
+	if err != nil {
+		return BaselineResult{}, err
+	}
+	if strings.TrimSpace(input.Path) == "" {
+		return BaselineResult{}, fmt.Errorf("path is required")
+	}
+	resolved, err := resolveVPath(project, normalizeVPath(input.Path))
+	if err != nil {
+		return BaselineResult{}, err
+	}
+	if locationID := strings.TrimSpace(string(resolved.ref.LocationID)); locationID != "" && locationID != "local" {
+		return BaselineResult{}, fmt.Errorf("git baseline is not supported on remote locations yet")
+	}
+	// `git -C <dir> show HEAD:./<name>` resolves the path relative to the
+	// file's own directory, so it works whether the git root is the project
+	// root or an ancestor of it.
+	dir := filepath.Dir(resolved.ref.Path)
+	name := filepath.Base(resolved.ref.Path)
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:./"+name).Output()
+	if err != nil {
+		// Untracked file, file new in the working tree, or no git repo at
+		// all: there is no baseline to diff against. Degrade, don't fail.
+		return BaselineResult{Path: resolved.vpath, Tracked: false}, nil
+	}
+	result := BaselineResult{Path: resolved.vpath, Tracked: true}
+	if len(out) > previewMaxBytesCap {
+		out = out[:previewMaxBytesCap]
+		result.Truncated = true
+	}
+	if !utf8.Valid(out) {
+		result.Binary = true
+		return result, nil
+	}
+	result.Content = string(out)
 	return result, nil
 }
 

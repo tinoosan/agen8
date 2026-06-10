@@ -99,6 +99,85 @@ describe('TaskArtifactsSection', () => {
     expect(await screen.findByText(/hello from the attachment/)).toBeInTheDocument()
   })
 
+  it('offers the diff toggle for text files and diffs against the git baseline', async () => {
+    mockRpcCall.mockImplementation(async (method: unknown) => {
+      if (method === 'files.get') {
+        return {
+          artifact: { nodeKey: 'file:/project/main.go', kind: 'file', label: 'main.go', vpath: '/project/main.go' },
+          content: 'line one\nline two changed\n',
+          contentKind: 'text',
+          contentEncoding: 'utf8',
+          truncated: false,
+          bytesRead: 24,
+        }
+      }
+      if (method === 'files.baseline') {
+        return { path: '/project/main.go', tracked: true, content: 'line one\nline two\n' }
+      }
+      throw new Error('unexpected method: ' + String(method))
+    })
+    renderSection(['file:/project/main.go'])
+    await expandArtifacts()
+    await userEvent.click(screen.getByRole('button', { name: 'View main.go' }))
+
+    const diffToggle = await screen.findByRole('button', { name: 'Diff' })
+    await userEvent.click(diffToggle)
+
+    expect(await screen.findByTestId('diff-view')).toBeInTheDocument()
+    expect(screen.getByText('line two')).toBeInTheDocument()
+    expect(screen.getByText('line two changed')).toBeInTheDocument()
+    expect(mockRpcCall).toHaveBeenCalledWith('files.baseline', {
+      projectId: 'proj-1',
+      path: '/project/main.go',
+    })
+  })
+
+  it('never offers the diff toggle for images', async () => {
+    mockRpcCall.mockResolvedValue({
+      artifact: { nodeKey: 'file:/project/shot.png', kind: 'file', label: 'shot.png', vpath: '/project/shot.png' },
+      content: '',
+      contentKind: 'image',
+      contentEncoding: 'base64',
+      bytesB64: 'aGk=',
+      truncated: false,
+      bytesRead: 2,
+    })
+    renderSection(['file:/project/shot.png'])
+    await expandArtifacts()
+    await userEvent.click(screen.getByRole('button', { name: 'View shot.png' }))
+
+    await waitFor(() => expect(mockRpcCall).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: 'Diff' })).not.toBeInTheDocument()
+  })
+
+  it('degrades to normal view with a notice when the file has no git baseline', async () => {
+    mockRpcCall.mockImplementation(async (method: unknown) => {
+      if (method === 'files.get') {
+        return {
+          artifact: { nodeKey: 'file:/project/new.txt', kind: 'file', label: 'new.txt', vpath: '/project/new.txt' },
+          content: 'brand new file\n',
+          contentKind: 'text',
+          contentEncoding: 'utf8',
+          truncated: false,
+          bytesRead: 15,
+        }
+      }
+      if (method === 'files.baseline') {
+        return { path: '/project/new.txt', tracked: false }
+      }
+      throw new Error('unexpected method: ' + String(method))
+    })
+    renderSection(['file:/project/new.txt'])
+    await expandArtifacts()
+    await userEvent.click(screen.getByRole('button', { name: 'View new.txt' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Diff' }))
+
+    expect(await screen.findByTestId('diff-unavailable-notice')).toBeInTheDocument()
+    // The normal content is still visible underneath the notice — no dead pane.
+    expect(screen.getByText(/brand new file/)).toBeInTheDocument()
+    expect(screen.queryByTestId('diff-view')).not.toBeInTheDocument()
+  })
+
   it('shows a calm error state when the file cannot be loaded', async () => {
     mockRpcCall.mockRejectedValue(new Error('file missing'))
     renderSection(['file:/project/.agen8/attachments/task-1/gone.png'])

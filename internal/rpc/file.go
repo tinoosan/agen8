@@ -10,6 +10,7 @@ import (
 const (
 	MethodFilesListDir    = "files.listDir"
 	MethodFilesGet        = "files.get"
+	MethodFilesBaseline   = "files.baseline"
 	MethodFilesCreateDir  = "files.createDir"
 	MethodFilesCreateFile = "files.createFile"
 	MethodFilesMove       = "files.move"
@@ -29,6 +30,9 @@ func RegisterFile(reg *Registry, fileSvc *fileapp.Service) error {
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodFilesGet, false, handler.Get)
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodFilesBaseline, false, handler.Baseline)
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodFilesCreateDir, false, handler.CreateDir)
