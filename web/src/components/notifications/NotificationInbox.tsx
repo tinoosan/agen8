@@ -6,7 +6,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { formatRelative } from '../../lib/format'
 import type { NotificationItem } from '../../lib/types'
@@ -162,7 +161,7 @@ export default function NotificationInbox({ projectId }: { projectId: string | n
             <span className="text-[0.8125rem] text-[var(--text-3)]">You're all caught up</span>
           </div>
         ) : (
-          <ScrollArea className="max-h-[24rem]">
+          <div className="max-h-[24rem] overflow-y-auto overscroll-contain">
             {notifications.map((n) => (
               <NotificationRow
                 key={n.id}
@@ -171,7 +170,7 @@ export default function NotificationInbox({ projectId }: { projectId: string | n
                 onDismiss={(id) => dismiss.mutate({ id })}
               />
             ))}
-          </ScrollArea>
+          </div>
         )}
       </PopoverContent>
     </Popover>
