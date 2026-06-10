@@ -522,7 +522,9 @@ export default function TaskDetail() {
         {/* Stats grid */}
         <div className="rounded-[var(--r-md)] bg-[var(--bg-surface)] border border-[var(--border)]/60 px-4 py-3.5">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {assigneeLabel && <StatItem label="Assignee" value={assigneeLabel} />}
+            {/* Assignee is edited inline (picker) for non-terminal tasks; don't also
+                show it read-only here while editing. */}
+            {assigneeLabel && !(editing && !isTerminal) && <StatItem label="Assignee" value={assigneeLabel} />}
             {claimedByLabel && claimedByLabel !== assigneeLabel && (
               <StatItem label="Claimed" value={claimedByLabel} />
             )}
@@ -541,7 +543,8 @@ export default function TaskDetail() {
                 icon={<Clock size={11} style={{ color: 'var(--text-3)' }} />}
               />
             )}
-            {task.taskKind && <StatItem label="Kind" value={task.taskKind} />}
+            {/* Kind is edited inline while editing; don't duplicate it here. */}
+            {task.taskKind && !editing && <StatItem label="Kind" value={task.taskKind} />}
           </div>
         </div>
 
