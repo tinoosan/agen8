@@ -137,6 +137,43 @@ describe('ArtifactViewerPanel', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('toggles a file browser and loads a picked file into the same viewer', async () => {
+    mockRpcCall.mockImplementation(async (method: unknown, params: unknown) => {
+      const p = params as { path?: string }
+      if (method === 'files.listDir') {
+        return {
+          path: p.path,
+          entries: [
+            { name: 'other.txt', path: '/project/other.txt', isDir: false, writable: false },
+          ],
+        }
+      }
+      if (method === 'files.get') {
+        const label = p.path?.split('/').pop()
+        return textPreview(p.path ?? '', `contents of ${label}`)
+      }
+      throw new Error('unexpected method: ' + String(method))
+    })
+    renderPanel('/project/notes.txt')
+    expect(await screen.findByText(/contents of notes.txt/)).toBeInTheDocument()
+
+    // Browser hidden by default; toggle reveals it.
+    expect(screen.queryByTestId('file-browser-pane')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Browse files' }))
+    expect(await screen.findByTestId('file-browser-pane')).toBeInTheDocument()
+
+    // Pick a different file — the same viewer (no remount) shows it.
+    await userEvent.click(await screen.findByText('other.txt'))
+    expect(await screen.findByText(/contents of other.txt/)).toBeInTheDocument()
+    await waitFor(() =>
+      expect(mockRpcCall).toHaveBeenCalledWith('files.get', expect.objectContaining({ path: '/project/other.txt' })),
+    )
+
+    // Toggling off returns to the plain single-file view.
+    await userEvent.click(screen.getByRole('button', { name: 'Browse files' }))
+    expect(screen.queryByTestId('file-browser-pane')).not.toBeInTheDocument()
+  })
+
   it('keeps the diff toggle working in inline layout', async () => {
     mockRpcCall.mockImplementation(async (method: unknown) => {
       if (method === 'files.get') return textPreview('/project/main.go', 'a\nb changed\n')

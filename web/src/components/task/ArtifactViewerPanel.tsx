@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { X } from 'lucide-react'
+import { FolderTree, X } from 'lucide-react'
 import { rpcCall } from '../../lib/rpc'
 import { qk } from '../../lib/queryKeys'
 import { basename } from '../files/filePreviewUtils'
 import ArtifactViewer from '../files/ArtifactViewer'
 import DiffView from '../files/DiffView'
+import { FileBrowserPane } from './FileBrowserPane'
 import {
   Sheet,
   SheetContent,
@@ -61,15 +62,30 @@ interface ArtifactViewerPanelProps {
  * baseline) for one vpath and renders it in the chosen layout. Mount with
  * key={vpath} so switching files resets the diff toggle.
  */
+function dirOf(path: string): string {
+  const trimmed = path.replace(/\/+$/, '')
+  const cut = trimmed.lastIndexOf('/')
+  return cut <= 0 ? '/' : trimmed.slice(0, cut)
+}
+
 export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: ArtifactViewerPanelProps) {
   const [diffMode, setDiffMode] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
+  // The browser can swap which file the viewer shows without remounting the
+  // panel, so the shown file is internal state seeded from the opened artifact.
+  const [activeVPath, setActiveVPath] = useState(vpath)
+
+  const selectFromBrowser = (next: string) => {
+    setActiveVPath(next)
+    setDiffMode(false) // a freshly picked file starts in normal view
+  }
 
   const previewQuery = useQuery<ArtifactGetResult>({
-    queryKey: qk.filePreview(projectId, null, vpath),
+    queryKey: qk.filePreview(projectId, null, activeVPath),
     queryFn: async () =>
       rpcCall<ArtifactGetResult>('files.get', {
         projectId: projectId ?? undefined,
-        path: vpath,
+        path: activeVPath,
         maxBytes: ARTIFACT_PREVIEW_MAX_BYTES,
       }),
     enabled: !!projectId,
@@ -81,11 +97,11 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
   // first time the toggle is used for this file.
   const diffable = previewQuery.data?.contentKind === 'text'
   const baselineQuery = useQuery<FileBaselineResult>({
-    queryKey: ['files.baseline', projectId, vpath],
+    queryKey: ['files.baseline', projectId, activeVPath],
     queryFn: async () =>
       rpcCall<FileBaselineResult>('files.baseline', {
         projectId: projectId ?? undefined,
-        path: vpath,
+        path: activeVPath,
       }),
     enabled: !!projectId && diffMode && diffable,
     retry: false,
@@ -93,12 +109,30 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
   })
 
   const viewerFile: ArtifactNode = {
-    nodeKey: 'file:' + vpath,
+    nodeKey: 'file:' + activeVPath,
     kind: 'file',
-    label: basename(vpath),
-    displayName: basename(vpath),
-    vpath,
+    label: basename(activeVPath),
+    displayName: basename(activeVPath),
+    vpath: activeVPath,
   }
+
+  const browseToggle = (
+    <button
+      type="button"
+      onClick={() => setBrowsing((b) => !b)}
+      aria-pressed={browsing}
+      aria-label="Browse files"
+      title="Browse files in this project"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-md)] border cursor-pointer transition-colors"
+      style={{
+        borderColor: 'var(--border)',
+        background: browsing ? 'var(--bg-elevated)' : 'transparent',
+        color: browsing ? 'var(--text-1)' : 'var(--text-3)',
+      }}
+    >
+      <FolderTree size={13} />
+    </button>
+  )
 
   const modeToggle = diffable ? (
     <div className="flex shrink-0 rounded-[var(--r-md)] border border-[var(--border)] overflow-hidden" role="group" aria-label="View mode">
@@ -134,7 +168,7 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
       }
       const reason = baselineUnavailableReason(baselineQuery.data, !!baselineQuery.error)
       if (!reason) {
-        return <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} filePath={vpath} />
+        return <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} filePath={activeVPath} />
       }
       // Degrade: notice banner + the normal view, never a dead pane.
       return (
@@ -159,16 +193,32 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
     )
   })()
 
+  // With the browser open, the file tree sits to the left of the viewer body.
+  const bodyWithBrowser = browsing ? (
+    <div className="flex h-full min-h-0">
+      <FileBrowserPane
+        projectId={projectId}
+        initialDir={dirOf(activeVPath)}
+        activeVPath={activeVPath}
+        onSelectFile={selectFromBrowser}
+      />
+      <div className="flex-1 min-h-0 flex flex-col">{body}</div>
+    </div>
+  ) : (
+    body
+  )
+
   if (layout === 'inline') {
     return (
       <aside
         className="flex flex-col h-full min-h-0 border-l border-[var(--border)] bg-[var(--bg-surface,transparent)]"
         data-testid="artifact-inline-panel"
-        aria-label={`Artifact viewer: ${basename(vpath)}`}
+        aria-label={`Artifact viewer: ${basename(activeVPath)}`}
       >
         <div className="shrink-0 border-b border-[var(--border)] px-4 py-3">
           <div className="flex items-center gap-2">
-            <span className="text-[13px] font-semibold tracking-[-0.02em] truncate flex-1 min-w-0">{basename(vpath)}</span>
+            <span className="text-[13px] font-semibold tracking-[-0.02em] truncate flex-1 min-w-0">{basename(activeVPath)}</span>
+            {browseToggle}
             {modeToggle}
             <button
               type="button"
@@ -179,9 +229,9 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
               <X size={14} />
             </button>
           </div>
-          <div className="text-[11px] text-[var(--text-3)] truncate" style={{ fontFamily: 'monospace' }}>{vpath}</div>
+          <div className="text-[11px] text-[var(--text-3)] truncate" style={{ fontFamily: 'monospace' }}>{activeVPath}</div>
         </div>
-        <div className="flex-1 min-h-0 flex flex-col">{body}</div>
+        <div className="flex-1 min-h-0 flex flex-col">{bodyWithBrowser}</div>
       </aside>
     )
   }
@@ -195,15 +245,16 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
         <SheetHeader className="shrink-0 border-b border-[var(--border)] px-4 py-3 space-y-0">
           <div className="flex items-center gap-2 pr-8">
             <SheetTitle className="text-[13px] font-semibold tracking-[-0.02em] truncate flex-1 min-w-0">
-              {basename(vpath)}
+              {basename(activeVPath)}
             </SheetTitle>
+            {browseToggle}
             {modeToggle}
           </div>
           <SheetDescription className="text-[11px] text-[var(--text-3)] truncate" style={{ fontFamily: 'monospace' }}>
-            {vpath}
+            {activeVPath}
           </SheetDescription>
         </SheetHeader>
-        <div className="flex-1 min-h-0 flex flex-col">{body}</div>
+        <div className="flex-1 min-h-0 flex flex-col">{bodyWithBrowser}</div>
       </SheetContent>
     </Sheet>
   )
