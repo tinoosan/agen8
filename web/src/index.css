@@ -2001,7 +2001,7 @@ body {
 }
 
 .dashboard-action-button {
-  border: 1px solid color-mix(in srgb, var(--border) 46%, transparent);
+  border: 1px solid transparent;
   background: color-mix(in srgb, var(--bg-panel) 44%, var(--bg-elevated) 56%);
   color: var(--text-2);
   border-radius: 10px;
@@ -2022,7 +2022,7 @@ body {
 .dashboard-action-button[disabled] {
   opacity: 1;
   cursor: not-allowed;
-  border-color: color-mix(in srgb, var(--border) 24%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--bg-panel) 22%, var(--bg-elevated) 78%);
   color: color-mix(in srgb, var(--text-3) 82%, transparent);
   box-shadow: none;
@@ -2030,37 +2030,37 @@ body {
 
 .dashboard-action-button-accent:disabled,
 .dashboard-action-button-accent[disabled] {
-  border-color: color-mix(in srgb, var(--accent-border) 12%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--accent-dim) 8%, var(--bg-panel) 92%);
   color: color-mix(in srgb, var(--accent) 22%, var(--text-2) 78%);
 }
 
 .dashboard-action-button-neutral {
-  border-color: color-mix(in srgb, var(--border) 42%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--bg-panel) 38%, var(--bg-elevated) 62%);
   color: var(--text-2);
 }
 
 .dashboard-action-button-accent {
-  border-color: color-mix(in srgb, var(--accent-border) 18%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--accent-dim) 14%, var(--bg-panel) 86%);
   color: color-mix(in srgb, var(--accent) 58%, var(--text-2) 42%);
 }
 
 .dashboard-action-button-success {
-  border-color: color-mix(in srgb, var(--green) 16%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--green-dim) 14%, var(--bg-panel) 86%);
   color: color-mix(in srgb, var(--green) 60%, var(--text-2) 40%);
 }
 
 .dashboard-action-button-warning {
-  border-color: color-mix(in srgb, var(--amber) 16%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--amber-dim) 14%, var(--bg-panel) 86%);
   color: color-mix(in srgb, var(--amber) 60%, var(--text-2) 40%);
 }
 
 .dashboard-action-button-danger {
-  border-color: color-mix(in srgb, var(--red) 16%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--red-dim) 14%, var(--bg-panel) 86%);
   color: color-mix(in srgb, var(--red) 60%, var(--text-2) 40%);
 }
