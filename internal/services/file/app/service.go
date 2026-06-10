@@ -221,6 +221,11 @@ type BaselineResult struct {
 	Binary    bool   `json:"binary,omitempty"`
 	Content   string `json:"content,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
+	// Unsupported carries a human-readable reason when this file's location
+	// cannot produce a baseline at all (e.g. remote SSH). A structured answer
+	// rather than an error so the viewer can degrade with the real reason
+	// instead of a generic failure.
+	Unsupported string `json:"unsupported,omitempty"`
 }
 
 // Baseline returns the committed (git HEAD) content of a file for diffing.
@@ -239,7 +244,10 @@ func (s *Service) Baseline(ctx context.Context, input GetInput) (BaselineResult,
 		return BaselineResult{}, err
 	}
 	if locationID := strings.TrimSpace(string(resolved.ref.LocationID)); locationID != "" && locationID != "local" {
-		return BaselineResult{}, fmt.Errorf("git baseline is not supported on remote locations yet")
+		return BaselineResult{
+			Path:        resolved.vpath,
+			Unsupported: "Diff is not available for files on remote locations yet.",
+		}, nil
 	}
 	// `git -C <dir> show HEAD:./<name>` resolves the path relative to the
 	// file's own directory, so it works whether the git root is the project

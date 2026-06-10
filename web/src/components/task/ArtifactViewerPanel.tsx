@@ -26,6 +26,8 @@ interface FileBaselineResult {
   binary?: boolean
   content?: string
   truncated?: boolean
+  /** Reason this location cannot produce a baseline at all (e.g. remote SSH). */
+  unsupported?: string
 }
 
 /**
@@ -36,6 +38,7 @@ interface FileBaselineResult {
 function baselineUnavailableReason(baseline: FileBaselineResult | undefined, error: boolean): string | null {
   if (error) return 'Could not load the git baseline for this file; showing normal view.'
   if (!baseline) return null
+  if (baseline.unsupported) return `${baseline.unsupported} Showing normal view.`
   if (!baseline.tracked) return 'No git baseline — this file is new or untracked, so there is nothing to diff against. Showing normal view.'
   if (baseline.binary) return 'The committed version of this file is binary; diff view is unavailable. Showing normal view.'
   return null

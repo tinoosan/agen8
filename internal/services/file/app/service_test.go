@@ -293,3 +293,12 @@ func TestBaselineOutsideGitRepoIsUntracked(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.Tracked)
 }
+
+func TestBaselineOnRemoteLocationIsUnsupportedNotError(t *testing.T) {
+	repo := &spyFileRepository{}
+	svc := newTestServiceWithProjects(t, repo, testProject{root: "/srv/app", locationID: "ssh-build"})
+	result, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/README.md"})
+	require.NoError(t, err, "remote baseline must be a structured answer, not an error")
+	require.NotEmpty(t, result.Unsupported)
+	require.False(t, result.Tracked)
+}

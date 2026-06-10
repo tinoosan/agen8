@@ -110,6 +110,20 @@ describe('ArtifactViewerPanel', () => {
     expect(screen.queryByTestId('diff-view')).not.toBeInTheDocument()
   })
 
+  it('shows the structured unsupported reason for remote-location files', async () => {
+    mockRpcCall.mockImplementation(async (method: unknown) => {
+      if (method === 'files.get') return textPreview('/project/remote.txt', 'remote file body\n')
+      if (method === 'files.baseline') return { path: '/project/remote.txt', tracked: false, unsupported: 'Diff is not available for files on remote locations yet.' }
+      throw new Error('unexpected method: ' + String(method))
+    })
+    renderPanel('/project/remote.txt')
+    await userEvent.click(await screen.findByRole('button', { name: 'Diff' }))
+
+    const notice = await screen.findByTestId('diff-unavailable-notice')
+    expect(notice.textContent).toContain('remote locations')
+    expect(screen.getByText(/remote file body/)).toBeInTheDocument()
+  })
+
   it('renders inline layout as a side panel with a working close button', async () => {
     mockRpcCall.mockResolvedValue(textPreview('/project/notes.txt', 'inline content'))
     const onClose = renderPanel('/project/notes.txt', 'inline')
