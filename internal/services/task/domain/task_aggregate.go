@@ -88,6 +88,29 @@ func (t Task) Complete(summary string, artifacts []string, now time.Time) (Task,
 	return next, nil
 }
 
+// AttachArtifact appends one artifact ref to the task. Unlike Complete it
+// never replaces the list, so attachments cannot clobber earlier evidence.
+// Attaching to an already-present ref is a no-op rather than an error so
+// retried uploads stay idempotent.
+func (t Task) AttachArtifact(ref string, now time.Time) (Task, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return Task{}, fmt.Errorf("attach artifact: artifact ref is required")
+	}
+	if t.Status == TaskStatusCanceled {
+		return Task{}, fmt.Errorf("attach artifact: task %s is canceled", t.ID)
+	}
+	for _, existing := range t.Artifacts {
+		if existing == ref {
+			return t, nil
+		}
+	}
+	next := t
+	next.Artifacts = append(append([]string(nil), t.Artifacts...), ref)
+	stampUpdated(&next, now)
+	return next, nil
+}
+
 // ApproveReview accepts an in-review task after every criterion is satisfied.
 func (t Task) ApproveReview(criteria []CriterionReview, now time.Time) (Task, error) {
 	if t.Status != TaskStatusInReview {

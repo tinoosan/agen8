@@ -2,12 +2,14 @@ package task
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8/internal/caller"
+	fileapp "github.com/tinoosan/agen8/internal/services/file/app"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8/internal/services/task/app"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
@@ -22,6 +24,9 @@ type stubService struct {
 	updateReq   taskapp.UpdateTaskParams
 	reviewReq   taskapp.ReviewTaskParams
 	reviewErr   error
+	attachRef   string
+	attachErr   error
+	getResp     *taskdomain.Task
 	seenCaller  taskapp.Caller
 	called      string
 }
@@ -40,6 +45,9 @@ func (s *stubService) Create(ctx context.Context, req taskapp.CreateTaskParams) 
 
 func (s *stubService) Get(ctx context.Context, id taskdomain.TaskID) (taskdomain.Task, error) {
 	s.capture(ctx, "get")
+	if s.getResp != nil {
+		return *s.getResp, nil
+	}
 	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", Status: taskdomain.TaskStatusPending}, nil
 }
 
@@ -134,6 +142,34 @@ func (s *stubService) FailReview(ctx context.Context, req taskapp.ReviewTaskPara
 		return taskdomain.Task{}, s.reviewErr
 	}
 	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: "worker-1", Error: req.Reason, Status: taskdomain.TaskStatusFailed}, nil
+}
+
+func (s *stubService) AttachArtifact(ctx context.Context, id taskdomain.TaskID, ref string) (taskdomain.Task, error) {
+	s.capture(ctx, "attach")
+	s.attachRef = ref
+	if s.attachErr != nil {
+		return taskdomain.Task{}, s.attachErr
+	}
+	return taskdomain.Task{ID: id, ProjectID: "space-1", AssignedTo: "worker-1", Artifacts: []string{ref}, Status: taskdomain.TaskStatusActive}, nil
+}
+
+type stubFileStore struct {
+	uploads   []fileapp.UploadInput
+	deletes   []fileapp.PathInput
+	uploadErr error
+}
+
+func (s *stubFileStore) Upload(_ context.Context, input fileapp.UploadInput) (fileapp.PathResult, error) {
+	s.uploads = append(s.uploads, input)
+	if s.uploadErr != nil {
+		return fileapp.PathResult{}, s.uploadErr
+	}
+	return fileapp.PathResult{Path: input.Path}, nil
+}
+
+func (s *stubFileStore) Delete(_ context.Context, input fileapp.PathInput) (struct{}, error) {
+	s.deletes = append(s.deletes, input)
+	return struct{}{}, nil
 }
 
 type stubMembers struct {
@@ -609,6 +645,105 @@ func TestHandleReviewRetryFailRequireReason(t *testing.T) {
 	}
 	if svc.called != "" {
 		t.Fatalf("service called without reason: %q", svc.called)
+	}
+}
+
+func callContextWithFiles(svc *stubService, files *stubFileStore, actorMemberID string) CallContext {
+	call := callContext(svc, actorMemberID)
+	call.Files = files
+	return call
+}
+
+func TestHandleAttachUploadsAndAppendsArtifact(t *testing.T) {
+	svc := &stubService{}
+	files := &stubFileStore{}
+	pngB64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\n fake image body"))
+	res, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), json.RawMessage(`{"action":"attach","task_id":"task-1","file_name":"build-screenshot.png","content_b64":"`+pngB64+`"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(files.uploads) != 1 {
+		t.Fatalf("uploads=%d want 1", len(files.uploads))
+	}
+	upload := files.uploads[0]
+	if upload.Path != "/project/.agen8/attachments/task-1/build-screenshot.png" {
+		t.Fatalf("upload path=%q", upload.Path)
+	}
+	if upload.BytesB64 != pngB64 || upload.Content != "" {
+		t.Fatalf("upload bytes not forwarded verbatim: %+v", upload)
+	}
+	if string(upload.ProjectID) != "space-1" {
+		t.Fatalf("upload projectID=%q want space-1", upload.ProjectID)
+	}
+	wantRef := "file:/project/.agen8/attachments/task-1/build-screenshot.png"
+	if svc.attachRef != wantRef {
+		t.Fatalf("attach ref=%q want %q", svc.attachRef, wantRef)
+	}
+	structured, ok := res.Structured.(map[string]any)
+	if !ok || structured["artifactRef"] != wantRef {
+		t.Fatalf("result missing artifactRef: %+v", res.Structured)
+	}
+	if len(files.deletes) != 0 {
+		t.Fatalf("unexpected cleanup delete: %+v", files.deletes)
+	}
+}
+
+func TestHandleAttachRejectsTraversalAndPathFileNames(t *testing.T) {
+	for _, name := range []string{"../../etc/passwd", "nested/dir.png", `back\slash.png`, "..", "."} {
+		svc := &stubService{}
+		files := &stubFileStore{}
+		body, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_name": name, "content": "x"})
+		_, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), body)
+		if err == nil || !strings.Contains(err.Error(), "file_name") {
+			t.Fatalf("file_name=%q: expected rejection, got %v", name, err)
+		}
+		if len(files.uploads) != 0 {
+			t.Fatalf("file_name=%q: upload happened despite rejection", name)
+		}
+	}
+}
+
+func TestHandleAttachRequiresExactlyOneContentField(t *testing.T) {
+	for _, payload := range []string{
+		`{"action":"attach","task_id":"task-1","file_name":"a.txt"}`,
+		`{"action":"attach","task_id":"task-1","file_name":"a.txt","content":"x","content_b64":"eA=="}`,
+	} {
+		svc := &stubService{}
+		files := &stubFileStore{}
+		_, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), json.RawMessage(payload))
+		if err == nil || !strings.Contains(err.Error(), "exactly one of content or content_b64") {
+			t.Fatalf("payload=%s: expected exactly-one error, got %v", payload, err)
+		}
+		if len(files.uploads) != 0 {
+			t.Fatalf("payload=%s: upload happened despite rejection", payload)
+		}
+	}
+}
+
+func TestHandleAttachRefusesCanceledTaskBeforeWriting(t *testing.T) {
+	svc := &stubService{getResp: &taskdomain.Task{ID: "task-1", ProjectID: "space-1", Status: taskdomain.TaskStatusCanceled}}
+	files := &stubFileStore{}
+	_, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), json.RawMessage(`{"action":"attach","task_id":"task-1","file_name":"a.txt","content":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected canceled rejection, got %v", err)
+	}
+	if len(files.uploads) != 0 {
+		t.Fatalf("file was written for a canceled task: %+v", files.uploads)
+	}
+}
+
+func TestHandleAttachCleansUpUploadWhenAppendFails(t *testing.T) {
+	svc := &stubService{attachErr: errors.New("append rejected")}
+	files := &stubFileStore{}
+	_, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), json.RawMessage(`{"action":"attach","task_id":"task-1","file_name":"a.txt","content":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "append rejected") {
+		t.Fatalf("expected append error to surface, got %v", err)
+	}
+	if len(files.uploads) != 1 {
+		t.Fatalf("uploads=%d want 1", len(files.uploads))
+	}
+	if len(files.deletes) != 1 || files.deletes[0].Path != "/project/.agen8/attachments/task-1/a.txt" {
+		t.Fatalf("expected cleanup delete of the uploaded file, got %+v", files.deletes)
 	}
 }
 

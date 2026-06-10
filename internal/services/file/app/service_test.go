@@ -1,7 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"testing"
 	"time"
@@ -9,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinoosan/agen8/internal/core/types"
 	filedomain "github.com/tinoosan/agen8/internal/services/file/domain/file"
+	fileinfra "github.com/tinoosan/agen8/internal/services/file/infra"
 	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
@@ -200,4 +204,38 @@ func (*spyFileRepository) Copy(context.Context, filedomain.Reference, filedomain
 func (*spyFileRepository) Delete(context.Context, filedomain.Reference) error { return nil }
 func (*spyFileRepository) WriteFile(context.Context, filedomain.Reference, []byte) error {
 	return nil
+}
+
+// TestUploadGetRoundTripsPNGAttachment pins the attachment byte path end to
+// end through the real local repository: binary bytes uploaded via base64
+// come back from Get byte-identical and classified as an image.
+func TestUploadGetRoundTripsPNGAttachment(t *testing.T) {
+	projectRoot := t.TempDir()
+	svc := newTestService(t, projectRoot, fileinfra.NewLocalRepository())
+
+	// A real, valid 1x1 transparent PNG (signature + IHDR + IDAT + IEND).
+	pngBytes, err := base64.StdEncoding.DecodeString(
+		"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+	require.NoError(t, err)
+	require.True(t, bytes.HasPrefix(pngBytes, []byte("\x89PNG\r\n\x1a\n")), "fixture must be a real PNG")
+
+	const vpath = "/project/.agen8/attachments/task-1/build-screenshot.png"
+	uploaded, err := svc.Upload(context.Background(), UploadInput{
+		ProjectID: "project-test-0",
+		Path:      vpath,
+		BytesB64:  base64.StdEncoding.EncodeToString(pngBytes),
+	})
+	require.NoError(t, err)
+	require.Equal(t, vpath, uploaded.Path)
+
+	got, err := svc.Get(context.Background(), GetInput{
+		ProjectID: "project-test-0",
+		Path:      vpath,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "image", got.ContentKind)
+	require.False(t, got.Truncated)
+	roundTripped, err := base64.StdEncoding.DecodeString(got.BytesB64)
+	require.NoError(t, err)
+	require.Equal(t, sha256.Sum256(pngBytes), sha256.Sum256(roundTripped), "bytes must round-trip identically")
 }

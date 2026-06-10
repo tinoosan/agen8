@@ -523,6 +523,38 @@ func (s *Service) Complete(ctx context.Context, params CompleteTaskParams) (doma
 	return next, nil
 }
 
+// AttachArtifact appends one artifact ref to a task. Any active member of
+// the task's project (or the project's user owner) may attach — workers add
+// evidence to their own tasks, reviewers add screenshots to tasks they are
+// reviewing — so this is deliberately looser than the coordinator-gated
+// mutations above.
+func (s *Service) AttachArtifact(ctx context.Context, taskID domain.TaskID, ref string) (domain.Task, error) {
+	caller, err := s.resolveCaller(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	loaded, err := s.Get(ctx, taskID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if caller.MemberID != "" {
+		if _, err := s.memberInProject(ctx, caller.MemberID, loaded.ProjectID); err != nil {
+			return domain.Task{}, err
+		}
+	} else if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
+		return domain.Task{}, err
+	}
+	next, err := loaded.AttachArtifact(ref, s.clock.Now())
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if err := s.tasks.UpdateTask(ctx, next); err != nil {
+		return domain.Task{}, fmt.Errorf("update task: %w", err)
+	}
+	s.logTaskTransition("attach_artifact", next, caller)
+	return next, nil
+}
+
 func (s *Service) ApproveReview(ctx context.Context, params ReviewTaskParams) (domain.Task, error) {
 	caller, err := s.resolveCaller(ctx)
 	if err != nil {

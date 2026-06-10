@@ -56,6 +56,9 @@ func decode(args json.RawMessage) (requestInput, error) {
 		Note:               trimPtr(raw.Note),
 		Decision:           strings.TrimSpace(strings.ToLower(trimPtr(raw.Decision))),
 		Criteria:           cleanReviewCriteria(raw.Criteria),
+		FileName:           trimPtr(raw.FileName),
+		Content:            ptrString(raw.Content),
+		ContentB64:         trimPtr(raw.ContentB64),
 	}, nil
 }
 
@@ -111,6 +114,7 @@ var fieldsByAction = map[string]map[string]struct{}{
 	"reassign": fieldSet("action", "task_id", "assignee_member_id"),
 	"cancel":   fieldSet("action", "task_id", "reason"),
 	"review":   fieldSet("action", "task_id", "decision", "reason", "summary", "note", "criteria"),
+	"attach":   fieldSet("action", "task_id", "file_name", "content", "content_b64"),
 }
 
 func fieldSet(fields ...string) map[string]struct{} {
@@ -149,6 +153,15 @@ func trimPtr(value *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*value)
+}
+
+// ptrString preserves the value verbatim — attach file content must keep
+// leading/trailing whitespace (e.g. a final newline) intact.
+func ptrString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func ptrInt(value *int) int {

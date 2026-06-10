@@ -421,3 +421,50 @@ func TestFixedClock_ReturnsConfiguredTime(t *testing.T) {
 		t.Fatalf("Now()=%v want %v", c.Now(), fixedTime)
 	}
 }
+
+func TestAttachArtifact_AppendsWithoutReplacing(t *testing.T) {
+	task := makeTask(TaskStatusInReview)
+	task.Artifacts = []string{"commit:abc123", "file:/project/docs/plan.md"}
+
+	next, err := task.AttachArtifact("file:/project/.agen8/attachments/task-1/shot.png", fixedTime)
+	if err != nil {
+		t.Fatalf("AttachArtifact returned error: %v", err)
+	}
+	want := []string{"commit:abc123", "file:/project/docs/plan.md", "file:/project/.agen8/attachments/task-1/shot.png"}
+	if len(next.Artifacts) != len(want) {
+		t.Fatalf("artifacts=%v want %v", next.Artifacts, want)
+	}
+	for i := range want {
+		if next.Artifacts[i] != want[i] {
+			t.Fatalf("artifacts[%d]=%q want %q", i, next.Artifacts[i], want[i])
+		}
+	}
+	if len(task.Artifacts) != 2 {
+		t.Fatalf("original task mutated: %v", task.Artifacts)
+	}
+	if next.UpdatedAt == nil || !next.UpdatedAt.Equal(fixedTime) {
+		t.Fatalf("updatedAt=%v want %v", next.UpdatedAt, fixedTime)
+	}
+}
+
+func TestAttachArtifact_IsIdempotentForExistingRef(t *testing.T) {
+	task := makeTask(TaskStatusActive)
+	task.Artifacts = []string{"file:/project/.agen8/attachments/task-1/shot.png"}
+
+	next, err := task.AttachArtifact("file:/project/.agen8/attachments/task-1/shot.png", fixedTime)
+	if err != nil {
+		t.Fatalf("AttachArtifact returned error: %v", err)
+	}
+	if len(next.Artifacts) != 1 {
+		t.Fatalf("artifacts=%v want single entry", next.Artifacts)
+	}
+}
+
+func TestAttachArtifact_RejectsCanceledTaskAndEmptyRef(t *testing.T) {
+	if _, err := makeTask(TaskStatusCanceled).AttachArtifact("file:/project/x.png", fixedTime); err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected canceled rejection, got %v", err)
+	}
+	if _, err := makeTask(TaskStatusActive).AttachArtifact("   ", fixedTime); err == nil || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("expected empty-ref rejection, got %v", err)
+	}
+}

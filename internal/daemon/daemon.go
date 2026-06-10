@@ -538,6 +538,7 @@ func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
 			credentials: d.app.CredentialSvc,
 		},
 		TaskService:     d.app.TaskSvc,
+		TaskFiles:       d.app.FileSvc,
 		MissionService:  d.app.MissionSvc,
 		MissionKRs:      d.app.MissionSvc,
 		MissionProgress: d.app.MissionSvc,

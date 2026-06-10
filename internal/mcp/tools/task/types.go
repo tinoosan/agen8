@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	fileapp "github.com/tinoosan/agen8/internal/services/file/app"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8/internal/services/task/app"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
@@ -24,15 +25,24 @@ type Service interface {
 	ApproveReview(context.Context, taskapp.ReviewTaskParams) (taskdomain.Task, error)
 	RetryReview(context.Context, taskapp.ReviewTaskParams) (taskdomain.Task, error)
 	FailReview(context.Context, taskapp.ReviewTaskParams) (taskdomain.Task, error)
+	AttachArtifact(ctx context.Context, taskID taskdomain.TaskID, ref string) (taskdomain.Task, error)
 }
 
 type MemberDirectory interface {
 	GetMember(ctx context.Context, id member.ID) (member.Record, error)
 }
 
+// FileStore is the slice of the file service the attach action needs: write
+// the uploaded bytes, and remove them again if the artifact append fails.
+type FileStore interface {
+	Upload(ctx context.Context, input fileapp.UploadInput) (fileapp.PathResult, error)
+	Delete(ctx context.Context, input fileapp.PathInput) (struct{}, error)
+}
+
 type CallContext struct {
 	Tasks         Service
 	Members       MemberDirectory
+	Files         FileStore
 	ProjectID     string
 	ActorMemberID string
 }
@@ -67,6 +77,9 @@ type rawRequest struct {
 	Note               *string                `json:"note"`
 	Decision           *string                `json:"decision"`
 	Criteria           []reviewCriterionInput `json:"criteria"`
+	FileName           *string                `json:"file_name"`
+	Content            *string                `json:"content"`
+	ContentB64         *string                `json:"content_b64"`
 }
 
 type requestInput struct {
@@ -89,4 +102,7 @@ type requestInput struct {
 	Note               string
 	Decision           string
 	Criteria           []reviewCriterionInput
+	FileName           string
+	Content            string
+	ContentB64         string
 }

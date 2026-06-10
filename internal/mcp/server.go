@@ -39,6 +39,7 @@ type Session struct {
 	GraphService       graphtool.Service
 	CredentialResolver httptool.CredentialResolver
 	TaskService        tasktool.Service
+	TaskFiles          tasktool.FileStore
 	MissionService     missiontool.MissionLifecycleService
 	MissionKRs         missiontool.KeyResultService
 	MissionProgress    missiontool.ProgressService
@@ -662,6 +663,7 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 		result, err := tasktool.NewHandler().Handle(ctx, tasktool.CallContext{
 			Tasks:         session.TaskService,
 			Members:       session.TaskMembers,
+			Files:         session.TaskFiles,
 			ProjectID:     strings.TrimSpace(session.ProjectID),
 			ActorMemberID: strings.TrimSpace(session.MemberID),
 		}, arguments)

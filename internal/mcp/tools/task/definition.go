@@ -21,6 +21,7 @@ var allActions = []string{
 	"reassign",
 	"cancel",
 	"review",
+	"attach",
 }
 
 func (h Handler) Schema() json.RawMessage {
@@ -50,6 +51,9 @@ func mustSchema() json.RawMessage {
 			"note":                stringSchema("Unblock note, or optional review note for any review action."),
 			"decision":            stringSchema("Review decision: approve, retry, or fail."),
 			"criteria":            reviewCriteriaArraySchema("Acceptance criteria checks for review."),
+			"file_name":           stringSchema("Attachment file name for action=attach. A bare name like build-screenshot.png; path separators are rejected. The file is stored under /project/.agen8/attachments/<task-id>/ and appended to the task's artifacts as file:<vpath>."),
+			"content":             stringSchema("Attachment text content for action=attach. Provide exactly one of content or content_b64."),
+			"content_b64":         stringSchema("Attachment binary content for action=attach, base64-encoded (e.g. a PNG screenshot). Provide exactly one of content or content_b64."),
 		},
 		"required":             []string{"action"},
 		"additionalProperties": false,

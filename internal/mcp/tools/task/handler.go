@@ -8,6 +8,7 @@ import (
 
 	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/core/types"
+	fileapp "github.com/tinoosan/agen8/internal/services/file/app"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 	taskapp "github.com/tinoosan/agen8/internal/services/task/app"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
@@ -233,9 +234,74 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, fmt.Errorf("task: decision must be approve, retry, or fail")
 		}
 		return h.taskResult(ctx, call, "review", task, err, map[string]any{"decision": input.Decision})
+	case "attach":
+		id, err := requireTaskID(input.TaskID)
+		if err != nil {
+			return Result{}, err
+		}
+		fileName, err := requireAttachmentFileName(input.FileName)
+		if err != nil {
+			return Result{}, err
+		}
+		hasText := input.Content != ""
+		hasBinary := input.ContentB64 != ""
+		if hasText == hasBinary {
+			return Result{}, fmt.Errorf("task: attach requires exactly one of content or content_b64")
+		}
+		if call.Files == nil {
+			return Result{}, fmt.Errorf("task: attach is not available: file store is not configured")
+		}
+		// Refuse before writing: uploading first and validating after would
+		// orphan the file when the task cannot accept the artifact.
+		loaded, err := call.Tasks.Get(taskCtx, id)
+		if err != nil {
+			return Result{}, err
+		}
+		if loaded.Status == taskdomain.TaskStatusCanceled {
+			return Result{}, fmt.Errorf("task: cannot attach to canceled task %s", id)
+		}
+		vpath := attachmentVPath(id, fileName)
+		uploaded, err := call.Files.Upload(taskCtx, fileapp.UploadInput{
+			ProjectID: types.ProjectID(call.ProjectID),
+			Path:      vpath,
+			Content:   input.Content,
+			BytesB64:  input.ContentB64,
+		})
+		if err != nil {
+			return Result{}, fmt.Errorf("task: attach upload: %w", err)
+		}
+		ref := "file:" + uploaded.Path
+		task, err := call.Tasks.AttachArtifact(taskCtx, id, ref)
+		if err != nil {
+			// Best-effort cleanup so a failed append does not orphan the upload.
+			_, _ = call.Files.Delete(taskCtx, fileapp.PathInput{ProjectID: types.ProjectID(call.ProjectID), Path: uploaded.Path})
+			return Result{}, err
+		}
+		return h.taskResult(ctx, call, "attach", task, nil, map[string]any{"artifactRef": ref})
 	default:
 		return Result{}, fmt.Errorf("task: unsupported action %q", input.Action)
 	}
+}
+
+// requireAttachmentFileName accepts only a bare file name. Anything that
+// could traverse out of the task's attachment directory (separators, "..")
+// is rejected rather than normalized so the caller's mistake stays visible.
+func requireAttachmentFileName(value string) (string, error) {
+	name := strings.TrimSpace(value)
+	if name == "" {
+		return "", fmt.Errorf("task: file_name is required")
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return "", fmt.Errorf("task: file_name must be a bare file name without path separators or \"..\"")
+	}
+	if name == "." {
+		return "", fmt.Errorf("task: file_name must be a bare file name without path separators or \"..\"")
+	}
+	return name, nil
+}
+
+func attachmentVPath(id taskdomain.TaskID, fileName string) string {
+	return "/project/.agen8/attachments/" + string(id) + "/" + fileName
 }
 
 type actor struct {

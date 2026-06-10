@@ -306,3 +306,95 @@ func TestUpdateRejectsMetadataMissionRefDriftForExistingKeyResult(t *testing.T) 
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func attachTestService(repo *fakeTaskRepository, callerID string) *Service {
+	return &Service{
+		clock:  taskdomain.FixedClock{T: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)},
+		logger: slog.Default(),
+		tasks:  repo,
+		caller: fakeCallerResolver{Caller: caller.Caller{MemberID: member.ID(callerID)}},
+		members: testMemberLoader{members: map[member.ID]member.Record{
+			"worker-1": {
+				ID:             "worker-1",
+				ProjectID:      "space-1",
+				MemberType:     member.TypeWorker,
+				LifecycleState: member.LifecycleActive,
+			},
+			"outsider-1": {
+				ID:             "outsider-1",
+				ProjectID:      "space-other",
+				MemberType:     member.TypeWorker,
+				LifecycleState: member.LifecycleActive,
+			},
+		}},
+	}
+}
+
+func TestAttachArtifactAppendsWithoutClobberingExistingArtifacts(t *testing.T) {
+	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
+		"task-1": {
+			ID:        "task-1",
+			ProjectID: "space-1",
+			Status:    taskdomain.TaskStatusActive,
+			Artifacts: []string{"commit:abc123", "file:/project/notes.md"},
+		},
+	}}
+	svc := attachTestService(repo, "worker-1")
+
+	next, err := svc.AttachArtifact(context.Background(), "task-1", "file:/project/.agen8/attachments/task-1/shot.png")
+	if err != nil {
+		t.Fatalf("AttachArtifact: %v", err)
+	}
+	want := []string{"commit:abc123", "file:/project/notes.md", "file:/project/.agen8/attachments/task-1/shot.png"}
+	if len(next.Artifacts) != len(want) {
+		t.Fatalf("artifacts=%v want %v", next.Artifacts, want)
+	}
+	for i := range want {
+		if next.Artifacts[i] != want[i] {
+			t.Fatalf("artifacts[%d]=%q want %q", i, next.Artifacts[i], want[i])
+		}
+	}
+	if len(repo.updatedTask.Artifacts) != 3 {
+		t.Fatalf("persisted artifacts=%v want 3 entries", repo.updatedTask.Artifacts)
+	}
+}
+
+func TestAttachArtifactAllowsAnyActiveProjectMember(t *testing.T) {
+	// A plain worker (not coordinator, not assignee) may attach — reviewers
+	// and collaborators add evidence to tasks they do not own.
+	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
+		"task-1": {ID: "task-1", ProjectID: "space-1", AssignedTo: "someone-else", Status: taskdomain.TaskStatusInReview},
+	}}
+	svc := attachTestService(repo, "worker-1")
+	if _, err := svc.AttachArtifact(context.Background(), "task-1", "file:/project/a.png"); err != nil {
+		t.Fatalf("worker attach should be allowed: %v", err)
+	}
+}
+
+func TestAttachArtifactRejectsMemberOutsideProject(t *testing.T) {
+	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
+		"task-1": {ID: "task-1", ProjectID: "space-1", Status: taskdomain.TaskStatusActive},
+	}}
+	svc := attachTestService(repo, "outsider-1")
+	_, err := svc.AttachArtifact(context.Background(), "task-1", "file:/project/a.png")
+	if err == nil || !strings.Contains(err.Error(), "not in project") {
+		t.Fatalf("expected project membership rejection, got %v", err)
+	}
+	if repo.updatedTask.ID != "" {
+		t.Fatalf("attach persisted despite rejection: %+v", repo.updatedTask)
+	}
+}
+
+func TestAttachArtifactRejectsCanceledTask(t *testing.T) {
+	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
+		"task-1": {ID: "task-1", ProjectID: "space-1", Status: taskdomain.TaskStatusCanceled},
+	}}
+	svc := attachTestService(repo, "worker-1")
+	_, err := svc.AttachArtifact(context.Background(), "task-1", "file:/project/a.png")
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected canceled rejection, got %v", err)
+	}
+	if repo.updatedTask.ID != "" {
+		t.Fatalf("attach persisted despite rejection: %+v", repo.updatedTask)
+	}
+}
