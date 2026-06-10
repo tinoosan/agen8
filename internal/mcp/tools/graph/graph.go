@@ -157,14 +157,14 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			return Result{}, err
 		}
 		edge, warnings, err := call.Graph.Link(ctx, req)
-		return result("link", map[string]any{"edge": edge, "warnings": dedupeWarnings(warnings)}, err)
+		return result("link", map[string]any{"edge": toLeanEdge(edge), "warnings": dedupeWarnings(warnings)}, err)
 	case "unlink":
 		req, err := linkRequest(projectID, input, false)
 		if err != nil {
 			return Result{}, err
 		}
 		edge, warnings, err := call.Graph.Unlink(ctx, req)
-		return result("unlink", map[string]any{"edge": edge, "warnings": dedupeWarnings(warnings)}, err)
+		return result("unlink", map[string]any{"edge": toLeanEdge(edge), "warnings": dedupeWarnings(warnings)}, err)
 	default:
 		return Result{}, fmt.Errorf("graph_query: unsupported action %q", input.Action)
 	}
@@ -489,6 +489,19 @@ func linkRequest(projectID string, input requestInput, includeRationale bool) (d
 		req.Rationale = input.Rationale
 	}
 	return req, nil
+}
+
+// leanEdge is the link/unlink ack — enough to confirm the operation and to
+// unlink by id later. The full domain.GraphEdge (source/target/confidence/
+// rationale/timestamps/origin/…) is mostly input the caller supplied and is only
+// returned by the node/search reads, where the model actually needs it.
+type leanEdge struct {
+	ID       string `json:"id,omitempty"`
+	EdgeType string `json:"edgeType,omitempty"`
+}
+
+func toLeanEdge(edge domain.GraphEdge) leanEdge {
+	return leanEdge{ID: edge.ID, EdgeType: edge.EdgeType}
 }
 
 func result(action string, fields map[string]any, err error) (Result, error) {
