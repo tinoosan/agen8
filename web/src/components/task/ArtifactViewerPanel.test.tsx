@@ -174,6 +174,32 @@ describe('ArtifactViewerPanel', () => {
     expect(screen.queryByTestId('file-browser-pane')).not.toBeInTheDocument()
   })
 
+  it('keeps the browser pane visible beside shrinkable wide content', async () => {
+    mockRpcCall.mockImplementation(async (method: unknown, params: unknown) => {
+      const p = params as { path?: string }
+      if (method === 'files.listDir') {
+        return {
+          path: p.path,
+          entries: [
+            { name: 'ArtifactPreviewPane.tsx', path: '/project/web/src/components/files/ArtifactPreviewPane.tsx', isDir: false, writable: false },
+          ],
+        }
+      }
+      if (method === 'files.get') {
+        return textPreview(p.path ?? '', 'const longLine = "' + 'x'.repeat(240) + '"')
+      }
+      throw new Error('unexpected method: ' + String(method))
+    })
+
+    renderPanel('/project/web/src/components/files/CodeView.tsx', 'inline')
+    await userEvent.click(await screen.findByRole('button', { name: 'Browse files' }))
+
+    const browserPane = await screen.findByTestId('file-browser-pane')
+    expect(browserPane).toHaveClass('w-[clamp(160px,34%,240px)]')
+    expect(browserPane.previousElementSibling).toHaveClass('min-w-0', 'overflow-hidden')
+    expect(await screen.findByText('ArtifactPreviewPane.tsx')).toBeInTheDocument()
+  })
+
   it('keeps the diff toggle working in inline layout', async () => {
     mockRpcCall.mockImplementation(async (method: unknown) => {
       if (method === 'files.get') return textPreview('/project/main.go', 'a\nb changed\n')

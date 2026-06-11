@@ -54,7 +54,7 @@ export function FileBrowserPane({ projectId, initialDir, activeVPath, onSelectFi
 
   return (
     <div
-      className="flex h-full min-h-0 w-[240px] shrink-0 flex-col border-l border-[var(--border)] bg-[var(--bg-surface,transparent)]"
+      className="flex h-full min-h-0 w-[clamp(160px,34%,240px)] shrink-0 flex-col border-l border-[var(--border)] bg-[var(--bg-surface,transparent)]"
       data-testid="file-browser-pane"
     >
       {/* current directory + up control */}
