@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
-import { AlertTriangle, ChevronRight, Clock, Timer, Layers } from 'lucide-react'
+import { AlertTriangle, ChevronRight, Clock, Timer, Layers, Hand } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { NotificationItem, NotificationSeverity } from '../../lib/types'
 import { SEVERITY_META } from '../notifications/severity'
 import { isStandingNotification } from '../../lib/notifications'
+import { formatDuration } from '../../lib/format'
 import {
   useNotifications,
   useMarkNotificationRead,
 } from '../../hooks/useNotifications'
+import { useAttention, type AttentionEntry } from '../../hooks/useAttention'
 
 /* Each standing-alert type gets one group: the type is named once in the group
  * header (icon + label + count) so individual rows aren't repetitive. Order here
@@ -88,6 +90,60 @@ function AlertRow({
   )
 }
 
+/* ── Waiting-on-you group: harness sessions paused for human input ─────────
+ *
+ * Fed by the attention radar (harness hooks → attention.list), not the
+ * notification service. Deliberately payload-free: member, harness, kind, and
+ * elapsed wait only, so Claude Code and Codex render identically. */
+
+const ATTENTION_KIND_LABEL: Record<AttentionEntry['kind'], string> = {
+  waiting: 'waiting for input',
+  needs_approval: 'needs approval',
+}
+
+function attentionLead(entry: AttentionEntry): string {
+  const who = entry.memberName || 'Unknown session'
+  const harness = entry.harness ? ` (${entry.harness})` : ''
+  const kind = ATTENTION_KIND_LABEL[entry.kind] ?? entry.kind
+  return `${who}${harness} — ${kind}`
+}
+
+function AttentionGroupBlock({ entries, last }: { entries: AttentionEntry[]; last: boolean }) {
+  const now = Date.now()
+  return (
+    <div className={cn(!last && 'border-b border-[var(--border)]')}>
+      <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+        <Hand size={13} className="text-[var(--amber)]" aria-hidden />
+        <span className="text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-[var(--text-2)]">
+          Waiting on you
+        </span>
+        {entries.length > 1 && (
+          <span className="ml-auto rounded-full bg-[var(--bg-active)] px-1.5 text-[0.6875rem] font-medium tabular-nums text-[var(--text-3)]">
+            {entries.length}
+          </span>
+        )}
+      </div>
+      {entries.map((entry) => {
+        const elapsed = Math.max(0, now - new Date(entry.since).getTime())
+        return (
+          <div key={entry.sessionRef} className="flex items-center gap-2.5 px-4 py-2">
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--amber)]"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-[var(--text-1)]">
+              {attentionLead(entry)}
+            </span>
+            <span className="shrink-0 text-[0.75rem] tabular-nums text-[var(--text-3)]">
+              {formatDuration(elapsed)}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 /* ── One group: header (type stated once) + capped rows + expand toggle ──── */
 
 function AlertGroupBlock({
@@ -145,6 +201,7 @@ function AlertGroupBlock({
  * hides entirely when nothing needs attention. */
 export default function NeedsAttention({ projectId }: { projectId: string | null }) {
   const { data } = useNotifications(projectId)
+  const { data: attentionEntries = [] } = useAttention(projectId)
   const [, navigate] = useLocation()
   const markRead = useMarkNotificationRead()
 
@@ -180,11 +237,14 @@ export default function NeedsAttention({ projectId }: { projectId: string | null
     return built
   }, [data?.notifications])
 
-  const total = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups])
+  const total = useMemo(
+    () => groups.reduce((n, g) => n + g.items.length, 0) + attentionEntries.length,
+    [groups, attentionEntries.length],
+  )
 
   if (!projectId) return null
   // Hide entirely when nothing needs attention — an empty attention card is noise.
-  if (groups.length === 0) return null
+  if (groups.length === 0 && attentionEntries.length === 0) return null
 
   const handleActivate = (n: NotificationItem) => {
     if (!n.readAt) markRead.mutate({ id: n.id })
@@ -213,6 +273,9 @@ export default function NeedsAttention({ projectId }: { projectId: string | null
           </div>
         </div>
         <div className="max-w-[720px] max-h-[28rem] overflow-y-auto overflow-x-hidden rounded-[18px] border border-[color-mix(in_srgb,var(--amber)_35%,var(--border))] bg-[var(--bg-elevated)]">
+          {attentionEntries.length > 0 && (
+            <AttentionGroupBlock entries={attentionEntries} last={groups.length === 0} />
+          )}
           {groups.map((g, i) => (
             <AlertGroupBlock
               key={g.trigger}

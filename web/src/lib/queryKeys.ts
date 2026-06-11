@@ -94,6 +94,11 @@ export const qk = {
   notifications: (projectId: string | null) =>
     ['notification.list', projectId ?? ''] as const,
 
+  // ── attention (harness sessions waiting on the human) ──
+  attentionAll: ['attention.list'] as const,
+  attention: (projectId: string | null) =>
+    ['attention.list', projectId ?? ''] as const,
+
   // ── pins ──────────────────────────────────────────────
   pinsAll: ['pin.list'] as const,
   pins: (projectId: string | null) => ['pin.list', projectId ?? ''] as const,

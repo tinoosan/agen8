@@ -47,6 +47,7 @@ const INVALIDATION_RULES: { prefix: string; roots: QueryRoot[] }[] = [
   },
   { prefix: 'space.member.', roots: [qk.projectMembersAll] },
   { prefix: 'pin.', roots: [qk.pinsAll] },
+  { prefix: 'attention.', roots: [qk.attentionAll] },
 ]
 
 /**

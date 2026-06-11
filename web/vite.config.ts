@@ -96,9 +96,15 @@ export default defineConfig({
       '/api': daemonProxyTarget,
       '/auth/chatgpt': daemonProxyTarget,
       '/setup': daemonProxyTarget,
+      '/hooks': daemonProxyTarget,
       '/events': {
         target: daemonProxyTarget,
         changeOrigin: true,
+        // The daemon's /events rejects cross-origin requests. changeOrigin only
+        // rewrites Host, not Origin — the browser still sends the dev server's
+        // origin, so every proxied SSE connect was refused (403). Present the
+        // daemon's own origin instead.
+        headers: { Origin: daemonProxyTarget },
       },
     },
   },
