@@ -13,6 +13,7 @@ import (
 	"github.com/tinoosan/agen8/internal/claudehook"
 	"github.com/tinoosan/agen8/internal/config"
 	"github.com/tinoosan/agen8/internal/daemon"
+	"github.com/tinoosan/agen8/internal/hookinstaller"
 	"github.com/tinoosan/agen8/internal/skillinstaller"
 	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
@@ -40,6 +41,8 @@ func run(args []string) error {
 		return runClaude(args[1:])
 	case "skill":
 		return runSkill(args[1:])
+	case "hooks":
+		return runHooks(args[1:])
 	}
 	if args[0] != "daemon" {
 		return fmt.Errorf("unknown command %q", args[0])
@@ -91,6 +94,52 @@ func runSkill(args []string) error {
 		return err
 	}
 	fmt.Printf("installed agen8 skills for %s\nroot: %s\nskills: %s\nrerun this command to refresh\n", result.Harness, result.Root, strings.Join(result.Skills, ", "))
+	return nil
+}
+
+// runHooks dispatches the attention-hook provisioning subcommands. `hooks
+// install` writes the curl-based harness hooks that report "this agent is
+// waiting on you" to the daemon (see internal/hookinstaller). Explicit by
+// design: agen8 never installs hooks silently.
+func runHooks(args []string) error {
+	const usage = "usage: agen8 hooks install --harness claude|codex --token TOKEN [--url URL] [--project-dir DIR] [--home DIR]"
+	if len(args) == 0 || args[0] != "install" {
+		return errors.New(usage)
+	}
+	fs := flag.NewFlagSet("hooks install", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var (
+		harness    string
+		baseURL    string
+		token      string
+		projectDir string
+		homeDir    string
+	)
+	fs.StringVar(&harness, "harness", "", "target harness: claude or codex")
+	fs.StringVar(&baseURL, "url", "http://127.0.0.1:7777", "agen8 daemon base URL")
+	fs.StringVar(&token, "token", "", "agen8 API key the hooks authenticate with (ak_...)")
+	fs.StringVar(&projectDir, "project-dir", "", "project directory for Claude Code settings (default: cwd)")
+	fs.StringVar(&homeDir, "home", "", "home directory override for Codex config")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(harness) == "" {
+		return errors.New(usage)
+	}
+	result, err := hookinstaller.Install(hookinstaller.Options{
+		Harness:    hookinstaller.Harness(harness),
+		BaseURL:    baseURL,
+		Token:      token,
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("installed agen8 attention hooks for %s\nwrote: %s\nrerun this command to refresh (e.g. after rotating the token)\n", result.Harness, result.Path)
 	return nil
 }
 

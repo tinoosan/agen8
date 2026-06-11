@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 
@@ -11,10 +12,19 @@ import (
 
 const maxAttentionHookBodyBytes = 16 * 1024
 
-// handleAttentionHook ingests one normalized attention event from a harness
-// hook script (Claude Code / Codex). The contract with the hook side is: ack
-// fast, never block, never make the hook's failure the agent's problem — a bad
-// payload gets a 4xx and the hook script still exits 0.
+// handleAttentionHook ingests one attention event from a harness hook script
+// (Claude Code / Codex). Two body shapes are accepted:
+//
+//   - Raw mode (?harness=...&kind=... query params): the body is the harness's
+//     own hook payload, piped through untouched — the installed hook is a bare
+//     `curl --data-binary @-` one-liner with zero local dependencies, which
+//     also works against a hosted agen8. The session id is extracted
+//     server-side (both harnesses name it "session_id").
+//   - Normalized mode (no kind param): the body is an attention.Event.
+//
+// The contract with the hook side is: ack fast, never block, never make the
+// hook's failure the agent's problem — a bad payload gets a 4xx and the hook
+// script still exits 0.
 //
 // Auth accepts the member's MCP API key (ak_..., already present in every
 // harness MCP config) or a web session token, both as a bearer header.
@@ -27,7 +37,13 @@ func (d *Daemon) handleAttentionHook(w http.ResponseWriter, r *http.Request) {
 
 	var ev attention.Event
 	body := http.MaxBytesReader(w, r.Body, maxAttentionHookBodyBytes)
-	if err := json.NewDecoder(body).Decode(&ev); err != nil {
+	if kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind != "" {
+		ev = attention.Event{
+			Harness:    strings.TrimSpace(r.URL.Query().Get("harness")),
+			Kind:       attention.Kind(kind),
+			SessionRef: sessionRefFromRawHookPayload(body),
+		}
+	} else if err := json.NewDecoder(body).Decode(&ev); err != nil {
 		http.Error(w, "invalid attention event payload", http.StatusBadRequest)
 		return
 	}
@@ -47,6 +63,20 @@ func (d *Daemon) handleAttentionHook(w http.ResponseWriter, r *http.Request) {
 		"kind":       entry.Kind,
 		"attributed": entry.MemberID != "",
 	})
+}
+
+// sessionRefFromRawHookPayload pulls the session identifier out of a harness's
+// own hook payload. Claude Code and Codex hooks both deliver stdin JSON with a
+// top-level "session_id". Returns empty on any parse failure — Report then
+// rejects with a 400 and the hook script still exits 0.
+func sessionRefFromRawHookPayload(body io.Reader) string {
+	var payload struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.SessionID)
 }
 
 // attentionHookUserID resolves the caller to a user id from the bearer token:
