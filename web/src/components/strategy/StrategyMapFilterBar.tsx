@@ -34,7 +34,7 @@ export const StrategyMapFilterBar = memo(function StrategyMapFilterBar({
   ]
 
   return (
-    <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5">
+    <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
       {/* Search node — touch-reachable entry point to the node search. Always
           visible (the mobile top-bar search is md:hidden, so iPad/tablet have
           no other way in without a keyboard). Mirrors the inactive-pill style. */}

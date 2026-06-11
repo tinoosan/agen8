@@ -9,7 +9,7 @@ import { StrategyMapFilterBar } from './StrategyMapFilterBar'
  * tests pin that it's present and fires the callback. */
 function renderBar(overrides: Partial<Parameters<typeof StrategyMapFilterBar>[0]> = {}) {
   const onOpenSearch = vi.fn()
-  render(
+  const result = render(
     <StrategyMapFilterBar
       activeFilter={null}
       onFilterChange={() => {}}
@@ -18,13 +18,19 @@ function renderBar(overrides: Partial<Parameters<typeof StrategyMapFilterBar>[0]
       {...overrides}
     />,
   )
-  return { onOpenSearch }
+  return { ...result, onOpenSearch }
 }
 
 describe('StrategyMapFilterBar — search button', () => {
   it('renders a search button (touch entry point, always visible)', () => {
     renderBar()
     expect(screen.getByLabelText('Search nodes')).toBeInTheDocument()
+  })
+
+  it('renders as normal flow content, not an absolute canvas overlay', () => {
+    const { container } = renderBar()
+    expect(container.firstElementChild).not.toHaveClass('absolute')
+    expect(container.firstElementChild).toHaveClass('overflow-x-auto')
   })
 
   it('invokes onOpenSearch when clicked', () => {

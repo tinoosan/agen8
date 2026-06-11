@@ -239,63 +239,72 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
             to { stroke-dashoffset: 0; }
           }
         `}</style>
-      <div className="relative flex-1 min-w-0 overflow-hidden" onDoubleClick={handlePaneDoubleClick}>
-        {deferredGraph.isLoading && displayNodes.length === 0 && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center p-8 pointer-events-none">
-            <div className="flex items-center gap-16">
-              {[0, 1, 2].map(i => (
-                <Skeleton key={i} className="w-20 h-20 rounded-full" />
-              ))}
-            </div>
-          </div>
-        )}
-
-        <StrategyMapFilterBar
-          activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
-          matchCount={filterResult?.matchCount ?? 0}
-          onOpenSearch={() => setSearchOpen(true)}
-        />
-
-        <StrategyMapCanvas
-          nodes={displayNodes}
-          edges={displayEdges}
-          onNodeClick={handleNodeClick}
-          onNodeDoubleClick={handleNodeDoubleClick}
-          onEdgeClick={handleEdgeClick}
-          onPaneClick={handlePaneClick}
-          markInteraction={markInteraction}
-          markZooming={markZooming}
-          setDisplayMode={setDisplayMode}
-          projectId={projectId}
-          initialViewport={initialViewport}
-        />
-
-        {effectiveFocusNodeId && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-            <span className="text-[0.625rem] text-muted-foreground/60 px-2.5 py-1">
-              Esc to clear focus
-            </span>
-          </div>
-        )}
-
-        <StrategyMapLegend />
-        <StrategyMapZoomControls />
-        <AnimatePresence>
-          {selectedNode && (
-            <DetailPanel
-              node={selectedNode}
-              projectId={projectId}
-              projectRoot={projectRoot}
-              onClose={() => {
-                // Close the panel but keep the focus cursor so traversal can
-                // continue with the panel closed. A second Escape (handled in
-                // the keyboard hook) clears the cursor.
-                setSelectedNodeId(null)
-              }}
+      <div className="relative flex flex-1 min-w-0 min-h-0 overflow-hidden">
+        <div className="flex flex-1 min-w-0 min-h-0 flex-col">
+          <div
+            className="shrink-0 px-4 py-3"
+            style={{ background: 'var(--color-bg)' }}
+          >
+            <StrategyMapFilterBar
+              activeFilter={activeFilter}
+              onFilterChange={setActiveFilter}
+              matchCount={filterResult?.matchCount ?? 0}
+              onOpenSearch={() => setSearchOpen(true)}
             />
-          )}
-        </AnimatePresence>
+          </div>
+
+          <div className="relative flex-1 min-h-0 overflow-hidden" onDoubleClick={handlePaneDoubleClick}>
+            {deferredGraph.isLoading && displayNodes.length === 0 && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center p-8 pointer-events-none">
+                <div className="flex items-center gap-16">
+                  {[0, 1, 2].map(i => (
+                    <Skeleton key={i} className="w-20 h-20 rounded-full" />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <StrategyMapCanvas
+              nodes={displayNodes}
+              edges={displayEdges}
+              onNodeClick={handleNodeClick}
+              onNodeDoubleClick={handleNodeDoubleClick}
+              onEdgeClick={handleEdgeClick}
+              onPaneClick={handlePaneClick}
+              markInteraction={markInteraction}
+              markZooming={markZooming}
+              setDisplayMode={setDisplayMode}
+              projectId={projectId}
+              initialViewport={initialViewport}
+            />
+
+            {effectiveFocusNodeId && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+                <span className="text-[0.625rem] text-muted-foreground/60 px-2.5 py-1">
+                  Esc to clear focus
+                </span>
+              </div>
+            )}
+
+            <StrategyMapLegend />
+            <StrategyMapZoomControls />
+            <AnimatePresence>
+              {selectedNode && (
+                <DetailPanel
+                  node={selectedNode}
+                  projectId={projectId}
+                  projectRoot={projectRoot}
+                  onClose={() => {
+                    // Close the panel but keep the focus cursor so traversal can
+                    // continue with the panel closed. A second Escape (handled in
+                    // the keyboard hook) clears the cursor.
+                    setSelectedNodeId(null)
+                  }}
+                />
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
 
       <StrategyMapHelp open={helpOpen} onOpenChange={setHelpOpen} />
