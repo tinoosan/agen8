@@ -166,11 +166,11 @@ func TestReviewApprove_HappyPath(t *testing.T) {
 	if next.Status != TaskStatusSucceeded {
 		t.Fatalf("status=%s want succeeded", next.Status)
 	}
-	if next.ClaimedBy() != "" {
-		t.Fatalf("claim should be cleared on approval, got %q", next.ClaimedBy())
+	if next.ClaimedBy() != member.ID("member-fred") {
+		t.Fatalf("claim should be retained on approval for attribution, got %q", next.ClaimedBy())
 	}
-	if next.ClaimedByMemberLabel != "" {
-		t.Fatalf("claim label should be cleared on approval, got %q", next.ClaimedByMemberLabel)
+	if next.ClaimedByMemberLabel != "Fred" {
+		t.Fatalf("claim label should be retained on approval, got %q", next.ClaimedByMemberLabel)
 	}
 	if next.CompletedAt == nil {
 		t.Fatal("CompletedAt should be stamped on approval")
@@ -212,7 +212,9 @@ func TestReviewRetry_RejectsEmptyFeedback(t *testing.T) {
 }
 
 func TestReviewFail_HappyPath(t *testing.T) {
-	next, err := makeTask(TaskStatusInReview).FailReview("criteria failed", []CriterionReview{
+	inReview := makeTask(TaskStatusInReview)
+	inReview.ClaimedByMemberID = member.ID("member-fred")
+	next, err := inReview.FailReview("criteria failed", []CriterionReview{
 		{ID: "criterion-1", Satisfied: true},
 		{ID: "criterion-2", Satisfied: false},
 	}, fixedTime)
@@ -227,6 +229,9 @@ func TestReviewFail_HappyPath(t *testing.T) {
 	}
 	if next.CompletedAt == nil {
 		t.Fatal("CompletedAt should be stamped on failure")
+	}
+	if next.ClaimedBy() != member.ID("member-fred") {
+		t.Fatalf("claim should be retained on failure for attribution, got %q", next.ClaimedBy())
 	}
 }
 

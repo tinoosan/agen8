@@ -126,12 +126,12 @@ func (t Task) ApproveReview(criteria []CriterionReview, now time.Time) (Task, er
 			return Task{}, fmt.Errorf("approve review: criterion %s is not satisfied", criterion.ID)
 		}
 	}
+	// The claim is kept on terminal transitions: it is the durable record of
+	// who did the work (the harness leaderboard attributes through it).
 	next := t
 	next.Status = TaskStatusSucceeded
 	next.AcceptanceCriteria = nextCriteria
 	next.Error = ""
-	next.ClaimedByMemberID = ""
-	next.ClaimedByMemberLabel = ""
 	completed := now.UTC()
 	next.CompletedAt = &completed
 	next.UpdatedAt = &completed
@@ -174,12 +174,12 @@ func (t Task) FailReview(reason string, criteria []CriterionReview, now time.Tim
 	if err != nil {
 		return Task{}, fmt.Errorf("fail review: %w", err)
 	}
+	// As with approval, the claim survives failure: who attempted the work is
+	// part of the task's history.
 	next := t
 	next.Status = TaskStatusFailed
 	next.AcceptanceCriteria = nextCriteria
 	next.Error = reason
-	next.ClaimedByMemberID = ""
-	next.ClaimedByMemberLabel = ""
 	completed := now.UTC()
 	next.CompletedAt = &completed
 	next.UpdatedAt = &completed
