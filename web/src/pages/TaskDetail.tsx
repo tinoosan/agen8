@@ -112,6 +112,8 @@ export default function TaskDetail() {
   // no room for both (dec-e8b58636).
   const [openArtifactVPath, setOpenArtifactVPath] = useState<string | null>(null)
   const viewerAsSheet = useIsBelow(1152)
+  const [renderedArtifactVPath, setRenderedArtifactVPath] = useState<string | null>(null)
+  const [inlineViewerVisible, setInlineViewerVisible] = useState(false)
   // Persisted, drag-adjustable width of the inline viewer panel.
   const [panelWidth, setPanelWidth] = useState<number>(() => {
     const stored = typeof window !== 'undefined' ? Number(window.localStorage.getItem('task-artifact-panel-width')) : NaN
@@ -146,8 +148,41 @@ export default function TaskDetail() {
     reclamp()
     window.addEventListener('resize', reclamp)
     return () => window.removeEventListener('resize', reclamp)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewerAsSheet, openArtifactVPath])
+
+  useEffect(() => {
+    if (viewerAsSheet) {
+      const timeout = window.setTimeout(() => {
+        setRenderedArtifactVPath(null)
+        setInlineViewerVisible(false)
+      }, 180)
+      return () => window.clearTimeout(timeout)
+    }
+
+    if (openArtifactVPath) {
+      const frame = requestAnimationFrame(() => setInlineViewerVisible(true))
+      return () => cancelAnimationFrame(frame)
+    }
+
+    if (!renderedArtifactVPath) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => setRenderedArtifactVPath(null), 180)
+    return () => window.clearTimeout(timeout)
+  }, [openArtifactVPath, renderedArtifactVPath, viewerAsSheet])
+
+  const openArtifactViewer = (vpath: string) => {
+    setRenderedArtifactVPath(vpath)
+    setInlineViewerVisible(false)
+    setOpenArtifactVPath(vpath)
+  }
+
+  const closeArtifactViewer = () => {
+    setInlineViewerVisible(false)
+    setOpenArtifactVPath(null)
+  }
+
   const updateTask = useUpdateTask()
   const assignTask = useAssignTask()
 
@@ -649,7 +684,7 @@ export default function TaskDetail() {
         <RelatedList items={related} storageKey="task-detail-related" />
 
         {/* Artifacts */}
-        <TaskArtifactsSection task={task} projectId={projectId} onOpenArtifact={setOpenArtifactVPath} />
+        <TaskArtifactsSection task={task} projectId={projectId} onOpenArtifact={openArtifactViewer} />
       </div>
 
       <CancelTaskDialog task={task} open={cancelOpen} onOpenChange={setCancelOpen} />
@@ -660,19 +695,37 @@ export default function TaskDetail() {
         key={openArtifactVPath}
         projectId={projectId}
         vpath={openArtifactVPath}
-        onClose={() => setOpenArtifactVPath(null)}
+        onClose={closeArtifactViewer}
         layout="sheet"
       />
     )}
-    {openArtifactVPath && !viewerAsSheet && (
+    {renderedArtifactVPath && !viewerAsSheet && (
       <>
-        <ResizeHandle onResize={resizePanel} aria-label="Resize artifact viewer" />
-        <div className="shrink-0 h-full min-h-0 flex flex-col" style={{ width: panelWidth }}>
+        <div
+          className="shrink-0 h-full min-h-0 overflow-hidden transition-[width,opacity,transform] duration-[180ms] ease-out"
+          style={{
+            width: inlineViewerVisible ? RESIZE_HANDLE_WIDTH : 0,
+            opacity: inlineViewerVisible ? 1 : 0,
+            transform: inlineViewerVisible ? 'translateX(0)' : 'translateX(6px)',
+          }}
+          aria-hidden={!inlineViewerVisible}
+        >
+          <ResizeHandle onResize={resizePanel} aria-label="Resize artifact viewer" />
+        </div>
+        <div
+          className="shrink-0 h-full min-h-0 flex flex-col overflow-hidden transition-[width,opacity,transform] duration-[180ms] ease-out will-change-[width,opacity,transform]"
+          style={{
+            width: inlineViewerVisible ? panelWidth : 0,
+            opacity: inlineViewerVisible ? 1 : 0,
+            transform: inlineViewerVisible ? 'translateX(0)' : 'translateX(10px)',
+          }}
+          aria-hidden={!inlineViewerVisible}
+        >
           <ArtifactViewerPanel
-            key={openArtifactVPath}
+            key={renderedArtifactVPath}
             projectId={projectId}
-            vpath={openArtifactVPath}
-            onClose={() => setOpenArtifactVPath(null)}
+            vpath={renderedArtifactVPath}
+            onClose={closeArtifactViewer}
             layout="inline"
           />
         </div>
