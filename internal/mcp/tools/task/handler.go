@@ -2,8 +2,11 @@ package task
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tinoosan/agen8/internal/caller"
@@ -239,14 +242,31 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		if err != nil {
 			return Result{}, err
 		}
+		sources := 0
+		for _, present := range []bool{input.Content != "", input.ContentB64 != "", input.FilePath != ""} {
+			if present {
+				sources++
+			}
+		}
+		if sources != 1 {
+			return Result{}, fmt.Errorf("task: attach requires exactly one of content, content_b64, or file_path")
+		}
+		// file_path lets the daemon read the bytes itself so they never round-trip
+		// through the model. file_name then defaults to the path's base name.
+		contentB64 := input.ContentB64
+		if input.FilePath != "" {
+			data, base, ferr := readAttachmentFile(input.FilePath)
+			if ferr != nil {
+				return Result{}, ferr
+			}
+			contentB64 = base64.StdEncoding.EncodeToString(data)
+			if input.FileName == "" {
+				input.FileName = base
+			}
+		}
 		fileName, err := requireAttachmentFileName(input.FileName)
 		if err != nil {
 			return Result{}, err
-		}
-		hasText := input.Content != ""
-		hasBinary := input.ContentB64 != ""
-		if hasText == hasBinary {
-			return Result{}, fmt.Errorf("task: attach requires exactly one of content or content_b64")
 		}
 		if call.Files == nil {
 			return Result{}, fmt.Errorf("task: attach is not available: file store is not configured")
@@ -265,7 +285,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 			ProjectID: types.ProjectID(call.ProjectID),
 			Path:      vpath,
 			Content:   input.Content,
-			BytesB64:  input.ContentB64,
+			BytesB64:  contentB64,
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf("task: attach upload: %w", err)
@@ -302,6 +322,34 @@ func requireAttachmentFileName(value string) (string, error) {
 
 func attachmentVPath(id taskdomain.TaskID, fileName string) string {
 	return "/project/.agen8/attachments/" + string(id) + "/" + fileName
+}
+
+// maxAttachmentFileBytes caps file_path attachments. Inline content is already
+// bounded by the RPC body limit; this bound covers daemon-side reads.
+const maxAttachmentFileBytes = 20 << 20 // 20 MiB
+
+// readAttachmentFile reads an attachment source from the daemon host's
+// filesystem so the bytes never round-trip through the model. The source is
+// copied, never moved — the caller's file is left untouched.
+func readAttachmentFile(path string) (data []byte, baseName string, err error) {
+	if !filepath.IsAbs(path) {
+		return nil, "", fmt.Errorf("task: file_path must be an absolute path, got %q", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("task: file_path: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, "", fmt.Errorf("task: file_path must be a regular file, %q is not", path)
+	}
+	if info.Size() > maxAttachmentFileBytes {
+		return nil, "", fmt.Errorf("task: file_path: %q is %d bytes, over the %d byte attachment limit", path, info.Size(), maxAttachmentFileBytes)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("task: file_path: %w", err)
+	}
+	return data, filepath.Base(path), nil
 }
 
 type actor struct {

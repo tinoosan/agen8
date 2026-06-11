@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -689,15 +691,105 @@ func TestHandleAttachRequiresExactlyOneContentField(t *testing.T) {
 	for _, payload := range []string{
 		`{"action":"attach","task_id":"task-1","file_name":"a.txt"}`,
 		`{"action":"attach","task_id":"task-1","file_name":"a.txt","content":"x","content_b64":"eA=="}`,
+		`{"action":"attach","task_id":"task-1","file_name":"a.txt","content":"x","file_path":"/tmp/a.txt"}`,
+		`{"action":"attach","task_id":"task-1","content_b64":"eA==","file_path":"/tmp/a.txt"}`,
 	} {
 		svc := &stubService{}
 		files := &stubFileStore{}
 		_, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), json.RawMessage(payload))
-		if err == nil || !strings.Contains(err.Error(), "exactly one of content or content_b64") {
+		if err == nil || !strings.Contains(err.Error(), "exactly one of content, content_b64, or file_path") {
 			t.Fatalf("payload=%s: expected exactly-one error, got %v", payload, err)
 		}
 		if len(files.uploads) != 0 {
 			t.Fatalf("payload=%s: upload happened despite rejection", payload)
+		}
+	}
+}
+
+func TestHandleAttachByFilePathReadsBytesAndDefaultsFileName(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("\x89PNG\r\n\x1a\n fake image body")
+	path := filepath.Join(dir, "pulse-after.png")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	svc := &stubService{}
+	files := &stubFileStore{}
+	payload, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_path": path})
+	res, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), payload)
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(files.uploads) != 1 {
+		t.Fatalf("uploads=%d want 1", len(files.uploads))
+	}
+	upload := files.uploads[0]
+	if upload.Path != "/project/.agen8/attachments/task-1/pulse-after.png" {
+		t.Fatalf("upload path=%q (file_name should default to base name)", upload.Path)
+	}
+	if upload.BytesB64 != base64.StdEncoding.EncodeToString(body) {
+		t.Fatalf("uploaded bytes do not match the source file")
+	}
+	structured, ok := res.Structured.(map[string]any)
+	if !ok || structured["artifactRef"] != "file:/project/.agen8/attachments/task-1/pulse-after.png" {
+		t.Fatalf("result missing artifactRef: %+v", res.Structured)
+	}
+	// Copy semantics: the source file must still exist untouched.
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(body) {
+		t.Fatalf("source file was modified or removed: err=%v", err)
+	}
+}
+
+func TestHandleAttachByFilePathExplicitFileNameWins(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "raw-capture.png")
+	if err := os.WriteFile(path, []byte("img"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	svc := &stubService{}
+	files := &stubFileStore{}
+	payload, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_path": path, "file_name": "verification.png"})
+	if _, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), payload); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(files.uploads) != 1 || files.uploads[0].Path != "/project/.agen8/attachments/task-1/verification.png" {
+		t.Fatalf("explicit file_name not honored: %+v", files.uploads)
+	}
+}
+
+func TestHandleAttachByFilePathGuards(t *testing.T) {
+	dir := t.TempDir()
+	big := filepath.Join(dir, "big.bin")
+	f, err := os.Create(big)
+	if err != nil {
+		t.Fatalf("create big fixture: %v", err)
+	}
+	if err := f.Truncate(maxAttachmentFileBytes + 1); err != nil {
+		t.Fatalf("truncate big fixture: %v", err)
+	}
+	_ = f.Close()
+
+	cases := []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{"relative path", "relative/capture.png", "absolute"},
+		{"missing file", filepath.Join(dir, "nope.png"), "file_path"},
+		{"directory", dir, "regular file"},
+		{"over size cap", big, "attachment limit"},
+	}
+	for _, tc := range cases {
+		svc := &stubService{}
+		files := &stubFileStore{}
+		payload, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_path": tc.path})
+		_, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), payload)
+		if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+			t.Fatalf("%s: expected error containing %q, got %v", tc.name, tc.wantErr, err)
+		}
+		if len(files.uploads) != 0 {
+			t.Fatalf("%s: upload happened despite rejection", tc.name)
 		}
 	}
 }

@@ -59,6 +59,7 @@ func decode(args json.RawMessage) (requestInput, error) {
 		FileName:           trimPtr(raw.FileName),
 		Content:            ptrString(raw.Content),
 		ContentB64:         trimPtr(raw.ContentB64),
+		FilePath:           trimPtr(raw.FilePath),
 	}, nil
 }
 
@@ -114,7 +115,7 @@ var fieldsByAction = map[string]map[string]struct{}{
 	"reassign": fieldSet("action", "task_id", "assignee_member_id"),
 	"cancel":   fieldSet("action", "task_id", "reason"),
 	"review":   fieldSet("action", "task_id", "decision", "reason", "summary", "note", "criteria"),
-	"attach":   fieldSet("action", "task_id", "file_name", "content", "content_b64"),
+	"attach":   fieldSet("action", "task_id", "file_name", "content", "content_b64", "file_path"),
 }
 
 func fieldSet(fields ...string) map[string]struct{} {

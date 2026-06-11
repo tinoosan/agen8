@@ -80,6 +80,7 @@ type rawRequest struct {
 	FileName           *string                `json:"file_name"`
 	Content            *string                `json:"content"`
 	ContentB64         *string                `json:"content_b64"`
+	FilePath           *string                `json:"file_path"`
 }
 
 type requestInput struct {
@@ -105,4 +106,5 @@ type requestInput struct {
 	FileName           string
 	Content            string
 	ContentB64         string
+	FilePath           string
 }
