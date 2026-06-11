@@ -28,6 +28,14 @@ let requestSeq = 0
 const handlers = new Map<string, NotificationHandler[]>()
 let eventSource: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+// Reconnect backoff state. EventSource gives onerror no HTTP status, so a
+// fetch probe classifies the failure: transient errors retry on an
+// exponential schedule; 401/403 halts retries until the token changes.
+let reconnectAttempts = 0
+let authBlockedToken: string | null = null
+let probeInFlight = false
+const RECONNECT_BASE_DELAY_MS = 1000
+const RECONNECT_MAX_DELAY_MS = 30_000
 export const AUTH_TOKEN_STORAGE_KEY = 'agen8.sessionToken'
 const AUTH_TOKEN_COOKIE_NAME = 'agen8.sessionToken'
 
@@ -49,6 +57,7 @@ export function setStoredSessionToken(token: string) {
     if (trimmed) {
       window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, trimmed)
       writeSessionCookie(trimmed)
+      resumeEventSourceAfterAuthChange(trimmed)
       return
     }
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
@@ -56,6 +65,15 @@ export function setStoredSessionToken(token: string) {
   } catch {
     // Blocked storage means the browser cannot persist the session token.
   }
+}
+
+// A fresh token invalidates an auth block: if /events was halted on 401/403
+// under a different token, reconnect now that credentials changed.
+function resumeEventSourceAfterAuthChange(token: string) {
+  if (authBlockedToken === null || authBlockedToken === token) return
+  authBlockedToken = null
+  reconnectAttempts = 0
+  if (handlers.size > 0) ensureEventSource()
 }
 
 export function clearStoredSessionToken() {
@@ -148,13 +166,26 @@ function dispatch(notification: RpcNotification) {
 
 function ensureEventSource() {
   if (eventSource && eventSource.readyState !== EventSource.CLOSED) return
+  // A pending backoff timer or in-flight probe owns the next attempt; a halted
+  // auth block waits for a token change. Re-subscribing must not bypass either —
+  // that immediate-reconnect path is what turned a persistent 403 into a storm.
+  if (reconnectTimer || probeInFlight) return
+  if (authBlockedToken !== null && authBlockedToken === getStoredSessionToken()) return
   connect()
 }
 
 function connect() {
-  if (reconnectTimer) clearTimeout(reconnectTimer)
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
   const es = new EventSource('/events')
   eventSource = es
+
+  es.onopen = () => {
+    reconnectAttempts = 0
+    authBlockedToken = null
+  }
 
   es.onmessage = (e) => {
     try {
@@ -168,9 +199,44 @@ function connect() {
   es.onerror = () => {
     es.close()
     eventSource = null
-    // Reconnect after 2s
-    reconnectTimer = setTimeout(connect, 2000)
+    void scheduleReconnect()
   }
+}
+
+// Classifies the failure and schedules (or halts) the next attempt.
+// EventSource hides the response status, so probe /events with an aborted
+// fetch: 401/403 halts retries until the token changes; anything else retries
+// on an exponential schedule capped at RECONNECT_MAX_DELAY_MS.
+async function scheduleReconnect() {
+  if (probeInFlight) return
+  probeInFlight = true
+  let authFailure = false
+  try {
+    const controller = new AbortController()
+    const res = await fetch('/events', {
+      headers: { Accept: 'text/event-stream' },
+      signal: controller.signal,
+    })
+    // Headers are enough to classify; abort before the stream body streams.
+    controller.abort()
+    authFailure = res.status === 401 || res.status === 403
+  } catch {
+    // Network-level failure: treat as transient and keep backing off.
+  } finally {
+    probeInFlight = false
+  }
+
+  if (authFailure) {
+    authBlockedToken = getStoredSessionToken()
+    return
+  }
+
+  const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS)
+  reconnectAttempts += 1
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    connect()
+  }, delay)
 }
 
 export function isConnected(): boolean {
