@@ -13,7 +13,27 @@ const (
 	TopicDecisionLogged       = "decision.logged"
 	TopicMissionLifecycle     = "mission.lifecycle"
 	TopicPinLifecycle         = "pin.lifecycle"
+	TopicAttentionLifecycle   = "attention.lifecycle"
 )
+
+const (
+	AttentionEventRaised  = "attention.raised"
+	AttentionEventCleared = "attention.cleared"
+)
+
+// AttentionEvent is emitted when a harness session starts or stops needing the
+// human (idle at the prompt, blocked on an approval). It drives the live
+// Needs Attention surface; the state behind it is ephemeral, so consumers
+// should treat it as a refresh signal, not a durable record.
+type AttentionEvent struct {
+	ProjectID  string    `json:"projectId"`
+	MemberID   string    `json:"memberId,omitempty"`
+	MemberName string    `json:"memberName,omitempty"`
+	Harness    string    `json:"harness,omitempty"`
+	Kind       string    `json:"kind,omitempty"` // waiting | needs_approval
+	EventType  string    `json:"eventType"`      // attention.raised | attention.cleared
+	Timestamp  time.Time `json:"timestamp"`
+}
 
 const (
 	SpaceMemberEventRegistered      = "space.member.registered"

@@ -24,6 +24,7 @@ import (
 	"github.com/tinoosan/agen8/internal/mcp"
 	projecttool "github.com/tinoosan/agen8/internal/mcp/tools/project"
 	"github.com/tinoosan/agen8/internal/rpc"
+	"github.com/tinoosan/agen8/internal/services/attention"
 	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
 	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
@@ -42,6 +43,7 @@ type Daemon struct {
 	mcpTokens *mcp.TokenStore
 	mcp       *mcp.Server
 	events    *eventsHub
+	attention *attention.Service
 	logger    *slog.Logger
 }
 
@@ -67,6 +69,20 @@ func New(cfg Config) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build application: %w", err)
 	}
+	logger, err := logging.NewLogger(cfg.Logging)
+	if err != nil {
+		return nil, fmt.Errorf("build daemon logger: %w", err)
+	}
+	attentionSvc, err := attention.NewService(
+		application.ProjectSvc,
+		application.EventBus,
+		nil,
+		attention.DefaultTTL,
+		logger.With("service", "attention"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build attention service: %w", err)
+	}
 	reg := rpc.NewRegistry()
 	for _, register := range []func() error{
 		func() error { return rpc.RegisterAuth(reg, application.AuthSvc) },
@@ -83,6 +99,7 @@ func New(cfg Config) (*Daemon, error) {
 		func() error { return rpc.RegisterLocation(reg, application.LocationSvc) },
 		func() error { return rpc.RegisterPin(reg, application.PinSvc) },
 		func() error { return rpc.RegisterNotification(reg, application.NotificationSvc) },
+		func() error { return rpc.RegisterAttention(reg, attentionSvc) },
 	} {
 		if err := register(); err != nil {
 			return nil, err
@@ -97,10 +114,6 @@ func New(cfg Config) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build mcp server: %w", err)
 	}
-	logger, err := logging.NewLogger(cfg.Logging)
-	if err != nil {
-		return nil, fmt.Errorf("build daemon logger: %w", err)
-	}
 	d := &Daemon{
 		cfg:       cfg,
 		app:       application,
@@ -108,6 +121,7 @@ func New(cfg Config) (*Daemon, error) {
 		mcpTokens: tokenStore,
 		mcp:       mcpServer,
 		events:    newEventsHub(application.EventBus, logger.With("service", "events")),
+		attention: attentionSvc,
 		logger:    logger.With("service", "daemon"),
 	}
 	mcpServer.SetSessionResolver(d.resolveMCPSession)
@@ -160,6 +174,7 @@ func (d *Daemon) httpHandler() (http.Handler, error) {
 	mux.HandleFunc("POST /rpc", d.handleRPC)
 	mux.Handle("/mcp", d.mcp.Handler())
 	mux.HandleFunc("GET /events", d.handleEvents)
+	mux.HandleFunc("POST /hooks/attention", d.handleAttentionHook)
 	mux.HandleFunc("GET /setup", d.handleSetupPage)
 	mux.HandleFunc("POST /setup", d.handleSetupCreate)
 	webHandler, err := d.webHandler()

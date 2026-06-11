@@ -69,6 +69,7 @@ func (h *eventsHub) topicSubscriptions() []struct {
 		{eventbus.TopicSpaceMemberLifecycle, h.buildMemberNotification},
 		{eventbus.TopicMissionLifecycle, h.buildRecordNotification},
 		{eventbus.TopicKRProgress, h.buildRecordNotification},
+		{eventbus.TopicAttentionLifecycle, h.buildAttentionNotification},
 	}
 }
 
@@ -269,6 +270,27 @@ func (h *eventsHub) buildRecordNotification(payload []byte) (string, []byte, err
 	}
 	notification, err := encodeEventAppend(projectID, fields)
 	return projectID, notification, err
+}
+
+func (h *eventsHub) buildAttentionNotification(payload []byte) (string, []byte, error) {
+	var event eventbus.AttentionEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return "", nil, fmt.Errorf("decode attention event: %w", err)
+	}
+	if event.ProjectID == "" {
+		return "", nil, fmt.Errorf("attention event missing projectId")
+	}
+	notification, err := encodeEventAppend(event.ProjectID, map[string]any{
+		"type":       event.EventType,
+		"eventType":  event.EventType,
+		"projectId":  event.ProjectID,
+		"memberId":   event.MemberID,
+		"memberName": event.MemberName,
+		"harness":    event.Harness,
+		"kind":       event.Kind,
+		"timestamp":  event.Timestamp,
+	})
+	return event.ProjectID, notification, err
 }
 
 func (h *eventsHub) publish(projectID string, payload []byte) {
