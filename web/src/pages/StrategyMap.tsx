@@ -376,7 +376,7 @@ export default function StrategyMap({ projectId }: Props) {
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--color-bg)' }}>
-      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border/50 shrink-0"
+      <div className="flex items-center gap-2.5 px-5 py-3 border-b border-border/50 shrink-0 md:pl-14"
         style={{ background: 'var(--color-bg)' }}>
         <Network size={16} className="text-muted-foreground/60 hidden md:block" />
         <h1 className="text-sm font-medium text-foreground/70 hidden md:block">Context Map</h1>
