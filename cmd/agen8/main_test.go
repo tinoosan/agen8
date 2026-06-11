@@ -48,14 +48,20 @@ func TestRunSkillInstallWritesSkill(t *testing.T) {
 		}
 	})
 
-	wantPath := filepath.Join(home, ".codex", "skills", "agen8", "SKILL.md")
-	if _, err := os.Stat(wantPath); err != nil {
-		t.Fatalf("expected installed skill at %s: %v", wantPath, err)
+	wantRoot := filepath.Join(home, ".codex", "skills")
+	wantSkillPath := filepath.Join(wantRoot, "agen8", "SKILL.md")
+	if _, err := os.Stat(wantSkillPath); err != nil {
+		t.Fatalf("expected installed skill at %s: %v", wantSkillPath, err)
+	}
+	wantGraphSkillPath := filepath.Join(wantRoot, "agen8-graph", "SKILL.md")
+	if _, err := os.Stat(wantGraphSkillPath); err != nil {
+		t.Fatalf("expected installed graph skill at %s: %v", wantGraphSkillPath, err)
 	}
 	for _, want := range []string{
-		"installed agen8 skill for codex",
-		"path: " + wantPath,
-		"rerun this command to refresh the skill",
+		"installed agen8 skills for codex",
+		"root: " + wantRoot,
+		"skills: agen8, agen8-graph",
+		"rerun this command to refresh",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output %q missing %q", output, want)

@@ -17,6 +17,9 @@ agen8-ui/*.tsbuildinfo
 
 # Go (agen8)
 /agen8
+/agen8-mcp
+/agen8-mcp-server
+/agen8-claude-hook
 agen8/data/
 agen8/agen8
 agen8/bin/

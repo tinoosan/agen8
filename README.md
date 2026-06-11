@@ -124,6 +124,10 @@ Install the workflow skill into your harness so it knows how to drive Agen8
 
 Re-run the same command any time to refresh the installed skill.
 
+Claude Code's Agen8 hook is not a separate binary. It is the same installed
+`agen8` binary invoked as `agen8 claude hook`, so local development should only
+produce `./bin/agen8` for releases and `./tmp/agen8-dev` while Air is running.
+
 ### Optional: Install the Codex plugin
 
 The repo also includes a Codex plugin at `plugins/agen8`. It packages the

@@ -30,7 +30,7 @@ DOCS_PORT ?= 8088
 run: daemon-remote
 
 clean:
-	@rm -rf ./tmp ./bin ~/.agen8/daemon.log ~/.agen8/debug.log
+	@rm -rf ./tmp ./bin ./agen8 ./agen8-mcp ./agen8-mcp-server ./agen8-claude-hook ~/.agen8/daemon.log ~/.agen8/debug.log
 
 reset-local-data:
 	@if [ "$(CONFIRM)" != "DELETE" ]; then \
@@ -127,7 +127,7 @@ dev-remote: ensure-air web-install
 	AGEN8_LOG_FILE="tmp/daemon.log" \
 	AGEN8_DEV_WEB_URL="http://127.0.0.1:$(REMOTE_VITE_PORT)" \
 	"$$AIR_BIN" \
-		-build.full_bin "./tmp/agen8 daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(REMOTE_HTTP_ADDR)\""
+		-build.full_bin "./tmp/agen8-dev daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(REMOTE_HTTP_ADDR)\""
 
 worktree-create:
 	@./scripts/worktree/create.sh "$(KIND)" "$(TASK)" "$(SLUG)" "$(or $(BASE),dev)"
