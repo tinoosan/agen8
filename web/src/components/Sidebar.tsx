@@ -253,7 +253,7 @@ export default function Sidebar() {
           <SheetHeader className="sr-only">
             <SheetTitle>Navigation</SheetTitle>
           </SheetHeader>
-          <div className="flex h-full w-full flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">{body}</div>
+          <div className="flex h-full w-full flex-col">{body}</div>
         </SheetContent>
       </Sheet>
     )

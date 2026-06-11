@@ -53,6 +53,18 @@ interface SheetContentProps
   hideOverlay?: boolean
 }
 
+// Device safe-area insets, keyed by the edge the sheet docks to. Applied here
+// (not in each consumer) so every sheet clears the notch/status-bar and the
+// home indicator. Appended AFTER the consumer className in cn() so it wins over
+// their `p-0` under tailwind-merge — otherwise a consumer's padding reset would
+// silently drop the inset.
+const safeAreaBySide: Record<NonNullable<VariantProps<typeof sheetVariants>["side"]>, string> = {
+  top: "pt-[env(safe-area-inset-top)]",
+  bottom: "pb-[env(safe-area-inset-bottom)]",
+  left: "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
+  right: "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
+}
+
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
@@ -61,11 +73,11 @@ const SheetContent = React.forwardRef<
     {!hideOverlay && <SheetOverlay />}
     <SheetPrimitive.Content
       ref={ref}
-      className={cn(sheetVariants({ side }), className)}
+      className={cn(sheetVariants({ side }), className, safeAreaBySide[side ?? "right"])}
       {...props}
     >
       {children}
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
+      <SheetPrimitive.Close className="absolute right-4 top-[calc(env(safe-area-inset-top)+1rem)] rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
       </SheetPrimitive.Close>

@@ -251,7 +251,7 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
         onOpenAutoFocus={(e) => e.preventDefault()}
         className="w-screen sm:w-[min(720px,90vw)] sm:max-w-none p-0 gap-0 flex flex-col"
       >
-        <SheetHeader className="shrink-0 border-b border-[var(--border)] px-4 py-3 space-y-0">
+        <SheetHeader className="shrink-0 border-b border-[var(--border)] px-4 py-3 space-y-0 text-left">
           <div className="flex items-center gap-2 pr-8">
             <SheetTitle className="text-[13px] font-semibold tracking-[-0.02em] truncate flex-1 min-w-0">
               {basename(activeVPath)}
