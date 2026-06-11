@@ -90,7 +90,7 @@ func runSkill(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("installed agen8 skill for %s\npath: %s\nrerun this command to refresh the skill\n", result.Harness, result.Path)
+	fmt.Printf("installed agen8 skills for %s\nroot: %s\nskills: %s\nrerun this command to refresh\n", result.Harness, result.Root, strings.Join(result.Skills, ", "))
 	return nil
 }
 

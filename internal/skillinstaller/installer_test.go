@@ -3,47 +3,65 @@ package skillinstaller
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
-func TestInstallWritesCodexSkill(t *testing.T) {
+func TestInstallWritesCodexSkillTree(t *testing.T) {
 	home := t.TempDir()
 
 	result, err := Install(Options{Harness: HarnessCodex, HomeDir: home})
 	if err != nil {
-		t.Fatalf("install skill: %v", err)
+		t.Fatalf("install skills: %v", err)
 	}
 
-	wantPath := filepath.Join(home, ".codex", "skills", "agen8", "SKILL.md")
+	wantRoot := filepath.Join(home, ".codex", "skills")
 	if result.Harness != HarnessCodex {
 		t.Fatalf("harness = %q, want %q", result.Harness, HarnessCodex)
 	}
-	if result.Path != wantPath {
-		t.Fatalf("path = %q, want %q", result.Path, wantPath)
+	if result.Root != wantRoot {
+		t.Fatalf("root = %q, want %q", result.Root, wantRoot)
 	}
-	content, err := os.ReadFile(wantPath)
-	if err != nil {
-		t.Fatalf("read installed skill: %v", err)
+	if len(result.Skills) == 0 {
+		t.Fatal("no skills installed")
 	}
-	if string(content) != string(EmbeddedSkill()) {
-		t.Fatal("installed skill content does not match embedded skill")
+	// Every reported skill is written and matches its embedded source.
+	for _, skill := range result.Skills {
+		content, err := os.ReadFile(filepath.Join(wantRoot, skill, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("read installed skill %s: %v", skill, err)
+		}
+		embeddedContent, err := embedded.ReadFile(embeddedRoot + "/" + skill + "/SKILL.md")
+		if err != nil {
+			t.Fatalf("read embedded skill %s: %v", skill, err)
+		}
+		if string(content) != string(embeddedContent) {
+			t.Fatalf("installed skill %s does not match embedded source", skill)
+		}
+	}
+	// The core agen8 skill must always be present.
+	if !slices.Contains(result.Skills, "agen8") {
+		t.Fatalf("skills = %v, want it to include agen8", result.Skills)
 	}
 }
 
-func TestInstallWritesClaudeSkill(t *testing.T) {
+func TestInstallWritesClaudeSkillTree(t *testing.T) {
 	home := t.TempDir()
 
 	result, err := Install(Options{Harness: "claude", HomeDir: home})
 	if err != nil {
-		t.Fatalf("install skill: %v", err)
+		t.Fatalf("install skills: %v", err)
 	}
 
-	wantPath := filepath.Join(home, ".claude", "skills", "agen8", "SKILL.md")
 	if result.Harness != HarnessClaudeCLI {
 		t.Fatalf("harness = %q, want %q", result.Harness, HarnessClaudeCLI)
 	}
-	if result.Path != wantPath {
-		t.Fatalf("path = %q, want %q", result.Path, wantPath)
+	wantRoot := filepath.Join(home, ".claude", "skills")
+	if result.Root != wantRoot {
+		t.Fatalf("root = %q, want %q", result.Root, wantRoot)
+	}
+	if _, err := os.Stat(filepath.Join(wantRoot, "agen8", "SKILL.md")); err != nil {
+		t.Fatalf("core agen8 skill not installed: %v", err)
 	}
 }
 
