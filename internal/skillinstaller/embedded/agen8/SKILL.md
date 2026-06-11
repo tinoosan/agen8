@@ -18,7 +18,7 @@ Call the Agen8 MCP tools directly: `project`, `mission`, `task`, `decision`, `gr
 5. **Decide out loud.** Log consequential choices with `decision.log` — why a direction changed, why a tradeoff was accepted — linked to the task and mission/KR. (`decision` only logs; there is no question or escalation verb.)
 6. **Submit with evidence.** Concise summary, artifacts, verification evidence, decision ids, remaining risks. A claim with no proof reads as unverified — attach what shows the work is done:
    - **A file already in the project** → list it in `artifacts` as `file:/project/<vpath>`. The viewer opens it (and shows your uncommitted changes against the last saved version) — don't upload a copy.
-   - **Evidence that isn't in the project** — a screenshot, a captured result, a report → `task` `attach` (`content` for text, `content_b64` for an image or other binary).
+   - **Evidence that isn't in the project** — a screenshot, a captured result, a report → `task` `attach` (`content` for short text; `file_path` — an absolute local path the daemon reads itself — for an image or any file on disk; never re-emit binary as base64).
 7. **Review** when you own closing the task. Check every acceptance criterion. Make it a reflection, not a rubber stamp: state what the work proves, what it does *not*, and the residual risk. Record durable findings as a decision.
 
 Update KR progress when a task materially moves the outcome.
@@ -27,7 +27,7 @@ Update KR progress when a task materially moves the outcome.
 
 Show evidence, don't just describe it. Match the proof to the acceptance criteria — a reviewer (human or agent) should open the task and see it's done without redoing it. What counts as proof depends on the work:
 
-- **A visible result** — a page, a chart, a layout, a rendered document → capture a screenshot and `attach` it as an image (`content_b64`).
+- **A visible result** — a page, a chart, a layout, a rendered document → save a screenshot to a local file and `attach` it by `file_path`.
 - **Output from a check or a run** — a result, a status, a captured response → `attach` it as text (`content`).
 - **Something you produced** — a report, notes, exported data → reference it in `artifacts` if it lives in the project, otherwise `attach` it.
 
