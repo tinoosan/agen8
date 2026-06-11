@@ -14,6 +14,8 @@ interface ArtifactViewerProps {
   isLoading: boolean
   error: boolean
   variant: Variant
+  /** Soft-wrap long lines in the code view. Only ArtifactPreviewPane honors it. */
+  wrap?: boolean
 }
 
 /**

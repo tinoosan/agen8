@@ -12,6 +12,12 @@ interface CodeViewProps {
   content: string
   filePath?: string
   search?: string
+  /**
+   * Soft-wrap long lines. When false (the viewer default), lines keep their
+   * length and the editor scrolls horizontally — the .cm-scroller already has
+   * overflow:auto, so dropping EditorView.lineWrapping is all it takes.
+   */
+  wrap?: boolean
 }
 
 function searchHighlighter(query?: string): Extension {
@@ -146,14 +152,14 @@ const agen8HighlightStyle = HighlightStyle.define([
   },
 ])
 
-export default function CodeView({ content, filePath, search: searchQuery }: CodeViewProps) {
+export default function CodeView({ content, filePath, search: searchQuery, wrap = true }: CodeViewProps) {
   const extensions = useMemo<Extension[]>(
     () => [
       lineNumbers(),
       highlightSpecialChars(),
       EditorState.readOnly.of(true),
       EditorView.editable.of(false),
-      EditorView.lineWrapping,
+      ...(wrap ? [EditorView.lineWrapping] : []),
       syntaxHighlighting(agen8HighlightStyle, { fallback: true }),
       search({ top: true }),
       highlightSelectionMatches(),
@@ -162,7 +168,7 @@ export default function CodeView({ content, filePath, search: searchQuery }: Cod
       searchHighlighter(searchQuery),
       ...codeViewLanguageExtensions(filePath),
     ],
-    [filePath, searchQuery],
+    [filePath, searchQuery, wrap],
   )
 
   return (

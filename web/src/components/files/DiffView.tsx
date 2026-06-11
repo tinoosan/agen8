@@ -65,6 +65,11 @@ interface DiffViewProps {
   current: string
   /** Used to pick the syntax-highlight language by extension. */
   filePath?: string
+  /**
+   * Soft-wrap long lines. When false (the viewer default), lines keep their
+   * length and the diff scrolls horizontally inside its overflow-auto host.
+   */
+  wrap?: boolean
 }
 
 interface DiffRow {
@@ -110,7 +115,7 @@ const ROW_STYLES: Record<DiffRow['kind'], { background: string; color?: string; 
 type PrismStyle = ReturnType<typeof prismStyleFor>
 
 /** One diff line, syntax-highlighted when the file's language is known. */
-function DiffLineText({ text, language, prismStyle }: { text: string; language: string | null; prismStyle: PrismStyle }) {
+function DiffLineText({ text, language, prismStyle, whiteSpace, wordBreak }: { text: string; language: string | null; prismStyle: PrismStyle; whiteSpace: 'pre' | 'pre-wrap'; wordBreak: 'break-all' | 'normal' }) {
   if (!language || text === '') {
     return <>{text}</>
   }
@@ -127,22 +132,24 @@ function DiffLineText({ text, language, prismStyle }: { text: string; language: 
         margin: 0,
         fontFamily: 'inherit',
         fontSize: 'inherit',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-all',
+        whiteSpace,
+        wordBreak,
       }}
-      codeTagProps={{ style: { fontFamily: 'inherit', fontSize: 'inherit', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: 'transparent' } }}
+      codeTagProps={{ style: { fontFamily: 'inherit', fontSize: 'inherit', whiteSpace, wordBreak, background: 'transparent' } }}
     >
       {text}
     </SyntaxHighlighter>
   )
 }
 
-export default function DiffView({ baseline, current, filePath }: DiffViewProps) {
+export default function DiffView({ baseline, current, filePath, wrap = true }: DiffViewProps) {
   const theme = useStore((s) => s.theme)
   const prismStyle = prismStyleFor(theme)
   const rows = useMemo(() => buildRows(baseline, current), [baseline, current])
   const language = useMemo(() => diffLanguageFor(filePath), [filePath])
   const hasChanges = rows.some((row) => row.kind !== 'context')
+  const whiteSpace: 'pre' | 'pre-wrap' = wrap ? 'pre-wrap' : 'pre'
+  const wordBreak: 'break-all' | 'normal' = wrap ? 'break-all' : 'normal'
 
   if (!hasChanges) {
     return (
@@ -175,8 +182,8 @@ export default function DiffView({ baseline, current, filePath }: DiffViewProps)
               <td className="select-none w-4 text-center align-top" style={{ color: row.kind === 'added' ? 'var(--green, #3fb950)' : row.kind === 'removed' ? 'var(--red, #f85149)' : 'var(--text-3)' }}>
                 {ROW_STYLES[row.kind].marker}
               </td>
-              <td className="align-top pr-4" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                <DiffLineText text={row.text} language={language} prismStyle={prismStyle} />
+              <td className="align-top pr-4" style={{ whiteSpace, wordBreak }}>
+                <DiffLineText text={row.text} language={language} prismStyle={prismStyle} whiteSpace={whiteSpace} wordBreak={wordBreak} />
               </td>
             </tr>
           ))}

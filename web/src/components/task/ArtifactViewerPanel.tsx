@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FolderTree, X } from 'lucide-react'
+import { FolderTree, WrapText, X } from 'lucide-react'
 import { rpcCall } from '../../lib/rpc'
 import { qk } from '../../lib/queryKeys'
 import { basename } from '../files/filePreviewUtils'
@@ -68,9 +68,34 @@ function dirOf(path: string): string {
   return cut <= 0 ? '/' : trimmed.slice(0, cut)
 }
 
+// Line-wrap preference for the viewer, persisted so it sticks across files and
+// sessions. Default OFF: long lines scroll horizontally like a code editor.
+const WRAP_PREF_KEY = 'artifact-viewer-wrap'
+function readWrapPref(): boolean {
+  try {
+    return localStorage.getItem(WRAP_PREF_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+function writeWrapPref(value: boolean): void {
+  try {
+    localStorage.setItem(WRAP_PREF_KEY, value ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+}
+
 export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: ArtifactViewerPanelProps) {
   const [diffMode, setDiffMode] = useState(false)
   const [browsing, setBrowsing] = useState(false)
+  const [wrap, setWrap] = useState(readWrapPref)
+  const toggleWrap = () =>
+    setWrap((w) => {
+      const next = !w
+      writeWrapPref(next)
+      return next
+    })
   // The sheet opens via a false->true transition (not mounted-already-open) so
   // a touch tap that triggered the open isn't caught by Radix's dismiss layer
   // and used to immediately close it — the iPad/mobile "won't open" bug.
@@ -142,6 +167,24 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
     </button>
   )
 
+  const wrapToggle = diffable ? (
+    <button
+      type="button"
+      onClick={toggleWrap}
+      aria-pressed={wrap}
+      aria-label="Toggle line wrap"
+      title={wrap ? 'Wrapping long lines — tap to scroll horizontally' : 'Scrolling long lines — tap to wrap'}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-md)] border cursor-pointer transition-colors"
+      style={{
+        borderColor: 'var(--border)',
+        background: wrap ? 'var(--bg-elevated)' : 'transparent',
+        color: wrap ? 'var(--text-1)' : 'var(--text-3)',
+      }}
+    >
+      <WrapText size={13} />
+    </button>
+  ) : null
+
   const modeToggle = diffable ? (
     <div className="flex shrink-0 rounded-[var(--r-md)] border border-[var(--border)] overflow-hidden" role="group" aria-label="View mode">
       <button
@@ -176,7 +219,7 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
       }
       const reason = baselineUnavailableReason(baselineQuery.data, !!baselineQuery.error)
       if (!reason) {
-        return <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} filePath={activeVPath} />
+        return <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} filePath={activeVPath} wrap={wrap} />
       }
       // Degrade: notice banner + the normal view, never a dead pane.
       return (
@@ -185,7 +228,7 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
             {reason}
           </div>
           <div className="flex-1 min-h-0">
-            <ArtifactViewer file={viewerFile} preview={previewQuery.data} isLoading={previewQuery.isLoading} error={!!previewQuery.error} variant="slideover" />
+            <ArtifactViewer file={viewerFile} preview={previewQuery.data} isLoading={previewQuery.isLoading} error={!!previewQuery.error} variant="slideover" wrap={wrap} />
           </div>
         </>
       )
@@ -197,6 +240,7 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
         isLoading={previewQuery.isLoading}
         error={!!previewQuery.error}
         variant="slideover"
+        wrap={wrap}
       />
     )
   })()
@@ -227,6 +271,7 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
           <div className="flex items-center gap-2">
             <span className="text-[13px] font-semibold tracking-[-0.02em] truncate flex-1 min-w-0">{basename(activeVPath)}</span>
             {browseToggle}
+            {wrapToggle}
             {modeToggle}
             <button
               type="button"
@@ -257,6 +302,7 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
               {basename(activeVPath)}
             </SheetTitle>
             {browseToggle}
+            {wrapToggle}
             {modeToggle}
           </div>
           <SheetDescription className="text-[11px] text-[var(--text-3)] truncate" style={{ fontFamily: 'monospace' }}>

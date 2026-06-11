@@ -28,12 +28,14 @@ export default function ArtifactPreviewPane({
   isLoading,
   error,
   variant,
+  wrap = true,
 }: {
   file: ArtifactNode
   preview: ArtifactGetResult | undefined
   isLoading: boolean
   error: boolean
   variant: Variant
+  wrap?: boolean
 }) {
   const [contentSearch, setContentSearch] = useState('')
   const [svgMode, setSvgMode] = useState<'preview' | 'source'>('preview')
@@ -237,7 +239,7 @@ export default function ArtifactPreviewPane({
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
         ) : isText ? (
-          <CodeView content={content} filePath={selectedPath} search={contentSearch} />
+          <CodeView content={content} filePath={selectedPath} search={contentSearch} wrap={wrap} />
         ) : null}
         {truncated && (
           <div className="mt-3 text-[0.6875rem] text-[var(--text-3)] px-2.5 py-1.5 bg-[var(--bg-surface)] rounded-[var(--r-sm)] border border-[var(--border)] inline-flex items-center gap-1">
