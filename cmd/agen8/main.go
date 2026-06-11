@@ -139,7 +139,7 @@ func runHooks(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("installed agen8 attention hooks for %s\nwrote: %s\nrerun this command to refresh (e.g. after rotating the token)\n", result.Harness, result.Path)
+	fmt.Printf("installed agen8 hooks for %s\nwrote: %s\nrerun this command to refresh (e.g. after rotating the token)\n", result.Harness, result.Path)
 	return nil
 }
 

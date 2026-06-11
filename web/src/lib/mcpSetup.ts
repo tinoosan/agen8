@@ -8,9 +8,9 @@ export interface MCPSetupSnippets {
   jsonConfig: string
   codexCommand: string
   claudeCommand: string
-  /** Provisions the attention hooks ("waiting on you" radar) for Claude Code. */
+  /** Provisions the agen8 hooks ("waiting on you" alerts) for Claude Code. */
   hooksClaudeCommand: string
-  /** Provisions the attention hooks for Codex (user-level ~/.codex/hooks.json). */
+  /** Provisions the agen8 hooks for Codex (user-level ~/.codex/hooks.json). */
   hooksCodexCommand: string
 }
 

@@ -425,13 +425,13 @@ export function AccountMCPAccessSection() {
                   value={snippets.claudeCommand}
                 />
                 <SetupSnippet
-                  title="Attention hooks — Claude Code"
-                  description="Run from a project root: tells the dashboard when an agent there is waiting on you (writes .claude/settings.local.json)."
+                  title="Hooks — Claude Code"
+                  description="Optional. Run inside a project to see when its agents are waiting on you."
                   value={snippets.hooksClaudeCommand}
                 />
                 <SetupSnippet
-                  title="Attention hooks — Codex"
-                  description="Run once per machine: same waiting-on-you alerts for Codex sessions (writes ~/.codex/hooks.json)."
+                  title="Hooks — Codex"
+                  description="Optional. Run once; covers all Codex sessions."
                   value={snippets.hooksCodexCommand}
                 />
               </div>

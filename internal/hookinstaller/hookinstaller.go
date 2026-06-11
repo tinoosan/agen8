@@ -59,10 +59,15 @@ type Result struct {
 //   - Notification(idle_prompt): the agent finished and is waiting at the prompt.
 //   - Notification(permission_prompt): blocked on a tool approval.
 //   - Stop: turn ended — same "waiting for the human" state, fires immediately.
+//   - Pre/PostToolUse(AskUserQuestion): the agent posed an interactive question
+//     and the human answered it. Mapped payload-free (kind only, no question
+//     text) so Claude Code and Codex stay at parity.
 //   - UserPromptSubmit / SessionEnd: the human engaged or the session is gone.
 var claudeHookEvents = []hookSpec{
 	{Event: "Notification", Matcher: "idle_prompt", Kind: "waiting"},
 	{Event: "Notification", Matcher: "permission_prompt", Kind: "needs_approval"},
+	{Event: "PreToolUse", Matcher: "AskUserQuestion", Kind: "waiting"},
+	{Event: "PostToolUse", Matcher: "AskUserQuestion", Kind: "cleared"},
 	{Event: "Stop", Matcher: "", Kind: "waiting"},
 	{Event: "UserPromptSubmit", Matcher: "", Kind: "cleared"},
 	{Event: "SessionEnd", Matcher: "", Kind: "cleared"},

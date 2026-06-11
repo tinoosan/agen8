@@ -65,10 +65,24 @@ func TestInstallClaudeWritesSettingsLocal(t *testing.T) {
 	if strings.Contains(cmd, "7777//") {
 		t.Fatalf("base URL not normalized: %s", cmd)
 	}
-	for _, event := range []string{"Stop", "UserPromptSubmit", "SessionEnd"} {
+	for _, event := range []string{"Stop", "UserPromptSubmit", "SessionEnd", "PreToolUse", "PostToolUse"} {
 		if len(eventGroups(t, config, event)) != 1 {
 			t.Fatalf("expected one group for %s", event)
 		}
+	}
+	// AskUserQuestion is matched by tool name: asking -> waiting, answered -> cleared.
+	pre := eventGroups(t, config, "PreToolUse")[0].(map[string]any)
+	if pre["matcher"] != "AskUserQuestion" {
+		t.Fatalf("PreToolUse matcher = %v", pre["matcher"])
+	}
+	preCmd := pre["hooks"].([]any)[0].(map[string]any)["command"].(string)
+	if !strings.Contains(preCmd, "kind=waiting") {
+		t.Fatalf("PreToolUse should map to waiting: %s", preCmd)
+	}
+	post := eventGroups(t, config, "PostToolUse")[0].(map[string]any)
+	postCmd := post["hooks"].([]any)[0].(map[string]any)["command"].(string)
+	if post["matcher"] != "AskUserQuestion" || !strings.Contains(postCmd, "kind=cleared") {
+		t.Fatalf("PostToolUse should clear on AskUserQuestion: %v / %s", post["matcher"], postCmd)
 	}
 
 	// The file embeds a token: must not be group/world readable.
