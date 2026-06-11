@@ -1,7 +1,7 @@
 {
-  "name": "agen8-local",
+  "name": "agen8",
   "interface": {
-    "displayName": "Agen8 Local"
+    "displayName": "Agen8"
   },
   "plugins": [
     {
