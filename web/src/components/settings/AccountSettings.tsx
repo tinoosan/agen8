@@ -424,6 +424,16 @@ export function AccountMCPAccessSection() {
                   description="Adds Agen8 for Claude Code at user scope."
                   value={snippets.claudeCommand}
                 />
+                <SetupSnippet
+                  title="Attention hooks — Claude Code"
+                  description="Run from a project root: tells the dashboard when an agent there is waiting on you (writes .claude/settings.local.json)."
+                  value={snippets.hooksClaudeCommand}
+                />
+                <SetupSnippet
+                  title="Attention hooks — Codex"
+                  description="Run once per machine: same waiting-on-you alerts for Codex sessions (writes ~/.codex/hooks.json)."
+                  value={snippets.hooksCodexCommand}
+                />
               </div>
             )}
 

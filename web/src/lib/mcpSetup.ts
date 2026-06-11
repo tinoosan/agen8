@@ -8,6 +8,10 @@ export interface MCPSetupSnippets {
   jsonConfig: string
   codexCommand: string
   claudeCommand: string
+  /** Provisions the attention hooks ("waiting on you" radar) for Claude Code. */
+  hooksClaudeCommand: string
+  /** Provisions the attention hooks for Codex (user-level ~/.codex/hooks.json). */
+  hooksCodexCommand: string
 }
 
 export function buildMCPSetup(secret: string, origin = browserOrigin()): MCPSetupSnippets {
@@ -16,6 +20,7 @@ export function buildMCPSetup(secret: string, origin = browserOrigin()): MCPSetu
     throw new Error('MCP token is required')
   }
   const url = buildMCPURL(token, origin)
+  const daemonOrigin = normalizeOrigin(origin)
   return {
     url,
     jsonConfig: JSON.stringify({
@@ -28,6 +33,8 @@ export function buildMCPSetup(secret: string, origin = browserOrigin()): MCPSetu
     }, null, 2),
     codexCommand: `codex mcp add ${SERVER_NAME} --url ${shellQuote(url)}`,
     claudeCommand: `claude mcp add --transport http --scope user ${SERVER_NAME} ${shellQuote(url)}`,
+    hooksClaudeCommand: `agen8 hooks install --harness claude --url ${shellQuote(daemonOrigin)} --token ${shellQuote(token)}`,
+    hooksCodexCommand: `agen8 hooks install --harness codex --url ${shellQuote(daemonOrigin)} --token ${shellQuote(token)}`,
   }
 }
 

@@ -16,6 +16,8 @@ describe('buildMCPSetup', () => {
     })
     expect(setup.codexCommand).toBe("codex mcp add agen8 --url 'http://127.0.0.1:7777/mcp?token=ak_test_secret'")
     expect(setup.claudeCommand).toBe("claude mcp add --transport http --scope user agen8 'http://127.0.0.1:7777/mcp?token=ak_test_secret'")
+    expect(setup.hooksClaudeCommand).toBe("agen8 hooks install --harness claude --url 'http://127.0.0.1:7777' --token 'ak_test_secret'")
+    expect(setup.hooksCodexCommand).toBe("agen8 hooks install --harness codex --url 'http://127.0.0.1:7777' --token 'ak_test_secret'")
   })
 
   it('turns wildcard listener origins into a usable loopback URL', () => {
