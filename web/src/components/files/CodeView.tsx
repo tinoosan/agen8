@@ -39,7 +39,10 @@ const agen8EditorTheme = EditorView.theme({
   '&': {
     height: '100%',
     color: 'var(--text-1)',
-    backgroundColor: 'transparent',
+    // An explicit opaque surface (not transparent) so the sticky line-number
+    // gutter has a matching background to sit on. Without it, horizontal
+    // scrolling slides code *under* the pinned gutter and it bleeds through.
+    backgroundColor: 'var(--bg-surface)',
     fontFamily: 'var(--font-mono, "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, monospace)',
     fontSize: '0.75rem',
   },
@@ -56,7 +59,9 @@ const agen8EditorTheme = EditorView.theme({
     padding: '0 18px 0 10px',
   },
   '.cm-gutters': {
-    backgroundColor: 'transparent',
+    // Opaque + matches the editor surface so scrolled code never shows through
+    // the gutter, which stays pinned (position: sticky) during horizontal scroll.
+    backgroundColor: 'var(--bg-surface)',
     color: 'var(--text-3)',
     border: '0',
     userSelect: 'none',
