@@ -138,6 +138,7 @@ func setupWantsJSON(r *http.Request) bool {
 
 type setupMCPResult struct {
 	URL                string `json:"url"`
+	CompatibilityURL   string `json:"compatibilityUrl,omitempty"`
 	Config             string `json:"config"`
 	CodexCommand       string `json:"codexCommand"`
 	ClaudeCommand      string `json:"claudeCommand"`
@@ -146,22 +147,28 @@ type setupMCPResult struct {
 }
 
 func (h httpSetupHandler) setupMCPArtifacts(r *http.Request, token string) (setupMCPResult, error) {
-	mcpURL := h.setupMCPURL(r, token)
+	mcpURL := h.setupMCPURL(r)
+	compatibilityURL := h.setupMCPCompatibilityURL(r, token)
 	config, err := setupMCPConfig(mcpURL)
 	if err != nil {
 		return setupMCPResult{}, err
 	}
 	return setupMCPResult{
 		URL:                mcpURL,
+		CompatibilityURL:   compatibilityURL,
 		Config:             config,
-		CodexCommand:       "codex mcp add agen8 --url " + shellQuote(mcpURL),
-		ClaudeCommand:      "claude mcp add --transport http --scope user agen8 " + shellQuote(mcpURL),
+		CodexCommand:       "export AGEN8_MCP_TOKEN=" + shellQuote(token) + "\n" + "codex mcp add agen8 --url " + shellQuote(mcpURL) + " --bearer-token-env-var AGEN8_MCP_TOKEN",
+		ClaudeCommand:      "claude mcp add --transport http --scope user agen8 " + shellQuote(mcpURL) + " --header " + shellQuote("Authorization: Bearer "+token),
 		CodexSkillCommand:  "agen8 skill install --harness codex",
 		ClaudeSkillCommand: "agen8 skill install --harness claude-cli",
 	}, nil
 }
 
-func (h httpSetupHandler) setupMCPURL(r *http.Request, token string) string {
+func (h httpSetupHandler) setupMCPURL(r *http.Request) string {
+	return h.setupRequestOrigin(r) + "/mcp"
+}
+
+func (h httpSetupHandler) setupMCPCompatibilityURL(r *http.Request, token string) string {
 	return h.setupRequestOrigin(r) + "/mcp?token=" + url.QueryEscape(token)
 }
 
@@ -201,9 +208,12 @@ func normalizeSetupHost(host string) string {
 func setupMCPConfig(mcpURL string) (string, error) {
 	config := map[string]any{
 		"mcpServers": map[string]any{
-			"agen8": map[string]string{
+			"agen8": map[string]any{
 				"type": "http",
 				"url":  mcpURL,
+				"headers": map[string]string{
+					"Authorization": "Bearer ${AGEN8_MCP_TOKEN}",
+				},
 			},
 		},
 	}
@@ -246,6 +256,12 @@ func setupCompleteHTML(sessionToken string, apiKey string, mcp setupMCPResult) s
     </section>
     <section>
       <h2>MCP URL</h2>
+      <p>Primary endpoint. Send the key as an Authorization bearer token.</p>
+      <code>%s</code>
+    </section>
+    <section>
+      <h2>Compatibility query-token URL</h2>
+      <p>Use only for clients that cannot send HTTP authorization headers.</p>
       <code>%s</code>
     </section>
     <section>
@@ -272,6 +288,7 @@ func setupCompleteHTML(sessionToken string, apiKey string, mcp setupMCPResult) s
 </html>`,
 		html.EscapeString(apiKey),
 		html.EscapeString(mcp.URL),
+		html.EscapeString(mcp.CompatibilityURL),
 		html.EscapeString(mcp.Config),
 		html.EscapeString(mcp.CodexCommand),
 		html.EscapeString(mcp.ClaudeCommand),
@@ -756,11 +773,21 @@ const setupPageHTML = `<!doctype html>
                   <div class="snippet-head">
                     <div>
                       <div class="snippet-title">MCP URL</div>
-                      <p class="snippet-hint">Use this if a client asks for a server URL.</p>
+                      <p class="snippet-hint">Primary endpoint. Send the key as an Authorization bearer token.</p>
                     </div>
                     <button class="secondary" type="button" data-copy-target="mcp-url">Copy</button>
                   </div>
                   <code id="mcp-url"></code>
+                </div>
+                <div class="snippet">
+                  <div class="snippet-head">
+                    <div>
+                      <div class="snippet-title">Compatibility query-token URL</div>
+                      <p class="snippet-hint">Use only for clients that cannot send HTTP authorization headers.</p>
+                    </div>
+                    <button class="secondary" type="button" data-copy-target="mcp-compatibility-url">Copy</button>
+                  </div>
+                  <code id="mcp-compatibility-url"></code>
                 </div>
               </div>
             </details>
@@ -855,6 +882,7 @@ const setupPageHTML = `<!doctype html>
             }
             setText('api-key', apiKey);
             setText('mcp-url', mcp.url);
+            setText('mcp-compatibility-url', mcp.compatibilityUrl);
             setText('mcp-config', mcp.config);
             setText('codex-command', mcp.codexCommand);
             setText('claude-command', mcp.claudeCommand);

@@ -406,8 +406,13 @@ export function AccountMCPAccessSection() {
                 />
                 <SetupSnippet
                   title="MCP URL"
-                  description="Use this endpoint when a client asks for a server URL."
+                  description="Primary endpoint. Send the key as an Authorization bearer token."
                   value={snippets.url}
+                />
+                <SetupSnippet
+                  title="Compatibility query-token URL"
+                  description="Use only for clients that cannot send HTTP authorization headers."
+                  value={snippets.compatibilityUrl}
                 />
                 <SetupSnippet
                   title=".mcp.json"

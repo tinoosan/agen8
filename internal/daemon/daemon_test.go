@@ -231,6 +231,7 @@ func TestHandleSetupJSONIncludesMCPArtifacts(t *testing.T) {
 		} `json:"apiKey"`
 		MCP struct {
 			URL                string `json:"url"`
+			CompatibilityURL   string `json:"compatibilityUrl"`
 			Config             string `json:"config"`
 			CodexCommand       string `json:"codexCommand"`
 			ClaudeCommand      string `json:"claudeCommand"`
@@ -244,19 +245,26 @@ func TestHandleSetupJSONIncludesMCPArtifacts(t *testing.T) {
 	if result.APIKey.Secret == "" {
 		t.Fatal("setup response missing api key secret")
 	}
-	if !strings.HasPrefix(result.MCP.URL, "http://127.0.0.1:7777/mcp?token=ak_") {
-		t.Fatalf("mcp url=%q want loopback URL with API key", result.MCP.URL)
+	if result.MCP.URL != "http://127.0.0.1:7777/mcp" {
+		t.Fatalf("mcp url=%q want bearer-auth URL without query token", result.MCP.URL)
+	}
+	if !strings.HasPrefix(result.MCP.CompatibilityURL, "http://127.0.0.1:7777/mcp?token=ak_") {
+		t.Fatalf("compatibility mcp url=%q want loopback URL with API key", result.MCP.CompatibilityURL)
 	}
 	for _, want := range []string{
 		result.APIKey.Secret,
 		`"mcpServers"`,
+		`"Authorization": "Bearer ${AGEN8_MCP_TOKEN}"`,
 		"codex mcp add agen8 --url",
+		"--bearer-token-env-var AGEN8_MCP_TOKEN",
 		"claude mcp add --transport http --scope user agen8",
+		"--header",
 		"agen8 skill install --harness codex",
 		"agen8 skill install --harness claude-cli",
 	} {
 		joined := strings.Join([]string{
 			result.MCP.URL,
+			result.MCP.CompatibilityURL,
 			result.MCP.Config,
 			result.MCP.CodexCommand,
 			result.MCP.ClaudeCommand,
@@ -376,10 +384,14 @@ func TestHandleSetupFormRevealsMCPArtifacts(t *testing.T) {
 	for _, want := range []string{
 		"Setup complete",
 		"ak_",
+		"http://127.0.0.1:7777/mcp",
+		"Compatibility query-token URL",
 		"http://127.0.0.1:7777/mcp?token=ak_",
 		".mcp.json",
 		"codex mcp add agen8 --url",
+		"--bearer-token-env-var AGEN8_MCP_TOKEN",
 		"claude mcp add --transport http --scope user agen8",
+		"--header",
 		"agen8 skill install --harness codex",
 		"agen8.sessionToken",
 	} {

@@ -5,17 +5,21 @@ describe('buildMCPSetup', () => {
   it('builds copy-ready MCP snippets from a token', () => {
     const setup = buildMCPSetup('ak_test_secret', 'http://127.0.0.1:7777')
 
-    expect(setup.url).toBe('http://127.0.0.1:7777/mcp?token=ak_test_secret')
+    expect(setup.url).toBe('http://127.0.0.1:7777/mcp')
+    expect(setup.compatibilityUrl).toBe('http://127.0.0.1:7777/mcp?token=ak_test_secret')
     expect(JSON.parse(setup.jsonConfig)).toEqual({
       mcpServers: {
         agen8: {
           type: 'http',
-          url: 'http://127.0.0.1:7777/mcp?token=ak_test_secret',
+          url: 'http://127.0.0.1:7777/mcp',
+          headers: {
+            Authorization: 'Bearer ${AGEN8_MCP_TOKEN}',
+          },
         },
       },
     })
-    expect(setup.codexCommand).toBe("codex mcp add agen8 --url 'http://127.0.0.1:7777/mcp?token=ak_test_secret'")
-    expect(setup.claudeCommand).toBe("claude mcp add --transport http --scope user agen8 'http://127.0.0.1:7777/mcp?token=ak_test_secret'")
+    expect(setup.codexCommand).toBe("export AGEN8_MCP_TOKEN='ak_test_secret'\ncodex mcp add agen8 --url 'http://127.0.0.1:7777/mcp' --bearer-token-env-var AGEN8_MCP_TOKEN")
+    expect(setup.claudeCommand).toBe("claude mcp add --transport http --scope user agen8 'http://127.0.0.1:7777/mcp' --header 'Authorization: Bearer ak_test_secret'")
     expect(setup.hooksClaudeCommand).toBe("agen8 hooks install --harness claude --url 'http://127.0.0.1:7777' --token 'ak_test_secret'")
     expect(setup.hooksCodexCommand).toBe("agen8 hooks install --harness codex --url 'http://127.0.0.1:7777' --token 'ak_test_secret'")
   })
@@ -23,13 +27,15 @@ describe('buildMCPSetup', () => {
   it('turns wildcard listener origins into a usable loopback URL', () => {
     const setup = buildMCPSetup('ak_test_secret', 'http://0.0.0.0:7777')
 
-    expect(setup.url).toBe('http://127.0.0.1:7777/mcp?token=ak_test_secret')
+    expect(setup.url).toBe('http://127.0.0.1:7777/mcp')
+    expect(setup.compatibilityUrl).toBe('http://127.0.0.1:7777/mcp?token=ak_test_secret')
   })
 
   it('turns IPv6 wildcard listener origins into a usable loopback URL', () => {
     const setup = buildMCPSetup('ak_test_secret', 'http://[::]:7777')
 
-    expect(setup.url).toBe('http://127.0.0.1:7777/mcp?token=ak_test_secret')
+    expect(setup.url).toBe('http://127.0.0.1:7777/mcp')
+    expect(setup.compatibilityUrl).toBe('http://127.0.0.1:7777/mcp?token=ak_test_secret')
   })
 
   it('requires a token', () => {

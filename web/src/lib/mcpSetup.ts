@@ -5,6 +5,7 @@ export const CLAUDE_SKILL_COMMAND = 'agen8 skill install --harness claude-cli'
 
 export interface MCPSetupSnippets {
   url: string
+  compatibilityUrl: string
   jsonConfig: string
   codexCommand: string
   claudeCommand: string
@@ -19,26 +20,37 @@ export function buildMCPSetup(secret: string, origin = browserOrigin()): MCPSetu
   if (!token) {
     throw new Error('MCP token is required')
   }
-  const url = buildMCPURL(token, origin)
+  const url = buildMCPURL(origin)
+  const compatibilityUrl = buildMCPCompatibilityURL(token, origin)
   const daemonOrigin = normalizeOrigin(origin)
   return {
     url,
+    compatibilityUrl,
     jsonConfig: JSON.stringify({
       mcpServers: {
         [SERVER_NAME]: {
           type: 'http',
           url,
+          headers: {
+            Authorization: 'Bearer ${AGEN8_MCP_TOKEN}',
+          },
         },
       },
     }, null, 2),
-    codexCommand: `codex mcp add ${SERVER_NAME} --url ${shellQuote(url)}`,
-    claudeCommand: `claude mcp add --transport http --scope user ${SERVER_NAME} ${shellQuote(url)}`,
+    codexCommand: `export AGEN8_MCP_TOKEN=${shellQuote(token)}\ncodex mcp add ${SERVER_NAME} --url ${shellQuote(url)} --bearer-token-env-var AGEN8_MCP_TOKEN`,
+    claudeCommand: `claude mcp add --transport http --scope user ${SERVER_NAME} ${shellQuote(url)} --header ${shellQuote(`Authorization: Bearer ${token}`)}`,
     hooksClaudeCommand: `agen8 hooks install --harness claude --url ${shellQuote(daemonOrigin)} --token ${shellQuote(token)}`,
     hooksCodexCommand: `agen8 hooks install --harness codex --url ${shellQuote(daemonOrigin)} --token ${shellQuote(token)}`,
   }
 }
 
-function buildMCPURL(token: string, origin: string): string {
+function buildMCPURL(origin: string): string {
+  const base = normalizeOrigin(origin)
+  const url = new URL('/mcp', base)
+  return url.toString()
+}
+
+function buildMCPCompatibilityURL(token: string, origin: string): string {
   const base = normalizeOrigin(origin)
   const url = new URL('/mcp', base)
   url.searchParams.set('token', token)
