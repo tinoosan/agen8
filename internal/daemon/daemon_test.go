@@ -277,6 +277,29 @@ func TestHandleSetupJSONIncludesMCPArtifacts(t *testing.T) {
 	}
 }
 
+func TestSetupMCPArtifactsRejectHostHeaderPoisoning(t *testing.T) {
+	handler := httpSetupHandler{httpAddr: "0.0.0.0:7777"}
+	req := httptest.NewRequest(http.MethodPost, "http://attacker.example/setup", nil)
+
+	result, err := handler.setupMCPArtifacts(req, "ak_secret")
+	if err != nil {
+		t.Fatalf("setupMCPArtifacts: %v", err)
+	}
+	joined := strings.Join([]string{
+		result.URL,
+		result.CompatibilityURL,
+		result.Config,
+		result.CodexCommand,
+		result.ClaudeCommand,
+	}, "\n")
+	if strings.Contains(joined, "attacker.example") {
+		t.Fatalf("setup artifacts trusted poisoned host: %s", joined)
+	}
+	if !strings.Contains(joined, "http://127.0.0.1:7777/mcp") {
+		t.Fatalf("setup artifacts did not fall back to loopback daemon address: %s", joined)
+	}
+}
+
 func TestSetupStatusRPCReturnsSetupURLWhileOpen(t *testing.T) {
 	d, err := New(Config{
 		AppConfig:  config.Config{DataDir: t.TempDir()},

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"os"
 	"os/exec"
 	pathpkg "path"
 	"path/filepath"
@@ -280,6 +281,10 @@ func (s *Service) Baseline(ctx context.Context, input GetInput) (BaselineResult,
 	if locationID := strings.TrimSpace(string(resolved.ref.LocationID)); locationID != "" && locationID != "local" {
 		return s.remoteBaseline(ctx, resolved, dir, name)
 	}
+	if err := validateLocalBaselineDir(project.root, dir); err != nil {
+		s.logger.Warn("local git baseline path rejected", "vpath", resolved.vpath, "err", err)
+		return BaselineResult{Path: resolved.vpath, Tracked: false}, nil
+	}
 
 	out, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:./"+name).Output()
 	if err != nil {
@@ -288,6 +293,36 @@ func (s *Service) Baseline(ctx context.Context, input GetInput) (BaselineResult,
 		return BaselineResult{Path: resolved.vpath, Tracked: false}, nil
 	}
 	return s.baselineFromBytes(resolved.vpath, out), nil
+}
+
+func validateLocalBaselineDir(projectRoot, dir string) error {
+	root, err := filepath.Abs(strings.TrimSpace(projectRoot))
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	dir, err = filepath.Abs(strings.TrimSpace(dir))
+	if err != nil {
+		return fmt.Errorf("resolve baseline directory: %w", err)
+	}
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve project root symlinks: %w", err)
+	}
+	dirReal, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("baseline directory does not exist: %w", err)
+		}
+		return fmt.Errorf("resolve baseline directory symlinks: %w", err)
+	}
+	rel, err := filepath.Rel(rootReal, dirReal)
+	if err != nil {
+		return fmt.Errorf("compare baseline directory to project root: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("baseline directory escapes project root")
+	}
+	return nil
 }
 
 // remoteBaseline produces a git baseline for a file on a non-local location by

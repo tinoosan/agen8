@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -184,10 +185,41 @@ func (h httpSetupHandler) setupRequestOrigin(r *http.Request) string {
 	if host == "" {
 		host = strings.TrimSpace(h.httpAddr)
 	}
+	if !safeSetupRequestHost(host) {
+		host = strings.TrimSpace(h.httpAddr)
+		if !safeSetupRequestHost(host) {
+			host = ""
+		}
+	}
 	if host == "" {
 		host = "127.0.0.1:7777"
 	}
 	return scheme + "://" + normalizeSetupHost(host)
+}
+
+func safeSetupRequestHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	if strings.ContainsAny(host, "/\\@%") {
+		return false
+	}
+	name := host
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		name = parsed
+	}
+	name = strings.Trim(strings.ToLower(strings.TrimSpace(name)), "[]")
+	if name == "" {
+		return false
+	}
+	if name == "localhost" || name == "0.0.0.0" || name == "::" {
+		return true
+	}
+	if ip := net.ParseIP(name); ip != nil {
+		return ip.IsLoopback() || ip.IsUnspecified()
+	}
+	return false
 }
 
 func normalizeSetupHost(host string) string {

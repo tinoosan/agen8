@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -292,6 +293,32 @@ func TestBaselineOutsideGitRepoIsUntracked(t *testing.T) {
 	result, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/loose.txt"})
 	require.NoError(t, err)
 	require.False(t, result.Tracked)
+}
+
+func TestBaselineRejectsSymlinkEscapedDirectory(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	projectRoot := t.TempDir()
+	outsideRoot := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=test@test", "-c", "user.name=test"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
+		}
+	}
+	run(outsideRoot, "init", "-q")
+	require.NoError(t, os.WriteFile(filepath.Join(outsideRoot, "secret.txt"), []byte("outside committed secret\n"), 0o644))
+	run(outsideRoot, "add", "secret.txt")
+	run(outsideRoot, "commit", "-q", "-m", "secret")
+	require.NoError(t, os.Symlink(outsideRoot, filepath.Join(projectRoot, "linked-outside")))
+
+	svc := newTestService(t, projectRoot, fileinfra.NewLocalRepository())
+	result, err := svc.Baseline(context.Background(), GetInput{ProjectID: "project-test-0", Path: "/project/linked-outside/secret.txt"})
+	require.NoError(t, err)
+	require.False(t, result.Tracked)
+	require.Empty(t, result.Content)
 }
 
 func TestBaselineOnRemoteLocationIsUnsupportedNotError(t *testing.T) {
