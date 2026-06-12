@@ -163,11 +163,28 @@ identity = { url = "http://127.0.0.1:7777/mcp" }
 
 ### 7. Start working
 
-From inside your harness, call `project.register` with the project root and a
-readable `display_name` such as `Atlas (Backend Engineer)` or
-`Iris (Frontend Reviewer)`, so tasks, decisions, and graph records stay
-understandable. From there you create missions and key results, then run tasks
-against them.
+From inside your harness, call `project.register` with the canonical project id
+or canonical project root and a readable `display_name` such as
+`Atlas (Backend Engineer)` or `Iris (Frontend Reviewer)`, so tasks, decisions,
+and graph records stay understandable. From there you create missions and key
+results, then run tasks against them.
+
+If a worker uses a git worktree, treat that worktree as an execution checkout
+only. It is not a new Agen8 project boundary. Create or enter the worktree for
+file edits, but register and log against the canonical Agen8 project:
+
+```json
+{
+  "action": "register",
+  "project_id": "agen8-mcp-server-3333e627",
+  "project_root": "/Users/santinoonyeme/personal/dev/Projects/agen8-mcp-server",
+  "display_name": "Helios (Services Refactorer)"
+}
+```
+
+Do not register with only a temporary worktree path, because that can mint a
+throwaway project and hide tasks, submissions, and decisions from the canonical
+work graph.
 
 Your runtime data lives outside the repository (default `~/.agen8`). It is never
 removed by routine cleanup — resetting the database is an explicit, deliberate

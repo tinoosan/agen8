@@ -154,7 +154,11 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <h2>MCP registration and delivery</h2>
 
-<p><code>project.register</code> is the MCP-first entry point for harnesses. A harness can call it with only a working directory or project id. Agen8 resolves the project, creates or reuses the member identity, and returns the ids the harness needs for later tool calls.</p>
+<p><code>project.register</code> is the MCP-first entry point for harnesses. A harness can call it with a canonical working directory or project id. Agen8 resolves the project, creates or reuses the member identity, and returns the ids the harness needs for later tool calls.</p>
+
+<div class="callout">
+<strong>Worktree boundary.</strong> A git worktree is an execution checkout, not an Agen8 project boundary. Workers may create a manual worktree for file edits and tests, but they must register, claim, log decisions, attach evidence, and submit against the canonical Agen8 project. When a canonical <code>project_id</code> is known, pass it to <code>project.register</code> even if the process working directory is a worktree. If only a root is available, pass the canonical main checkout <code>project_root</code>, not the temporary worktree path.
+</div>
 
 <p>When a harness exposes a stable native session or thread id in the MCP call metadata, the MCP server passes that value through the project tool call context. The daemon stores it as the harness session reference. For Codex, the server reads the top-level MCP metadata fields <code>threadId</code>, <code>thread_id</code>, <code>sessionId</code>, and <code>session_id</code>, plus the optional <code>x-codex-turn-metadata</code> object that Codex sends with <code>thread_id</code> and <code>session_id</code>.</p>
 
@@ -166,7 +170,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <table>
   <tr><th>Input</th><th>Source</th><th>Behavior</th></tr>
-  <tr><td><code>project_root</code> or <code>project_id</code></td><td>Tool arguments</td><td>Creates or reuses the Agen8 project.</td></tr>
+  <tr><td><code>project_root</code> or <code>project_id</code></td><td>Tool arguments</td><td>Creates or reuses the Agen8 project. Worktree-based workers should pass the canonical <code>project_id</code> first, or the canonical main checkout root when no id is available.</td></tr>
   <tr><td><code>thread_id</code> or <code>session_id</code></td><td>Tool arguments, then MCP metadata fallback</td><td>Creates or reuses a member for that native harness session and stores the value as the harness session reference.</td></tr>
   <tr><td>No native session reference</td><td>Absent metadata</td><td>Reuses a token/project-bound member when available, otherwise creates a member for the project/harness.</td></tr>
   <tr><td>First member in a project</td><td>Agen8 roster state</td><td>Receives the public-baseline member type for compatibility metadata.</td></tr>
@@ -185,8 +189,8 @@ project.NewHandler().Handle(ctx, project.CallContext{
 <table>
   <tr><th>Field</th><th>Used by</th><th>Rule</th></tr>
   <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>register</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update</code>, <code>member_remove</code>.</td></tr>
-  <tr><td><code>project_root</code></td><td><code>register</code></td><td>Optional when <code>project_id</code> is supplied. Creates or reuses a local project for the working directory.</td></tr>
-  <tr><td><code>project_id</code></td><td><code>register</code></td><td>Optional when <code>project_root</code> is supplied. Reuses an existing project.</td></tr>
+  <tr><td><code>project_root</code></td><td><code>register</code></td><td>Optional when <code>project_id</code> is supplied. Creates or reuses a local project for the canonical working directory. Do not use a temporary worktree path as the only project identity.</td></tr>
+  <tr><td><code>project_id</code></td><td><code>register</code></td><td>Optional when <code>project_root</code> is supplied. Reuses an existing project and is the preferred input for workers editing from a git worktree.</td></tr>
   <tr><td><code>location_id</code></td><td><code>register</code></td><td>Optional. Defaults to the local location when a project root creates a project.</td></tr>
   <tr><td><code>session_id</code></td><td><code>register</code></td><td>Optional stable native harness session id. Explicit arguments take precedence over MCP metadata.</td></tr>
   <tr><td><code>thread_id</code></td><td><code>register</code></td><td>Optional stable native harness thread id. Explicit arguments take precedence over MCP metadata and session id.</td></tr>

@@ -11,7 +11,7 @@ Call the Agen8 MCP tools directly: `project`, `mission`, `task`, `decision`, `gr
 
 ## The Loop
 
-1. **Register.** Call `project.register` early — prefer `project_root` for a local project. Set `display_name` to `Name (Role)` (e.g. `Atlas (Backend Engineer)`) when a role is given or inferable, otherwise a bare name. Keep the returned `memberId`/`projectId`; you act as that member.
+1. **Register.** Call `project.register` early. Prefer an explicit canonical `project_id` when the task or orchestrator gives one; otherwise use the canonical main checkout `project_root` for the local project. Set `display_name` to `Name (Role)` (e.g. `Atlas (Backend Engineer)`) when a role is given or inferable, otherwise a bare name. Keep the returned `memberId`/`projectId`; you act as that member.
 2. **Inspect before choosing work.** Read the current state — active missions, their key results, open tasks, recent decisions, the roster — before creating or claiming anything. Use the **agen8-graph** skill to read the work graph. This is mandatory after compaction, handoff, or a "continue".
 3. **Anchor.** Every task serves a key result (or, lacking one, a mission). Reuse the active mission/KR if it fits; create a mission, then a KR, when the goal is new durable work. KRs are observable outcomes, not chores or working methods.
 4. **One task at a time.** Create or claim the task, then claim it before doing the work. Work from its acceptance criteria. Keep tasks small enough to submit with clear evidence; don't duplicate a task an active one already covers.
@@ -33,6 +33,7 @@ Show evidence, don't just describe it. Match the proof to the acceptance criteri
 
 ## Hard Rules
 
+- **Worktrees are execution checkouts, not Agen8 project boundaries.** If you edit in a git worktree, still register/log/claim/submit against the canonical Agen8 project. Do not call `project.register` with only the temporary worktree path; pass the canonical `project_id` first, or the canonical main `project_root` when no id is available. A safe worker pattern is: create a manual git worktree for file edits, then call `project.register` with the canonical `project_id` (or canonical main root) and your `display_name`.
 - **Finish what you claim.** If you claim a task you must submit and review it before ending the turn. The user cannot tell from the Agen8 UI whether your session is still alive, so a claimed-but-abandoned task reads as stuck. Leave follow-ups as *pending* tasks, never as half-done claimed ones.
 - **No stray tasks.** A task with no mission/KR anchor is acceptable only when no anchor is discoverable — and say so.
 - **Don't invent** ids, project/member/task state, or decision history. If a read returns nothing, that is the answer.
