@@ -7,7 +7,6 @@ import (
 	"github.com/tinoosan/agen8/internal/caller"
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
 	decisionrpc "github.com/tinoosan/agen8/internal/services/decision/rpc"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 	userapp "github.com/tinoosan/agen8/internal/services/user/app"
 )
 
@@ -63,7 +62,7 @@ func withDecisionIdentity[Params any, Result any](fn func(context.Context, Param
 		}
 		ctx = caller.ContextWithCaller(ctx, caller.Caller{
 			UserID:   identity.UserID,
-			MemberID: member.ID(identity.MemberID),
+			MemberID: identity.MemberID,
 			Role:     identity.Role,
 		})
 		return fn(ctx, params)

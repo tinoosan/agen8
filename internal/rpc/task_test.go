@@ -126,7 +126,7 @@ func TestApproveReviewRecordsReviewerNote(t *testing.T) {
 
 	callerCtx := caller.ContextWithCaller(ctx, caller.Caller{
 		UserID:    "user-1",
-		MemberID:  member.ID(registered.MemberID),
+		MemberID:  registered.MemberID,
 		ProjectID: types.ProjectID(registered.ProjectID),
 	})
 

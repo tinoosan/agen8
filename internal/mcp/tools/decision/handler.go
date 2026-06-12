@@ -9,7 +9,6 @@ import (
 	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/core/types"
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 type Handler struct{}
@@ -53,7 +52,7 @@ func (h Handler) log(ctx context.Context, call CallContext, input requestInput) 
 	}
 	ctx = caller.ContextWithCaller(ctx, caller.Caller{
 		UserID:    strings.TrimSpace(call.UserID),
-		MemberID:  member.ID(memberID),
+		MemberID:  memberID,
 		ProjectID: types.ProjectID(projectID),
 	})
 	result, err := call.Decisions.Log(ctx, decisionapp.LogRequest{

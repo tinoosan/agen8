@@ -267,7 +267,7 @@ func TestHandleMemberListUsesProjectScopedDirectory(t *testing.T) {
 				if err != nil {
 					t.Fatalf("actor lookup missing caller: %v", err)
 				}
-				if resolved.MemberID != id {
+				if resolved.MemberID != string(id) {
 					t.Fatalf("caller=%+v want member %s", resolved, id)
 				}
 				return member.Record{
@@ -349,7 +349,7 @@ func TestHandleCreateMemberUsesSessionActorAndRegistrar(t *testing.T) {
 				if err != nil {
 					t.Fatalf("actor lookup missing caller: %v", err)
 				}
-				if resolved.MemberID != id {
+				if resolved.MemberID != string(id) {
 					t.Fatalf("caller=%+v want member %s", resolved, id)
 				}
 				return member.Record{

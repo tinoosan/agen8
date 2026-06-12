@@ -39,7 +39,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	if err != nil {
 		return Result{}, err
 	}
-	taskCtx := caller.ContextWithCaller(ctx, caller.Caller{UserID: actor.UserID, MemberID: actor.MemberID, ProjectID: actor.ProjectID})
+	taskCtx := caller.ContextWithCaller(ctx, caller.Caller{UserID: actor.UserID, MemberID: string(actor.MemberID), ProjectID: actor.ProjectID})
 
 	switch input.Action {
 	case "create":
@@ -367,7 +367,7 @@ func contextWithSessionActor(ctx context.Context, actorMemberID, projectID strin
 		return ctx
 	}
 	return caller.ContextWithCaller(ctx, caller.Caller{
-		MemberID:  member.ID(actorMemberID),
+		MemberID:  actorMemberID,
 		ProjectID: types.ProjectID(projectID),
 	})
 }

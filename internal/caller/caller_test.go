@@ -21,7 +21,7 @@ func TestContextResolverReturnsStampedCaller(t *testing.T) {
 	if caller.UserID != "user-1" {
 		t.Fatalf("UserID = %q, want user-1", caller.UserID)
 	}
-	if string(caller.MemberID) != "member-1" {
+	if caller.MemberID != "member-1" {
 		t.Fatalf("MemberID = %q, want member-1", caller.MemberID)
 	}
 	if string(caller.ProjectID) != "project-1" {

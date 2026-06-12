@@ -313,7 +313,7 @@ func attachTestService(repo *fakeTaskRepository, callerID string) *Service {
 		clock:  taskdomain.FixedClock{T: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)},
 		logger: slog.Default(),
 		tasks:  repo,
-		caller: fakeCallerResolver{Caller: caller.Caller{MemberID: member.ID(callerID)}},
+		caller: fakeCallerResolver{Caller: caller.Caller{MemberID: callerID}},
 		members: testMemberLoader{members: map[member.ID]member.Record{
 			"worker-1": {
 				ID:             "worker-1",

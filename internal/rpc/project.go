@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/agen8/internal/caller"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 
 	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
 	projectrpc "github.com/tinoosan/agen8/internal/services/project/rpc"
@@ -40,7 +39,7 @@ func withProjectCaller[Params any, Result any](fn func(context.Context, Params) 
 		}
 		ctx = caller.ContextWithCaller(ctx, caller.Caller{
 			UserID:   identity.UserID,
-			MemberID: member.ID(identity.MemberID),
+			MemberID: identity.MemberID,
 			Role:     identity.Role,
 		})
 		return fn(ctx, params)

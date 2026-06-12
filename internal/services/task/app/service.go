@@ -448,15 +448,16 @@ func (s *Service) Claim(ctx context.Context, taskID domain.TaskID) (domain.Task,
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireAssignedCaller(loaded, caller.MemberID); err != nil {
+	if err := s.requireAssignedCaller(loaded, member.ID(caller.MemberID)); err != nil {
 		return domain.Task{}, err
 	}
-	next, err := loaded.Claim(caller.MemberID, s.clock.Now())
+	callerMemberID := member.ID(caller.MemberID)
+	next, err := loaded.Claim(callerMemberID, s.clock.Now())
 	if err != nil {
 		return domain.Task{}, err
 	}
 	next.ClaimedByMemberLabel = s.callerMemberLabel(ctx, caller, loaded.ProjectID)
-	if next.AssignedToLabel == "" && next.AssignedTo == caller.MemberID {
+	if next.AssignedToLabel == "" && next.AssignedTo == callerMemberID {
 		next.AssignedToLabel = next.ClaimedByMemberLabel
 	}
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
@@ -506,7 +507,7 @@ func (s *Service) Complete(ctx context.Context, params CompleteTaskParams) (doma
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
+	if err := s.requireClaimedCaller(loaded, member.ID(caller.MemberID)); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Complete(params.Summary, params.Artifacts, s.clock.Now())
@@ -538,7 +539,7 @@ func (s *Service) AttachArtifact(ctx context.Context, taskID domain.TaskID, ref 
 		return domain.Task{}, err
 	}
 	if caller.MemberID != "" {
-		if _, err := s.memberInProject(ctx, caller.MemberID, loaded.ProjectID); err != nil {
+		if _, err := s.memberInProject(ctx, member.ID(caller.MemberID), loaded.ProjectID); err != nil {
 			return domain.Task{}, err
 		}
 	} else if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
@@ -586,7 +587,7 @@ func (s *Service) reviewMetadata(ctx context.Context, caller Caller, projectID t
 		"reviewDecision": decision,
 		"reviewedAt":     s.clock.Now().UTC().Format(time.RFC3339),
 	}
-	if memberID := strings.TrimSpace(string(caller.MemberID)); memberID != "" {
+	if memberID := strings.TrimSpace(caller.MemberID); memberID != "" {
 		meta["reviewedBy"] = memberID
 	}
 	if role := s.callerMemberLabel(ctx, caller, projectID); role != "" {
@@ -667,7 +668,7 @@ func (s *Service) Block(ctx context.Context, taskID domain.TaskID, reason string
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
+	if err := s.requireClaimedCaller(loaded, member.ID(caller.MemberID)); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Block(reason, s.clock.Now())
@@ -693,7 +694,7 @@ func (s *Service) Unblock(ctx context.Context, taskID domain.TaskID, note string
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireUnblockCaller(ctx, loaded, caller.MemberID); err != nil {
+	if err := s.requireUnblockCaller(ctx, loaded, member.ID(caller.MemberID)); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Unblock(note, s.clock.Now())
@@ -719,7 +720,7 @@ func (s *Service) Release(ctx context.Context, taskID domain.TaskID) (domain.Tas
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
+	if err := s.requireClaimedCaller(loaded, member.ID(caller.MemberID)); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Release(s.clock.Now())
@@ -777,7 +778,7 @@ func requireMemberCaller(caller Caller) error {
 
 func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Caller, projectID types.ProjectID) error {
 	if caller.MemberID != "" {
-		return s.requireCoordinator(ctx, caller.MemberID, projectID)
+		return s.requireCoordinator(ctx, member.ID(caller.MemberID), projectID)
 	}
 	userID := strings.TrimSpace(caller.UserID)
 	if userID == "" {
@@ -824,7 +825,7 @@ func (s *Service) callerMemberLabel(ctx context.Context, caller Caller, projectI
 	if caller.MemberID == "" {
 		return ""
 	}
-	rosterMember, err := s.memberInProject(ctx, caller.MemberID, projectID)
+	rosterMember, err := s.memberInProject(ctx, member.ID(caller.MemberID), projectID)
 	if err != nil {
 		return ""
 	}
@@ -905,7 +906,7 @@ func (s *Service) logTaskTransition(action string, task domain.Task, caller Call
 		"assigned_to", string(task.AssignedTo),
 		"claimed_by_member_id", string(task.ClaimedByMemberID),
 		"caller_user_id", caller.UserID,
-		"caller_member_id", string(caller.MemberID),
+		"caller_member_id", caller.MemberID,
 	)
 	s.publishTaskEvent(action, task)
 }

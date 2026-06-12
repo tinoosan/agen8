@@ -7,7 +7,6 @@ import (
 	"github.com/tinoosan/agen8/internal/caller"
 	notificationapp "github.com/tinoosan/agen8/internal/services/notification/app"
 	notificationrpc "github.com/tinoosan/agen8/internal/services/notification/rpc"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 const (
@@ -49,7 +48,7 @@ func withNotificationIdentity[Params any, Result any](fn func(context.Context, P
 		}
 		ctx = caller.ContextWithCaller(ctx, caller.Caller{
 			UserID:   identity.UserID,
-			MemberID: member.ID(identity.MemberID),
+			MemberID: identity.MemberID,
 			Role:     identity.Role,
 		})
 		return fn(ctx, params)

@@ -276,7 +276,7 @@ func TestHandleStampsCallerBeforeLoadingMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if members.seen.MemberID != member.ID("member-1") || string(members.seen.ProjectID) != "proj-1" {
+	if members.seen.MemberID != "member-1" || string(members.seen.ProjectID) != "proj-1" {
 		t.Fatalf("caller=%+v", members.seen)
 	}
 }

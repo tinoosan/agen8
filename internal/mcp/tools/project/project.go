@@ -151,7 +151,7 @@ func (h Handler) resolveActor(ctx context.Context, call CallContext) (member.Rec
 		return member.Record{}, ctx, fmt.Errorf("project: actor member id is required")
 	}
 	ctx = caller.ContextWithCaller(ctx, caller.Caller{
-		MemberID:  member.ID(memberID),
+		MemberID:  memberID,
 		ProjectID: types.ProjectID(strings.TrimSpace(call.ProjectID)),
 	})
 	actor, err := call.Members.GetMember(ctx, member.ID(memberID))
@@ -169,7 +169,7 @@ func (h Handler) resolveActor(ctx context.Context, call CallContext) (member.Rec
 	}
 	ctx = caller.ContextWithCaller(ctx, caller.Caller{
 		UserID:    strings.TrimSpace(actor.UserID),
-		MemberID:  actor.ID,
+		MemberID:  string(actor.ID),
 		ProjectID: types.ProjectID(strings.TrimSpace(actor.ProjectID)),
 	})
 	return actor, ctx, nil

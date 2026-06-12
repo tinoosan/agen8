@@ -8,7 +8,6 @@ import (
 
 	"github.com/tinoosan/agen8/internal/caller"
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 type recordingDecisionService struct {
@@ -52,7 +51,7 @@ func TestHandleLogAddsSessionCallerContext(t *testing.T) {
 	if service.caller.UserID != "user-1" {
 		t.Fatalf("caller user=%q want user-1", service.caller.UserID)
 	}
-	if service.caller.MemberID != member.ID("member-1") {
+	if service.caller.MemberID != "member-1" {
 		t.Fatalf("caller member=%q want member-1", service.caller.MemberID)
 	}
 	if string(service.caller.ProjectID) != "project-1" {

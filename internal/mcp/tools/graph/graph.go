@@ -254,7 +254,7 @@ func (h Handler) contextWithActor(ctx context.Context, call CallContext) (contex
 		return nil, fmt.Errorf("graph_query: member service is not configured")
 	}
 	ctx = caller.ContextWithCaller(ctx, caller.Caller{
-		MemberID:  member.ID(memberID),
+		MemberID:  memberID,
 		ProjectID: types.ProjectID(projectID),
 	})
 	actor, err := call.Members.GetMember(ctx, member.ID(memberID))
@@ -266,7 +266,7 @@ func (h Handler) contextWithActor(ctx context.Context, call CallContext) (contex
 	}
 	return caller.ContextWithCaller(ctx, caller.Caller{
 		UserID:    strings.TrimSpace(actor.UserID),
-		MemberID:  actor.ID,
+		MemberID:  string(actor.ID),
 		ProjectID: types.ProjectID(projectID),
 	}), nil
 }

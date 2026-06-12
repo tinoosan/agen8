@@ -6,14 +6,13 @@ import (
 	"strings"
 
 	"github.com/tinoosan/agen8/internal/core/types"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 )
 
 type contextKey struct{}
 
 type Caller struct {
 	UserID    string
-	MemberID  member.ID
+	MemberID  string
 	ProjectID types.ProjectID
 	Role      string
 }
@@ -42,7 +41,7 @@ func (ContextResolver) ResolveCaller(ctx context.Context) (Caller, error) {
 
 func (c Caller) Normalize() Caller {
 	c.UserID = strings.TrimSpace(c.UserID)
-	c.MemberID = member.ID(strings.TrimSpace(string(c.MemberID)))
+	c.MemberID = strings.TrimSpace(c.MemberID)
 	c.ProjectID = types.ProjectID(strings.TrimSpace(string(c.ProjectID)))
 	c.Role = strings.TrimSpace(c.Role)
 	return c
@@ -51,7 +50,7 @@ func (c Caller) Normalize() Caller {
 func (c Caller) ActorID() string {
 	c = c.Normalize()
 	if c.MemberID != "" {
-		return string(c.MemberID)
+		return c.MemberID
 	}
 	return c.UserID
 }
