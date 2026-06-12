@@ -20,11 +20,11 @@
   <span class="eyebrow">Architecture · Runtime &amp; protocol</span>
   <h1>Real-time events over SSE</h1>
   <p class="lede">
-    Server-Sent Events are how agen8 pushes durable state changes to every open browser without polling. A domain change is published to the in-process bus, the daemon's <code>GET /events</code> stream fans it out to connected clients for the resolved project as a JSON-RPC notification, and the React app turns notification traffic into query invalidation. The core realtime path is live for pin, task, mission, decision, space-member, and KR domains with project-scoped fan-out and authenticated SSE.
+    Server-Sent Events are how agen8 pushes state changes to every open browser without polling. A domain or runtime lifecycle change is published to the in-process bus, the daemon's <code>GET /events</code> stream fans it out to connected clients for the resolved project as a JSON-RPC notification, and the React app turns notification traffic into query invalidation. The core realtime path is live for pin, task, mission, decision, member, KR, and attention lifecycle events with project-scoped fan-out and authenticated SSE.
   </p>
 
   <div class="callout">
-    <strong>Status: expanded live core.</strong> The in-process bus, browser client, and hub bridge are live. Section&nbsp;3 now reflects the currently subscribed domains and any remaining backlog is tracked via KR-linked review tasks.
+    <strong>Status: expanded live core.</strong> The in-process bus, browser client, and hub bridge are live. Section&nbsp;3 reflects the currently subscribed domains, including the attention lifecycle raised by harness hooks.
   </div>
 
   <nav class="toc" aria-label="On this page">
@@ -130,7 +130,7 @@
 
   <h2 id="state">3. Current state: live vs. pending</h2>
 
-  <p>The bridge and publishers are implemented and the daemon now fans events for task, mission, decision, member, and KR domains through one SSE path; remaining backlog is explicitly tracked in the linked KR.
+  <p>The bridge and publishers are implemented and the daemon now fans events for task, mission, decision, member, KR, pin, and attention lifecycle domains through one SSE path.</p>
 
   <table>
     <thead><tr><th>Piece</th><th>State</th><th>Where</th></tr></thead>
@@ -144,7 +144,8 @@
       <tr><td>Per-project fan-out hub (one subscription &rarr; N clients)</td><td>Live</td><td><code>internal/daemon/events_hub.go</code></td></tr>
       <tr><td>Stream authentication for <code>EventSource</code></td><td>Live</td><td><code>internal/daemon/daemon.go</code> + cookie write path in <code>web/src/lib/rpc.ts</code></td></tr>
       <tr><td>Pin events on the bus</td><td>Live</td><td><code>internal/services/pin/app/service.go</code></td></tr>
-      <tr><td>Additional event-domain subscriptions</td><td>Live</td><td><code>internal/daemon/events_hub.go</code> subscribes to task, mission, decision, space-member, KR, and pin lifecycle topics</td></tr>
+      <tr><td>Attention lifecycle events</td><td>Live</td><td><code>internal/services/attention</code> publishes <code>attention.lifecycle</code>; <code>internal/daemon/events_hub.go</code> maps it to <code>event.append</code></td></tr>
+      <tr><td>Additional event-domain subscriptions</td><td>Live</td><td><code>internal/daemon/events_hub.go</code> subscribes to task, mission, decision, member, KR, pin, and attention lifecycle topics</td></tr>
     </tbody>
   </table>
 
@@ -168,7 +169,7 @@ onNotification(<span class="tok-string">'event.append'</span>, (notif) =&gt; {
   }
 })</code></pre>
 
-  <p>So new domains ride the same rail. Pins emit <code>event.append</code> notifications whose <code>event.type</code> is <code>pin.added</code> / <code>pin.removed</code>. Do not introduce a bespoke <code>pin.changed</code> method — that would fork the contract and force every consumer to learn a second dispatch scheme.</p>
+  <p>So new domains ride the same rail. Pins emit <code>event.append</code> notifications whose <code>event.type</code> is <code>pin.added</code> / <code>pin.removed</code>. Attention emits <code>event.append</code> notifications whose <code>event.type</code> is <code>attention.raised</code> / <code>attention.cleared</code>. Do not introduce bespoke <code>pin.changed</code> or <code>attention.changed</code> methods — that would fork the contract and force every consumer to learn a second dispatch scheme.</p>
 
   <div class="callout">
     <strong>Why type-prefix filtering, not per-method routing.</strong> One method keeps the client dispatch table flat and the reconnect logic single-path. Consumers opt in to the slices they care about by prefix, and the daemon never has to know the React Query key space. The cost — every client wakes for every event and discards most — is negligible at single-daemon scale and is the right trade for a uniform contract.
@@ -201,7 +202,7 @@ onNotification(<span class="tok-string">'event.append'</span>, (notif) =&gt; {
 
   <p>The handler stays thin; the hub holds the concurrency. Because the bus is in-process, an event published anywhere in the daemon reaches the hub synchronously — there is no cross-process delivery to reason about at the single-daemon baseline.</p>
 
-  <h2 id="publish">6. Publishing a new event (pins)</h2>
+  <h2 id="publish">6. Publishing new events: pins and attention</h2>
 
   <p>The pin service holds a hard invariant: <em>pinning has no side effects and emits no events</em> (see the <a href="./pin-service.html">Pin Service</a> doc). That invariant stays. The publisher is added <strong>around</strong> the service at the app layer — the same place the mission and KR publishers already live — not inside the pin domain.</p>
 
@@ -226,6 +227,41 @@ onNotification(<span class="tok-string">'event.append'</span>, (notif) =&gt; {
   <div class="callout">
     <strong>Idempotency note.</strong> A re-pin is a no-op that preserves <code>CreatedAt</code>. The publisher should only emit when the pin set actually changed, so a redundant pin does not flood every client with a refetch. The service already returns enough to distinguish a real change from a no-op.
   </div>
+
+  <p>Attention lifecycle events follow the same <code>event.append</code> contract, but they are runtime presence signals rather than durable work records. Harness hooks post to <code>POST /hooks/attention</code>; the daemon normalizes the hook payload and calls the attention service; the service publishes <code>attention.lifecycle</code> when an attributed session starts or stops needing the human.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">const</span> <span class="tok-name">TopicAttentionLifecycle</span> = <span class="tok-string">"attention.lifecycle"</span>
+
+<span class="tok-kw">const</span> (
+    <span class="tok-name">AttentionEventRaised</span>  = <span class="tok-string">"attention.raised"</span>
+    <span class="tok-name">AttentionEventCleared</span> = <span class="tok-string">"attention.cleared"</span>
+)
+
+<span class="tok-kw">type</span> <span class="tok-type">AttentionEvent</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span>  string    <span class="tok-string">`json:"projectId"`</span>
+    <span class="tok-field">MemberID</span>   string    <span class="tok-string">`json:"memberId,omitempty"`</span>
+    <span class="tok-field">MemberName</span> string    <span class="tok-string">`json:"memberName,omitempty"`</span>
+    <span class="tok-field">Harness</span>    string    <span class="tok-string">`json:"harness,omitempty"`</span>
+    <span class="tok-field">Kind</span>       string    <span class="tok-string">`json:"kind,omitempty"`</span> <span class="tok-comment">// waiting | needs_approval | asking</span>
+    <span class="tok-field">EventType</span>  string    <span class="tok-string">`json:"eventType"`</span>      <span class="tok-comment">// attention.raised | attention.cleared</span>
+    <span class="tok-field">Timestamp</span>  time.Time <span class="tok-string">`json:"timestamp"`</span>
+}</code></pre>
+
+<pre><code class="lang-json">{
+  "jsonrpc": "2.0",
+  "method": "event.append",
+  "event": {
+    "type": "attention.raised",
+    "eventType": "attention.raised",
+    "projectId": "agen8-mcp-server-3333e627",
+    "memberId": "member-...",
+    "memberName": "Boreas (Daemon Refactorer)",
+    "harness": "codex",
+    "kind": "needs_approval"
+  }
+}</code></pre>
+
+  <p>Hook setup is explicit: <code>agen8 hooks install</code> writes curl-based harness hooks that post raw payloads to <code>/hooks/attention?harness=&amp;kind=</code>. The hook command exits successfully even when the daemon is slow or down, so attention reporting never blocks the harness. See <a href="./attention-service.html">Attention Service</a> for the ingest and TTL details.</p>
 
   <h2 id="auth">7. Authenticating the stream</h2>
 
@@ -272,7 +308,8 @@ onNotification(<span class="tok-string">'event.append'</span>, (notif) =&gt; {
 
   daemon/
     daemon.go              # handleEvents (authenticated, hub-backed bridge)
-    events_hub.go          # per-project fan-out hub
+    events_hub.go          # per-project fan-out hub; maps attention.lifecycle to event.append
+    http_attention.go      # POST /hooks/attention ingest for harness lifecycle hooks
 
   app/
     application.go         # mission/KR publishers wired here
@@ -287,10 +324,10 @@ web/
   <h2 id="invariants">10. Invariants</h2>
 
   <ul>
-    <li><strong>Services do not know about browsers.</strong> A mutation publishes a domain event and returns. The bus, hub, and SSE layer are all downstream and removable without touching domain logic.</li>
+    <li><strong>Services do not know about browsers.</strong> A mutation or runtime lifecycle change publishes an event and returns. The bus, hub, and SSE layer are all downstream and removable without touching domain logic.</li>
     <li><strong>The pin service stays side-effect-free.</strong> Pin events are published by an app-layer wrapper, never from inside the pin domain. The no-events invariant in the pin service is preserved verbatim.</li>
     <li><strong>One notification method.</strong> Everything arrives as <code>event.append</code>; consumers filter on <code>event.type</code> prefixes. No per-domain methods.</li>
-    <li><strong>Notifications are hints, not data.</strong> Consumers invalidate-and-refetch; they never render the event payload as state. This keeps delivery best-effort and the bridge replay-free.</li>
+    <li><strong>Notifications are hints, not durable data.</strong> Consumers invalidate-and-refetch or refresh ephemeral presence; they never treat the event payload as the source of truth. This keeps delivery best-effort and the bridge replay-free.</li>
     <li><strong>Every stream is project-scoped.</strong> A client only ever receives events for its resolved <code>projectId</code>; cross-project leakage is structurally impossible in the hub.</li>
     <li><strong>No secrets in the URL.</strong> Stream auth uses a session cookie and no token-in-query strategy.</li>
   </ul>
