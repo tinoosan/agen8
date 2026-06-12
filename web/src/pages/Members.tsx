@@ -13,7 +13,6 @@ import { cn } from '@/lib/utils'
 import { formatRelative } from '@/lib/format'
 import { isUuid } from '@/lib/displaySanitizers'
 import type { ProjectMember } from '../lib/types'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
   Table,
   TableBody,
@@ -92,12 +91,11 @@ export default function Members() {
     [tasksQuery.data, members],
   )
 
+  // The roster is the ACTIVE set only. Removed session-members accumulate
+  // forever (every ended harness session leaves one) and the human never acts
+  // on them — listing them was pure noise.
   const active = useMemo(
     () => members.filter((m) => m.lifecycleState === 'active'),
-    [members],
-  )
-  const removed = useMemo(
-    () => members.filter((m) => m.lifecycleState === 'removed'),
     [members],
   )
   const dupeIds = useMemo(() => findDuplicateIds(active), [active])
@@ -127,54 +125,31 @@ export default function Members() {
         ) : isError ? (
           <EmptyState text="Couldn't load members." />
         ) : (
-          <Tabs defaultValue="active" className="w-full">
-            <TabsList>
-              <TabsTrigger value="active">
-                Active <CountPill n={active.length} />
-              </TabsTrigger>
-              <TabsTrigger value="removed">
-                Removed <CountPill n={removed.length} />
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="active">
-              {active.length === 0 ? (
-                <EmptyState text="No active members." />
-              ) : (
-                <div className="flex flex-col gap-4">
-                  <div className="grid grid-cols-3 gap-2 sm:max-w-lg">
-                    <StatTile label="Active" value={active.length} />
-                    <StatTile
-                      label="Possible dupes"
-                      value={dupeIds.size}
-                      tone="danger"
-                    />
-                    <StatTile
-                      label="Hand-typed"
-                      value={handTypedCount}
-                      tone="warning"
-                    />
-                  </div>
-                  <MemberRoster members={active} dupeIds={dupeIds} perfById={perfById} />
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="removed">
-              {removed.length === 0 ? (
-                <EmptyState text="No removed members." />
-              ) : (
-                <MemberRoster members={removed} dupeIds={EMPTY_IDS} perfById={perfById} removed />
-              )}
-            </TabsContent>
-          </Tabs>
+          active.length === 0 ? (
+            <EmptyState text="No active members." />
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-3 gap-2 sm:max-w-lg">
+                <StatTile label="Active" value={active.length} />
+                <StatTile
+                  label="Possible dupes"
+                  value={dupeIds.size}
+                  tone="danger"
+                />
+                <StatTile
+                  label="Hand-typed"
+                  value={handTypedCount}
+                  tone="warning"
+                />
+              </div>
+              <MemberRoster members={active} dupeIds={dupeIds} perfById={perfById} />
+            </div>
+          )
         )}
       </div>
     </div>
   )
 }
-
-const EMPTY_IDS: Set<string> = new Set()
 
 /* ── Roster (responsive) ─────────────────────────────────
  * A data table can't reflow its columns, so narrow widths get the same roster as
@@ -193,7 +168,6 @@ function MemberRoster(props: {
   members: ProjectMember[]
   dupeIds: Set<string>
   perfById: Map<string, MemberPerformance>
-  removed?: boolean
 }) {
   const maxDone = props.members.reduce(
     (m, member) => Math.max(m, props.perfById.get(member.id)?.done ?? 0),
@@ -212,7 +186,6 @@ function MemberRoster(props: {
             isDupe={props.dupeIds.has(m.id)}
             perf={props.perfById.get(m.id)}
             share={shareOf(m.id)}
-            removed={props.removed}
           />
         ))}
       </div>
@@ -267,13 +240,11 @@ function MemberCard({
   isDupe,
   perf,
   share,
-  removed,
 }: {
   m: ProjectMember
   isDupe: boolean
   perf?: MemberPerformance
   share: number
-  removed?: boolean
 }) {
   const name = memberDisplayName(m.displayName, m.id) ?? m.id
   const handTyped = isHandTypedRef(m.nativeSessionRef)
@@ -282,7 +253,6 @@ function MemberCard({
     <div
       className={cn(
         'flex flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)] p-4',
-        removed && 'opacity-60',
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -290,7 +260,7 @@ function MemberCard({
           <span className="font-medium text-[var(--text-1)]">{name}</span>
           {isDupe && <DupeBadge />}
         </div>
-        {!removed && <RemoveMemberButton member={m} name={name} />}
+        <RemoveMemberButton member={m} name={name} />
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
         <CardField
@@ -350,13 +320,11 @@ function MemberTable({
   dupeIds,
   perfById,
   shareOf,
-  removed,
 }: {
   members: ProjectMember[]
   dupeIds: Set<string>
   perfById: Map<string, MemberPerformance>
   shareOf: (id: string) => number
-  removed?: boolean
 }) {
   return (
     <div className="hidden overflow-hidden rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)] @min-[720px]:block">
@@ -367,7 +335,7 @@ function MemberTable({
             <Th>Performance</Th>
             <Th>Session ref</Th>
             <Th>Registered</Th>
-            {!removed && (
+            {(
               <TableHead className="w-[1%] px-4">
                 <span className="sr-only">Actions</span>
               </TableHead>
@@ -382,7 +350,6 @@ function MemberTable({
               isDupe={dupeIds.has(m.id)}
               perf={perfById.get(m.id)}
               share={shareOf(m.id)}
-              removed={removed}
             />
           ))}
         </TableBody>
@@ -404,13 +371,11 @@ function MemberRow({
   isDupe,
   perf,
   share,
-  removed,
 }: {
   m: ProjectMember
   isDupe: boolean
   perf?: MemberPerformance
   share: number
-  removed?: boolean
 }) {
   const name = memberDisplayName(m.displayName, m.id) ?? m.id
   const handTyped = isHandTypedRef(m.nativeSessionRef)
@@ -419,7 +384,6 @@ function MemberRow({
     <TableRow
       className={cn(
         'group border-[var(--border)] hover:bg-[var(--bg-hover)]',
-        removed && 'opacity-60',
       )}
     >
       <TableCell className="px-4 py-3">
@@ -447,7 +411,7 @@ function MemberRow({
           {formatRelative(m.registeredAt, { seconds: true, fallback: '—' })}
         </span>
       </TableCell>
-      {!removed && (
+      {(
         <TableCell className="px-4 py-3 text-right">
           <RemoveMemberButton member={m} name={name} revealOnHover />
         </TableCell>
@@ -600,13 +564,6 @@ function StatTile({
   )
 }
 
-function CountPill({ n }: { n: number }) {
-  return (
-    <span className="ml-1.5 rounded-full bg-[var(--bg-active)] px-1.5 text-[0.6875rem] text-[var(--text-2)]">
-      {n}
-    </span>
-  )
-}
 
 function EmptyState({ text }: { text: string }) {
   return (
