@@ -634,6 +634,9 @@ func copyLocalPath(src string, dst string, info os.FileInfo) error {
 			if err != nil {
 				return err
 			}
+			if entryInfo.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("copy source contains symlink component %s", path)
+			}
 			return copyLocalFile(path, target, entryInfo.Mode())
 		})
 	}
@@ -1030,7 +1033,104 @@ func validateLocalPath(path string) (string, error) {
 			return "", fmt.Errorf("path traversal is not allowed")
 		}
 	}
+	if err := ensureNoSymlinkPath(clean); err != nil {
+		return "", err
+	}
 	return clean, nil
+}
+
+func ensureNoSymlinkPath(path string) error {
+	cleanPath := filepath.Clean(path)
+	parts := strings.Split(filepath.ToSlash(cleanPath), "/")
+	if len(parts) == 0 {
+		return nil
+	}
+	cursor := ""
+	absolute := strings.HasPrefix(cleanPath, string(filepath.Separator))
+	if absolute {
+		cursor = string(filepath.Separator)
+	}
+	for i, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			continue
+		}
+		if cursor == "" {
+			cursor = part
+		} else {
+			cursor = filepath.Join(cursor, part)
+		}
+		if absolute && i == 1 {
+			if err := validateTopLevelSymlinkPath(cursor); err != nil {
+				return err
+			}
+			continue
+		}
+		if !absolute && i == 0 {
+			continue
+		}
+		info, err := os.Lstat(cursor)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("stat path %s: %w", cursor, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("path contains symlink component %s", cursor)
+		}
+	}
+	return nil
+}
+
+func validateTopLevelSymlinkPath(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat path %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	target, err := resolveSymlinkTarget(path)
+	if err != nil {
+		return fmt.Errorf("resolve symlink target %s: %w", path, err)
+	}
+	if !isAllowedTopLevelSymlinkTarget(path, target) {
+		return fmt.Errorf("path contains disallowed top-level symlink component %s", path)
+	}
+	return nil
+}
+
+func resolveSymlinkTarget(path string) (string, error) {
+	value, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(value) {
+		return filepath.Clean(value), nil
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(path), value)), nil
+}
+
+func isAllowedTopLevelSymlinkTarget(root string, resolvedTarget string) bool {
+	allowed, ok := topLevelSymlinkAllowlist[filepath.Clean(filepath.ToSlash(root))]
+	if !ok {
+		return false
+	}
+	cleanTarget := filepath.Clean(filepath.ToSlash(resolvedTarget))
+	for _, expected := range allowed {
+		if cleanTarget == filepath.Clean(filepath.ToSlash(expected)) {
+			return true
+		}
+	}
+	return false
+}
+
+var topLevelSymlinkAllowlist = map[string][]string{
+	"/tmp": {"/private/tmp"},
+	"/var": {"/private/var"},
 }
 
 func cleanPath(path string) string {

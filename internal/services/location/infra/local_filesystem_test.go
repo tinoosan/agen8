@@ -40,6 +40,93 @@ func TestValidateLocalPath(t *testing.T) {
 	}
 }
 
+func TestValidateLocalPathRejectsSymlinkPaths(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "project")
+	escapeTarget := filepath.Join(base, "escape-target")
+	safeFile := filepath.Join(projectDir, "safe.txt")
+	unsafeTarget := filepath.Join(escapeTarget, "passwd")
+	symlinkPath := filepath.Join(base, "link")
+	existingNested := filepath.Join(base, "nested")
+
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	if err := os.MkdirAll(escapeTarget, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.MkdirAll(existingNested, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(safeFile, []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write safe file: %v", err)
+	}
+	if err := os.WriteFile(unsafeTarget, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write escape file: %v", err)
+	}
+	if err := os.Symlink(escapeTarget, symlinkPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	if _, err := validateLocalPath(safeFile); err != nil {
+		t.Fatalf("safe file should be allowed: %v", err)
+	}
+	if _, err := validateLocalPath(filepath.Join(symlinkPath, "passwd")); err == nil {
+		t.Fatalf("expected symlinked path to be rejected")
+	}
+
+	siblingSymlink := filepath.Join(existingNested, "sibling")
+	if err := os.Symlink(projectDir, siblingSymlink); err != nil {
+		t.Fatalf("create sibling symlink: %v", err)
+	}
+	if _, err := validateLocalPath(filepath.Join(siblingSymlink, "safe.txt")); err == nil {
+		t.Fatalf("expected symlink directory escape to be rejected")
+	}
+}
+
+func TestValidateTopLevelSymlinkPolicy(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := topLevelSymlinkAllowlist["/tmp"]; !ok {
+		t.Fatalf("top-level symlink allowlist missing /tmp")
+	}
+	if !isAllowedTopLevelSymlinkTarget("/tmp", "/private/tmp") {
+		t.Fatalf("/tmp symlink target /private/tmp should be allowed")
+	}
+	if isAllowedTopLevelSymlinkTarget("/tmp", "/etc") {
+		t.Fatalf("/tmp symlink target /etc should be rejected")
+	}
+	if isAllowedTopLevelSymlinkTarget("/dev", "/private/tmp") {
+		t.Fatalf("unlisted top-level symlink roots should be rejected")
+	}
+}
+
+func TestValidateLocalPathTopLevelSymlinkAllowlistMatchesPlatform(t *testing.T) {
+	t.Parallel()
+
+	for root := range topLevelSymlinkAllowlist {
+		info, err := os.Lstat(root)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("lstat %s: %v", root, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		target, err := resolveSymlinkTarget(root)
+		if err != nil {
+			t.Fatalf("resolveSymlinkTarget %s: %v", root, err)
+		}
+		if !isAllowedTopLevelSymlinkTarget(root, target) {
+			t.Fatalf("platform symlinked %s -> %s is not in allowlist", root, target)
+		}
+	}
+}
+
 func TestTransportLocalMethodsRejectUnsafePaths(t *testing.T) {
 	t.Parallel()
 
@@ -47,6 +134,27 @@ func TestTransportLocalMethodsRejectUnsafePaths(t *testing.T) {
 	location := mustTestLocalLocation(t)
 	ctx := context.Background()
 	bad := filepath.Join("tmp", "..", "etc")
+	root := t.TempDir()
+	escape := filepath.Join(root, "escape")
+	if err := os.MkdirAll(escape, 0o755); err != nil {
+		t.Fatalf("mkdir escape: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(escape, "secret"), []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write escape file: %v", err)
+	}
+	symlinkDir := filepath.Join(root, "symlink")
+	if err := os.Symlink(escape, symlinkDir); err != nil {
+		t.Fatalf("create symlink dir: %v", err)
+	}
+	symlinkFile := filepath.Join(root, "symlink-file.txt")
+	if err := os.WriteFile(symlinkFile, []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write symlink file: %v", err)
+	}
+	if err := os.Symlink(symlinkFile, filepath.Join(root, "secret-link.txt")); err != nil {
+		t.Fatalf("create symlink file: %v", err)
+	}
+	badSymlink := filepath.Join(symlinkDir, "secret")
+	badSymlinkFile := filepath.Join(root, "secret-link.txt")
 
 	if _, err := transport.ListDir(ctx, location, bad); err == nil {
 		t.Fatalf("ListDir expected reject")
@@ -77,6 +185,65 @@ func TestTransportLocalMethodsRejectUnsafePaths(t *testing.T) {
 	}
 	if err := transport.CopyFile(ctx, location, bad, filepath.Join("tmp", "out")); err == nil {
 		t.Fatalf("CopyFile expected reject")
+	}
+
+	if _, err := transport.ListDir(ctx, location, badSymlink); err == nil {
+		t.Fatalf("ListDir expected symlink reject")
+	}
+	if _, err := transport.ListFiles(ctx, location, badSymlink); err == nil {
+		t.Fatalf("ListFiles expected symlink reject")
+	}
+	if _, err := transport.ReadFile(ctx, location, badSymlink, 16); err == nil {
+		t.Fatalf("ReadFile expected symlink reject")
+	}
+	if _, err := transport.StatFile(ctx, location, badSymlink); err == nil {
+		t.Fatalf("StatFile expected symlink reject")
+	}
+	if err := transport.CreateDir(ctx, location, filepath.Join(symlinkDir, "new-dir")); err == nil {
+		t.Fatalf("CreateDir expected symlink reject")
+	}
+	if err := transport.CreateFile(ctx, location, badSymlinkFile); err == nil {
+		t.Fatalf("CreateFile expected symlink file reject")
+	}
+	if err := transport.MoveFile(ctx, location, symlinkFile, filepath.Join(symlinkDir, "moved")); err == nil {
+		t.Fatalf("MoveFile expected symlink destination reject")
+	}
+	if err := transport.DeleteFile(ctx, location, badSymlink); err == nil {
+		t.Fatalf("DeleteFile expected symlink reject")
+	}
+	if err := transport.WriteFile(ctx, location, badSymlinkFile, []byte("x")); err == nil {
+		t.Fatalf("WriteFile expected symlink reject")
+	}
+	if err := transport.CopyFile(ctx, location, symlinkFile, filepath.Join(symlinkDir, "copied")); err == nil {
+		t.Fatalf("CopyFile expected symlink destination reject")
+	}
+}
+
+func TestCopyLocalPathRejectsNestedSymlinkEntries(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	escape := filepath.Join(root, "escape")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.MkdirAll(escape, 0o755); err != nil {
+		t.Fatalf("mkdir escape: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(escape, "secret"), []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write escape: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(escape, "secret"), filepath.Join(src, "secret-link")); err != nil {
+		t.Fatalf("create nested symlink: %v", err)
+	}
+	info, err := os.Stat(src)
+	if err != nil {
+		t.Fatalf("stat src: %v", err)
+	}
+	if err := copyLocalPath(src, dst, info); err == nil {
+		t.Fatalf("copyLocalPath expected nested symlink reject")
 	}
 }
 
