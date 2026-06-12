@@ -21,8 +21,8 @@ harness session manager.
   recompiles only the Go side)
 - Version check: `./bin/agen8 version`
 - Health check: `GET http://127.0.0.1:7777/healthz`
-- MCP endpoint: `http://127.0.0.1:7777/mcp?token=<token>` or
-  `http://127.0.0.1:7777/mcp` with `Authorization: Bearer <token>`
+- MCP endpoint: `http://127.0.0.1:7777/mcp` with
+  `Authorization: Bearer <token>`
 - Retained MCP tools: `project`, `mission`, `task`, `decision`,
   `graph_query`, and `http`
 - Pre-push gate: clean git status, Go tests, frontend lint/tests/build,
@@ -87,20 +87,13 @@ harness will use to talk to Agen8. Copy it somewhere safe.
 ### 5. Connect a harness
 
 Add an MCP server entry to your harness pointing at the daemon, using the API
-key from the previous step as the token. The simplest form puts the token in
-the local URL:
+key from the previous step as a bearer token. `.mcp.example.json` at the repo
+root is a ready-to-copy template. Copy it to `.mcp.json`, then set
+`AGEN8_MCP_TOKEN` to your key before starting the MCP client. Keep the real
+`.mcp.json` local — it is gitignored because it is machine-specific.
 
-```text
-http://127.0.0.1:7777/mcp?token=<your-agen8-api-key>
-```
-
-`.mcp.example.json` at the repo root is a ready-to-copy template. Copy it to
-`.mcp.json` and drop in your key. Keep the real `.mcp.json` local — it is
-gitignored because it holds your machine-specific server entry and API key.
-
-Agen8 also accepts the same token as a bearer token. This is useful for Codex
-or managed environments where you want the server URL to stay stable while the
-secret lives separately:
+For Codex or managed environments where you want the server URL to stay stable
+while the secret lives separately, use an environment-backed bearer token:
 
 ```toml
 [mcp_servers.agen8]
@@ -109,7 +102,9 @@ bearer_token_env_var = "AGEN8_MCP_TOKEN"
 ```
 
 Then set `AGEN8_MCP_TOKEN` to your `ak_...` API key before starting Codex. The
-query-token URL remains supported, including for project link tokens.
+upcoming setup snippets use the same stable URL pattern. Query-token auth
+remains supported for compatibility and project link-token flows, but it is not
+the public default.
 
 ### 6. Install the Agen8 workflow skill
 
@@ -144,7 +139,7 @@ For local plugin development from this checkout instead, register the repo
 folder:
 
 ```sh
-codex plugin marketplace add /Users/santino.onyeme/Projects/agen8
+codex plugin marketplace add <path-to-this-checkout>
 ```
 
 Set the API key before starting Codex:
@@ -176,9 +171,9 @@ file edits, but register and log against the canonical Agen8 project:
 ```json
 {
   "action": "register",
-  "project_id": "agen8-mcp-server-3333e627",
-  "project_root": "/Users/santinoonyeme/personal/dev/Projects/agen8-mcp-server",
-  "display_name": "Helios (Services Refactorer)"
+  "project_id": "<canonical-project-id>",
+  "project_root": "<canonical-main-checkout-root>",
+  "display_name": "Atlas (Backend Engineer)"
 }
 ```
 

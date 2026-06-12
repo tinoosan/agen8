@@ -47,7 +47,7 @@
       <tr><td>Binary</td><td><code>agen8</code></td></tr>
       <tr><td>Daemon command</td><td><code>agen8 daemon start --listener http --http-addr 127.0.0.1:7777</code></td></tr>
       <tr><td>Web UI</td><td>Served by the daemon. In development, the daemon proxies Vite.</td></tr>
-      <tr><td>MCP endpoint</td><td><code>http://127.0.0.1:7777/mcp?token=&lt;initial-api-key&gt;</code></td></tr>
+      <tr><td>MCP endpoint</td><td><code>http://127.0.0.1:7777/mcp</code> with <code>Authorization: Bearer &lt;initial-api-key&gt;</code></td></tr>
       <tr><td>Retained MCP tools</td><td><code>project</code>, <code>mission</code>, <code>task</code>, <code>decision</code>, <code>graph_query</code>, <code>http</code></td></tr>
     </tbody>
   </table>
@@ -86,12 +86,16 @@ curl http://127.0.0.1:7777/healthz</code></pre>
 <pre><code class="lang-json">{
   "mcpServers": {
     "agen8": {
-      "url": "http://127.0.0.1:7777/mcp?token=&lt;initial-api-key&gt;"
+      "type": "http",
+      "url": "http://127.0.0.1:7777/mcp",
+      "bearer_token_env_var": "AGEN8_MCP_TOKEN"
     }
   }
 }</code></pre>
 
-  <p>Use the repository <code>.mcp.example.json</code> as the public template. Copy it to a local <code>.mcp.json</code> or to the harness-specific MCP configuration location, then replace the placeholder token with the user's API key. The real <code>.mcp.json</code> is ignored and should stay out of git because it is machine-specific and may contain local tokens.</p>
+  <p>Use the repository <code>.mcp.example.json</code> as the public template. Copy it to a local <code>.mcp.json</code> or to the harness-specific MCP configuration location, then set <code>AGEN8_MCP_TOKEN</code> to the user's API key before starting the client. The real <code>.mcp.json</code> is ignored and should stay out of git because it is machine-specific and may contain local tokens.</p>
+
+  <p>Query-token MCP URLs remain a compatibility path for clients that cannot send headers and for project link-token flows, but bearer-token configuration is the public release default.</p>
 
   <p>After registration, the response includes <code>projectId</code>, <code>memberId</code>, <code>channelId</code>, <code>url</code>, and <code>token</code>. It may also include <code>memberType</code> as compatibility metadata. Agents should use returned ids rather than inventing them.</p>
 

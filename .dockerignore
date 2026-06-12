@@ -2,10 +2,13 @@
 .github
 .cursor
 .claude
-.worktrees
+.worktrees/
 .playwright
 .playwright-cli
 .playwright-mcp
+.agen8
+.agent8
+.mcp.json
 node_modules
 web/node_modules
 **/node_modules
@@ -14,6 +17,8 @@ bin
 data
 .env
 .env.*
+*.env
+*.pem
 dist
 coverage
 output
