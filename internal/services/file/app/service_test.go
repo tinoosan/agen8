@@ -307,11 +307,11 @@ func TestBaselineOnRemoteLocationIsUnsupportedNotError(t *testing.T) {
 // capability so the service's remote-baseline routing can be exercised.
 type baselinerRepo struct {
 	*spyFileRepository
-	result  filedomain.GitBaseline
-	err     error
-	dir     string
-	name    string
-	called  bool
+	result filedomain.GitBaseline
+	err    error
+	dir    string
+	name   string
+	called bool
 }
 
 func (r *baselinerRepo) GitBaseline(_ context.Context, _ filedomain.Reference, dir, name string) (filedomain.GitBaseline, error) {
