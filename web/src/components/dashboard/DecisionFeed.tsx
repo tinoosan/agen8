@@ -15,7 +15,7 @@ import DecisionDetails from '../decision/DecisionDetails'
 import { sourceToClusterColor } from '../../lib/clusterColors'
 import { decisionsLink } from '../../lib/routing'
 import { decisionActorDisplay } from '../../lib/decisionDisplay'
-import { formatRelative } from '@/lib/format'
+import RelativeTime from '@/components/RelativeTime'
 import { Link } from 'wouter'
 
 /* -- Confidence dots ------------------------------------------------------ */
@@ -194,7 +194,7 @@ function DecisionRow({ decision, catalogs }: { decision: DecisionView; catalogs:
                   {identity}
                 </span>
                 <span className="text-[0.625rem] text-[var(--text-3)] tabular-nums shrink-0">
-                  {formatRelative(decision.createdAt, { seconds: true })}
+                  <RelativeTime iso={decision.createdAt} options={{ seconds: true }} />
                 </span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
@@ -354,7 +354,7 @@ export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = 
                 Recent Decisions
               </span>
               <span className="decision-heading-count">
-                {safeDecisions.length} latest
+                last {Math.min(PREVIEW_COUNT, safeDecisions.length)} of {safeDecisions.length}
               </span>
             </div>
           </div>
@@ -364,7 +364,7 @@ export default function DecisionFeed({ projectId, hideHeader, defaultExpanded = 
         <div className="mb-3 flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <span className="decision-heading-count">
-              {safeDecisions.length} latest
+              last {Math.min(PREVIEW_COUNT, safeDecisions.length)} of {safeDecisions.length}
             </span>
           </div>
           <Button asChild variant="outline" size="xs" className="shrink-0">

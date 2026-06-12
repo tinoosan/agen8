@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import {
   AlertTriangle,
   Clock,
-  Hash,
   Network,
   Pencil,
   Ban,
@@ -41,6 +40,7 @@ import { AcceptanceCriteriaList } from '../components/task/AcceptanceCriteriaLis
 import { LatestReviewSection } from '../components/task/LatestReviewSection'
 import { TaskArtifactsSection } from '../components/task/TaskArtifactsSection'
 import { ArtifactViewerPanel } from '../components/task/ArtifactViewerPanel'
+import CopyIdChip from '../components/CopyIdChip'
 import { ResizeHandle } from '../components/detail/ResizeHandle'
 import { useIsBelow } from '../hooks/use-mobile'
 import { Badge } from '@/components/ui/badge'
@@ -339,10 +339,7 @@ export default function TaskDetail() {
                 <span className="uppercase" style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', color: 'var(--text-3)' }}>
                   Task
                 </span>
-                <span className="flex items-center gap-0.5 text-[var(--text-3)]">
-                  <Hash size={9} />
-                  <span style={{ fontSize: '0.625rem', fontFamily: 'monospace' }}>{taskIdShort(task.id)}</span>
-                </span>
+                <CopyIdChip id={task.id} shortId={taskIdShort(task.id)} />
               </div>
               {editing ? (
                 <Input

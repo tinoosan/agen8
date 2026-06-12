@@ -22,7 +22,7 @@ import { DatePicker } from '@/components/ui/date-picker'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import type { DecisionView } from '../../lib/types'
-import { formatRelative } from '@/lib/format'
+import RelativeTime from '@/components/RelativeTime'
 import { confidenceBadgeClass } from '@/lib/decisionDisplay'
 
 const PAGE_SIZE = 20
@@ -89,7 +89,7 @@ function DecisionLogRow({ projectId, decision }: { projectId: string; decision: 
           >
             {confidencePct}%
           </span>
-          <span className="inline-flex items-center gap-1"><Clock size={10} />{formatRelative(decision.createdAt)}</span>
+          <span className="inline-flex items-center gap-1"><Clock size={10} /><RelativeTime iso={decision.createdAt} /></span>
           {refTypes.map(type => (
             <span
               key={type}

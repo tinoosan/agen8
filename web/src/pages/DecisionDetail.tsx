@@ -27,6 +27,7 @@ import { StatItem } from '../components/detail/StatItem'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
+import CopyIdChip from '../components/CopyIdChip'
 import { RelatedList } from '../components/detail/RelatedList'
 import DecisionDetails from '../components/decision/DecisionDetails'
 import { Badge } from '@/components/ui/badge'
@@ -176,6 +177,7 @@ export default function DecisionDetail() {
                 <span className="uppercase" style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', color: 'var(--text-3)' }}>
                   Decision
                 </span>
+                <CopyIdChip id={decision.id} shortId={shortRef(decision.id)} />
                 <span style={{ fontSize: '0.625rem', color: 'var(--text-3)' }}>·</span>
                 <span style={{ fontSize: '0.6875rem', color: 'var(--text-2)' }}>{actor.label}</span>
               </div>

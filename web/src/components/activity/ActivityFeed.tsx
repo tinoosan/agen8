@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatRelative } from '@/lib/format'
+import RelativeTime from '@/components/RelativeTime'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import { useRecentDecisions } from '../../hooks/useDecisions'
 import { useMissions } from '../../hooks/useMissions'
@@ -128,7 +128,7 @@ function ActivityRow({ event }: { event: ActivityEvent }) {
           </Link>
         </div>
         <div className="mt-0.5 flex items-center gap-2 text-[0.6875rem] tabular-nums text-[var(--text-3)]">
-          <span>{formatRelative(event.at, { seconds: true })}</span>
+          <RelativeTime iso={event.at} options={{ seconds: true }} />
         </div>
       </div>
     </div>

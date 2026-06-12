@@ -12,6 +12,7 @@ import { missionsPanelLink, taskDetailLink, decisionDetailLink, strategyMapLink,
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
 import { DetailHeader } from '../components/detail/DetailHeader'
+import CopyIdChip from '../components/CopyIdChip'
 import { RelatedList } from '../components/detail/RelatedList'
 import { KRRow } from '../components/mission/KRRow'
 import MissionLifecycleActions from '../components/mission/MissionLifecycleActions'
@@ -254,6 +255,12 @@ export default function MissionDetail() {
               (title, status, progress). The description and metadata render in
               the scrollable body below, so a long description can never grow the
               sticky header past the viewport and hide the key results. */}
+          <div className="flex items-center gap-2 mb-2">
+            <span className="uppercase" style={{ fontSize: '0.625rem', fontWeight: 500, letterSpacing: '0.08em', color: 'var(--text-3)' }}>
+              Mission
+            </span>
+            <CopyIdChip id={mission.id} shortId={mission.id.replace(/^mission-/, '').slice(0, 8)} />
+          </div>
           <div className="flex items-center gap-2.5 mb-1">
             {editing ? (
               <Input

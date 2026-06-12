@@ -7,7 +7,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
-import { formatRelative } from '../../lib/format'
+import RelativeTime from '@/components/RelativeTime'
 import type { NotificationItem } from '../../lib/types'
 import { SEVERITY_META } from './severity'
 import {
@@ -69,7 +69,7 @@ function NotificationRow({
           <p className="mt-0.5 text-[0.75rem] text-[var(--text-3)] leading-snug">{item.body}</p>
         )}
         <span className="mt-1 block text-[0.6875rem] text-[var(--text-3)]">
-          {formatRelative(item.createdAt)}
+          <RelativeTime iso={item.createdAt} />
         </span>
       </div>
       <button
