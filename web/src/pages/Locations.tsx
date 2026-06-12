@@ -602,10 +602,6 @@ export default function Locations() {
         <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex flex-col gap-1">
             <h1 className="m-0 hidden text-2xl font-bold text-[var(--text-1)] md:block">Locations</h1>
-            <p className="m-0 max-w-prose text-[0.8125rem] leading-relaxed text-[var(--text-3)]">
-              Where Agen8 looks for project roots. Local is the machine running the daemon; SSH locations let the daemon
-              browse another machine without managing that machine&apos;s AI harness.
-            </p>
           </div>
           <AddLocationDialog />
         </header>

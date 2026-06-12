@@ -301,9 +301,6 @@ export default function DashboardDecisionsPanel({
               >
                 Decisions
               </h1>
-              <p className="m-0 mt-1 text-[var(--text-3)]" style={{ fontSize: '0.75rem', letterSpacing: '-0.12px', lineHeight: 1.45 }}>
-                What was decided, why, and what would change our minds.
-              </p>
             </div>
             <div className="flex items-center gap-0.5 shrink-0">
               {sortButton}

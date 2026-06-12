@@ -111,11 +111,6 @@ export default function Members() {
           <h1 className="m-0 hidden text-2xl font-bold text-[var(--text-1)] md:block">
             Members
           </h1>
-          <p className="m-0 max-w-prose text-[0.8125rem] leading-relaxed text-[var(--text-3)]">
-            Agent sessions registered to this project. A member is one harness
-            session — the same name registered from a different session is a
-            separate member.
-          </p>
         </div>
 
         {!projectId ? (

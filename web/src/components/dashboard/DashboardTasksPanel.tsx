@@ -146,9 +146,6 @@ export default function DashboardTasksPanel({
             >
               Tasks
             </h1>
-            <p className="m-0 mt-1 text-[var(--text-3)]" style={{ fontSize: embedded ? '0.75rem' : '0.8125rem', letterSpacing: embedded ? '-0.12px' : '-0.08px', lineHeight: 1.45 }}>
-              Track the concrete work assigned to members and the criteria that mark it done.
-            </p>
           </div>
           <Button
             variant="outline"

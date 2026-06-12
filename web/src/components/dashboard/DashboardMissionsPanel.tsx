@@ -126,9 +126,6 @@ export default function DashboardMissionsPanel({
             >
               Missions
             </h1>
-            <p className="m-0 mt-1 text-[var(--text-3)]" style={{ fontSize: embedded ? '0.75rem' : '0.8125rem', letterSpacing: embedded ? '-0.12px' : '-0.08px', lineHeight: 1.45 }}>
-              Shape the outcomes, key results, and ownership the rest of the work builds on.
-            </p>
           </div>
           <Button
             variant="outline"
