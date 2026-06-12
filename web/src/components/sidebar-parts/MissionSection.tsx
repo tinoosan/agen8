@@ -5,7 +5,7 @@
 import { useLocation } from 'wouter'
 import { Clock, CircleCheck, CircleAlert, CircleX, Target } from 'lucide-react'
 import { useMissions, useKeyResults } from '../../hooks/useMissions'
-import { missionDetailLink } from '../../lib/routing'
+import { missionDetailLink, missionsPanelLink } from '../../lib/routing'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { KeyResultView, MissionView } from '../../lib/types'
 
@@ -86,13 +86,16 @@ export function MissionsSidebarSection({ projectId }: { projectId: string | null
 
   if (!projectId) return null
 
-  const visibleMissions = (missions ?? [])
+  const relevantMissions = (missions ?? [])
     .filter(m => m.status === 'active' || m.status === 'paused' || m.status === 'completed')
     .sort((a, b) => {
       const order = { active: 0, paused: 1, completed: 2, draft: 3, archived: 4 }
       return (order[a.status] ?? 9) - (order[b.status] ?? 9)
     })
-    .slice(0, 8)
+  // Cap the sidebar but never silently: the overflow row says how many more
+  // exist and links to the full missions panel.
+  const visibleMissions = relevantMissions.slice(0, 8)
+  const overflowCount = relevantMissions.length - visibleMissions.length
 
   if (isLoading) {
     return (
@@ -134,6 +137,15 @@ export function MissionsSidebarSection({ projectId }: { projectId: string | null
           </button>
         )
       })}
+      {overflowCount > 0 && (
+        <button
+          type="button"
+          className="px-3.5 py-[5px] pl-[34px] text-left text-[0.75rem] text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] cursor-pointer border-0 bg-transparent transition-colors w-full"
+          onClick={() => navigate(missionsPanelLink(projectId))}
+        >
+          +{overflowCount} more {overflowCount === 1 ? 'mission' : 'missions'}
+        </button>
+      )}
     </div>
   )
 }
