@@ -5,12 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/agen8/internal/core/types"
-	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
 	"github.com/tinoosan/agen8/internal/services/graph/domain"
-	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 // StructuralEdgeResolver derives the structural skeleton of the graph
@@ -33,34 +28,19 @@ type StructuralEdgeResolver interface {
 	Edges(ctx context.Context, projectID string, focal domain.GraphNodeCore) ([]domain.GraphEdge, error)
 }
 
-// structuralTaskReader / structuralDecisionReader / structuralKeyResultReader
-// are the narrow read slices the resolver needs. The concrete task, decision and
-// mission services satisfy them; tests use stubs.
-type structuralTaskReader interface {
-	List(ctx context.Context, filter taskdomain.TaskFilter) ([]taskdomain.Task, error)
-}
-
-type structuralDecisionReader interface {
-	List(ctx context.Context, filter decisiondomain.DecisionFilter) ([]decisiondomain.Decision, error)
-}
-
-type structuralKeyResultReader interface {
-	ListKeyResults(ctx context.Context, missionID missiondomain.MissionID) ([]krdomain.KeyResult, error)
-}
-
 const structuralChildScanLimit = 1000
 
 type structuralResolver struct {
-	tasks     structuralTaskReader
-	decisions structuralDecisionReader
-	keys      structuralKeyResultReader
+	tasks     TaskHydrationReader
+	decisions DecisionHydrationReader
+	missions  MissionHydrationReader
 }
 
 // NewStructuralResolver builds the resolver from the same services that back the
 // hydrators. Any reader may be nil; the resolver simply skips the edges it can't
 // compute (so a partially-wired graph still returns the structure it can).
-func NewStructuralResolver(tasks structuralTaskReader, decisions structuralDecisionReader, keys structuralKeyResultReader) StructuralEdgeResolver {
-	return structuralResolver{tasks: tasks, decisions: decisions, keys: keys}
+func NewStructuralResolver(tasks TaskHydrationReader, decisions DecisionHydrationReader, missions MissionHydrationReader) StructuralEdgeResolver {
+	return structuralResolver{tasks: tasks, decisions: decisions, missions: missions}
 }
 
 func (r structuralResolver) Edges(ctx context.Context, projectID string, focal domain.GraphNodeCore) ([]domain.GraphEdge, error) {
@@ -120,17 +100,17 @@ func (r structuralResolver) upwardEdge(focalType, focalID string, fields map[str
 func (r structuralResolver) downwardEdges(ctx context.Context, projectID, focalType, focalID string) ([]domain.GraphEdge, error) {
 	switch focalType {
 	case domain.NodeTypeTask:
-		return r.decisionChildren(ctx, projectID, func(d decisiondomain.Decision) bool {
+		return r.decisionChildren(ctx, projectID, func(d DecisionHydrationRow) bool {
 			return strings.EqualFold(strings.TrimSpace(d.TaskRef), focalID)
 		}, domain.NodeTypeTask, focalID, domain.EdgeTypeMadeDuring, "decision made during task")
 	case domain.NodeTypeKeyResult:
-		edges, err := r.taskChildren(ctx, projectID, func(t taskdomain.Task) bool {
+		edges, err := r.taskChildren(ctx, projectID, func(t TaskHydrationRow) bool {
 			return strings.EqualFold(strings.TrimSpace(t.KeyResultRef), focalID)
 		}, domain.NodeTypeKeyResult, focalID, "task serves key result")
 		if err != nil {
 			return nil, err
 		}
-		decEdges, err := r.decisionChildren(ctx, projectID, func(d decisiondomain.Decision) bool {
+		decEdges, err := r.decisionChildren(ctx, projectID, func(d DecisionHydrationRow) bool {
 			return strings.TrimSpace(d.TaskRef) == "" && strings.EqualFold(strings.TrimSpace(d.KeyResultRef), focalID)
 		}, domain.NodeTypeKeyResult, focalID, domain.EdgeTypeServes, "decision serves key result")
 		if err != nil {
@@ -145,23 +125,23 @@ func (r structuralResolver) downwardEdges(ctx context.Context, projectID, focalT
 
 func (r structuralResolver) missionChildren(ctx context.Context, projectID, missionID string) ([]domain.GraphEdge, error) {
 	edges := make([]domain.GraphEdge, 0, 8)
-	if r.keys != nil {
-		krs, err := r.keys.ListKeyResults(ctx, missiondomain.MissionID(missionID))
+	if r.missions != nil {
+		krs, err := r.missions.ListKeyResults(ctx, missionID)
 		if err != nil {
 			return nil, fmt.Errorf("structural: list key results for mission %s: %w", missionID, err)
 		}
 		for _, kr := range krs {
-			edges = append(edges, structuralEdge(domain.NodeTypeKeyResult, strings.TrimSpace(string(kr.ID)), domain.NodeTypeMission, missionID, domain.EdgeTypeServes, "key result serves mission"))
+			edges = append(edges, structuralEdge(domain.NodeTypeKeyResult, strings.TrimSpace(kr.ID), domain.NodeTypeMission, missionID, domain.EdgeTypeServes, "key result serves mission"))
 		}
 	}
-	taskEdges, err := r.taskChildren(ctx, projectID, func(t taskdomain.Task) bool {
+	taskEdges, err := r.taskChildren(ctx, projectID, func(t TaskHydrationRow) bool {
 		return strings.TrimSpace(t.KeyResultRef) == "" && strings.EqualFold(taskMissionRef(t), missionID)
 	}, domain.NodeTypeMission, missionID, "task serves mission")
 	if err != nil {
 		return nil, err
 	}
 	edges = append(edges, taskEdges...)
-	decEdges, err := r.decisionChildren(ctx, projectID, func(d decisiondomain.Decision) bool {
+	decEdges, err := r.decisionChildren(ctx, projectID, func(d DecisionHydrationRow) bool {
 		return strings.TrimSpace(d.TaskRef) == "" && strings.TrimSpace(d.KeyResultRef) == "" && strings.EqualFold(strings.TrimSpace(d.MissionRef), missionID)
 	}, domain.NodeTypeMission, missionID, domain.EdgeTypeServes, "decision serves mission")
 	if err != nil {
@@ -170,14 +150,11 @@ func (r structuralResolver) missionChildren(ctx context.Context, projectID, miss
 	return append(edges, decEdges...), nil
 }
 
-func (r structuralResolver) taskChildren(ctx context.Context, projectID string, match func(taskdomain.Task) bool, parentType, parentID, rationale string) ([]domain.GraphEdge, error) {
+func (r structuralResolver) taskChildren(ctx context.Context, projectID string, match func(TaskHydrationRow) bool, parentType, parentID, rationale string) ([]domain.GraphEdge, error) {
 	if r.tasks == nil {
 		return nil, nil
 	}
-	tasks, err := r.tasks.List(ctx, taskdomain.TaskFilter{
-		ProjectID: types.ProjectID(strings.TrimSpace(projectID)),
-		Limit:     structuralChildScanLimit,
-	})
+	tasks, err := r.tasks.ListTasks(ctx, strings.TrimSpace(projectID), structuralChildScanLimit)
 	if err != nil {
 		return nil, fmt.Errorf("structural: list tasks for %s %s: %w", parentType, parentID, err)
 	}
@@ -186,19 +163,16 @@ func (r structuralResolver) taskChildren(ctx context.Context, projectID string, 
 		if !match(task) {
 			continue
 		}
-		edges = append(edges, structuralEdge(domain.NodeTypeTask, strings.TrimSpace(string(task.ID)), parentType, parentID, domain.EdgeTypeServes, rationale))
+		edges = append(edges, structuralEdge(domain.NodeTypeTask, strings.TrimSpace(task.ID), parentType, parentID, domain.EdgeTypeServes, rationale))
 	}
 	return edges, nil
 }
 
-func (r structuralResolver) decisionChildren(ctx context.Context, projectID string, match func(decisiondomain.Decision) bool, parentType, parentID, edgeType, rationale string) ([]domain.GraphEdge, error) {
+func (r structuralResolver) decisionChildren(ctx context.Context, projectID string, match func(DecisionHydrationRow) bool, parentType, parentID, edgeType, rationale string) ([]domain.GraphEdge, error) {
 	if r.decisions == nil {
 		return nil, nil
 	}
-	decisions, err := r.decisions.List(ctx, decisiondomain.DecisionFilter{
-		ProjectID: strings.TrimSpace(projectID),
-		Limit:     structuralChildScanLimit,
-	})
+	decisions, err := r.decisions.ListDecisions(ctx, strings.TrimSpace(projectID), structuralChildScanLimit)
 	if err != nil {
 		return nil, fmt.Errorf("structural: list decisions for %s %s: %w", parentType, parentID, err)
 	}
@@ -207,7 +181,7 @@ func (r structuralResolver) decisionChildren(ctx context.Context, projectID stri
 		if !match(decision) {
 			continue
 		}
-		edges = append(edges, structuralEdge(domain.NodeTypeDecision, strings.TrimSpace(string(decision.ID)), parentType, parentID, edgeType, rationale))
+		edges = append(edges, structuralEdge(domain.NodeTypeDecision, strings.TrimSpace(decision.ID), parentType, parentID, edgeType, rationale))
 	}
 	return edges, nil
 }

@@ -2,31 +2,99 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8/internal/core/types"
-	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
-	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
 	"github.com/tinoosan/agen8/internal/services/graph/domain"
-	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
-	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
-	implstore "github.com/tinoosan/agen8/internal/store"
 )
 
-type TaskReader interface {
-	Get(ctx context.Context, taskID taskdomain.TaskID) (taskdomain.Task, error)
-	List(ctx context.Context, filter taskdomain.TaskFilter) ([]taskdomain.Task, error)
+type TaskHydrationReader interface {
+	GetTask(ctx context.Context, taskID string) (TaskHydrationRow, error)
+	ListTasks(ctx context.Context, projectID string, limit int) ([]TaskHydrationRow, error)
+}
+
+type DecisionHydrationReader interface {
+	GetDecision(ctx context.Context, decisionID string) (DecisionHydrationRow, error)
+	ListDecisions(ctx context.Context, projectID string, limit int) ([]DecisionHydrationRow, error)
+}
+
+type MissionHydrationReader interface {
+	GetMission(ctx context.Context, missionID string) (MissionHydrationRow, error)
+	ListMissions(ctx context.Context, projectID string, limit int) ([]MissionHydrationRow, error)
+	GetKeyResult(ctx context.Context, keyResultID string) (KeyResultHydrationRow, error)
+	ListKeyResults(ctx context.Context, missionID string) ([]KeyResultHydrationRow, error)
+}
+
+type TaskHydrationRow struct {
+	ID                   string
+	ProjectID            string
+	Description          string
+	Title                string
+	Status               string
+	AssignedTo           string
+	AssignedToLabel      string
+	ClaimedByMemberID    string
+	ClaimedByMemberLabel string
+	CreatedBy            string
+	CreatedByLabel       string
+	TaskKind             string
+	KeyResultRef         string
+	Metadata             map[string]any
+	CreatedAt            *time.Time
+}
+
+type DecisionHydrationRow struct {
+	ID                     string
+	ProjectID              string
+	Source                 string
+	Title                  string
+	Confidence             float64
+	CreatedAt              time.Time
+	SourceIdentity         string
+	CorrelationRef         string
+	InformedByRef          string
+	Kind                   string
+	TaskRef                string
+	KeyResultRef           string
+	MissionRef             string
+	Rationale              string
+	Context                string
+	AlternativesRejected   string
+	InvalidationConditions []string
+	Outcome                string
+}
+
+type MissionHydrationRow struct {
+	ID          string
+	ProjectID   string
+	Title       string
+	Description string
+	Status      string
+	CreatedAt   time.Time
+	StartDate   *time.Time
+	EndDate     *time.Time
+}
+
+type KeyResultHydrationRow struct {
+	ID              string
+	MissionID       string
+	Title           string
+	Description     string
+	Status          string
+	CreatedAt       time.Time
+	MeasurementType string
+	Direction       string
+	Unit            string
+	TargetValue     float64
+	CurrentValue    float64
+	Baseline        *float64
 }
 
 func DefaultHydrators(
-	taskSvc TaskReader,
-	decisionSvc *decisionapp.Service,
-	missionSvc *missionapp.Service,
+	taskSvc TaskHydrationReader,
+	decisionSvc DecisionHydrationReader,
+	missionSvc MissionHydrationReader,
 ) []domain.NodeHydrator {
 	out := make([]domain.NodeHydrator, 0, 4)
 	if taskSvc != nil {
@@ -43,13 +111,13 @@ func DefaultHydrators(
 }
 
 type taskHydrator struct {
-	tasks TaskReader
+	tasks TaskHydrationReader
 }
 
 func (h taskHydrator) NodeType() string { return domain.NodeTypeTask }
 
 func (h taskHydrator) Fetch(ctx context.Context, projectID string, nodeID string) (domain.GraphNodeCore, error) {
-	task, err := h.tasks.Get(ctx, taskdomain.TaskID(strings.TrimSpace(nodeID)))
+	task, err := h.tasks.GetTask(ctx, strings.TrimSpace(nodeID))
 	if err != nil {
 		return domain.GraphNodeCore{}, err
 	}
@@ -65,18 +133,18 @@ func (h taskHydrator) Fetch(ctx context.Context, projectID string, nodeID string
 		title = strings.TrimSpace(task.Description)
 	}
 	return domain.GraphNodeCore{
-		ID:        strings.TrimSpace(string(task.ID)),
+		ID:        strings.TrimSpace(task.ID),
 		Type:      domain.NodeTypeTask,
 		Title:     title,
-		Status:    strings.TrimSpace(string(task.Status)),
-		ScopeID:   strings.TrimSpace(string(task.ProjectID)),
+		Status:    strings.TrimSpace(task.Status),
+		ScopeID:   strings.TrimSpace(task.ProjectID),
 		CreatedAt: createdAt.Format(time.RFC3339Nano),
 		Fields: map[string]any{
 			"description":          strings.TrimSpace(task.Description),
-			"assigneeRef":          strings.TrimSpace(string(task.AssignedTo)),
-			"assignedTo":           strings.TrimSpace(string(task.AssignedTo)),
+			"assigneeRef":          strings.TrimSpace(task.AssignedTo),
+			"assignedTo":           strings.TrimSpace(task.AssignedTo),
 			"assignedToLabel":      strings.TrimSpace(task.AssignedToLabel),
-			"claimedByMemberId":    strings.TrimSpace(string(task.ClaimedByMemberID)),
+			"claimedByMemberId":    strings.TrimSpace(task.ClaimedByMemberID),
 			"claimedByMemberLabel": strings.TrimSpace(task.ClaimedByMemberLabel),
 			"createdBy":            strings.TrimSpace(task.CreatedBy),
 			"createdByLabel":       strings.TrimSpace(task.CreatedByLabel),
@@ -93,10 +161,7 @@ func (h taskHydrator) FetchMany(ctx context.Context, projectID string, nodeIDs [
 }
 
 func (h taskHydrator) Search(ctx context.Context, projectID string, query string, limit int) ([]domain.GraphNodeSummary, error) {
-	tasks, err := h.tasks.List(ctx, taskdomain.TaskFilter{
-		ProjectID: types.ProjectID(strings.TrimSpace(projectID)),
-		Limit:     max(200, limit*20),
-	})
+	tasks, err := h.tasks.ListTasks(ctx, strings.TrimSpace(projectID), max(200, limit*20))
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +174,7 @@ func (h taskHydrator) Search(ctx context.Context, projectID string, query string
 		if title == "" {
 			title = strings.TrimSpace(task.Description)
 		}
-		if !matchesQuery(query, title, task.Description, string(task.ID)) {
+		if !matchesQuery(query, title, task.Description, task.ID) {
 			continue
 		}
 		createdAt, err := taskCreatedAt(task)
@@ -117,11 +182,11 @@ func (h taskHydrator) Search(ctx context.Context, projectID string, query string
 			continue
 		}
 		out = append(out, domain.GraphNodeSummary{
-			ID:        strings.TrimSpace(string(task.ID)),
+			ID:        strings.TrimSpace(task.ID),
 			Type:      domain.NodeTypeTask,
 			Title:     title,
-			Status:    strings.TrimSpace(string(task.Status)),
-			ScopeID:   strings.TrimSpace(string(task.ProjectID)),
+			Status:    strings.TrimSpace(task.Status),
+			ScopeID:   strings.TrimSpace(task.ProjectID),
 			CreatedAt: createdAt.Format(time.RFC3339Nano),
 		})
 		if len(out) >= limit {
@@ -135,13 +200,13 @@ func (h taskHydrator) Search(ctx context.Context, projectID string, query string
 }
 
 type decisionHydrator struct {
-	decisions *decisionapp.Service
+	decisions DecisionHydrationReader
 }
 
 func (h decisionHydrator) NodeType() string { return domain.NodeTypeDecision }
 
 func (h decisionHydrator) Fetch(ctx context.Context, projectID string, nodeID string) (domain.GraphNodeCore, error) {
-	decision, err := h.decisions.Get(ctx, decisiondomain.DecisionID(strings.TrimSpace(nodeID)))
+	decision, err := h.decisions.GetDecision(ctx, strings.TrimSpace(nodeID))
 	if err != nil {
 		return domain.GraphNodeCore{}, err
 	}
@@ -150,23 +215,23 @@ func (h decisionHydrator) Fetch(ctx context.Context, projectID string, nodeID st
 	}
 	fields := map[string]any{
 		"confidence":     decision.Confidence,
-		"source":         strings.TrimSpace(string(decision.Source)),
+		"source":         strings.TrimSpace(decision.Source),
 		"sourceIdentity": strings.TrimSpace(decision.SourceIdentity),
 		"correlationRef": strings.TrimSpace(decision.CorrelationRef),
 		"informedByRef":  strings.TrimSpace(decision.InformedByRef),
-		"kind":           strings.TrimSpace(string(decision.Kind())),
+		"kind":           strings.TrimSpace(decision.Kind),
 		"taskRef":        strings.TrimSpace(decision.TaskRef),
 		"keyResultRef":   strings.TrimSpace(decision.KeyResultRef),
 		"missionRef":     strings.TrimSpace(decision.MissionRef),
 	}
-	if p := decision.Log; p != nil {
-		fields["rationale"] = strings.TrimSpace(p.Rationale)
-		fields["context"] = strings.TrimSpace(p.Context)
-		fields["alternativesRejected"] = strings.TrimSpace(p.AlternativesRejected)
-		fields["invalidationConditions"] = append([]string(nil), p.InvalidationConditions...)
+	if decision.Rationale != "" || decision.Context != "" || decision.AlternativesRejected != "" || len(decision.InvalidationConditions) > 0 {
+		fields["rationale"] = strings.TrimSpace(decision.Rationale)
+		fields["context"] = strings.TrimSpace(decision.Context)
+		fields["alternativesRejected"] = strings.TrimSpace(decision.AlternativesRejected)
+		fields["invalidationConditions"] = append([]string(nil), decision.InvalidationConditions...)
 	}
 	return domain.GraphNodeCore{
-		ID:        strings.TrimSpace(string(decision.ID)),
+		ID:        strings.TrimSpace(decision.ID),
 		Type:      domain.NodeTypeDecision,
 		Title:     strings.TrimSpace(decision.Title),
 		Status:    decisionStatus(decision),
@@ -181,29 +246,22 @@ func (h decisionHydrator) FetchMany(ctx context.Context, projectID string, nodeI
 }
 
 func (h decisionHydrator) Search(ctx context.Context, projectID, query string, limit int) ([]domain.GraphNodeSummary, error) {
-	items, err := h.decisions.List(ctx, decisiondomain.DecisionFilter{
-		ProjectID: strings.TrimSpace(projectID),
-		SortDesc:  true,
-		Limit:     max(limit*20, 200),
-	})
+	items, err := h.decisions.ListDecisions(ctx, strings.TrimSpace(projectID), max(limit*20, 200))
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.GraphNodeSummary, 0, len(items))
 	for _, item := range items {
-		var logValues []string
-		if item.Log != nil {
-			logValues = []string{
-				item.Log.Rationale,
-				item.Log.Context,
-				item.Log.AlternativesRejected,
-				strings.Join(item.Log.InvalidationConditions, " "),
-				item.Log.Outcome,
-			}
+		logValues := []string{
+			item.Rationale,
+			item.Context,
+			item.AlternativesRejected,
+			strings.Join(item.InvalidationConditions, " "),
+			item.Outcome,
 		}
 		if !matchesQuery(query, append([]string{
 			item.Title,
-			string(item.ID),
+			item.ID,
 			item.TaskRef,
 			item.KeyResultRef,
 			item.MissionRef,
@@ -211,7 +269,7 @@ func (h decisionHydrator) Search(ctx context.Context, projectID, query string, l
 			continue
 		}
 		out = append(out, domain.GraphNodeSummary{
-			ID:        strings.TrimSpace(string(item.ID)),
+			ID:        strings.TrimSpace(item.ID),
 			Type:      domain.NodeTypeDecision,
 			Title:     strings.TrimSpace(item.Title),
 			Status:    decisionStatus(item),
@@ -229,13 +287,13 @@ func (h decisionHydrator) Search(ctx context.Context, projectID, query string, l
 }
 
 type missionHydrator struct {
-	missions *missionapp.Service
+	missions MissionHydrationReader
 }
 
 func (h missionHydrator) NodeType() string { return domain.NodeTypeMission }
 
 func (h missionHydrator) Fetch(ctx context.Context, projectID string, nodeID string) (domain.GraphNodeCore, error) {
-	mission, err := h.missions.GetMission(ctx, missiondomain.MissionID(strings.TrimSpace(nodeID)))
+	mission, err := h.missions.GetMission(ctx, strings.TrimSpace(nodeID))
 	if err != nil {
 		return domain.GraphNodeCore{}, err
 	}
@@ -243,10 +301,10 @@ func (h missionHydrator) Fetch(ctx context.Context, projectID string, nodeID str
 		return domain.GraphNodeCore{}, fmt.Errorf("mission %q not found", strings.TrimSpace(nodeID))
 	}
 	return domain.GraphNodeCore{
-		ID:        strings.TrimSpace(string(mission.ID)),
+		ID:        strings.TrimSpace(mission.ID),
 		Type:      domain.NodeTypeMission,
 		Title:     strings.TrimSpace(mission.Title),
-		Status:    strings.TrimSpace(string(mission.Status)),
+		Status:    strings.TrimSpace(mission.Status),
 		ScopeID:   "",
 		CreatedAt: mission.CreatedAt.UTC().Format(time.RFC3339Nano),
 		Fields: map[string]any{
@@ -262,22 +320,20 @@ func (h missionHydrator) FetchMany(ctx context.Context, projectID string, nodeID
 }
 
 func (h missionHydrator) Search(ctx context.Context, projectID, query string, limit int) ([]domain.GraphNodeSummary, error) {
-	items, err := h.missions.ListMissions(ctx, strings.TrimSpace(projectID), missiondomain.MissionFilter{
-		Limit: max(limit*5, 100),
-	})
+	items, err := h.missions.ListMissions(ctx, strings.TrimSpace(projectID), max(limit*5, 100))
 	if err != nil {
 		return nil, err
 	}
 	out := make([]domain.GraphNodeSummary, 0, len(items))
 	for _, item := range items {
-		if !matchesQuery(query, item.Title, item.Description, string(item.ID)) {
+		if !matchesQuery(query, item.Title, item.Description, item.ID) {
 			continue
 		}
 		out = append(out, domain.GraphNodeSummary{
-			ID:        strings.TrimSpace(string(item.ID)),
+			ID:        strings.TrimSpace(item.ID),
 			Type:      domain.NodeTypeMission,
 			Title:     strings.TrimSpace(item.Title),
-			Status:    strings.TrimSpace(string(item.Status)),
+			Status:    strings.TrimSpace(item.Status),
 			ScopeID:   "",
 			CreatedAt: item.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
@@ -292,13 +348,13 @@ func (h missionHydrator) Search(ctx context.Context, projectID, query string, li
 }
 
 type keyResultHydrator struct {
-	missions *missionapp.Service
+	missions MissionHydrationReader
 }
 
 func (h keyResultHydrator) NodeType() string { return domain.NodeTypeKeyResult }
 
 func (h keyResultHydrator) Fetch(ctx context.Context, projectID string, nodeID string) (domain.GraphNodeCore, error) {
-	kr, err := h.missions.GetKeyResult(ctx, krdomain.KeyResultID(strings.TrimSpace(nodeID)))
+	kr, err := h.missions.GetKeyResult(ctx, strings.TrimSpace(nodeID))
 	if err != nil {
 		return domain.GraphNodeCore{}, err
 	}
@@ -310,20 +366,20 @@ func (h keyResultHydrator) Fetch(ctx context.Context, projectID string, nodeID s
 		return domain.GraphNodeCore{}, fmt.Errorf("key_result %q not found", strings.TrimSpace(nodeID))
 	}
 	return domain.GraphNodeCore{
-		ID:        strings.TrimSpace(string(kr.ID)),
+		ID:        strings.TrimSpace(kr.ID),
 		Type:      domain.NodeTypeKeyResult,
 		Title:     strings.TrimSpace(kr.Title),
-		Status:    strings.TrimSpace(string(kr.Status)),
+		Status:    strings.TrimSpace(kr.Status),
 		ScopeID:   strings.TrimSpace(mission.ProjectID),
 		CreatedAt: kr.CreatedAt.UTC().Format(time.RFC3339Nano),
 		Fields: map[string]any{
-			"measurementType": strings.TrimSpace(string(kr.MeasurementType)),
-			"direction":       strings.TrimSpace(string(kr.Direction)),
+			"measurementType": strings.TrimSpace(kr.MeasurementType),
+			"direction":       strings.TrimSpace(kr.Direction),
 			"unit":            strings.TrimSpace(kr.Unit),
 			"targetValue":     kr.TargetValue,
 			"currentValue":    kr.CurrentValue,
 			"baseline":        floatPtrValue(kr.Baseline),
-			"missionId":       strings.TrimSpace(string(kr.MissionID)),
+			"missionId":       strings.TrimSpace(kr.MissionID),
 		},
 	}, nil
 }
@@ -333,9 +389,7 @@ func (h keyResultHydrator) FetchMany(ctx context.Context, projectID string, node
 }
 
 func (h keyResultHydrator) Search(ctx context.Context, projectID, query string, limit int) ([]domain.GraphNodeSummary, error) {
-	missions, err := h.missions.ListMissions(ctx, strings.TrimSpace(projectID), missiondomain.MissionFilter{
-		Limit: max(limit*5, 100),
-	})
+	missions, err := h.missions.ListMissions(ctx, strings.TrimSpace(projectID), max(limit*5, 100))
 	if err != nil {
 		return nil, err
 	}
@@ -346,14 +400,14 @@ func (h keyResultHydrator) Search(ctx context.Context, projectID, query string, 
 			continue
 		}
 		for _, kr := range krs {
-			if !matchesQuery(query, kr.Title, kr.Description, string(kr.ID), string(kr.MissionID)) {
+			if !matchesQuery(query, kr.Title, kr.Description, kr.ID, kr.MissionID) {
 				continue
 			}
 			out = append(out, domain.GraphNodeSummary{
-				ID:        strings.TrimSpace(string(kr.ID)),
+				ID:        strings.TrimSpace(kr.ID),
 				Type:      domain.NodeTypeKeyResult,
 				Title:     strings.TrimSpace(kr.Title),
-				Status:    strings.TrimSpace(string(kr.Status)),
+				Status:    strings.TrimSpace(kr.Status),
 				ScopeID:   strings.TrimSpace(mission.ProjectID),
 				CreatedAt: kr.CreatedAt.UTC().Format(time.RFC3339Nano),
 			})
@@ -398,25 +452,25 @@ func fetchManyUsingFetch(
 	return out, nil
 }
 
-func taskVisibleToProject(task taskdomain.Task, projectID string) bool {
+func taskVisibleToProject(task TaskHydrationRow, projectID string) bool {
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(string(task.ProjectID)), projectID)
+	return strings.EqualFold(strings.TrimSpace(task.ProjectID), projectID)
 }
 
-func taskCreatedAt(task taskdomain.Task) (time.Time, error) {
+func taskCreatedAt(task TaskHydrationRow) (time.Time, error) {
 	if task.CreatedAt != nil && !task.CreatedAt.IsZero() {
 		return task.CreatedAt.UTC(), nil
 	}
-	return time.Time{}, fmt.Errorf("task %q missing createdAt", strings.TrimSpace(string(task.ID)))
+	return time.Time{}, fmt.Errorf("task %q missing createdAt", strings.TrimSpace(task.ID))
 }
 
 // taskMissionRef reads the task's mission ref out of metadata. Tasks store the
 // mission link in metadata (under any of these aliases) rather than a dedicated
 // field, so the structural resolver and graph_query consumers read it here.
-func taskMissionRef(task taskdomain.Task) string {
+func taskMissionRef(task TaskHydrationRow) string {
 	if task.Metadata == nil {
 		return ""
 	}
@@ -430,7 +484,7 @@ func taskMissionRef(task taskdomain.Task) string {
 	return ""
 }
 
-func taskDueDate(task taskdomain.Task) string {
+func taskDueDate(task TaskHydrationRow) string {
 	if task.Metadata == nil {
 		return ""
 	}
@@ -443,9 +497,9 @@ func taskDueDate(task taskdomain.Task) string {
 	return ""
 }
 
-func decisionStatus(decision decisiondomain.Decision) string {
-	if kind := decision.Kind(); kind != "" {
-		return string(kind)
+func decisionStatus(decision DecisionHydrationRow) string {
+	if kind := strings.TrimSpace(decision.Kind); kind != "" {
+		return kind
 	}
 	return "recorded"
 }
@@ -531,9 +585,6 @@ func timePtrRFC3339(value *time.Time) string {
 func isNotFoundError(err error) bool {
 	if err == nil {
 		return false
-	}
-	if errors.Is(err, implstore.ErrNotFound) {
-		return true
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }

@@ -2,28 +2,33 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/tinoosan/agen8/internal/core/types"
-	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
 	"github.com/tinoosan/agen8/internal/services/graph/domain"
-	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
-	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 type stubDecisionLister struct {
-	decisions []decisiondomain.Decision
+	decisions []DecisionHydrationRow
 }
 
-func (s stubDecisionLister) List(_ context.Context, filter decisiondomain.DecisionFilter) ([]decisiondomain.Decision, error) {
-	if filter.ProjectID == "" {
-		return append([]decisiondomain.Decision(nil), s.decisions...), nil
-	}
-	out := make([]decisiondomain.Decision, 0, len(s.decisions))
+func (s stubDecisionLister) GetDecision(_ context.Context, decisionID string) (DecisionHydrationRow, error) {
 	for _, d := range s.decisions {
-		if d.ProjectID == filter.ProjectID {
+		if d.ID == decisionID {
+			return d, nil
+		}
+	}
+	return DecisionHydrationRow{}, fmt.Errorf("decision not found")
+}
+
+func (s stubDecisionLister) ListDecisions(_ context.Context, projectID string, _ int) ([]DecisionHydrationRow, error) {
+	if projectID == "" {
+		return append([]DecisionHydrationRow(nil), s.decisions...), nil
+	}
+	out := make([]DecisionHydrationRow, 0, len(s.decisions))
+	for _, d := range s.decisions {
+		if d.ProjectID == projectID {
 			out = append(out, d)
 		}
 	}
@@ -31,10 +36,22 @@ func (s stubDecisionLister) List(_ context.Context, filter decisiondomain.Decisi
 }
 
 type stubKRLister struct {
-	byMission map[missiondomain.MissionID][]krdomain.KeyResult
+	byMission map[string][]KeyResultHydrationRow
 }
 
-func (s stubKRLister) ListKeyResults(_ context.Context, missionID missiondomain.MissionID) ([]krdomain.KeyResult, error) {
+func (s stubKRLister) GetMission(context.Context, string) (MissionHydrationRow, error) {
+	return MissionHydrationRow{}, fmt.Errorf("mission not found")
+}
+
+func (s stubKRLister) ListMissions(context.Context, string, int) ([]MissionHydrationRow, error) {
+	return nil, nil
+}
+
+func (s stubKRLister) GetKeyResult(context.Context, string) (KeyResultHydrationRow, error) {
+	return KeyResultHydrationRow{}, fmt.Errorf("key result not found")
+}
+
+func (s stubKRLister) ListKeyResults(_ context.Context, missionID string) ([]KeyResultHydrationRow, error) {
 	return s.byMission[missionID], nil
 }
 
@@ -124,16 +141,16 @@ func TestStructuralResolver_DecisionPrefersTask(t *testing.T) {
 // the task, one hop deeper).
 func TestStructuralResolver_MissionDownwardChildren(t *testing.T) {
 	now := time.Now().UTC()
-	krLister := stubKRLister{byMission: map[missiondomain.MissionID][]krdomain.KeyResult{
+	krLister := stubKRLister{byMission: map[string][]KeyResultHydrationRow{
 		"mission-1": {{ID: "kr-1", MissionID: "mission-1"}},
 	}}
 	taskReader := stubTaskReader{
-		tasks: []taskdomain.Task{
-			{ID: "task-direct", ProjectID: types.ProjectID("project-a"), Metadata: map[string]any{"missionRef": "mission-1"}, CreatedAt: &now},
-			{ID: "task-under-kr", ProjectID: types.ProjectID("project-a"), KeyResultRef: "kr-1", CreatedAt: &now},
+		tasks: []TaskHydrationRow{
+			{ID: "task-direct", ProjectID: "project-a", Metadata: map[string]any{"missionRef": "mission-1"}, CreatedAt: &now},
+			{ID: "task-under-kr", ProjectID: "project-a", KeyResultRef: "kr-1", CreatedAt: &now},
 		},
 	}
-	decLister := stubDecisionLister{decisions: []decisiondomain.Decision{
+	decLister := stubDecisionLister{decisions: []DecisionHydrationRow{
 		{ID: "dec-orphan", ProjectID: "project-a", MissionRef: "mission-1"},
 		{ID: "dec-on-task", ProjectID: "project-a", TaskRef: "task-direct", MissionRef: "mission-1"},
 	}}

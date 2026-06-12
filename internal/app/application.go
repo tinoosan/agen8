@@ -253,7 +253,11 @@ func NewApplication(cfg Config) (*Application, error) {
 
 	graphSvc, err := graphapp.NewService(
 		contextLinkRepo,
-		graphapp.DefaultHydrators(taskSvc, decisionSvc, missionSvc),
+		graphapp.DefaultHydrators(
+			graphTaskHydrationReader{tasks: taskSvc},
+			graphDecisionHydrationReader{decisions: decisionSvc},
+			graphMissionHydrationReader{missions: missionSvc},
+		),
 		2*time.Second,
 	)
 	if err != nil {
@@ -263,7 +267,11 @@ func NewApplication(cfg Config) (*Application, error) {
 	// The graph derives its structural skeleton (mission -> KR -> task ->
 	// decision lineage) from entity refs at read time, so structure is owned by
 	// the backend and never re-derived by each consumer.
-	graphSvc.SetStructuralResolver(graphapp.NewStructuralResolver(taskSvc, decisionSvc, missionSvc))
+	graphSvc.SetStructuralResolver(graphapp.NewStructuralResolver(
+		graphTaskHydrationReader{tasks: taskSvc},
+		graphDecisionHydrationReader{decisions: decisionSvc},
+		graphMissionHydrationReader{missions: missionSvc},
+	))
 
 	pinRepo, err := pininfra.NewRepository(handle)
 	if err != nil {
