@@ -84,7 +84,7 @@
   /* Text */
   --text-1: #f0f0f4;
   --text-2: #9898a8;
-  --text-3: #636378;
+  --text-3: #818197;
 
   /* Accent */
   --accent: #3B82F6;
@@ -223,7 +223,7 @@
 
   --text-1: #e7e9ea;
   --text-2: #8b98a5;
-  --text-3: #536471;
+  --text-3: #738898;
 
   --accent: #1d9bf0;
   --accent-dim: rgba(29, 155, 240, 0.12);
@@ -310,7 +310,7 @@
 
   --text-1: #1d1d1f;
   --text-2: #6e6e73;
-  --text-3: #98989d;
+  --text-3: #74747a;
 
   --accent: #2563eb;
   --accent-dim: rgba(37, 99, 235, 0.10);
@@ -387,7 +387,7 @@
 
   --text-1: #f5f5f8;
   --text-2: #a0a0b0;
-  --text-3: #6a6a7e;
+  --text-3: #76768c;
 
   --accent: #3b82f6;
   --accent-dim: rgba(59, 130, 246, 0.16);
@@ -437,7 +437,7 @@
 
   --text-1: #f1f0f7;
   --text-2: #a39fb8;
-  --text-3: #6f6a85;
+  --text-3: #847f99;
 
   --accent: #8b5cf6;
   --accent-dim: rgba(139, 92, 246, 0.16);
@@ -503,7 +503,7 @@
 
   --text-1: #3a2f1d;
   --text-2: #6b5a3e;
-  --text-3: #9a876a;
+  --text-3: #766750;
 
   --accent: #b45309;
   --accent-dim: rgba(180, 83, 9, 0.12);
@@ -575,7 +575,7 @@
 
   --text-1: #eceff4;
   --text-2: #abb2c0;
-  --text-3: #7b8394;
+  --text-3: #979dab;
 
   --accent: #5e81ac;
   --accent-dim: rgba(94, 129, 172, 0.18);
@@ -636,7 +636,7 @@
 
   --text-1: #e0def4;
   --text-2: #908caa;
-  --text-3: #6e6a86;
+  --text-3: #837f9a;
 
   --accent: #c4567a;
   --accent-dim: rgba(196, 86, 122, 0.16);
@@ -697,7 +697,7 @@
 
   --text-1: #e7f3ec;
   --text-2: #94b0a3;
-  --text-3: #5f7a6e;
+  --text-3: #688578;
 
   --accent: #059669;
   --accent-dim: rgba(5, 150, 105, 0.16);
@@ -758,7 +758,7 @@
 
   --text-1: #ebdbb2;
   --text-2: #bdae93;
-  --text-3: #928374;
+  --text-3: #948677;
 
   --accent: #d65d0e;
   --accent-dim: rgba(214, 93, 14, 0.16);
@@ -820,7 +820,7 @@
 
   --text-1: #586e75;
   --text-2: #657b83;
-  --text-3: #93a1a1;
+  --text-3: #627171;
 
   --accent: #268bd2;
   --accent-dim: rgba(38, 139, 210, 0.12);
@@ -2718,9 +2718,13 @@ textarea:focus {
   outline: none !important;
 }
 
-/* ── Global focus-visible indicator ────────────────── */
+/* ── Global focus-visible indicator ────────────────────
+   Keyboard navigation must SHOW where focus is. :focus-visible only matches
+   keyboard/programmatic focus, so mouse and touch interactions stay clean —
+   pointer users never see the ring, keyboard users always do. */
 *:focus-visible {
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 *:focus:not(:focus-visible) {
   outline: none;

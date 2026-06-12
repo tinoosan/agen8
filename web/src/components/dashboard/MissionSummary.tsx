@@ -209,9 +209,10 @@ function MissionRow({ mission, projectId }: { mission: MissionView; projectId: s
         )}
         <Link
           to={missionDetailLink(projectId, mission.id)}
-          className="text-[var(--text-3)] hover:text-[var(--accent)] transition-colors shrink-0"
+          className="flex items-center justify-center -m-1.5 p-1.5 text-[var(--text-3)] hover:text-[var(--accent)] transition-colors shrink-0"
           onClick={(e: React.MouseEvent) => e.stopPropagation()}
           title="View mission details"
+          aria-label={`View details for mission ${mission.title}`}
         >
           <ExternalLink size={11} />
         </Link>
