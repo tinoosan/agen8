@@ -11,6 +11,7 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import { decisionsPanelLink, decisionDetailLink } from '../../lib/routing'
+import ListPager from '../ListPager'
 import { useDecisionLog, useDecisionStats, useExportDecisions } from '../../hooks/useDecisions'
 import { sanitizeDecisionTitle } from '../../lib/displaySanitizers'
 import { Badge } from '@/components/ui/badge'
@@ -321,18 +322,9 @@ export default function DashboardDecisionsPanel({
     </div>
   )
 
+  // House pagination — the shared control decisions/tasks/missions all use.
   const paginationControls = (
-    <>
-      <span className="tabular-nums">Page {page} of {totalPages}</span>
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => setPage(prev => Math.max(1, prev - 1))} disabled={page <= 1}>
-          Previous
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => setPage(prev => Math.min(totalPages, prev + 1))} disabled={page >= totalPages}>
-          Next
-        </Button>
-      </div>
-    </>
+    <ListPager page={page} totalPages={totalPages} onPageChange={setPage} />
   )
 
   return (

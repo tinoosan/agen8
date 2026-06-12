@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Link, useLocation, useSearch } from 'wouter'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
 import CreateTaskDialog from '../task/CreateTaskDialog'
+import ListPager, { pageSlice } from '../ListPager'
 import { taskDetailLink } from '../../lib/routing'
 import { taskStatusLabel, taskStatusColor } from '../../lib/statusLabels'
 import { taskAssignedMemberLabel } from '../../lib/taskMembers'
@@ -10,9 +11,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { ListChecks, Plus, AlertCircle, Search, ExternalLink } from 'lucide-react'
 
-/* Bounded initial window for the task rows; the DOM never renders the full
- * history at once. Filters/search still cover everything. */
-const TASKS_WINDOW = 60
+/* Page size for the task list — same house pagination as the decisions panel. */
+const TASKS_PAGE_SIZE = 60
 
 const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -73,15 +73,15 @@ export default function DashboardTasksPanel({
   )
 	const [searchQuery, setSearchQuery] = useState('')
 	const [createDialogOpen, setCreateDialogOpen] = useState(false)
-	const [taskWindow, setTaskWindow] = useState(TASKS_WINDOW)
+	const [page, setPage] = useState(1)
 
 	const changeStatusFilter = (value: string) => {
-		setTaskWindow(TASKS_WINDOW)
+		setPage(1)
 		setStatusFilter(value)
 	}
 
 	const changeSearchQuery = (value: string) => {
-		setTaskWindow(TASKS_WINDOW)
+		setPage(1)
 		setSearchQuery(value)
 	}
 
@@ -115,12 +115,11 @@ export default function DashboardTasksPanel({
     return list
   }, [allTasks, statusFilter, searchQuery])
 
-	// Bounded window over the filtered rows: the full task history grows without
-	// limit, and rendering every row makes the panel unusable months in. Filter
-	// and search above operate on the FULL set; the window only bounds the DOM.
-	// Changing filter/search resets the window in the event handlers above.
-	const visibleTasks = useMemo(() => filteredTasks.slice(0, taskWindow), [filteredTasks, taskWindow])
-	const hiddenTaskCount = filteredTasks.length - visibleTasks.length
+	// House pagination (same pattern as the decisions panel): filters and search
+	// above operate on the FULL set; the page only bounds the DOM. Filter/search
+	// changes reset to page 1 in the handlers above.
+	const totalPages = Math.max(1, Math.ceil(filteredTasks.length / TASKS_PAGE_SIZE))
+	const visibleTasks = useMemo(() => pageSlice(filteredTasks, page, TASKS_PAGE_SIZE), [filteredTasks, page])
 
   if (!projectId) {
     return (
@@ -297,15 +296,9 @@ export default function DashboardTasksPanel({
                 </Link>
 					)
 				})}
-				{hiddenTaskCount > 0 && (
-					<button
-						type="button"
-						onClick={() => setTaskWindow((n) => n + TASKS_WINDOW)}
-						className="mt-2 w-full rounded-[var(--r-md)] border-none bg-[var(--bg-surface)] px-3 py-2 text-left text-[0.75rem] font-medium text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-					>
-						Show {Math.min(TASKS_WINDOW, hiddenTaskCount)} more · {hiddenTaskCount} older
-					</button>
-				)}
+				<div className="mt-3 px-1">
+					<ListPager page={page} totalPages={totalPages} onPageChange={setPage} />
+				</div>
 			</div>
 		)}
       </div>

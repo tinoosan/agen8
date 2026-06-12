@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'wouter'
 import { useMissions } from '../../hooks/useMissions'
+import ListPager, { pageSlice } from '../ListPager'
 import { usePins } from '../../hooks/usePins'
 import CreateMissionDialog from '../mission/CreateMissionDialog'
 import type { MissionStatus } from '../../lib/types'
@@ -42,13 +43,28 @@ interface DashboardMissionsPanelProps {
   embedded?: boolean
 }
 
+/* Page size for the mission list — same house pagination as decisions/tasks. */
+const MISSIONS_PAGE_SIZE = 30
+
 export default function DashboardMissionsPanel({
   projectId,
   embedded = false,
 }: DashboardMissionsPanelProps) {
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilterState] = useState<StatusFilter>('all')
+  const [searchQuery, setSearchQueryState] = useState('')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [page, setPage] = useState(1)
+
+  // Filter/search changes reset to page 1 — same house pagination as the
+  // decisions and tasks panels.
+  const setStatusFilter = (value: StatusFilter) => {
+    setPage(1)
+    setStatusFilterState(value)
+  }
+  const setSearchQuery = (value: string) => {
+    setPage(1)
+    setSearchQueryState(value)
+  }
 
   const { data: allMissions, isLoading, isError, error } = useMissions(projectId)
   const { isPinned, togglePin } = usePins(projectId)
@@ -64,7 +80,7 @@ export default function DashboardMissionsPanel({
     [allMissions],
   )
 
-  const visibleMissions = useMemo(() => {
+  const filteredMissions = useMemo(() => {
     if (!allMissions) return []
 
     let list = statusFilter === 'all'
@@ -84,6 +100,9 @@ export default function DashboardMissionsPanel({
       return ap - bp
     })
   }, [allMissions, statusFilter, searchQuery, isPinned])
+
+  const totalPages = Math.max(1, Math.ceil(filteredMissions.length / MISSIONS_PAGE_SIZE))
+  const visibleMissions = useMemo(() => pageSlice(filteredMissions, page, MISSIONS_PAGE_SIZE), [filteredMissions, page])
 
   if (!projectId) {
     return (
@@ -263,6 +282,9 @@ export default function DashboardMissionsPanel({
                 </div>
               )
             })}
+            <div className="mt-3 px-1">
+              <ListPager page={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
           </div>
         )}
       </div>
