@@ -20,7 +20,8 @@ vi.mock('sonner', () => ({
   },
 }))
 
-const { TaskArtifactsSection, fileArtifactVPath, artifactNote } = await import('./TaskArtifactsSection')
+const { TaskArtifactsSection } = await import('./TaskArtifactsSection')
+const { fileArtifactVPath, artifactNote } = await import('./artifactRefs')
 
 function task(artifacts: string[], status = 'in_review'): Task {
   return { id: 'task-1', description: 'desc', status, artifacts } as Task
@@ -123,7 +124,7 @@ describe('TaskArtifactsSection', () => {
   })
 
   it('hides the attach affordance for canceled tasks', () => {
-    const { } = { ...renderSection([], { status: 'canceled' }) }
+    renderSection([], { status: 'canceled' })
     expect(screen.queryByRole('button', { name: /artifacts/i })).not.toBeInTheDocument()
   })
 

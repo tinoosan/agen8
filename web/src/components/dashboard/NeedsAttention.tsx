@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
 import { AlertTriangle, ChevronRight, Clock, Timer, Layers, Hand } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -109,8 +109,7 @@ function attentionLead(entry: AttentionEntry): string {
   return `${who}${harness} — ${kind}`
 }
 
-function AttentionGroupBlock({ entries, last }: { entries: AttentionEntry[]; last: boolean }) {
-  const now = Date.now()
+function AttentionGroupBlock({ entries, last, now }: { entries: AttentionEntry[]; last: boolean; now: number | null }) {
   return (
     <div className={cn(!last && 'border-b border-[var(--border)]')}>
       <div className="flex items-center gap-2 px-4 pt-3 pb-1">
@@ -125,7 +124,7 @@ function AttentionGroupBlock({ entries, last }: { entries: AttentionEntry[]; las
         )}
       </div>
       {entries.map((entry) => {
-        const elapsed = Math.max(0, now - new Date(entry.since).getTime())
+        const elapsed = now === null ? 0 : Math.max(0, now - new Date(entry.since).getTime())
         return (
           <div key={entry.sessionRef} className="flex items-center gap-2.5 px-4 py-2">
             <span
@@ -203,11 +202,19 @@ function AlertGroupBlock({
 export default function NeedsAttention({ projectId }: { projectId: string | null }) {
   const { data } = useNotifications(projectId)
   const { data: rawAttention = [] } = useAttention(projectId)
+  const [now, setNow] = useState<number | null>(null)
   // Fresh turn-end "waiting" blips are hidden until they've actually lasted —
   // see WAITING_GRACE_MS. The 15s poll re-renders entries across the boundary.
   const attentionEntries = displayableAttention(rawAttention)
   const [, navigate] = useLocation()
   const markRead = useMarkNotificationRead()
+
+  useEffect(() => {
+    const updateNow = () => setNow(Date.now())
+    updateNow()
+    const interval = window.setInterval(updateNow, 15_000)
+    return () => window.clearInterval(interval)
+  }, [])
 
   const groups = useMemo<AlertGroup[]>(() => {
     const byTrigger = new Map<string, NotificationItem[]>()
@@ -278,7 +285,7 @@ export default function NeedsAttention({ projectId }: { projectId: string | null
         </div>
         <div className="max-w-[720px] max-h-[28rem] overflow-y-auto overflow-x-hidden rounded-[18px] border border-[color-mix(in_srgb,var(--amber)_35%,var(--border))] bg-[var(--bg-elevated)]">
           {attentionEntries.length > 0 && (
-            <AttentionGroupBlock entries={attentionEntries} last={groups.length === 0} />
+            <AttentionGroupBlock entries={attentionEntries} last={groups.length === 0} now={now} />
           )}
           {groups.map((g, i) => (
             <AlertGroupBlock

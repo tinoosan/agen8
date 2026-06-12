@@ -31,7 +31,6 @@ export function ResizeHandle({ onResize, 'aria-label': ariaLabel = 'Resize panel
     document.body.style.removeProperty('cursor')
     document.body.style.removeProperty('user-select')
     window.removeEventListener('pointermove', handlePointerMove)
-    window.removeEventListener('pointerup', endDrag)
   }, [handlePointerMove])
 
   const handlePointerDown = useCallback(
@@ -41,7 +40,7 @@ export function ResizeHandle({ onResize, 'aria-label': ariaLabel = 'Resize panel
       document.body.style.cursor = 'col-resize'
       document.body.style.userSelect = 'none'
       window.addEventListener('pointermove', handlePointerMove)
-      window.addEventListener('pointerup', endDrag)
+      window.addEventListener('pointerup', endDrag, { once: true })
     },
     [handlePointerMove, endDrag],
   )
