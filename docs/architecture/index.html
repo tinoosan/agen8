@@ -144,6 +144,12 @@
           <div class="meta">Per-project shared pinned-node set, idempotent pin/unpin, self-migrating store, and the pinned refs that boost graph search ranking.</div>
           <span class="path">internal/services/pin</span>
         </a>
+        <a class="card primary" href="./attention-service.html">
+          <div class="label">Presence</div>
+          <div class="title">Attention Service</div>
+          <div class="meta">Ephemeral harness wait state, member attribution, hook ingest, TTL expiry, and attention lifecycle events.</div>
+          <span class="path">internal/services/attention</span>
+        </a>
         <a class="card" href="./mission-service.html">
           <div class="label">Strategy</div>
           <div class="title">Mission Service</div>
@@ -194,6 +200,12 @@
           <div class="title">Real-time Events (SSE)</div>
           <div class="meta">Target design: domain change &rarr; in-process bus &rarr; <code>/events</code> fan-out hub &rarr; <code>EventSource</code> &rarr; query invalidation. One <code>event.append</code> method, project-scoped, no polling.</div>
           <span class="path">internal/daemon · internal/eventbus</span>
+        </a>
+        <a class="card" href="./attention-service.html">
+          <div class="label">Hooks</div>
+          <div class="title">Attention Hooks</div>
+          <div class="meta">Harness lifecycle hooks post to <code>/hooks/attention</code> so waiting sessions surface through runtime events.</div>
+          <span class="path">internal/daemon/http_attention.go</span>
         </a>
         <a class="card" href="./project-workspace-binding.html">
           <div class="label">Planned</div>

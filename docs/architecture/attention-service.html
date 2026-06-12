@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attention Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / attention-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Attention Service</span>
+  <h1>Attention Service</h1>
+  <p class="lede">
+    The attention service is an ephemeral radar for harness sessions that need the human. It is presence state, not work memory: tasks, questions, and decisions remain the durable coordination primitives.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#purpose">Purpose</a></li>
+      <li><a href="#lifecycle">Lifecycle</a></li>
+      <li><a href="#attribution">Member attribution</a></li>
+      <li><a href="#hook-contract">Hook ingest contract</a></li>
+      <li><a href="#events">Bus events</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="purpose">1. Purpose</h2>
+  <p><code>internal/services/attention</code> tracks which registered harness sessions are currently waiting on the human. It answers a narrow question: "which agent sessions need attention now?" It does not persist records, create graph nodes, or replace a task or future durable question primitive.</p>
+
+  <div class="layers">
+    <div class="layer handler">
+      <div class="label">Harness hook</div>
+      <div class="role">Claude Code and Codex hooks send raw lifecycle payloads with a short curl command.</div>
+    </div>
+    <div class="layer service">
+      <div class="label">Daemon ingest</div>
+      <div class="role"><code>POST /hooks/attention</code> authenticates the bearer token, normalizes the payload, and acks quickly.</div>
+    </div>
+    <div class="layer domain">
+      <div class="label">Attention service</div>
+      <div class="role">Maintains in-memory entries keyed by native session ref, resolves member attribution, expires stale entries, and publishes lifecycle events.</div>
+    </div>
+    <div class="layer events">
+      <div class="label">SSE fan-out</div>
+      <div class="role">The event bus publishes <code>attention.lifecycle</code> so dashboards refresh without polling as the primary path.</div>
+    </div>
+  </div>
+
+  <h2 id="lifecycle">2. Lifecycle</h2>
+  <p>An attention entry is created or refreshed when a harness reports <code>waiting</code>, <code>needs_approval</code>, or <code>asking</code>. It is removed when a newer <code>cleared</code> signal arrives for the same session. Entries also expire after the service TTL, which defaults to six hours.</p>
+
+  <table>
+    <thead><tr><th>Kind</th><th>Meaning</th><th>Typical source</th></tr></thead>
+    <tbody>
+      <tr><td><code>waiting</code></td><td>The agent ended its turn and is waiting at the prompt.</td><td>Claude <code>Stop</code> or idle notification; Codex <code>Stop</code>.</td></tr>
+      <tr><td><code>needs_approval</code></td><td>The agent is blocked on a permission or approval prompt.</td><td>Claude permission notification; Codex <code>PermissionRequest</code>.</td></tr>
+      <tr><td><code>asking</code></td><td>The agent asked an interactive question and is waiting for an answer.</td><td>Claude <code>AskUserQuestion</code> hook mapping; future harness parity can report the same kind.</td></tr>
+      <tr><td><code>cleared</code></td><td>The human engaged, the session resumed, or the session ended.</td><td>User prompt submit, session start, session end, or question answer hook.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Repeated reports for the same session and same kind refresh <code>UpdatedAt</code> but keep the original <code>Since</code>. The dashboard can therefore show how long the session has been waiting instead of resetting the wait clock on every hook retry.</p>
+
+  <h2 id="attribution">3. Member attribution</h2>
+  <p>The service resolves a hook event to a project member by matching the authenticated user and native session ref against active project members. Attribution is best-effort: an unmatched event is still kept as an unattributed entry and appears in project reads so it is not invisible.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Entry</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">SessionRef</span> string
+    <span class="tok-field">ProjectID</span>  string
+    <span class="tok-field">MemberID</span>   string
+    <span class="tok-field">MemberName</span> string
+    <span class="tok-field">Harness</span>    string
+    <span class="tok-field">Kind</span>       <span class="tok-type">Kind</span>
+    <span class="tok-field">Since</span>      time.Time
+    <span class="tok-field">UpdatedAt</span>  time.Time
+}</code></pre>
+
+  <p>If duplicate member rows share a session ref, attribution uses the earliest registered row. This matches project-service session resolution and avoids flicker when a harness label changes.</p>
+
+  <h2 id="hook-contract">4. Hook ingest contract</h2>
+  <p>The daemon exposes <code>POST /hooks/attention</code>. It accepts either a normalized <code>attention.Event</code> JSON body or raw harness hook JSON with <code>harness</code> and <code>kind</code> query parameters. Raw mode is the installed default.</p>
+
+<pre><code class="lang-sh">curl -m 3 -s -o /dev/null -X POST \
+  'http://127.0.0.1:7777/hooks/attention?harness=codex&amp;kind=waiting' \
+  -H 'Authorization: Bearer ak_...' \
+  --data-binary @- || true</code></pre>
+
+  <p>The hook body cap is intentionally small: <code>maxAttentionHookBodyBytes</code> is 16 KiB. Hook payloads carry lifecycle context, not artifacts. A bad payload returns a 4xx to the HTTP client, but installed hook commands still exit successfully so a slow or down agen8 daemon cannot break the agent's own hook chain.</p>
+
+  <p>Hooks are installed explicitly with <code>agen8 hooks install</code>. Claude Code writes project-local <code>.claude/settings.local.json</code>; Codex writes user-level <code>~/.codex/hooks.json</code>. Both files embed a bearer token and are never installed silently.</p>
+
+  <h2 id="events">5. Bus events</h2>
+  <p>When an attributed entry is raised or cleared, the service publishes an <code>eventbus.AttentionEvent</code> on <code>attention.lifecycle</code>. The SSE hub forwards these as project-scoped events.</p>
+
+<pre><code class="lang-json">{
+  "topic": "attention.lifecycle",
+  "eventType": "attention.raised",
+  "projectId": "agen8-mcp-server-3333e627",
+  "memberId": "member-...",
+  "memberName": "Sora (Full Stack Engineer)",
+  "harness": "codex",
+  "kind": "waiting"
+}</code></pre>
+
+  <p>Unattributed entries are retained in memory but do not publish to a project room because there is no project id to route through SSE.</p>
+
+  <h2 id="invariants">6. Invariants</h2>
+  <ul>
+    <li>Attention state is ephemeral and in-memory; it is not a task, question, note, decision, graph node, or audit log.</li>
+    <li>The native session ref is the primary key. Newer signals for the same session replace or clear older state.</li>
+    <li>The hook ingest path must ack quickly and must not block on dashboard consumers.</li>
+    <li>Member attribution is best-effort and must not make hook reporting fail when a session cannot be resolved.</li>
+    <li>Durable human questions belong to the question primitive; attention only says that a session is asking.</li>
+  </ul>
+
+</div>
+</body>
+</html>
