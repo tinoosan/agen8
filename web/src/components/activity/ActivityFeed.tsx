@@ -155,12 +155,20 @@ function ActivityFeedSkeleton() {
 
 /* ── Main exported component ─────────────────────────────────────────── */
 
+/* Initial window and per-click increment for the feed. The event list grows
+ * linearly with project history (it's derived from every task, decision, and
+ * mission), so rendering it whole turns Pulse into a 10k+-node page within
+ * months. Counts stay computed over the full set so the filter chips never
+ * understate history. */
+const FEED_WINDOW = 60
+
 export default function ActivityFeed({ projectId }: { projectId: string | null }) {
   const tasksQuery = useProjectTasks(projectId)
   const decisionsQuery = useRecentDecisions(projectId)
   const missionsQuery = useMissions(projectId)
 
   const [filter, setFilter] = useState<FilterKey>('all')
+  const [windowSize, setWindowSize] = useState(FEED_WINDOW)
 
   const allEvents = useMemo(
     () =>
@@ -179,10 +187,19 @@ export default function ActivityFeed({ projectId }: { projectId: string | null }
     return c
   }, [allEvents])
 
-  const visible = useMemo(
+  const filtered = useMemo(
     () => (filter === 'all' ? allEvents : allEvents.filter(e => e.kind === filter)),
     [allEvents, filter],
   )
+
+  // Switching filters resets the window: each lens starts at a readable depth.
+  const changeFilter = (next: FilterKey) => {
+    setFilter(next)
+    setWindowSize(FEED_WINDOW)
+  }
+
+  const visible = useMemo(() => filtered.slice(0, windowSize), [filtered, windowSize])
+  const hiddenCount = filtered.length - visible.length
 
   const groups = useMemo(() => groupActivityByBucket(visible), [visible])
 
@@ -206,7 +223,7 @@ export default function ActivityFeed({ projectId }: { projectId: string | null }
       {/* Filters */}
       {!isLoading && !isError && allEvents.length > 0 && (
         <div className="mb-5">
-          <FilterChips active={filter} counts={counts} onChange={setFilter} />
+          <FilterChips active={filter} counts={counts} onChange={changeFilter} />
         </div>
       )}
 
@@ -239,6 +256,15 @@ export default function ActivityFeed({ projectId }: { projectId: string | null }
               </div>
             </div>
           ))}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setWindowSize((n) => n + FEED_WINDOW)}
+              className="mt-2 w-full rounded-[var(--r-md)] border-none bg-[var(--bg-surface)] px-3 py-2 text-left text-[0.75rem] font-medium text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+            >
+              Show {Math.min(FEED_WINDOW, hiddenCount)} more · {hiddenCount} older
+            </button>
+          )}
         </div>
       )}
     </section>

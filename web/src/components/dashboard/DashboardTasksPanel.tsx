@@ -10,6 +10,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { ListChecks, Plus, AlertCircle, Search, ExternalLink } from 'lucide-react'
 
+/* Bounded initial window for the task rows; the DOM never renders the full
+ * history at once. Filters/search still cover everything. */
+const TASKS_WINDOW = 60
+
 const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'pending', label: 'Queued' },
@@ -67,10 +71,21 @@ export default function DashboardTasksPanel({
     },
     [navigate, projectId, rawSearch],
   )
-  const [searchQuery, setSearchQuery] = useState('')
-  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+	const [searchQuery, setSearchQuery] = useState('')
+	const [createDialogOpen, setCreateDialogOpen] = useState(false)
+	const [taskWindow, setTaskWindow] = useState(TASKS_WINDOW)
 
-  const { data: allTasks, isLoading, isError, error } = useProjectTasks(projectId)
+	const changeStatusFilter = (value: string) => {
+		setTaskWindow(TASKS_WINDOW)
+		setStatusFilter(value)
+	}
+
+	const changeSearchQuery = (value: string) => {
+		setTaskWindow(TASKS_WINDOW)
+		setSearchQuery(value)
+	}
+
+	const { data: allTasks, isLoading, isError, error } = useProjectTasks(projectId)
 
   const statusCounts = useMemo(
     () =>
@@ -83,7 +98,7 @@ export default function DashboardTasksPanel({
     [allTasks],
   )
 
-  const visibleTasks = useMemo(() => {
+  const filteredTasks = useMemo(() => {
     if (!allTasks) return []
 
     let list = statusFilter === 'all'
@@ -99,6 +114,13 @@ export default function DashboardTasksPanel({
 
     return list
   }, [allTasks, statusFilter, searchQuery])
+
+	// Bounded window over the filtered rows: the full task history grows without
+	// limit, and rendering every row makes the panel unusable months in. Filter
+	// and search above operate on the FULL set; the window only bounds the DOM.
+	// Changing filter/search resets the window in the event handlers above.
+	const visibleTasks = useMemo(() => filteredTasks.slice(0, taskWindow), [filteredTasks, taskWindow])
+	const hiddenTaskCount = filteredTasks.length - visibleTasks.length
 
   if (!projectId) {
     return (
@@ -147,7 +169,7 @@ export default function DashboardTasksPanel({
               return (
                 <button
                   key={filter.value}
-                  onClick={() => setStatusFilter(filter.value)}
+									onClick={() => changeStatusFilter(filter.value)}
                   aria-pressed={isActive}
                   className="inline-flex items-center gap-1 border-none cursor-pointer transition-colors duration-150 whitespace-nowrap"
                   style={{
@@ -181,7 +203,7 @@ export default function DashboardTasksPanel({
               <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-3)] pointer-events-none" />
               <input
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+									onChange={(e) => changeSearchQuery(e.target.value)}
                 placeholder="Search tasks…"
                 className={cn(
                   'w-full pl-7 pr-3 py-1.5 rounded-[var(--r-md)] outline-none',
@@ -234,7 +256,7 @@ export default function DashboardTasksPanel({
                 <p className="text-[var(--text-3)] mb-5" style={{ fontSize: '0.875rem', letterSpacing: '-0.224px', lineHeight: 1.47 }}>
                   Try a different filter or search term.
                 </p>
-                <Button variant="secondary" onClick={() => { setStatusFilter('all'); setSearchQuery('') }} style={{ letterSpacing: '-0.12px' }}>
+								<Button variant="secondary" onClick={() => { changeStatusFilter('all'); changeSearchQuery('') }} style={{ letterSpacing: '-0.12px' }}>
                   Clear filters
                 </Button>
               </>
@@ -244,9 +266,9 @@ export default function DashboardTasksPanel({
 
         {!isLoading && !isError && visibleTasks.length > 0 && (
           <div className="flex flex-col gap-0.5">
-            {visibleTasks.map((task) => {
-              const assigneeLabel = taskAssignedMemberLabel(task)
-              return (
+				{visibleTasks.map((task) => {
+					const assigneeLabel = taskAssignedMemberLabel(task)
+					return (
                 <Link
                   key={task.id}
                   to={taskDetailLink(projectId, task.id)}
@@ -273,10 +295,19 @@ export default function DashboardTasksPanel({
                   </span>
                   <ExternalLink size={11} className="shrink-0 text-[var(--text-3)]" />
                 </Link>
-              )
-            })}
-          </div>
-        )}
+					)
+				})}
+				{hiddenTaskCount > 0 && (
+					<button
+						type="button"
+						onClick={() => setTaskWindow((n) => n + TASKS_WINDOW)}
+						className="mt-2 w-full rounded-[var(--r-md)] border-none bg-[var(--bg-surface)] px-3 py-2 text-left text-[0.75rem] font-medium text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+					>
+						Show {Math.min(TASKS_WINDOW, hiddenTaskCount)} more · {hiddenTaskCount} older
+					</button>
+				)}
+			</div>
+		)}
       </div>
 
       <CreateTaskDialog
