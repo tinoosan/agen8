@@ -40,6 +40,9 @@ import (
 	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
 	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 	projectinfra "github.com/tinoosan/agen8/internal/services/project/infra"
+	questionapp "github.com/tinoosan/agen8/internal/services/question/app"
+	questiondomain "github.com/tinoosan/agen8/internal/services/question/domain"
+	questioninfra "github.com/tinoosan/agen8/internal/services/question/infra"
 	taskapp "github.com/tinoosan/agen8/internal/services/task/app"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 	taskinfra "github.com/tinoosan/agen8/internal/services/task/infra"
@@ -64,6 +67,7 @@ type Application struct {
 	LocationSvc     *locationapp.Service
 	EventBus        *eventbus.Bus
 	DecisionSvc     *decisionapp.Service
+	QuestionSvc     *questionapp.Service
 	PinSvc          *pinapp.Service
 	NotificationSvc *notificationapp.Service
 }
@@ -251,6 +255,21 @@ func NewApplication(cfg Config) (*Application, error) {
 		return nil, fmt.Errorf("build decision service: %w", err)
 	}
 
+	questionRepo, err := questioninfra.NewSQLiteRepository(handle)
+	if err != nil {
+		return nil, fmt.Errorf("build question repository: %w", err)
+	}
+	questionSvc, err := questionapp.NewService(questionapp.Config{
+		Questions: questionRepo,
+		Clock:     questiondomain.SystemClock{},
+		Events:    bus,
+		Decisions: decisionSvc,
+		Logger:    logger.With("service", "question"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build question service: %w", err)
+	}
+
 	graphSvc, err := graphapp.NewService(
 		contextLinkRepo,
 		graphapp.DefaultHydrators(
@@ -313,6 +332,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		LocationSvc:     locationSvc,
 		EventBus:        bus,
 		DecisionSvc:     decisionSvc,
+		QuestionSvc:     questionSvc,
 		PinSvc:          pinSvc,
 		NotificationSvc: notificationSvc,
 	}, nil

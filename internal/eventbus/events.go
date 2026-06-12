@@ -14,6 +14,7 @@ const (
 	TopicMissionLifecycle     = "mission.lifecycle"
 	TopicPinLifecycle         = "pin.lifecycle"
 	TopicAttentionLifecycle   = "attention.lifecycle"
+	TopicQuestionLifecycle    = "question.lifecycle"
 )
 
 const (
@@ -33,6 +34,37 @@ type AttentionEvent struct {
 	Kind       string    `json:"kind,omitempty"` // waiting | needs_approval
 	EventType  string    `json:"eventType"`      // attention.raised | attention.cleared
 	Timestamp  time.Time `json:"timestamp"`
+}
+
+const (
+	QuestionEventOpened   = "question.opened"
+	QuestionEventAnswered = "question.answered"
+)
+
+type QuestionOpenedEvent struct {
+	ProjectID       string    `json:"projectId"`
+	QuestionID      string    `json:"questionId"`
+	AskedByMemberID string    `json:"askedByMemberId"`
+	AnswerKind      string    `json:"answerKind"`
+	AsDecision      bool      `json:"asDecision"`
+	TaskRef         string    `json:"taskRef,omitempty"`
+	KeyResultRef    string    `json:"keyResultRef,omitempty"`
+	MissionRef      string    `json:"missionRef,omitempty"`
+	EventType       string    `json:"eventType"`
+	Timestamp       time.Time `json:"timestamp"`
+}
+
+type QuestionAnsweredEvent struct {
+	ProjectID          string    `json:"projectId"`
+	QuestionID         string    `json:"questionId"`
+	AskedByMemberID    string    `json:"askedByMemberId"`
+	AnsweredByMemberID string    `json:"answeredByMemberId"`
+	DecisionID         string    `json:"decisionId,omitempty"`
+	TaskRef            string    `json:"taskRef,omitempty"`
+	KeyResultRef       string    `json:"keyResultRef,omitempty"`
+	MissionRef         string    `json:"missionRef,omitempty"`
+	EventType          string    `json:"eventType"`
+	Timestamp          time.Time `json:"timestamp"`
 }
 
 const (
