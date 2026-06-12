@@ -10,7 +10,7 @@ import {
   useNotifications,
   useMarkNotificationRead,
 } from '../../hooks/useNotifications'
-import { useAttention, type AttentionEntry } from '../../hooks/useAttention'
+import { displayableAttention, useAttention, type AttentionEntry } from '../../hooks/useAttention'
 
 /* Each standing-alert type gets one group: the type is named once in the group
  * header (icon + label + count) so individual rows aren't repetitive. Order here
@@ -201,7 +201,10 @@ function AlertGroupBlock({
  * hides entirely when nothing needs attention. */
 export default function NeedsAttention({ projectId }: { projectId: string | null }) {
   const { data } = useNotifications(projectId)
-  const { data: attentionEntries = [] } = useAttention(projectId)
+  const { data: rawAttention = [] } = useAttention(projectId)
+  // Fresh turn-end "waiting" blips are hidden until they've actually lasted —
+  // see WAITING_GRACE_MS. The 15s poll re-renders entries across the boundary.
+  const attentionEntries = displayableAttention(rawAttention)
   const [, navigate] = useLocation()
   const markRead = useMarkNotificationRead()
 
