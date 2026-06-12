@@ -9,7 +9,7 @@ export interface AttentionEntry {
   memberId?: string
   memberName?: string
   harness?: string
-  kind: 'waiting' | 'needs_approval'
+  kind: 'waiting' | 'needs_approval' | 'asking'
   message?: string
   since: string
   updatedAt: string

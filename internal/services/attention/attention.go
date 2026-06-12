@@ -31,6 +31,10 @@ const (
 	KindWaiting Kind = "waiting"
 	// KindNeedsApproval — the agent is blocked on a permission/approval prompt.
 	KindNeedsApproval Kind = "needs_approval"
+	// KindAsking — the agent posed an interactive question and is blocked on
+	// the answer. Kind taxonomy only, no question content, so harnesses without
+	// an observable question tool stay at parity.
+	KindAsking Kind = "asking"
 	// KindCleared — the session resumed; not a state, only an event.
 	KindCleared Kind = "cleared"
 )
@@ -123,9 +127,9 @@ func (s *Service) Report(ctx context.Context, userID string, ev Event) (Entry, e
 		return Entry{}, errors.New("attention report: sessionRef is required")
 	}
 	switch ev.Kind {
-	case KindWaiting, KindNeedsApproval, KindCleared:
+	case KindWaiting, KindNeedsApproval, KindAsking, KindCleared:
 	default:
-		return Entry{}, fmt.Errorf("attention report: invalid kind %q (must be waiting, needs_approval, or cleared)", ev.Kind)
+		return Entry{}, fmt.Errorf("attention report: invalid kind %q (must be waiting, needs_approval, asking, or cleared)", ev.Kind)
 	}
 	now := s.now().UTC()
 

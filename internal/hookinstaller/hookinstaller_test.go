@@ -70,14 +70,14 @@ func TestInstallClaudeWritesSettingsLocal(t *testing.T) {
 			t.Fatalf("expected one group for %s", event)
 		}
 	}
-	// AskUserQuestion is matched by tool name: asking -> waiting, answered -> cleared.
+	// AskUserQuestion is matched by tool name: posed -> asking, answered -> cleared.
 	pre := eventGroups(t, config, "PreToolUse")[0].(map[string]any)
 	if pre["matcher"] != "AskUserQuestion" {
 		t.Fatalf("PreToolUse matcher = %v", pre["matcher"])
 	}
 	preCmd := pre["hooks"].([]any)[0].(map[string]any)["command"].(string)
-	if !strings.Contains(preCmd, "kind=waiting") {
-		t.Fatalf("PreToolUse should map to waiting: %s", preCmd)
+	if !strings.Contains(preCmd, "kind=asking") {
+		t.Fatalf("PreToolUse should map to asking: %s", preCmd)
 	}
 	post := eventGroups(t, config, "PostToolUse")[0].(map[string]any)
 	postCmd := post["hooks"].([]any)[0].(map[string]any)["command"].(string)

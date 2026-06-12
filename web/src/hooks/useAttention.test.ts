@@ -24,6 +24,11 @@ describe('displayableAttention', () => {
     expect(displayableAttention([approval], now)).toEqual([approval])
   })
 
+  it('shows posed questions immediately — they hard-block the agent', () => {
+    const question = entry('asking', 0, now)
+    expect(displayableAttention([question], now)).toEqual([question])
+  })
+
   it('filters mixed lists per entry', () => {
     const freshWait = entry('waiting', 1000, now)
     const oldWait = entry('waiting', WAITING_GRACE_MS * 2, now)

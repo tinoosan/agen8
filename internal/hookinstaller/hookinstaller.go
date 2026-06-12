@@ -66,7 +66,7 @@ type Result struct {
 var claudeHookEvents = []hookSpec{
 	{Event: "Notification", Matcher: "idle_prompt", Kind: "waiting"},
 	{Event: "Notification", Matcher: "permission_prompt", Kind: "needs_approval"},
-	{Event: "PreToolUse", Matcher: "AskUserQuestion", Kind: "waiting"},
+	{Event: "PreToolUse", Matcher: "AskUserQuestion", Kind: "asking"},
 	{Event: "PostToolUse", Matcher: "AskUserQuestion", Kind: "cleared"},
 	{Event: "Stop", Matcher: "", Kind: "waiting"},
 	{Event: "UserPromptSubmit", Matcher: "", Kind: "cleared"},

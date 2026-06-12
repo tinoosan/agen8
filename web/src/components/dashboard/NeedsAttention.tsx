@@ -99,6 +99,7 @@ function AlertRow({
 const ATTENTION_KIND_LABEL: Record<AttentionEntry['kind'], string> = {
   waiting: 'waiting for input',
   needs_approval: 'needs approval',
+  asking: 'has a question for you',
 }
 
 function attentionLead(entry: AttentionEntry): string {
