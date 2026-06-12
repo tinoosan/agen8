@@ -18,7 +18,7 @@ import (
 func TestRegisterProjectDispatchCreateAndList(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc); err != nil {
+	if err := RegisterProject(reg, svc, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -76,7 +76,7 @@ func TestRegisterProjectDispatchCreateAndList(t *testing.T) {
 func TestRegisterProjectMapsInvalidParams(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc); err != nil {
+	if err := RegisterProject(reg, svc, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -103,7 +103,7 @@ func TestRegisterProjectMapsInvalidParams(t *testing.T) {
 func TestRegisterProjectArchiveThenDelete(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc); err != nil {
+	if err := RegisterProject(reg, svc, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -212,7 +212,7 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 	}
 
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc); err != nil {
+	if err := RegisterProject(reg, svc, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -315,7 +315,7 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 func TestRegisterProjectDispatchLinkTokenCreate(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc); err != nil {
+	if err := RegisterProject(reg, svc, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -373,7 +373,7 @@ func TestRegisterProjectDispatchLinkTokenCreate(t *testing.T) {
 func TestRegisterProjectLinkTokenCreateRequiresIdentity(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc); err != nil {
+	if err := RegisterProject(reg, svc, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)

@@ -61,6 +61,9 @@ type ProjectCreateParams struct {
 
 type ProjectCreateResult struct {
 	Project ProjectView `json:"project"`
+	// HooksInstalled reports whether the daemon auto-provisioned the attention
+	// hooks for the new project (nil when no provisioner is wired).
+	HooksInstalled *bool `json:"hooksInstalled,omitempty"`
 }
 
 type ProjectSaveParams struct {

@@ -46,7 +46,12 @@ func withProjectCaller[Params any, Result any](fn func(context.Context, Params) 
 	}
 }
 
-func RegisterProject(reg *Registry, projectSvc *projectapp.Service) error {
+// PostProjectCreate runs after a successful project.create — the daemon wires
+// hook auto-provisioning here so the project service stays free of auth/hook
+// dependencies. Returns whether hooks were installed; must never error.
+type PostProjectCreate func(ctx context.Context, userID, projectTitle, root string) bool
+
+func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate PostProjectCreate) error {
 	if projectSvc == nil {
 		return fmt.Errorf("project service is required")
 	}
@@ -56,7 +61,19 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service) error {
 			return AddBoundHandler(reg, MethodProjectGet, false, handler.ProjectGet)
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectCreate, false, withProjectCaller(handler.ProjectCreate))
+			return AddBoundHandler(reg, MethodProjectCreate, false, withProjectCaller(func(ctx context.Context, p projectrpc.ProjectCreateParams) (projectrpc.ProjectCreateResult, error) {
+				res, err := handler.ProjectCreate(ctx, p)
+				if err != nil || postCreate == nil {
+					return res, err
+				}
+				identity, idErr := RequireIdentity(ctx)
+				if idErr != nil {
+					return res, nil
+				}
+				installed := postCreate(ctx, identity.UserID, res.Project.Title, res.Project.Root)
+				res.HooksInstalled = &installed
+				return res, nil
+			}))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectSave, false, withProjectCaller(handler.ProjectSave))

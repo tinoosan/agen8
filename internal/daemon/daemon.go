@@ -90,7 +90,10 @@ func New(cfg Config) (*Daemon, error) {
 		},
 		func() error { return rpc.RegisterGraph(reg, application.GraphSvc, application.GraphLinks) },
 		func() error { return rpc.RegisterMission(reg, application.MissionSvc) },
-		func() error { return rpc.RegisterProject(reg, application.ProjectSvc) },
+		func() error {
+			provisioner := newProjectHooksProvisioner(application.AuthSvc, cfg.HTTPAddr, logger.With("service", "hooks-provision"))
+			return rpc.RegisterProject(reg, application.ProjectSvc, provisioner.ProvisionHooks)
+		},
 		func() error { return rpc.RegisterFile(reg, application.FileSvc) },
 		func() error { return rpc.RegisterLocation(reg, application.LocationSvc) },
 		func() error { return rpc.RegisterPin(reg, application.PinSvc) },
