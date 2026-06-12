@@ -78,21 +78,3 @@ func sessionRefFromRawHookPayload(body io.Reader) string {
 	}
 	return strings.TrimSpace(payload.SessionID)
 }
-
-// attentionHookUserID resolves the caller to a user id from the bearer token:
-// MCP API key first (the credential hook scripts actually have), then a web
-// session token.
-func (d *Daemon) attentionHookUserID(r *http.Request) string {
-	token := bearerToken(r.Header.Get("Authorization"))
-	if token == "" {
-		return ""
-	}
-	ctx := r.Context()
-	if account, err := d.app.AuthSvc.ValidateAPIKey(ctx, token); err == nil {
-		return strings.TrimSpace(account.ID.String())
-	}
-	if identity, err := d.httpIdentity(ctx, "Bearer "+token); err == nil {
-		return strings.TrimSpace(identity.UserID)
-	}
-	return ""
-}

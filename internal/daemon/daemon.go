@@ -29,7 +29,6 @@ import (
 	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 	userapp "github.com/tinoosan/agen8/internal/services/user/app"
-	userdomain "github.com/tinoosan/agen8/internal/services/user/domain"
 	"github.com/tinoosan/agen8/internal/web"
 	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
@@ -353,7 +352,7 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 		ctx = rpc.ContextWithIdentity(ctx, identity)
 		ctx = caller.ContextWithCaller(ctx, caller.Caller{
 			UserID:   identity.UserID,
-			MemberID: member.ID(identity.MemberID),
+			MemberID: identity.MemberID,
 			Role:     identity.Role,
 		})
 	}
@@ -736,36 +735,6 @@ func methodRequiresHTTPIdentity(method string, authorization string) bool {
 	}
 }
 
-func (d *Daemon) httpIdentity(ctx context.Context, authorization string) (rpc.Identity, error) {
-	token := bearerToken(authorization)
-	if token == "" {
-		return rpc.Identity{}, fmt.Errorf("bearer token is required")
-	}
-	user, err := d.app.AuthSvc.ValidateSession(ctx, token)
-	if err != nil {
-		return rpc.Identity{}, err
-	}
-	role := string(userdomain.RoleUser)
-	if user.Role != "" {
-		role = string(user.Role)
-	}
-	return rpc.Identity{UserID: user.ID.String(), Role: role}, nil
-}
-
-const sessionCookieName = "agen8.sessionToken"
-
-func (d *Daemon) httpIdentityFromSessionCookie(ctx context.Context, r *http.Request) (rpc.Identity, error) {
-	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil {
-		return rpc.Identity{}, fmt.Errorf("session cookie is required")
-	}
-	token := strings.TrimSpace(cookie.Value)
-	if token == "" {
-		return rpc.Identity{}, fmt.Errorf("session cookie is empty")
-	}
-	return d.httpIdentity(ctx, "Bearer "+token)
-}
-
 func eventProjectID(r *http.Request) string {
 	projectID := strings.TrimSpace(r.URL.Query().Get("projectId"))
 	if projectID != "" {
@@ -786,15 +755,6 @@ func eventProjectID(r *http.Request) string {
 		}
 	}
 	return ""
-}
-
-func bearerToken(header string) string {
-	header = strings.TrimSpace(header)
-	const prefix = "Bearer "
-	if !strings.HasPrefix(header, prefix) {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
 }
 
 func (d *Daemon) handleSetupPage(w http.ResponseWriter, r *http.Request) {
