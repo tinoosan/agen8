@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -481,6 +483,82 @@ func TestRegisterMCPContextRecordsWorkspace(t *testing.T) {
 	}
 }
 
+func TestRegisterMCPContextWorktreeRootResolvesCanonicalProject(t *testing.T) {
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	mainRoot, worktreeRoot := createGitWorktreeFixture(t)
+
+	mainResult, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: mainRoot,
+		HarnessKind: "codex",
+		SessionID:   "session-main",
+	})
+	if err != nil {
+		t.Fatalf("register main root: %v", err)
+	}
+	worktreeResult, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: worktreeRoot,
+		HarnessKind: "codex",
+		SessionID:   "session-worktree",
+	})
+	if err != nil {
+		t.Fatalf("register worktree root: %v", err)
+	}
+	if worktreeResult.ProjectID != mainResult.ProjectID {
+		t.Fatalf("worktree project=%q want canonical %q", worktreeResult.ProjectID, mainResult.ProjectID)
+	}
+	if worktreeResult.ProjectRoot != mainRoot {
+		t.Fatalf("worktree projectRoot=%q want canonical root %q", worktreeResult.ProjectRoot, mainRoot)
+	}
+	if worktreeResult.ProjectID != string(ProjectIDForLocationRoot("local", mainRoot)) {
+		t.Fatalf("project id=%q want main-root hash", worktreeResult.ProjectID)
+	}
+
+	workspaces, err := service.ListWorkspaces(ctx, workspace.Filter{ProjectID: mainResult.ProjectID})
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	roots := map[string]bool{}
+	for _, ws := range workspaces {
+		roots[ws.Root] = true
+	}
+	if !roots[mainRoot] || !roots[worktreeRoot] {
+		t.Fatalf("workspace roots=%v want main and worktree roots", roots)
+	}
+}
+
+func TestRegisterMCPContextRegularGitSubdirKeepsPathHashFallback(t *testing.T) {
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	mainRoot := createGitRepoFixture(t)
+	subdir := filepath.Join(mainRoot, "tools", "worker")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("create subdir: %v", err)
+	}
+
+	result, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: subdir,
+		HarnessKind: "codex",
+		SessionID:   "session-subdir",
+	})
+	if err != nil {
+		t.Fatalf("register subdir: %v", err)
+	}
+	want := string(ProjectIDForLocationRoot("local", subdir))
+	if result.ProjectID != want {
+		t.Fatalf("regular git subdir project=%q want path-hash %q", result.ProjectID, want)
+	}
+	if result.ProjectRoot != subdir {
+		t.Fatalf("regular git subdir root=%q want %q", result.ProjectRoot, subdir)
+	}
+}
+
 func TestRegisterMCPContextBoundProjectOverridesCallerAssertedProjectID(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -659,4 +737,45 @@ func newProjectServiceForMCPContextTest(t *testing.T) *Service {
 		t.Fatalf("new service: %v", err)
 	}
 	return service
+}
+
+func createGitWorktreeFixture(t *testing.T) (string, string) {
+	t.Helper()
+	mainRoot := createGitRepoFixture(t)
+	worktreeRoot := filepath.Join(t.TempDir(), "repo-worktree")
+	runGit(t, mainRoot, "worktree", "add", "-b", "fixture-worktree", worktreeRoot)
+	return mainRoot, worktreeRoot
+}
+
+func createGitRepoFixture(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary is required for worktree registration tests")
+	}
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("resolve repo path: %v", err)
+	}
+	runGit(t, root, "init")
+	runGit(t, root, "config", "user.email", "tests@example.com")
+	runGit(t, root, "config", "user.name", "Agen8 Tests")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	runGit(t, root, "add", "README.md")
+	runGit(t, root, "commit", "-m", "fixture")
+	return root
+}
+
+func runGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmdArgs := append([]string{"-C", root}, args...)
+	out, err := exec.Command("git", cmdArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, string(out))
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -87,13 +88,17 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		// 2. An explicit caller-asserted id from a user-scoped token.
 		projectID = types.ProjectID(strings.TrimSpace(input.ProjectID))
 	}
-	root := strings.TrimSpace(input.ProjectRoot)
+	requestedRoot := strings.TrimSpace(input.ProjectRoot)
+	identityRoot := requestedRoot
 	if projectID == "" {
 		// 3. Path-hash fallback — last resort for unmarked and legacy folders.
-		if root == "" {
+		if identityRoot == "" {
 			return RegisterMCPContextResult{}, fmt.Errorf("no project binding: marker, project_id, or project_root required")
 		}
-		projectID = ProjectIDForLocationRoot(locationID, root)
+		if canonicalRoot, ok := canonicalGitWorktreeRoot(identityRoot, locationID); ok {
+			identityRoot = canonicalRoot
+		}
+		projectID = ProjectIDForLocationRoot(locationID, identityRoot)
 	}
 	userID := userIDForMCPToken(token, input.UserID)
 	ctx = caller.ContextWithCaller(ctx, caller.Caller{UserID: userID})
@@ -102,13 +107,13 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		if !errors.Is(err, project.ErrNotFound) {
 			return RegisterMCPContextResult{}, fmt.Errorf("load project: %w", err)
 		}
-		if root == "" {
+		if identityRoot == "" {
 			return RegisterMCPContextResult{}, fmt.Errorf("project %s not found; project_root is required to create it", projectID)
 		}
-		title := filepath.Base(filepath.Clean(root))
+		title := filepath.Base(filepath.Clean(identityRoot))
 		loadedProject, err = s.CreateProject(ctx, CreateProjectInput{
 			LocationID: locationID,
-			Root:       root,
+			Root:       identityRoot,
 			Title:      title,
 			Status:     project.StatusOpen,
 		})
@@ -121,8 +126,12 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		return RegisterMCPContextResult{}, err
 	}
 	projectID = loadedProject.ID()
-	root = strings.TrimSpace(loadedProject.Root())
+	projectRoot := strings.TrimSpace(loadedProject.Root())
 	locationID = loadedProject.LocationID()
+	workspaceRoot := requestedRoot
+	if workspaceRoot == "" {
+		workspaceRoot = projectRoot
+	}
 	// Record the folder as a Workspace of this project — metadata, never identity.
 	// This happens in every resolution path (bound, explicit, fallback): cwd tells
 	// us where a workspace is, not which project it is.
@@ -130,7 +139,7 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		ProjectID:  string(projectID),
 		UserID:     userID,
 		LocationID: string(locationID),
-		Root:       root,
+		Root:       workspaceRoot,
 	}); err != nil {
 		return RegisterMCPContextResult{}, fmt.Errorf("record workspace: %w", err)
 	}
@@ -183,7 +192,7 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	}
 	return RegisterMCPContextResult{
 		ProjectID:         string(projectID),
-		ProjectRoot:       root,
+		ProjectRoot:       projectRoot,
 		LocationID:        string(locationID),
 		MemberID:          string(existing.ID),
 		DisplayName:       strings.TrimSpace(existing.DisplayName),
@@ -197,6 +206,49 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		MCPServers:        []string{"agen8"},
 		AlreadyRegistered: reusedExisting,
 	}, nil
+}
+
+func canonicalGitWorktreeRoot(root string, locationID types.LocationID) (string, bool) {
+	if strings.TrimSpace(string(locationID)) != "" && locationID != "local" {
+		return "", false
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", false
+	}
+	gitDir, ok := gitOutput(root, "rev-parse", "--absolute-git-dir")
+	if !ok {
+		return "", false
+	}
+	commonDir, ok := gitOutput(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if !ok {
+		return "", false
+	}
+	gitDir = filepath.Clean(gitDir)
+	commonDir = filepath.Clean(commonDir)
+	if gitDir == "" || commonDir == "" || filepath.Clean(gitDir) == filepath.Clean(commonDir) {
+		return "", false
+	}
+	list, ok := gitOutput(root, "worktree", "list", "--porcelain")
+	if !ok {
+		return "", false
+	}
+	for _, line := range strings.Split(list, "\n") {
+		path := strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+		if path != line && path != "" {
+			return filepath.Clean(path), true
+		}
+	}
+	return "", false
+}
+
+func gitOutput(root string, args ...string) (string, bool) {
+	cmdArgs := append([]string{"-C", root}, args...)
+	out, err := exec.Command("git", cmdArgs...).Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
 }
 
 func (s *Service) rehomeLegacyLocalProject(ctx context.Context, loaded project.Project, userID string) (project.Project, error) {
