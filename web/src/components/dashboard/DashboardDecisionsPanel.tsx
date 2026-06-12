@@ -13,7 +13,7 @@ import {
 import { decisionsPanelLink, decisionDetailLink } from '../../lib/routing'
 import ListPager from '../ListPager'
 import { usePageParam } from '../../hooks/usePageParam'
-import { useDecisionLog, useDecisionStats, useExportDecisions } from '../../hooks/useDecisions'
+import { useDecisionLog, useExportDecisions } from '../../hooks/useDecisions'
 import { sanitizeDecisionTitle } from '../../lib/displaySanitizers'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -110,28 +110,6 @@ function DecisionLogRow({ projectId, decision }: { projectId: string; decision: 
   )
 }
 
-/* ── Summary metric tile ── */
-
-function StatCard({ label, value, tone, hint }: {
-  label: string
-  value: number
-  tone?: 'danger' | 'warning'
-  hint?: string
-}) {
-  const valueColor =
-    value > 0 && tone === 'danger'
-      ? 'text-[var(--red)]'
-      : value > 0 && tone === 'warning'
-        ? 'text-[var(--amber)]'
-        : 'text-[var(--text-1)]'
-  return (
-    <div title={hint} className="rounded-[var(--r-md)] bg-[var(--bg-elevated)] px-3 py-2.5">
-      <div className="text-[0.625rem] font-medium uppercase tracking-[0.04em] text-[var(--text-3)]">{label}</div>
-      <div className={`mt-1 text-xl font-semibold tabular-nums ${valueColor}`}>{value}</div>
-    </div>
-  )
-}
-
 /* ── Loading skeleton ── */
 
 function DecisionsSkeleton({ embedded }: { embedded: boolean }) {
@@ -175,15 +153,6 @@ export default function DashboardDecisionsPanel({
     since: isoStart(fromDate),
     until: isoEnd(toDate),
     sort,
-  })
-
-  // Stats span the whole filtered set (server-side aggregate), so they share
-  // the content filters but not sort/page. Declared before the projectId guard
-  // to keep hook order stable.
-  const statsQuery = useDecisionStats(projectId, {
-    query,
-    since: isoStart(fromDate),
-    until: isoEnd(toDate),
   })
 
   const total = logQuery.data?.total ?? 0
@@ -282,15 +251,6 @@ export default function DashboardDecisionsPanel({
     </>
   )
 
-  const showStats = !!statsQuery.data && statsQuery.data.total > 0
-  const statCards = statsQuery.data && (
-    <div className={cn('grid gap-2', embedded ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4')}>
-      <StatCard label="Total" value={statsQuery.data.total} hint="Decisions matching the current filters" />
-      <StatCard label="Needs review" value={statsQuery.data.lowConfidence} tone="danger" hint="Logged with confidence below 50%" />
-      <StatCard label="Unlinked" value={statsQuery.data.unlinked} tone="warning" hint="Not linked to a task, key result, or mission" />
-      <StatCard label="Revisit conditions" value={statsQuery.data.withInvalidationConditions} hint="Recorded conditions that would invalidate the decision" />
-    </div>
-  )
 
   const body = logQuery.isLoading ? (
     <DecisionsSkeleton embedded={embedded} />
@@ -384,18 +344,6 @@ export default function DashboardDecisionsPanel({
         </div>
       )}
 
-      {/* Summary */}
-      {showStats && (
-        embedded ? (
-          <div className="shrink-0 px-[var(--dashboard-context-gutter)] py-3 border-b border-[color-mix(in_srgb,var(--border)_42%,transparent)]">
-            {statCards}
-          </div>
-        ) : (
-          <div className="shrink-0 border-b border-[var(--border)]">
-            <div className="mx-auto w-full max-w-4xl px-4 py-3 sm:px-6">{statCards}</div>
-          </div>
-        )
-      )}
 
       {/* Content */}
       <div className={cn('flex-1 min-h-0 overflow-y-auto', embedded ? 'px-[var(--dashboard-context-gutter)] py-4' : 'px-3 py-3 sm:px-4 max-w-4xl mx-auto w-full')}>
