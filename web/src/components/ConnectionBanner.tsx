@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'wouter'
 import { WifiOff, KeyRound, Wifi } from 'lucide-react'
-import { subscribeConnectionState, type ConnectionState } from '../lib/rpc'
+import { retryConnectionNow, subscribeConnectionState, type ConnectionState } from '../lib/rpc'
 
 /**
  * ConnectionBanner — the honest "you're looking at stale data" strip.
@@ -83,6 +83,14 @@ export default function ConnectionBanner() {
         <>
           <WifiOff size={13} aria-hidden />
           <span>Connection to agen8 lost — reconnecting. Data may be out of date.</span>
+          <button
+            type="button"
+            onClick={retryConnectionNow}
+            className="ml-1 cursor-pointer border-none bg-transparent p-0 font-medium underline underline-offset-2"
+            style={{ color: 'inherit' }}
+          >
+            Retry now
+          </button>
         </>
       )}
       {mode === 'auth_blocked' && (

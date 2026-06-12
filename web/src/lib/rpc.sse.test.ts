@@ -95,21 +95,21 @@ describe('rpc SSE reconnect policy', () => {
     expect(FakeEventSource.instances).toHaveLength(4)
   })
 
-  it('caps the backoff delay at 30s', async () => {
+  it('caps the backoff delay at 10s', async () => {
     mockEventsProbe(500)
     const rpc = await importRpc()
     rpc.onNotification('event.test', () => {})
 
-    // Walk the schedule well past the cap (2^10s uncapped = 1024s).
+    // Walk the schedule well past the cap.
     for (let i = 0; i < 10; i++) {
       FakeEventSource.instances[FakeEventSource.instances.length - 1].emitError()
       await flushProbe()
-      await vi.advanceTimersByTimeAsync(30_000)
+      await vi.advanceTimersByTimeAsync(10_000)
     }
     const countAtCap = FakeEventSource.instances.length
     FakeEventSource.instances[countAtCap - 1].emitError()
     await flushProbe()
-    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(10_000)
     expect(FakeEventSource.instances).toHaveLength(countAtCap + 1)
   })
 
@@ -191,6 +191,24 @@ describe('connection state emissions', () => {
 
     // Immediate delivery of the optimistic initial state, then the transitions.
     expect(seen).toEqual(['connected', 'reconnecting', 'connected'])
+  })
+
+
+  it('retryConnectionNow skips the pending backoff', async () => {
+    mockEventsProbe(500)
+    const rpc = await importRpc()
+    rpc.onNotification('event.test', () => {})
+
+    // Build up a long pending delay, then force a retry immediately.
+    FakeEventSource.instances[0].emitError()
+    await flushProbe()
+    await vi.advanceTimersByTimeAsync(1000)
+    FakeEventSource.instances[1].emitError()
+    await flushProbe()
+    // 2s timer pending; no new instance yet.
+    expect(FakeEventSource.instances).toHaveLength(2)
+    rpc.retryConnectionNow()
+    expect(FakeEventSource.instances).toHaveLength(3)
   })
 
   it('emits auth_blocked when the stream is refused', async () => {

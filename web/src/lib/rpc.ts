@@ -51,6 +51,26 @@ function setConnectionState(next: ConnectionState) {
   for (const listener of connectionListeners) listener(next)
 }
 
+/**
+ * Force an immediate reconnect attempt, skipping any pending backoff. Used by
+ * the banner's "Retry now" and by focus/online events — the moments a human is
+ * actively looking are exactly when lag is most visible.
+ */
+export function retryConnectionNow() {
+  if (connectionState !== 'reconnecting') return
+  if (probeInFlight) return
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  connect()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus', retryConnectionNow)
+  window.addEventListener('online', retryConnectionNow)
+}
+
 /** Current state plus change subscription; returns an unsubscribe. */
 export function subscribeConnectionState(listener: (state: ConnectionState) => void): () => void {
   connectionListeners.add(listener)
@@ -59,7 +79,9 @@ export function subscribeConnectionState(listener: (state: ConnectionState) => v
 }
 
 const RECONNECT_BASE_DELAY_MS = 1000
-const RECONNECT_MAX_DELAY_MS = 30_000
+// 10s cap: with auth failures halting separately, a transient retry every 10s
+// is harmless — and it bounds how long the banner can lag a recovered daemon.
+const RECONNECT_MAX_DELAY_MS = 10_000
 export const AUTH_TOKEN_STORAGE_KEY = 'agen8.sessionToken'
 const AUTH_TOKEN_COOKIE_NAME = 'agen8.sessionToken'
 
