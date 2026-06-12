@@ -254,7 +254,7 @@ func TestHandleSetupJSONIncludesMCPArtifacts(t *testing.T) {
 	for _, want := range []string{
 		result.APIKey.Secret,
 		`"mcpServers"`,
-		`"Authorization": "Bearer ${AGEN8_MCP_TOKEN}"`,
+		`"bearer_token_env_var": "AGEN8_MCP_TOKEN"`,
 		"codex mcp add agen8 --url",
 		"--bearer-token-env-var AGEN8_MCP_TOKEN",
 		"claude mcp add --transport http --scope user agen8",

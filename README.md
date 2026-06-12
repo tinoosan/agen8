@@ -102,7 +102,7 @@ bearer_token_env_var = "AGEN8_MCP_TOKEN"
 ```
 
 Then set `AGEN8_MCP_TOKEN` to your `ak_...` API key before starting Codex. The
-upcoming setup snippets use the same stable URL pattern. Query-token auth
+setup snippets use the same stable URL pattern. Query-token auth
 remains supported for compatibility and project link-token flows, but it is not
 the public default.
 

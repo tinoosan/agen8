@@ -209,11 +209,9 @@ func setupMCPConfig(mcpURL string) (string, error) {
 	config := map[string]any{
 		"mcpServers": map[string]any{
 			"agen8": map[string]any{
-				"type": "http",
-				"url":  mcpURL,
-				"headers": map[string]string{
-					"Authorization": "Bearer ${AGEN8_MCP_TOKEN}",
-				},
+				"type":                 "http",
+				"url":                  mcpURL,
+				"bearer_token_env_var": "AGEN8_MCP_TOKEN",
 			},
 		},
 	}

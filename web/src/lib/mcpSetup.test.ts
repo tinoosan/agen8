@@ -12,9 +12,7 @@ describe('buildMCPSetup', () => {
         agen8: {
           type: 'http',
           url: 'http://127.0.0.1:7777/mcp',
-          headers: {
-            Authorization: 'Bearer ${AGEN8_MCP_TOKEN}',
-          },
+          bearer_token_env_var: 'AGEN8_MCP_TOKEN',
         },
       },
     })

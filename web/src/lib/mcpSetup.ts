@@ -31,9 +31,7 @@ export function buildMCPSetup(secret: string, origin = browserOrigin()): MCPSetu
         [SERVER_NAME]: {
           type: 'http',
           url,
-          headers: {
-            Authorization: 'Bearer ${AGEN8_MCP_TOKEN}',
-          },
+          bearer_token_env_var: 'AGEN8_MCP_TOKEN',
         },
       },
     }, null, 2),
