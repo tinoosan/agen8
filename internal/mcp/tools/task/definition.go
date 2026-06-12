@@ -54,7 +54,7 @@ func mustSchema() json.RawMessage {
 			"file_name":           stringSchema("Attachment file name for action=attach. A bare name like build-screenshot.png; path separators are rejected. Optional with file_path (defaults to its base name). The file is stored under /project/.agen8/attachments/<task-id>/ and appended to the task's artifacts as file:<vpath>. Attach is for material that does not already live in the project (screenshots, generated reports); a file already in the project tree should be referenced in artifacts as file:<its real vpath> instead of uploading a copy."),
 			"content":             stringSchema("Attachment text content for action=attach. Provide exactly one of content, content_b64, or file_path."),
 			"content_b64":         stringSchema("Attachment binary content for action=attach, base64-encoded. Provide exactly one of content, content_b64, or file_path. For a binary file that already exists on disk (a screenshot, an image), prefer file_path — re-emitting base64 through the model is slow and corrupts easily."),
-			"file_path":           stringSchema("Absolute path to a local file for action=attach. The daemon reads the bytes directly so they never pass through the model — use this for screenshots and other binary evidence. The source file is copied, never moved (max 20MB); file_name defaults to its base name."),
+			"file_path":           stringSchema("Absolute path to a local file for action=attach. The daemon reads the bytes directly so they never pass through the model — use this for screenshots and other binary evidence. The source file is copied, never moved (max 25MB); file_name defaults to its base name."),
 		},
 		"required":             []string{"action"},
 		"additionalProperties": false,

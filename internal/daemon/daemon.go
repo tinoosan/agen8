@@ -167,6 +167,7 @@ func (d *Daemon) httpHandler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", d.handleHealthz)
 	mux.HandleFunc("POST /rpc", d.handleRPC)
+	mux.HandleFunc("POST /uploads/files", d.handleFileUpload)
 	mux.Handle("/mcp", d.mcp.Handler())
 	mux.HandleFunc("GET /events", d.handleEvents)
 	mux.HandleFunc("POST /hooks/attention", d.handleAttentionHook)

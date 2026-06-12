@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { FileText, Paperclip } from 'lucide-react'
 import { toast } from 'sonner'
-import { rpcCall } from '../../lib/rpc'
+import { rpcCall, uploadFile } from '../../lib/rpc'
 import { qk } from '../../lib/queryKeys'
 import { basename } from '../files/filePreviewUtils'
 import { CollapsibleSection } from '../strategy/CollapsibleSection'
@@ -55,18 +55,6 @@ function safeAttachmentName(name: string): string {
   return cleaned || `attachment-${Date.now()}`
 }
 
-function fileToBase64(file: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error ?? new Error('read failed'))
-    reader.onload = () => {
-      const url = String(reader.result)
-      resolve(url.slice(url.indexOf(',') + 1)) // strip the data:...;base64, prefix
-    }
-    reader.readAsDataURL(file)
-  })
-}
-
 interface TaskArtifactsSectionProps {
   task: Task
   projectId: string | null
@@ -86,8 +74,7 @@ export function TaskArtifactsSection({ task, projectId, onOpenArtifact }: TaskAr
     try {
       const fileName = safeAttachmentName(name)
       const vpath = `/project/.agen8/attachments/${task.id}/${fileName}`
-      const bytesB64 = await fileToBase64(file)
-      await rpcCall('files.upload', { projectId, path: vpath, bytesB64 })
+      await uploadFile({ projectId, path: vpath, file, fileName })
       // Server-side append (task.attachArtifact -> Service.AttachArtifact):
       // never read-modify-write the artifacts array in the client.
       await rpcCall('task.attachArtifact', { taskId: task.id, ref: FILE_REF_PREFIX + vpath })

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -128,8 +129,16 @@ type UploadInput struct {
 	ProjectID   types.ProjectID
 	ProjectRoot string
 	Path        string
+	Bytes       []byte
 	Content     string
 	BytesB64    string
+}
+
+type UploadReaderInput struct {
+	ProjectID   types.ProjectID
+	ProjectRoot string
+	Path        string
+	Reader      io.Reader
 }
 
 type PathResult struct {
@@ -394,13 +403,41 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (PathResult, er
 		return PathResult{}, err
 	}
 	var raw []byte
-	if strings.TrimSpace(input.BytesB64) != "" {
+	if input.Bytes != nil {
+		raw = input.Bytes
+	} else if strings.TrimSpace(input.BytesB64) != "" {
 		raw, err = base64.StdEncoding.DecodeString(strings.TrimSpace(input.BytesB64))
 		if err != nil {
 			return PathResult{}, fmt.Errorf("decode upload bytes: %w", err)
 		}
 	} else {
 		raw = []byte(input.Content)
+	}
+	if err := s.files.WriteFile(ctx, resolved.ref, raw); err != nil {
+		return PathResult{}, fmt.Errorf("write upload %s: %w", resolved.vpath, err)
+	}
+	return PathResult{Path: resolved.vpath}, nil
+}
+
+func (s *Service) UploadReader(ctx context.Context, input UploadReaderInput) (PathResult, error) {
+	resolved, err := s.resolveWritable(ctx, input.ProjectID, input.ProjectRoot, input.Path)
+	if err != nil {
+		return PathResult{}, err
+	}
+	if input.Reader == nil {
+		return PathResult{}, fmt.Errorf("reader is required")
+	}
+	if writer, ok := s.files.(interface {
+		WriteFileReader(context.Context, filedomain.Reference, io.Reader) error
+	}); ok {
+		if err := writer.WriteFileReader(ctx, resolved.ref, input.Reader); err != nil {
+			return PathResult{}, fmt.Errorf("write upload %s: %w", resolved.vpath, err)
+		}
+		return PathResult{Path: resolved.vpath}, nil
+	}
+	raw, err := io.ReadAll(input.Reader)
+	if err != nil {
+		return PathResult{}, fmt.Errorf("read upload %s: %w", resolved.vpath, err)
 	}
 	if err := s.files.WriteFile(ctx, resolved.ref, raw); err != nil {
 		return PathResult{}, fmt.Errorf("write upload %s: %w", resolved.vpath, err)

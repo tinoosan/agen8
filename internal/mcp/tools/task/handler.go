@@ -326,7 +326,7 @@ func attachmentVPath(id taskdomain.TaskID, fileName string) string {
 
 // maxAttachmentFileBytes caps file_path attachments. Inline content is already
 // bounded by the RPC body limit; this bound covers daemon-side reads.
-const maxAttachmentFileBytes = 20 << 20 // 20 MiB
+const maxAttachmentFileBytes = 25 << 20 // 25 MiB
 
 // readAttachmentFile reads an attachment source from the daemon host's
 // filesystem so the bytes never round-trip through the model. The source is

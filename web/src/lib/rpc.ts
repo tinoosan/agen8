@@ -121,6 +121,31 @@ export async function rpcCall<T = unknown>(method: string, params: unknown = {})
   return msg.result as T
 }
 
+export async function uploadFile(params: { projectId: string; path: string; file: Blob; fileName?: string }): Promise<{ path: string }> {
+  const form = new FormData()
+  form.set('projectId', params.projectId)
+  form.set('path', params.path)
+  if (params.fileName) {
+    form.set('file', params.file, params.fileName)
+  } else {
+    form.set('file', params.file)
+  }
+  const headers: Record<string, string> = {}
+  const token = getStoredSessionToken()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  const res = await fetch('/uploads/files', {
+    method: 'POST',
+    headers,
+    body: form,
+  })
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+  }
+  return await res.json()
+}
+
 /**
  * Calls an RPC method and returns a single named field from the result
  * envelope. Collapses the `const res = await rpcCall<{ x: T }>(...); return res.x`

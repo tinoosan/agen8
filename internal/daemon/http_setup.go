@@ -40,10 +40,6 @@ func (d *Daemon) setupAvailable(ctx context.Context) bool {
 	return d.setupHandler().available(ctx)
 }
 
-func (d *Daemon) validSetupToken(token string) bool {
-	return d.setupHandler().validToken(token)
-}
-
 func (h httpSetupHandler) handlePage(w http.ResponseWriter, r *http.Request) {
 	if !h.available(r.Context()) || !h.validToken(r.URL.Query().Get("token")) {
 		http.NotFound(w, r)

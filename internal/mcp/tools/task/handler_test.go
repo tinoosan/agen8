@@ -741,6 +741,34 @@ func TestHandleAttachByFilePathReadsBytesAndDefaultsFileName(t *testing.T) {
 	}
 }
 
+func TestHandleAttachByFilePathAllowsFiveMegabytes(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(strings.Repeat("x", 5<<20))
+	path := filepath.Join(dir, "five-megabytes.bin")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	svc := &stubService{}
+	files := &stubFileStore{}
+	payload, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_path": path})
+	if _, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), payload); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(files.uploads) != 1 {
+		t.Fatalf("uploads=%d want 1", len(files.uploads))
+	}
+	decoded, err := base64.StdEncoding.DecodeString(files.uploads[0].BytesB64)
+	if err != nil {
+		t.Fatalf("decode upload bytes: %v", err)
+	}
+	if len(decoded) != len(body) {
+		t.Fatalf("uploaded bytes=%d want %d", len(decoded), len(body))
+	}
+	if files.uploads[0].Path != "/project/.agen8/attachments/task-1/five-megabytes.bin" {
+		t.Fatalf("upload path=%q", files.uploads[0].Path)
+	}
+}
+
 func TestHandleAttachByFilePathExplicitFileNameWins(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "raw-capture.png")

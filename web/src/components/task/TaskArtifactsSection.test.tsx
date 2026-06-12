@@ -5,11 +5,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Task } from '../../lib/types'
 
 const mockRpcCall = vi.fn()
+const mockUploadFile = vi.fn()
 const mockToastError = vi.fn()
 const mockToastSuccess = vi.fn()
 
 vi.mock('../../lib/rpc', () => ({
   rpcCall: (...args: unknown[]) => mockRpcCall(...args),
+  uploadFile: (...args: unknown[]) => mockUploadFile(...args),
 }))
 vi.mock('sonner', () => ({
   toast: {
@@ -47,6 +49,7 @@ async function expandArtifacts() {
 
 beforeEach(() => {
   mockRpcCall.mockReset()
+  mockUploadFile.mockReset()
   mockToastError.mockReset()
   mockToastSuccess.mockReset()
   localStorage.clear()
@@ -126,6 +129,7 @@ describe('TaskArtifactsSection', () => {
 
   it('uploads a picked file then appends the ref server-side', async () => {
     mockRpcCall.mockResolvedValue({})
+    mockUploadFile.mockResolvedValue({})
     renderSection([])
     await expandArtifacts()
 
@@ -134,10 +138,11 @@ describe('TaskArtifactsSection', () => {
     await userEvent.upload(input, file)
 
     await waitFor(() => {
-      expect(mockRpcCall).toHaveBeenCalledWith('files.upload', expect.objectContaining({
+      expect(mockUploadFile).toHaveBeenCalledWith(expect.objectContaining({
         projectId: 'proj-1',
         path: '/project/.agen8/attachments/task-1/build-shot.png',
-        bytesB64: expect.any(String),
+        file,
+        fileName: 'build-shot.png',
       }))
     })
     expect(mockRpcCall).toHaveBeenCalledWith('task.attachArtifact', {
@@ -148,7 +153,7 @@ describe('TaskArtifactsSection', () => {
   })
 
   it('surfaces upload failures and never appends a ref', async () => {
-    mockRpcCall.mockRejectedValue(new Error('disk full'))
+    mockUploadFile.mockRejectedValue(new Error('disk full'))
     renderSection([])
     await expandArtifacts()
 
@@ -161,6 +166,7 @@ describe('TaskArtifactsSection', () => {
 
   it('attaches a pasted image from the clipboard', async () => {
     mockRpcCall.mockResolvedValue({})
+    mockUploadFile.mockResolvedValue({})
     renderSection([])
 
     const blob = new File(['png bytes'], 'clip.png', { type: 'image/png' })
@@ -171,7 +177,7 @@ describe('TaskArtifactsSection', () => {
     document.dispatchEvent(event)
 
     await waitFor(() => {
-      expect(mockRpcCall).toHaveBeenCalledWith('files.upload', expect.objectContaining({
+      expect(mockUploadFile).toHaveBeenCalledWith(expect.objectContaining({
         path: expect.stringMatching(/^\/project\/\.agen8\/attachments\/task-1\/pasted-.*\.png$/),
       }))
     })
@@ -190,6 +196,7 @@ describe('TaskArtifactsSection', () => {
     input.dispatchEvent(event)
     await new Promise((r) => setTimeout(r, 50))
     expect(mockRpcCall).not.toHaveBeenCalled()
+    expect(mockUploadFile).not.toHaveBeenCalled()
     input.remove()
   })
 })

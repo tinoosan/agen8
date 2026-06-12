@@ -119,6 +119,35 @@ func (LocalRepository) WriteFile(_ context.Context, ref filedomain.Reference, co
 	return os.WriteFile(ref.Path, contents, 0o644)
 }
 
+func (LocalRepository) WriteFileReader(_ context.Context, ref filedomain.Reference, contents io.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(ref.Path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(ref.Path), "."+filepath.Base(ref.Path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := io.Copy(tmp, contents); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, ref.Path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
 func infoFromOS(info os.FileInfo) filedomain.Info {
 	return filedomain.Info{
 		IsDir:      info.IsDir(),
