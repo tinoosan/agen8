@@ -34,6 +34,30 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
 let authBlockedToken: string | null = null
 let probeInFlight = false
+// ---- Connection state (UI surface) --------------------------------------
+// The reconnect machinery below already knows whether we're connected,
+// retrying, or halted on auth — this exposes those transitions so the app can
+// show an honest banner instead of silently serving stale data.
+export type ConnectionState = 'connected' | 'reconnecting' | 'auth_blocked'
+// Optimistic start: 'connected' until proven otherwise. A daemon that's down
+// at page load still errors the first EventSource attempt, which flips this to
+// reconnecting — but a slow first connect never flashes a false outage banner.
+let connectionState: ConnectionState = 'connected'
+const connectionListeners = new Set<(state: ConnectionState) => void>()
+
+function setConnectionState(next: ConnectionState) {
+  if (next === connectionState) return
+  connectionState = next
+  for (const listener of connectionListeners) listener(next)
+}
+
+/** Current state plus change subscription; returns an unsubscribe. */
+export function subscribeConnectionState(listener: (state: ConnectionState) => void): () => void {
+  connectionListeners.add(listener)
+  listener(connectionState)
+  return () => { connectionListeners.delete(listener) }
+}
+
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30_000
 export const AUTH_TOKEN_STORAGE_KEY = 'agen8.sessionToken'
@@ -210,6 +234,7 @@ function connect() {
   es.onopen = () => {
     reconnectAttempts = 0
     authBlockedToken = null
+    setConnectionState('connected')
   }
 
   es.onmessage = (e) => {
@@ -224,6 +249,7 @@ function connect() {
   es.onerror = () => {
     es.close()
     eventSource = null
+    setConnectionState('reconnecting')
     void scheduleReconnect()
   }
 }
@@ -253,6 +279,7 @@ async function scheduleReconnect() {
 
   if (authFailure) {
     authBlockedToken = getStoredSessionToken()
+    setConnectionState('auth_blocked')
     return
   }
 

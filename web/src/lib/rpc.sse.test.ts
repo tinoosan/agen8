@@ -161,3 +161,65 @@ describe('rpc SSE reconnect policy', () => {
     expect(FakeEventSource.instances).toHaveLength(after)
   })
 })
+
+describe('connection state emissions', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    window.localStorage.clear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('emits connected -> reconnecting -> connected across an outage', async () => {
+    mockEventsProbe(500)
+    const rpc = await importRpc()
+    const seen: string[] = []
+    rpc.subscribeConnectionState((s: string) => seen.push(s))
+    rpc.onNotification('event.test', () => {})
+
+    FakeEventSource.instances[0].emitOpen()
+    FakeEventSource.instances[0].emitError()
+    await flushProbe()
+    await vi.advanceTimersByTimeAsync(1000)
+    FakeEventSource.instances[1].emitOpen()
+
+    // Immediate delivery of the optimistic initial state, then the transitions.
+    expect(seen).toEqual(['connected', 'reconnecting', 'connected'])
+  })
+
+  it('emits auth_blocked when the stream is refused', async () => {
+    mockEventsProbe(403)
+    const rpc = await importRpc()
+    const seen: string[] = []
+    rpc.subscribeConnectionState((s: string) => seen.push(s))
+    rpc.onNotification('event.test', () => {})
+
+    FakeEventSource.instances[0].emitError()
+    await flushProbe()
+
+    expect(seen[seen.length - 1]).toBe('auth_blocked')
+  })
+
+  it('does not re-emit duplicate states', async () => {
+    mockEventsProbe(500)
+    const rpc = await importRpc()
+    const seen: string[] = []
+    rpc.subscribeConnectionState((s: string) => seen.push(s))
+    rpc.onNotification('event.test', () => {})
+
+    // Repeated errors stay one 'reconnecting' after the initial delivery.
+    FakeEventSource.instances[0].emitError()
+    await flushProbe()
+    await vi.advanceTimersByTimeAsync(1000)
+    FakeEventSource.instances[1].emitError()
+    await flushProbe()
+
+    expect(seen).toEqual(['connected', 'reconnecting'])
+  })
+})
