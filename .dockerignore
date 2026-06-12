@@ -1,5 +1,6 @@
 .git
 .github
+.gitignore
 .cursor
 .claude
 .worktrees/
@@ -12,6 +13,8 @@
 node_modules
 web/node_modules
 **/node_modules
+web/node_modules/.tmp
+web/node_modules/.vite
 tmp
 bin
 data
@@ -20,9 +23,13 @@ data
 *.env
 *.pem
 dist
+internal/web/dist
+web/dist
+dist-ssr
 coverage
 output
 test-results
+web/test-results
 workspace
 playground/.agen8
 playground/.playwright-mcp

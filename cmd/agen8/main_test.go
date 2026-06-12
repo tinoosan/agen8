@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +38,33 @@ func TestRunVersionPrintsBuildInfo(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output %q missing %q", output, want)
 		}
+	}
+}
+
+func TestRunHealthcheckAcceptsHealthyEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(server.Close)
+
+	if err := run([]string{"healthcheck", "--url", server.URL}); err != nil {
+		t.Fatalf("run healthcheck: %v", err)
+	}
+}
+
+func TestRunHealthcheckRejectsUnhealthyEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not ready", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	err := run([]string{"healthcheck", "--url", server.URL})
+	if err == nil {
+		t.Fatal("run healthcheck unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "503") {
+		t.Fatalf("error=%v, want status code", err)
 	}
 }
 

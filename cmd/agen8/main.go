@@ -5,10 +5,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/tinoosan/agen8/internal/claudehook"
 	"github.com/tinoosan/agen8/internal/config"
@@ -37,6 +39,8 @@ func run(args []string) error {
 			fmt.Printf("built: %s\n", info.BuildDate)
 		}
 		return nil
+	case "healthcheck":
+		return runHealthcheck(args[1:])
 	case "claude":
 		return runClaude(args[1:])
 	case "skill":
@@ -51,6 +55,36 @@ func run(args []string) error {
 		return fmt.Errorf("usage: agen8 daemon start [--data-dir DIR] [--listener http] [--http-addr ADDR]")
 	}
 	return runDaemonStart(args[2:])
+}
+
+func runHealthcheck(args []string) error {
+	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var (
+		url     string
+		timeout time.Duration
+	)
+	fs.StringVar(&url, "url", "http://127.0.0.1:7777/healthz", "health endpoint URL")
+	fs.DurationVar(&timeout, "timeout", 2*time.Second, "request timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(url) == "" {
+		return fmt.Errorf("healthcheck url is required")
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("healthcheck request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("healthcheck failed: %s", resp.Status)
+	}
+	return nil
 }
 
 // runClaude dispatches the Claude Code integration subcommands. Today the only

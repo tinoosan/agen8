@@ -75,6 +75,62 @@ Confirm it is up:
 curl http://127.0.0.1:7777/healthz
 ```
 
+### Docker
+
+You can also build and run Agen8 as a container. The image builds the web UI
+inside Docker, compiles the `agen8` binary with the UI embedded, runs as a
+non-root user, stores state in `/data`, and exposes the daemon on port `7777`.
+
+Build the image:
+
+```sh
+docker build -t agen8:local .
+```
+
+Run it with a named volume so SQLite state survives container replacement:
+
+```sh
+docker run --rm \
+  --name agen8 \
+  -p 7777:7777 \
+  -v agen8-data:/data \
+  agen8:local
+```
+
+Or use Compose:
+
+```sh
+docker compose up --build
+```
+
+On first run with an empty volume, the container logs include the setup URL:
+
+```text
+agen8 setup: http://[::]:7777/setup?token=...
+```
+
+Open the equivalent host URL, `http://127.0.0.1:7777/setup?token=...`, create
+the first account, then use the returned API key for MCP clients. Confirm the
+container is healthy with:
+
+```sh
+curl http://127.0.0.1:7777/healthz
+docker inspect --format '{{json .State.Health}}' agen8
+```
+
+The image default command is equivalent to:
+
+```sh
+agen8 daemon start --listener http --http-addr 0.0.0.0:7777 --data-dir /data
+```
+
+To run with a bind-mounted data directory instead of a named volume:
+
+```sh
+mkdir -p ./.agen8-docker
+docker run --rm -p 7777:7777 -v "$PWD/.agen8-docker:/data" agen8:local
+```
+
 ### 4. Create your account
 
 On the **first run with a fresh data directory**, the daemon prints a setup URL

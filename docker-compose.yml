@@ -1,0 +1,19 @@
+services:
+  agen8:
+    build:
+      context: .
+      args:
+        VERSION: ${AGEN8_VERSION:-dev}
+        COMMIT: ${AGEN8_COMMIT:-local}
+        BUILD_DATE: ${AGEN8_BUILD_DATE:-local}
+    image: agen8:local
+    ports:
+      - "7777:7777"
+    volumes:
+      - agen8-data:/data
+    environment:
+      AGEN8_DATA_DIR: /data
+    restart: unless-stopped
+
+volumes:
+  agen8-data:
