@@ -8,6 +8,7 @@ import { useAuth } from './hooks/useAuth'
 import { useRealtimeInvalidation } from './hooks/useRealtimeSync'
 import { lazyWithRetry } from './lib/lazyWithRetry'
 import Sidebar from './components/Sidebar'
+import GlobalNodeSearch from './components/GlobalNodeSearch'
 import NotificationInbox from './components/notifications/NotificationInbox'
 import { Toaster } from './components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -279,6 +280,7 @@ export default function App() {
           </a>
           <MobileTopBar />
           <Sidebar />
+          <GlobalNodeSearch />
           <main id="main-content" className="app-main md:pt-[env(safe-area-inset-top)]">
             <Suspense fallback={<Spinner />}>
               <PageErrorBoundary>
