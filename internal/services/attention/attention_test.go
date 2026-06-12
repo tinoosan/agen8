@@ -2,6 +2,7 @@ package attention
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,9 +35,28 @@ type tickClock struct{ t time.Time }
 
 func (c *tickClock) now() time.Time { return c.t }
 
+// fakeProjects maps directory roots to project ids for cwd attribution.
+type fakeProjects struct {
+	roots map[string]string
+}
+
+func (f *fakeProjects) ProjectIDForDir(_ context.Context, dir string) (string, bool) {
+	for root, id := range f.roots {
+		if dir == root || strings.HasPrefix(dir, root+"/") {
+			return id, true
+		}
+	}
+	return "", false
+}
+
 func newServiceForTest(t *testing.T, members *fakeMembers, bus *capturingBus, clock *tickClock, ttl time.Duration) *Service {
 	t.Helper()
-	svc, err := NewService(members, bus, clock.now, ttl, nil)
+	return newServiceWithProjects(t, members, &fakeProjects{}, bus, clock, ttl)
+}
+
+func newServiceWithProjects(t *testing.T, members *fakeMembers, projects *fakeProjects, bus *capturingBus, clock *tickClock, ttl time.Duration) *Service {
+	t.Helper()
+	svc, err := NewService(members, projects, bus, clock.now, ttl, nil)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -69,7 +89,7 @@ func TestReportAttributesToMemberAndPublishes(t *testing.T) {
 	}
 }
 
-func TestUnmatchedSessionIsKeptUnattributed(t *testing.T) {
+func TestUnknownSessionIsDropped(t *testing.T) {
 	members := &fakeMembers{}
 	bus := &capturingBus{}
 	clock := &tickClock{t: time.Unix(1700000000, 0).UTC()}
@@ -79,16 +99,45 @@ func TestUnmatchedSessionIsKeptUnattributed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Report: %v", err)
 	}
-	if entry.MemberID != "" || entry.ProjectID != "" {
-		t.Fatalf("expected unattributed entry, got %+v", entry)
+	if entry.SessionRef != "" {
+		t.Fatalf("expected drop (zero entry), got %+v", entry)
 	}
-	// No project room to publish into, but it must still be listed everywhere.
 	if len(bus.events) != 0 {
-		t.Fatalf("unattributed entries must not publish, got %+v", bus.events)
+		t.Fatalf("dropped events must not publish, got %+v", bus.events)
 	}
-	listed := svc.List(context.Background(), "any-project")
-	if len(listed) != 1 || listed[0].SessionRef != "sess-unknown" {
-		t.Fatalf("unattributed entry missing from list: %+v", listed)
+	if listed := svc.List(context.Background(), "any-project"); len(listed) != 0 {
+		t.Fatalf("dropped event must not be listed: %+v", listed)
+	}
+}
+
+func TestUnmatchedSessionAttributesByCwd(t *testing.T) {
+	members := &fakeMembers{}
+	projects := &fakeProjects{roots: map[string]string{"/home/me/dev/app": "proj-app"}}
+	bus := &capturingBus{}
+	clock := &tickClock{t: time.Unix(1700000000, 0).UTC()}
+	svc := newServiceWithProjects(t, members, projects, bus, clock, DefaultTTL)
+
+	entry, err := svc.Report(context.Background(), "u", Event{
+		SessionRef: "sess-cwd",
+		Harness:    "codex",
+		Kind:       KindWaiting,
+		Cwd:        "/home/me/dev/app/sub/dir",
+	})
+	if err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	if entry.ProjectID != "proj-app" || entry.MemberID != "" {
+		t.Fatalf("expected cwd attribution to proj-app without member, got %+v", entry)
+	}
+	// Scoped to its project only.
+	if got := svc.List(context.Background(), "proj-app"); len(got) != 1 {
+		t.Fatalf("expected entry in proj-app, got %+v", got)
+	}
+	if got := svc.List(context.Background(), "other"); len(got) != 0 {
+		t.Fatalf("entry leaked into another project: %+v", got)
+	}
+	if len(bus.events) != 1 || bus.events[0].ProjectID != "proj-app" {
+		t.Fatalf("expected raised event for proj-app, got %+v", bus.events)
 	}
 }
 

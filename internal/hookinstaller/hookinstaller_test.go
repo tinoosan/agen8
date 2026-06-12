@@ -65,7 +65,7 @@ func TestInstallClaudeWritesSettingsLocal(t *testing.T) {
 	if strings.Contains(cmd, "7777//") {
 		t.Fatalf("base URL not normalized: %s", cmd)
 	}
-	for _, event := range []string{"Stop", "UserPromptSubmit", "SessionEnd", "PreToolUse", "PostToolUse"} {
+	for _, event := range []string{"Stop", "UserPromptSubmit", "SessionEnd"} {
 		if len(eventGroups(t, config, event)) != 1 {
 			t.Fatalf("expected one group for %s", event)
 		}
@@ -79,10 +79,24 @@ func TestInstallClaudeWritesSettingsLocal(t *testing.T) {
 	if !strings.Contains(preCmd, "kind=asking") {
 		t.Fatalf("PreToolUse should map to asking: %s", preCmd)
 	}
-	post := eventGroups(t, config, "PostToolUse")[0].(map[string]any)
+	// PostToolUse carries two groups: question answered + the Bash heartbeat.
+	postGroups := eventGroups(t, config, "PostToolUse")
+	if len(postGroups) != 2 {
+		t.Fatalf("PostToolUse groups = %d, want 2", len(postGroups))
+	}
+	post := postGroups[0].(map[string]any)
 	postCmd := post["hooks"].([]any)[0].(map[string]any)["command"].(string)
 	if post["matcher"] != "AskUserQuestion" || !strings.Contains(postCmd, "kind=cleared") {
 		t.Fatalf("PostToolUse should clear on AskUserQuestion: %v / %s", post["matcher"], postCmd)
+	}
+	heartbeat := postGroups[1].(map[string]any)
+	heartbeatCmd := heartbeat["hooks"].([]any)[0].(map[string]any)["command"].(string)
+	if heartbeat["matcher"] != "Bash" || !strings.Contains(heartbeatCmd, "kind=cleared") {
+		t.Fatalf("expected Bash heartbeat clearing: %v / %s", heartbeat["matcher"], heartbeatCmd)
+	}
+	// High-frequency hook: must use the tight 1s timeout, not the default 3s.
+	if !strings.Contains(heartbeatCmd, "curl -m 1 ") {
+		t.Fatalf("Bash heartbeat should use -m 1: %s", heartbeatCmd)
 	}
 
 	// The file embeds a token: must not be group/world readable.
@@ -158,6 +172,7 @@ func TestInstallCodexWritesUserLevelHooks(t *testing.T) {
 	for event, kind := range map[string]string{
 		"Stop":              "kind=waiting",
 		"PermissionRequest": "kind=needs_approval",
+		"PostToolUse":       "kind=cleared", // Bash heartbeat
 		"UserPromptSubmit":  "kind=cleared",
 		"SessionStart":      "kind=cleared",
 	} {

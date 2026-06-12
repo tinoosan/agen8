@@ -70,6 +70,7 @@ func New(cfg Config) (*Daemon, error) {
 	}
 	attentionSvc, err := attention.NewService(
 		application.ProjectSvc,
+		projectDirLookup{projects: application.ProjectSvc},
 		application.EventBus,
 		nil,
 		attention.DefaultTTL,

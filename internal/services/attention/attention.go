@@ -39,10 +39,11 @@ const (
 	KindCleared Kind = "cleared"
 )
 
-// DefaultTTL bounds how long a stale entry survives without a clear signal
-// (hook script lost, laptop slept mid-wait). Generous on purpose: a false
-// "waiting" that self-expires beats a real wait that vanishes too early.
-const DefaultTTL = 6 * time.Hour
+// DefaultTTL bounds how long a stale entry survives without a clear signal —
+// the crash ghost: a killed session never sends cleared. Two hours keeps a
+// genuine overnight wait visible long enough to act on while capping how long
+// a ghost can lie.
+const DefaultTTL = 2 * time.Hour
 
 // Event is the normalized payload a harness hook posts.
 type Event struct {
@@ -50,6 +51,9 @@ type Event struct {
 	Harness    string `json:"harness,omitempty"`
 	Kind       Kind   `json:"kind"`
 	Message    string `json:"message,omitempty"`
+	// Cwd is the session's working directory from the harness payload, used to
+	// attribute sessions that registered no member (cwd -> project root).
+	Cwd string `json:"cwd,omitempty"`
 }
 
 // Entry is one session currently needing the human.
@@ -77,21 +81,30 @@ type EventPublisher interface {
 	Publish(topic string, event any) error
 }
 
+// ProjectLookup resolves a working directory to the project whose root
+// contains it — the fallback attribution for sessions with no registered
+// member (e.g. Codex's user-level hooks firing from any directory).
+type ProjectLookup interface {
+	ProjectIDForDir(ctx context.Context, dir string) (string, bool)
+}
+
 // Service is the in-memory attention tracker, keyed by session ref.
 type Service struct {
 	mu      sync.RWMutex
 	entries map[string]Entry
 
-	members MemberLookup
-	events  EventPublisher
-	now     func() time.Time
-	ttl     time.Duration
-	logger  *slog.Logger
+	members  MemberLookup
+	projects ProjectLookup
+	events   EventPublisher
+	now      func() time.Time
+	ttl      time.Duration
+	logger   *slog.Logger
 }
 
-// NewService builds the tracker. members and events are required; now and ttl
-// default to time.Now and DefaultTTL.
-func NewService(members MemberLookup, events EventPublisher, now func() time.Time, ttl time.Duration, logger *slog.Logger) (*Service, error) {
+// NewService builds the tracker. members and events are required; projects is
+// optional (without it, member-unmatched events are dropped outright); now and
+// ttl default to time.Now and DefaultTTL.
+func NewService(members MemberLookup, projects ProjectLookup, events EventPublisher, now func() time.Time, ttl time.Duration, logger *slog.Logger) (*Service, error) {
 	if members == nil {
 		return nil, errors.New("attention service: member lookup is required")
 	}
@@ -108,19 +121,24 @@ func NewService(members MemberLookup, events EventPublisher, now func() time.Tim
 		logger = slog.Default().With("service", "attention")
 	}
 	return &Service{
-		entries: map[string]Entry{},
-		members: members,
-		events:  events,
-		now:     now,
-		ttl:     ttl,
-		logger:  logger,
+		entries:  map[string]Entry{},
+		members:  members,
+		projects: projects,
+		events:   events,
+		now:      now,
+		ttl:      ttl,
+		logger:   logger,
 	}, nil
 }
 
 // Report ingests one hook event for the authenticated user. It never blocks on
-// downstream consumers: member resolution is best-effort (an unmatched session
-// is kept as unattributed) and a bus publish failure is logged, not returned —
-// the hook caller must always get a fast, successful ack.
+// downstream consumers: attribution is best-effort and a bus publish failure is
+// logged, not returned — the hook caller must always get a fast, successful ack.
+//
+// Attribution is two-step: session ref -> registered member, else cwd ->
+// project root. An event matching neither is dropped — Codex's user-level
+// hooks fire from every directory, and a session agen8 knows nothing about
+// must not pollute project dashboards.
 func (s *Service) Report(ctx context.Context, userID string, ev Event) (Entry, error) {
 	sessionRef := strings.TrimSpace(ev.SessionRef)
 	if sessionRef == "" {
@@ -154,6 +172,15 @@ func (s *Service) Report(ctx context.Context, userID string, ev Event) (Entry, e
 		UpdatedAt:  now,
 	}
 	s.attribute(ctx, &entry)
+	if entry.ProjectID == "" && s.projects != nil {
+		if projectID, ok := s.projects.ProjectIDForDir(ctx, strings.TrimSpace(ev.Cwd)); ok {
+			entry.ProjectID = projectID
+		}
+	}
+	if entry.ProjectID == "" {
+		s.logger.Debug("attention: drop event from unknown session", "sessionRef", sessionRef, "cwd", ev.Cwd)
+		return Entry{}, nil
+	}
 
 	s.mu.Lock()
 	if existing, ok := s.entries[sessionRef]; ok && existing.Kind == entry.Kind {
@@ -168,9 +195,9 @@ func (s *Service) Report(ctx context.Context, userID string, ev Event) (Entry, e
 	return entry, nil
 }
 
-// List returns live entries for a project, newest wait first. Unattributed
-// entries (no member matched) are included for every project so they are never
-// invisible. Expired entries are swept on the way through.
+// List returns live entries for a project, newest wait first. Every stored
+// entry carries a project (unmappable events are dropped at Report), so the
+// scope is exact. Expired entries are swept on the way through.
 func (s *Service) List(ctx context.Context, projectID string) []Entry {
 	_ = ctx
 	projectID = strings.TrimSpace(projectID)
@@ -183,7 +210,7 @@ func (s *Service) List(ctx context.Context, projectID string) []Entry {
 			delete(s.entries, ref)
 			continue
 		}
-		if entry.ProjectID == projectID || entry.ProjectID == "" {
+		if entry.ProjectID == projectID {
 			out = append(out, entry)
 		}
 	}

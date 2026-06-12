@@ -103,7 +103,7 @@ const ATTENTION_KIND_LABEL: Record<AttentionEntry['kind'], string> = {
 }
 
 function attentionLead(entry: AttentionEntry): string {
-  const who = entry.memberName || 'Unknown session'
+  const who = entry.memberName || 'Unregistered session'
   const harness = entry.harness ? ` (${entry.harness})` : ''
   const kind = ATTENTION_KIND_LABEL[entry.kind] ?? entry.kind
   return `${who}${harness} — ${kind}`

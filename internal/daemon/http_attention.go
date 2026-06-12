@@ -1,13 +1,17 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/services/attention"
+	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
+	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 const maxAttentionHookBodyBytes = 16 * 1024
@@ -38,10 +42,12 @@ func (d *Daemon) handleAttentionHook(w http.ResponseWriter, r *http.Request) {
 	var ev attention.Event
 	body := http.MaxBytesReader(w, r.Body, maxAttentionHookBodyBytes)
 	if kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind != "" {
+		sessionRef, cwd := rawHookPayloadFields(body)
 		ev = attention.Event{
 			Harness:    strings.TrimSpace(r.URL.Query().Get("harness")),
 			Kind:       attention.Kind(kind),
-			SessionRef: sessionRefFromRawHookPayload(body),
+			SessionRef: sessionRef,
+			Cwd:        cwd,
 		}
 	} else if err := json.NewDecoder(body).Decode(&ev); err != nil {
 		http.Error(w, "invalid attention event payload", http.StatusBadRequest)
@@ -65,16 +71,47 @@ func (d *Daemon) handleAttentionHook(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// sessionRefFromRawHookPayload pulls the session identifier out of a harness's
-// own hook payload. Claude Code and Codex hooks both deliver stdin JSON with a
-// top-level "session_id". Returns empty on any parse failure — Report then
-// rejects with a 400 and the hook script still exits 0.
-func sessionRefFromRawHookPayload(body io.Reader) string {
+// rawHookPayloadFields pulls the session identifier and working directory out
+// of a harness's own hook payload. Claude Code and Codex hooks both deliver
+// stdin JSON with top-level "session_id" and "cwd". Returns empties on any
+// parse failure — Report then rejects with a 400 and the hook script still
+// exits 0.
+func rawHookPayloadFields(body io.Reader) (sessionRef, cwd string) {
 	var payload struct {
 		SessionID string `json:"session_id"`
+		Cwd       string `json:"cwd"`
 	}
 	if err := json.NewDecoder(body).Decode(&payload); err != nil {
-		return ""
+		return "", ""
 	}
-	return strings.TrimSpace(payload.SessionID)
+	return strings.TrimSpace(payload.SessionID), strings.TrimSpace(payload.Cwd)
+}
+
+// projectDirLookup adapts the project service to attention.ProjectLookup:
+// resolve a session's working directory to the project whose root contains it,
+// preferring the longest (most specific) matching root.
+type projectDirLookup struct {
+	projects *projectapp.Service
+}
+
+func (l projectDirLookup) ProjectIDForDir(ctx context.Context, dir string) (string, bool) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" || l.projects == nil {
+		return "", false
+	}
+	all, err := l.projects.ListProjects(ctx, projectdomain.Filter{})
+	if err != nil {
+		return "", false
+	}
+	bestID, bestLen := "", 0
+	for _, p := range all {
+		root := strings.TrimRight(strings.TrimSpace(l.projects.ResolveRoot(ctx, p)), string(filepath.Separator))
+		if root == "" || len(root) <= bestLen {
+			continue
+		}
+		if dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
+			bestID, bestLen = string(p.ID()), len(root)
+		}
+	}
+	return bestID, bestID != ""
 }

@@ -68,6 +68,11 @@ var claudeHookEvents = []hookSpec{
 	{Event: "Notification", Matcher: "permission_prompt", Kind: "needs_approval"},
 	{Event: "PreToolUse", Matcher: "AskUserQuestion", Kind: "asking"},
 	{Event: "PostToolUse", Matcher: "AskUserQuestion", Kind: "cleared"},
+	// Heartbeat: a completed Bash call proves the agent is running, clearing a
+	// stale needs_approval (nothing fires when the human approves a tool) or
+	// waiting. Tight timeout — this fires often, so a down agen8 may cost at
+	// most ~1s per Bash call, never more.
+	{Event: "PostToolUse", Matcher: "Bash", Kind: "cleared", TimeoutSecs: 1},
 	{Event: "Stop", Matcher: "", Kind: "waiting"},
 	{Event: "UserPromptSubmit", Matcher: "", Kind: "cleared"},
 	{Event: "SessionEnd", Matcher: "", Kind: "cleared"},
@@ -80,6 +85,8 @@ var claudeHookEvents = []hookSpec{
 var codexHookEvents = []hookSpec{
 	{Event: "Stop", Matcher: "", Kind: "waiting"},
 	{Event: "PermissionRequest", Matcher: "", Kind: "needs_approval"},
+	// Heartbeat — see the claude PostToolUse(Bash) entry.
+	{Event: "PostToolUse", Matcher: "Bash", Kind: "cleared", TimeoutSecs: 1},
 	{Event: "UserPromptSubmit", Matcher: "", Kind: "cleared"},
 	{Event: "SessionStart", Matcher: "", Kind: "cleared"},
 }
@@ -88,6 +95,9 @@ type hookSpec struct {
 	Event   string
 	Matcher string
 	Kind    string
+	// TimeoutSecs overrides the curl -m timeout (default 3). Use a tight value
+	// for high-frequency hooks so a down agen8 cannot meaningfully slow agents.
+	TimeoutSecs int
 }
 
 // Install provisions the attention hooks for one harness.
@@ -112,10 +122,14 @@ func Install(opts Options) (Result, error) {
 // hookCommand renders the curl one-liner for one harness+kind. Short timeout,
 // silent, and `|| true` so a slow or down agen8 can never block or fail the
 // agent's hook chain.
-func hookCommand(baseURL, token, harness, kind string) string {
+func hookCommand(baseURL, token, harness string, spec hookSpec) string {
+	timeout := spec.TimeoutSecs
+	if timeout <= 0 {
+		timeout = 3
+	}
 	return fmt.Sprintf(
-		"curl -m 3 -s -o /dev/null -X POST '%s/hooks/attention?harness=%s&kind=%s' -H 'Authorization: Bearer %s' --data-binary @- || true",
-		baseURL, harness, kind, token,
+		"curl -m %d -s -o /dev/null -X POST '%s/hooks/attention?harness=%s&kind=%s' -H 'Authorization: Bearer %s' --data-binary @- || true",
+		timeout, baseURL, harness, spec.Kind, token,
 	)
 }
 
@@ -200,7 +214,7 @@ func mergeHookEvents(container map[string]any, specs []hookSpec, harness, baseUR
 		group := map[string]any{
 			"hooks": []any{map[string]any{
 				"type":    "command",
-				"command": hookCommand(baseURL, token, harness, spec.Kind),
+				"command": hookCommand(baseURL, token, harness, spec),
 			}},
 		}
 		if spec.Matcher != "" {
