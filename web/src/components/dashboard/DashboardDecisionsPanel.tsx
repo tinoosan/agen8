@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { decisionsPanelLink, decisionDetailLink } from '../../lib/routing'
 import ListPager from '../ListPager'
+import { usePageParam } from '../../hooks/usePageParam'
 import { useDecisionLog, useDecisionStats, useExportDecisions } from '../../hooks/useDecisions'
 import { sanitizeDecisionTitle } from '../../lib/displaySanitizers'
 import { Badge } from '@/components/ui/badge'
@@ -164,7 +165,7 @@ export default function DashboardDecisionsPanel({
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
-  const [page, setPage] = useState(1)
+  const [page, setPage] = usePageParam()
   const exportDecisions = useExportDecisions()
 
   const logQuery = useDecisionLog(projectId, {

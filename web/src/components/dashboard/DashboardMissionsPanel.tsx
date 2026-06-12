@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'wouter'
 import { useMissions } from '../../hooks/useMissions'
 import ListPager, { pageSlice } from '../ListPager'
+import { usePageParam } from '../../hooks/usePageParam'
 import { usePins } from '../../hooks/usePins'
 import CreateMissionDialog from '../mission/CreateMissionDialog'
 import type { MissionStatus } from '../../lib/types'
@@ -53,7 +54,7 @@ export default function DashboardMissionsPanel({
   const [statusFilter, setStatusFilterState] = useState<StatusFilter>('all')
   const [searchQuery, setSearchQueryState] = useState('')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [page, setPage] = useState(1)
+  const [page, setPage] = usePageParam()
 
   // Filter/search changes reset to page 1 — same house pagination as the
   // decisions and tasks panels.

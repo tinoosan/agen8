@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link, useLocation, useSearch } from 'wouter'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
+import { usePageParam } from '../../hooks/usePageParam'
 import CreateTaskDialog from '../task/CreateTaskDialog'
 import ListPager, { pageSlice } from '../ListPager'
 import { taskDetailLink } from '../../lib/routing'
@@ -64,6 +65,10 @@ export default function DashboardTasksPanel({
       if (!projectId) return
       const params = new URLSearchParams(rawSearch)
       params.set('panel', 'tasks')
+      // A new filter is a new list: the page param must not survive it. The
+      // page reset rides THIS navigation — calling setPage(1) separately races
+      // it (two navigations from stale closures resurrect the old page).
+      params.delete('page')
       if (value === 'all') params.delete('status')
       else params.set('status', value)
       const qs = params.toString()
@@ -73,10 +78,9 @@ export default function DashboardTasksPanel({
   )
 	const [searchQuery, setSearchQuery] = useState('')
 	const [createDialogOpen, setCreateDialogOpen] = useState(false)
-	const [page, setPage] = useState(1)
+	const [page, setPage] = usePageParam()
 
 	const changeStatusFilter = (value: string) => {
-		setPage(1)
 		setStatusFilter(value)
 	}
 
