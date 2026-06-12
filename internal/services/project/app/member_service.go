@@ -98,12 +98,23 @@ func (s *Service) UpsertExternalHarnessMember(ctx context.Context, p UpsertExter
 		if err := s.members.Update(ctx, rosterMember); err != nil {
 			return member.Record{}, fmt.Errorf("update external harness member: %w", err)
 		}
-		return s.withResolvedPermissionMode(rosterMember), nil
+		resolved := s.withResolvedPermissionMode(rosterMember)
+		if err := s.publishMemberLifecycle(eventbus.SpaceMemberEventConfigChanged, resolved); err != nil {
+			return member.Record{}, fmt.Errorf("publish external harness member updated: %w", err)
+		}
+		return resolved, nil
 	}
 	if err := s.members.Create(ctx, rosterMember); err != nil {
 		return member.Record{}, fmt.Errorf("create external harness member: %w", err)
 	}
-	return s.withResolvedPermissionMode(rosterMember), nil
+	// Every MCP project.register lands here, so this publish is what lets the
+	// dashboard react the moment an agent appears (SSE invalidates the roster);
+	// without it the web UI only notices on its 30s poll backstop.
+	resolved := s.withResolvedPermissionMode(rosterMember)
+	if err := s.publishMemberLifecycle(eventbus.SpaceMemberEventRegistered, resolved); err != nil {
+		return member.Record{}, fmt.Errorf("publish external harness member registered: %w", err)
+	}
+	return resolved, nil
 }
 
 func (s *Service) RegisterMember(ctx context.Context, rosterMember member.Record) (RegisterMemberResult, error) {
