@@ -72,6 +72,7 @@ func (s *Service) GetLifecycleHistory(ctx context.Context, missionID missiondoma
 
 func lifecycleHistoryEventTypes() []string {
 	return []string{
+		string(MissionEventCreated),
 		string(MissionEventActivated),
 		string(MissionEventPaused),
 		string(MissionEventCompleted),
@@ -96,6 +97,8 @@ func isLifecycleHistoryEvent(kind MissionEventKind) bool {
 func lifecycleAction(eventType string) string {
 	eventType = strings.TrimSpace(eventType)
 	switch eventType {
+	case string(MissionEventCreated):
+		return "create"
 	case string(MissionEventActivated):
 		return "activate"
 	case string(MissionEventPaused):

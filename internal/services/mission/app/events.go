@@ -15,6 +15,7 @@ import (
 type MissionEventKind string
 
 const (
+	MissionEventCreated   MissionEventKind = "mission.created"
 	MissionEventActivated MissionEventKind = "mission.activated"
 	MissionEventPaused    MissionEventKind = "mission.paused"
 	MissionEventCompleted MissionEventKind = "mission.completed"

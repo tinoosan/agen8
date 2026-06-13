@@ -580,7 +580,8 @@ func (p missionEventPublisher) Append(_ context.Context, event types.EventRecord
 		return fmt.Errorf("mission event bus is required")
 	}
 	switch event.Type {
-	case string(missionapp.MissionEventActivated),
+	case string(missionapp.MissionEventCreated),
+		string(missionapp.MissionEventActivated),
 		string(missionapp.MissionEventPaused),
 		string(missionapp.MissionEventCompleted),
 		string(missionapp.MissionEventArchived):

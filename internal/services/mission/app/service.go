@@ -206,6 +206,13 @@ func (s *Service) CreateMission(ctx context.Context, params CreateMissionParams)
 	if err := s.missions.CreateMission(ctx, mission); err != nil {
 		return missiondomain.Mission{}, err
 	}
+	// Publish so the dashboard/sidebar refresh the moment a mission appears,
+	// instead of waiting on the 30s poll. Parallels KREventCreated in
+	// CreateKeyResult; mission.created is routed to TopicMissionLifecycle and
+	// recorded in lifecycle history, like kr.created.
+	if err := s.publishMissionEvent(ctx, MissionEventCreated, mission); err != nil {
+		return missiondomain.Mission{}, err
+	}
 	s.logMissionTransition("create", mission)
 	return mission, nil
 }

@@ -456,6 +456,55 @@ func TestDeleteMissionPublishesArchivedEventAfterPersistence(t *testing.T) {
 	}
 }
 
+// Creating a mission must publish a mission.created event (so the dashboard and
+// sidebar refresh in realtime instead of on the 30s poll) and record it in
+// lifecycle history, mirroring kr.created. Regression for the gap where
+// CreateMission only logged and never published.
+func TestCreateMissionPublishesCreatedEvent(t *testing.T) {
+	events := &fakeEventPublisher{}
+	lifecycle := &fakeLifecycleEventRepository{}
+	svc, err := NewService(
+		newFakeMissionRepository(),
+		newFakeKeyResultRepository(),
+		&fakeProgressEntryRepository{},
+		lifecycle,
+		fakeClock{now: serviceTestNow},
+		fakeCallerResolver{},
+		fakeTaskLoader{},
+		&fakeLinkedTaskLoader{},
+		events,
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	mission, err := svc.CreateMission(context.Background(), CreateMissionParams{
+		ID:        missiondomain.MissionID("mission-1"),
+		ProjectID: "project-1",
+		Title:     "Launch",
+	})
+	if err != nil {
+		t.Fatalf("CreateMission: %v", err)
+	}
+
+	if len(events.events) != 1 {
+		t.Fatalf("published events=%d want 1", len(events.events))
+	}
+	ev := events.events[0]
+	if ev.Type != string(MissionEventCreated) {
+		t.Fatalf("event Type=%q want %q", ev.Type, MissionEventCreated)
+	}
+	if ev.Data["missionId"] != string(mission.ID) || ev.Data["projectId"] != "project-1" {
+		t.Fatalf("event Data=%v want missionId=%s projectId=project-1", ev.Data, mission.ID)
+	}
+	// mission.created is a lifecycle-history event, like kr.created, so it must
+	// also land in the lifecycle repo.
+	if len(lifecycle.events) != 1 || lifecycle.events[0].Type != string(MissionEventCreated) {
+		t.Fatalf("lifecycle events=%v want one mission.created", lifecycle.events)
+	}
+}
+
 func TestHardDeleteMissionRemovesMissionAndPublishesPurgedEvent(t *testing.T) {
 	mission, err := missiondomain.NewMission(missiondomain.NewMissionInput{
 		ID:        missiondomain.MissionID("mission-1"),
