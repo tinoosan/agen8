@@ -39,16 +39,16 @@ describe('useNavigation', () => {
     expect(result.current.projectLoading).toBe(false)
   })
 
-  it('resolves the tasks list to the Pulse page', () => {
-    expect(tasksPanelLink('proj-1')).toBe('/project/proj-1/pulse')
+  it('resolves the tasks list to its dedicated page', () => {
+    expect(tasksPanelLink('proj-1')).toBe('/project/proj-1/tasks')
   })
 
-  it('builds a status-filtered tasks link on the Pulse page', () => {
-    expect(filteredTasksLink('proj-1', 'active')).toBe('/project/proj-1/pulse?status=active')
+  it('builds a status-filtered tasks link on the Tasks page', () => {
+    expect(filteredTasksLink('proj-1', 'active')).toBe('/project/proj-1/tasks?status=active')
   })
 
   it('omits the status query parameter for the default (all) filter', () => {
-    expect(filteredTasksLink('proj-1', 'all')).toBe('/project/proj-1/pulse')
+    expect(filteredTasksLink('proj-1', 'all')).toBe('/project/proj-1/tasks')
   })
 
   it('builds routed decision detail links', () => {

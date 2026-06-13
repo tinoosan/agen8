@@ -29,6 +29,7 @@ const StrategyMap = lazyWithRetry(() => import('./pages/StrategyMap'), 'pages/St
 const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisions')
 const Members = lazyWithRetry(() => import('./pages/Members'), 'pages/Members')
 const Pulse = lazyWithRetry(() => import('./pages/Pulse'), 'pages/Pulse')
+const Tasks = lazyWithRetry(() => import('./pages/Tasks'), 'pages/Tasks')
 
 function MissionsRouteRedirect({ params }: { params: { projectId: string } }) {
   return <Redirect to={missionsPanelLink(params.projectId)} />
@@ -48,6 +49,7 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
   strategy: 'Context Map',
   members: 'Members',
   pulse: 'Pulse',
+  tasks: 'Tasks',
 }
 
 /** Mobile-only top bar: hamburger (opens the sidebar drawer) + app icon +
@@ -295,6 +297,9 @@ export default function App() {
                   <Route path="/project/:projectId/decisions" component={Decisions} />
                   <Route path="/project/:projectId/members" component={Members} />
                   <Route path="/project/:projectId/pulse" component={Pulse} />
+                  {/* Listed after /tasks/:taskId (TaskDetail) above, so the
+                      detail route wins; this is the bare-list page. */}
+                  <Route path="/project/:projectId/tasks" component={Tasks} />
                   {/* Activity + Metrics were merged into Pulse; keep the old
                       paths working by redirecting them. */}
                   <Route path="/project/:projectId/activity">{(params) => <Redirect to={`/project/${params.projectId}/pulse`} />}</Route>

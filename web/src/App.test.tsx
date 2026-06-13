@@ -28,6 +28,14 @@ vi.mock('./pages/Pulse', () => ({
   default: () => <div>Pulse Page</div>,
 }))
 
+vi.mock('./pages/Tasks', () => ({
+  default: () => <div>Tasks Page</div>,
+}))
+
+vi.mock('./pages/TaskDetail', () => ({
+  default: () => <div>Task Detail Page</div>,
+}))
+
 vi.mock('./pages/StrategyMap', () => ({
   default: () => {
     throw new Error('strategy-map-route-crash')
@@ -104,6 +112,16 @@ describe('App', () => {
   it('renders the pulse page at the pulse route', async () => {
     renderWithRouter('/project/myapp/pulse')
     expect(await screen.findByText('Pulse Page')).toBeInTheDocument()
+  })
+
+  it('renders the tasks page at the tasks route', async () => {
+    renderWithRouter('/project/myapp/tasks')
+    expect(await screen.findByText('Tasks Page')).toBeInTheDocument()
+  })
+
+  it('resolves /tasks/:taskId to task detail, not the tasks list', async () => {
+    renderWithRouter('/project/myapp/tasks/task-123')
+    expect(await screen.findByText('Task Detail Page')).toBeInTheDocument()
   })
 
   it('redirects the legacy metrics and activity routes to pulse', async () => {

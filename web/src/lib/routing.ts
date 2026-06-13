@@ -3,7 +3,7 @@ import { useProjects } from '../hooks/useProjects'
 import { useStore, type DefaultProjectView } from './store'
 import type { Project } from './types'
 
-export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy' | 'members' | 'pulse'
+export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy' | 'members' | 'pulse' | 'tasks'
 // The dashboard context rail no longer carries tasks — they live on the Pulse
 // page now (see tasksPanelLink). Only missions and decisions remain as rail tabs.
 export type DashboardPanel = 'missions' | 'decisions'
@@ -65,17 +65,21 @@ export function decisionsPanelLink(projectId: string): string {
   return dashboardLink(projectId, { panel: 'decisions' })
 }
 
-// Tasks now live on the Pulse page (not the dashboard rail), so the "go to
-// tasks" affordances resolve there.
+// Tasks live on their own dedicated page (not the dashboard rail), so the "go
+// to tasks" affordances resolve there.
+export function tasksLink(projectId: string): string {
+  return `/project/${encodeURIComponent(projectId)}/tasks`
+}
+
 export function tasksPanelLink(projectId: string): string {
-  return pulseLink(projectId)
+  return tasksLink(projectId)
 }
 
 // Open the Tasks list pre-filtered to a status bucket (e.g. from a dashboard
-// tile). The Pulse page's task list reads ?status= off the URL. 'all' is the
-// default, so it's omitted.
+// tile). The Tasks page reads ?status= off the URL. 'all' is the default, so
+// it's omitted.
 export function filteredTasksLink(projectId: string, status: string): string {
-  const base = pulseLink(projectId)
+  const base = tasksLink(projectId)
   if (!status || status === 'all') return base
   return `${base}?status=${encodeURIComponent(status)}`
 }
@@ -151,7 +155,8 @@ function parseLocation(pathname: string): ParsedRoute {
   if (segments[2] === 'dashboard') {
     activeView = 'dashboard'
   } else if (segments[2] === 'tasks') {
-    activeView = 'dashboard'
+    // Both the /tasks list and /tasks/:taskId detail highlight the Tasks nav.
+    activeView = 'tasks'
   } else if (segments[2] === 'missions') {
     activeView = 'missions'
   } else if (segments[2] === 'decisions') {

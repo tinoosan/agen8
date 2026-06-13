@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
 import {
-  BarChart3, Network, Plus, PanelLeft, Users, Activity,
+  BarChart3, Network, Plus, PanelLeft, Users, Activity, ListChecks,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNavigation, dashboardLink } from '../lib/routing'
@@ -173,6 +173,17 @@ export default function Sidebar() {
                   >
                     <BarChart3 size={15} className="shrink-0" />
                     <span>Dashboard</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeView === 'tasks'}
+                    onClick={() => setActiveView('tasks')}
+                    className={cn(ROW_BASE, activeView === 'tasks' ? ROW_ACTIVE : ROW_IDLE)}
+                    style={ROW_STYLE}
+                  >
+                    <ListChecks size={15} className="shrink-0" />
+                    <span>Tasks</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
