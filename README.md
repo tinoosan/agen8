@@ -94,6 +94,8 @@ docker run --rm \
   --name agen8 \
   -p 7777:7777 \
   -v agen8-data:/data \
+  -e AGEN8_PUBLIC_URL=http://127.0.0.1:7777 \
+  -e AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true \
   agen8:local
 ```
 
@@ -102,6 +104,12 @@ Or use Compose:
 ```sh
 docker compose up --build
 ```
+
+Set `AGEN8_PUBLIC_URL` to the URL users will put in their harness MCP config.
+For hosted Docker or Kubernetes deployments, keep
+`AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true`; the daemon can receive remote hook
+events, but only the local machine running Codex or Claude Code can install
+those hooks.
 
 On first run with an empty volume, the container logs include the setup URL:
 
@@ -130,6 +138,9 @@ To run with a bind-mounted data directory instead of a named volume:
 mkdir -p ./.agen8-docker
 docker run --rm -p 7777:7777 -v "$PWD/.agen8-docker:/data" agen8:local
 ```
+
+For Kubernetes and remote self-hosting, see
+[docs/self-hosting.md](docs/self-hosting.md).
 
 ### 4. Create your account
 
@@ -162,6 +173,9 @@ setup snippets use the same stable URL pattern. Query-token auth
 remains supported for compatibility and project link-token flows, but it is not
 the public default.
 
+For a hosted daemon, replace `http://127.0.0.1:7777` with your public HTTPS
+origin, for example `https://agen8.example.com`.
+
 ### 6. Install the Agen8 workflow skill
 
 Install the workflow skill into your harness so it knows how to drive Agen8
@@ -178,6 +192,17 @@ Re-run the same command any time to refresh the installed skill.
 Claude Code's Agen8 hook is not a separate binary. It is the same installed
 `agen8` binary invoked as `agen8 claude hook`, so local development should only
 produce `./bin/agen8` for releases and `./tmp/agen8-dev` while Air is running.
+
+Attention hooks are installed separately from the skill:
+
+```sh
+agen8 hooks install --harness codex --url https://agen8.example.com --token ak_...
+agen8 hooks install --harness claude --url https://agen8.example.com --token ak_... --project-dir /path/to/local/project
+```
+
+Use the hosted daemon URL for `--url`. These commands write local harness
+configuration files and must run on the machine where the harness runs, not
+inside a Kubernetes pod.
 
 ### Optional: Install the Codex plugin
 

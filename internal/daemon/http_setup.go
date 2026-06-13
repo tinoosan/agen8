@@ -23,6 +23,7 @@ type httpSetupHandler struct {
 	users      *userapp.Service
 	setupToken string
 	httpAddr   string
+	publicURL  string
 }
 
 func (d *Daemon) setupHandler() httpSetupHandler {
@@ -34,6 +35,7 @@ func (d *Daemon) setupHandler() httpSetupHandler {
 		users:      d.app.UserSvc,
 		setupToken: d.cfg.SetupToken,
 		httpAddr:   d.cfg.HTTPAddr,
+		publicURL:  d.cfg.PublicURL,
 	}
 }
 
@@ -174,6 +176,9 @@ func (h httpSetupHandler) setupMCPCompatibilityURL(r *http.Request, token string
 }
 
 func (h httpSetupHandler) setupRequestOrigin(r *http.Request) string {
+	if publicURL := strings.TrimRight(strings.TrimSpace(h.publicURL), "/"); publicURL != "" {
+		return publicURL
+	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"

@@ -91,8 +91,12 @@ func New(cfg Config) (*Daemon, error) {
 		func() error { return rpc.RegisterGraph(reg, application.GraphSvc, application.GraphLinks) },
 		func() error { return rpc.RegisterMission(reg, application.MissionSvc) },
 		func() error {
-			provisioner := newProjectHooksProvisioner(application.AuthSvc, cfg.HTTPAddr, logger.With("service", "hooks-provision"))
-			return rpc.RegisterProject(reg, application.ProjectSvc, provisioner.ProvisionHooks)
+			var postCreate rpc.PostProjectCreate
+			if !cfg.DisableLocalHookProvisioning {
+				provisioner := newProjectHooksProvisionerWithBaseURL(application.AuthSvc, cfg.externalBaseURL(), logger.With("service", "hooks-provision"))
+				postCreate = provisioner.ProvisionHooks
+			}
+			return rpc.RegisterProject(reg, application.ProjectSvc, postCreate)
 		},
 		func() error { return rpc.RegisterFile(reg, application.FileSvc) },
 		func() error { return rpc.RegisterLocation(reg, application.LocationSvc) },
@@ -151,7 +155,7 @@ func (d *Daemon) serveHTTP(ctx context.Context, ln net.Listener) error {
 	}()
 	if d.cfg.Out != nil {
 		if d.setupAvailable(ctx) {
-			fmt.Fprintf(d.cfg.Out, "agen8 setup: http://%s/setup?token=%s\n", ln.Addr().String(), d.cfg.SetupToken)
+			fmt.Fprintf(d.cfg.Out, "agen8 setup: %s/setup?token=%s\n", d.cfg.externalBaseURL(), d.cfg.SetupToken)
 		}
 		fmt.Fprintf(d.cfg.Out, "agen8 daemon listening on http://%s\n", ln.Addr().String())
 	}
@@ -543,7 +547,7 @@ func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
 			projects: d.app.ProjectSvc,
 			users:    d.app.UserSvc,
 			auth:     d.app.AuthSvc,
-			baseURL:  "http://" + d.cfg.HTTPAddr,
+			baseURL:  d.cfg.externalBaseURL(),
 		},
 		MemberDirectory: d.app.ProjectSvc,
 		MemberRegistrar: d.app.ProjectSvc,
@@ -559,6 +563,14 @@ func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
 		MissionKRs:      d.app.MissionSvc,
 		MissionProgress: d.app.MissionSvc,
 	}
+}
+
+func (c Config) externalBaseURL() string {
+	publicURL := strings.TrimRight(strings.TrimSpace(c.PublicURL), "/")
+	if publicURL != "" {
+		return publicURL
+	}
+	return daemonBaseURL(c.HTTPAddr)
 }
 
 func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header http.Header, body []byte) (mcp.Session, error) {

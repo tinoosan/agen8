@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 
@@ -15,21 +16,27 @@ import (
 const (
 	ListenerHTTP = "http"
 
-	EnvListener  = "AGEN8_DAEMON_LISTENER"
-	EnvEndpoint  = "AGEN8_RPC_ENDPOINT"
-	EnvHTTPAddr  = "AGEN8_HTTP_ADDR"
-	EnvDevWebURL = "AGEN8_DEV_WEB_URL"
+	EnvListener   = "AGEN8_DAEMON_LISTENER"
+	EnvEndpoint   = "AGEN8_RPC_ENDPOINT"
+	EnvHTTPAddr   = "AGEN8_HTTP_ADDR"
+	EnvDevWebURL  = "AGEN8_DEV_WEB_URL"
+	EnvPublicURL  = "AGEN8_PUBLIC_URL"
+	EnvSetupToken = "AGEN8_SETUP_TOKEN"
+
+	EnvDisableLocalHookProvisioning = "AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING"
 
 	DefaultHTTPAddr = "127.0.0.1:7777"
 )
 
 type Config struct {
-	AppConfig  config.Config
-	Logging    logging.Config
-	Listener   string
-	HTTPAddr   string
-	SetupToken string
-	Out        io.Writer
+	AppConfig                    config.Config
+	Logging                      logging.Config
+	Listener                     string
+	HTTPAddr                     string
+	PublicURL                    string
+	DisableLocalHookProvisioning bool
+	SetupToken                   string
+	Out                          io.Writer
 }
 
 func (c Config) withDefaults() (Config, error) {
@@ -38,7 +45,11 @@ func (c Config) withDefaults() (Config, error) {
 	}
 	c.Listener = firstNonEmpty(c.Listener, os.Getenv(EnvListener), ListenerHTTP)
 	c.HTTPAddr = firstNonEmpty(c.HTTPAddr, os.Getenv(EnvHTTPAddr), DefaultHTTPAddr)
+	c.PublicURL = firstNonEmpty(c.PublicURL, os.Getenv(EnvPublicURL))
+	c.SetupToken = firstNonEmpty(c.SetupToken, os.Getenv(EnvSetupToken))
+	c.DisableLocalHookProvisioning = c.DisableLocalHookProvisioning || config.ParseBoolEnvDefault(EnvDisableLocalHookProvisioning, false)
 	c.Listener = strings.TrimSpace(strings.ToLower(c.Listener))
+	c.PublicURL = strings.TrimRight(strings.TrimSpace(c.PublicURL), "/")
 	if c.AppConfig.DataDir == "" {
 		c.AppConfig = config.Default()
 	}
@@ -66,6 +77,15 @@ func (c Config) withDefaults() (Config, error) {
 			return c, err
 		}
 		c.SetupToken = token
+	}
+	if c.PublicURL != "" {
+		parsed, err := url.Parse(c.PublicURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return c, fmt.Errorf("%s must be an absolute http(s) URL", EnvPublicURL)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return c, fmt.Errorf("%s must use http or https", EnvPublicURL)
+		}
 	}
 	return c, nil
 }

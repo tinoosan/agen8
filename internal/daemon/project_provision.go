@@ -31,6 +31,14 @@ func newProjectHooksProvisioner(auth *authapp.Service, httpAddr string, logger *
 	return &projectHooksProvisioner{auth: auth, baseURL: daemonBaseURL(httpAddr), logger: logger}
 }
 
+func newProjectHooksProvisionerWithBaseURL(auth *authapp.Service, baseURL string, logger *slog.Logger) *projectHooksProvisioner {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = daemonBaseURL(DefaultHTTPAddr)
+	}
+	return &projectHooksProvisioner{auth: auth, baseURL: baseURL, logger: logger}
+}
+
 // ProvisionHooks mints a key and writes both harness configs. Returns whether
 // hooks ended up installed.
 func (p *projectHooksProvisioner) ProvisionHooks(ctx context.Context, userID, projectTitle, root string) bool {

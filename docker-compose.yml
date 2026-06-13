@@ -13,6 +13,9 @@ services:
       - agen8-data:/data
     environment:
       AGEN8_DATA_DIR: /data
+      AGEN8_PUBLIC_URL: ${AGEN8_PUBLIC_URL:-http://127.0.0.1:7777}
+      AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING: ${AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING:-true}
+      AGEN8_SETUP_TOKEN: ${AGEN8_SETUP_TOKEN:-}
     restart: unless-stopped
 
 volumes:

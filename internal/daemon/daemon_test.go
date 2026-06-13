@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -277,6 +278,51 @@ func TestHandleSetupJSONIncludesMCPArtifacts(t *testing.T) {
 	}
 }
 
+func TestHandleSetupJSONUsesPublicURLWhenConfigured(t *testing.T) {
+	d, err := New(Config{
+		AppConfig:  config.Config{DataDir: t.TempDir()},
+		PublicURL:  "https://agen8.example.com/",
+		SetupToken: "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+
+	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:7777/setup", strings.NewReader(setupBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var result struct {
+		MCP struct {
+			URL              string `json:"url"`
+			CompatibilityURL string `json:"compatibilityUrl"`
+			CodexCommand     string `json:"codexCommand"`
+			ClaudeCommand    string `json:"claudeCommand"`
+		} `json:"mcp"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	if result.MCP.URL != "https://agen8.example.com/mcp" {
+		t.Fatalf("mcp url=%q want public URL", result.MCP.URL)
+	}
+	for _, got := range []string{result.MCP.CompatibilityURL, result.MCP.CodexCommand, result.MCP.ClaudeCommand} {
+		if !strings.Contains(got, "https://agen8.example.com/mcp") {
+			t.Fatalf("setup artifact did not use public URL: %s", got)
+		}
+	}
+}
+
 func TestSetupMCPArtifactsRejectHostHeaderPoisoning(t *testing.T) {
 	handler := httpSetupHandler{httpAddr: "0.0.0.0:7777"}
 	req := httptest.NewRequest(http.MethodPost, "http://attacker.example/setup", nil)
@@ -297,6 +343,74 @@ func TestSetupMCPArtifactsRejectHostHeaderPoisoning(t *testing.T) {
 	}
 	if !strings.Contains(joined, "http://127.0.0.1:7777/mcp") {
 		t.Fatalf("setup artifacts did not fall back to loopback daemon address: %s", joined)
+	}
+}
+
+func TestDaemonConfigHostedModeFromEnv(t *testing.T) {
+	t.Setenv(EnvPublicURL, "https://agen8.example.com/")
+	t.Setenv(EnvDisableLocalHookProvisioning, "true")
+
+	cfg, err := Config{AppConfig: config.Config{DataDir: t.TempDir()}}.withDefaults()
+	if err != nil {
+		t.Fatalf("withDefaults: %v", err)
+	}
+	if cfg.PublicURL != "https://agen8.example.com" {
+		t.Fatalf("PublicURL=%q", cfg.PublicURL)
+	}
+	if !cfg.DisableLocalHookProvisioning {
+		t.Fatal("DisableLocalHookProvisioning=false, want true")
+	}
+	if got := cfg.externalBaseURL(); got != "https://agen8.example.com" {
+		t.Fatalf("externalBaseURL=%q", got)
+	}
+}
+
+func TestDaemonConfigRejectsInvalidPublicURL(t *testing.T) {
+	_, err := Config{
+		AppConfig: config.Config{DataDir: t.TempDir()},
+		PublicURL: "agen8.example.com",
+	}.withDefaults()
+	if err == nil {
+		t.Fatal("expected invalid public URL to fail")
+	}
+}
+
+func TestAttentionHookAcceptsRemoteStyleRawPayload(t *testing.T) {
+	projectRoot := t.TempDir()
+	d, err := New(Config{
+		AppConfig:                    config.Config{DataDir: t.TempDir()},
+		DisableLocalHookProvisioning: true,
+		PublicURL:                    "https://agen8.example.com",
+		SetupToken:                   "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+	sessionToken, apiKey := setupSessionAndAPIKeyForTest(t, handler)
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, projectRoot)
+
+	payload := `{"session_id":"remote-codex-session","cwd":` + strconv.Quote(projectRoot) + `}`
+	req := httptest.NewRequest(http.MethodPost, "https://agen8.example.com/hooks/attention?harness=codex&kind=waiting", strings.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"ok":true`) || !strings.Contains(body, `"kind":"waiting"`) {
+		t.Fatalf("body=%s want accepted waiting hook", body)
+	}
+	entries := d.attention.List(context.Background(), projectID)
+	if len(entries) != 1 {
+		t.Fatalf("attention entries=%d want 1", len(entries))
+	}
+	if entries[0].SessionRef != "remote-codex-session" || entries[0].Harness != "codex" {
+		t.Fatalf("entry=%+v", entries[0])
 	}
 }
 
@@ -1049,6 +1163,12 @@ func createProjectForLinkTokenTest(t *testing.T, handler http.Handler, sessionTo
 
 func setupSessionForEventsTest(t *testing.T, handler http.Handler) string {
 	t.Helper()
+	sessionToken, _ := setupSessionAndAPIKeyForTest(t, handler)
+	return sessionToken
+}
+
+func setupSessionAndAPIKeyForTest(t *testing.T, handler http.Handler) (sessionToken string, apiKey string) {
+	t.Helper()
 	setupBody := `{"token":"test-setup-token","email":"admin@example.com","name":"Admin","password":"password123","confirmPassword":"password123"}`
 	setupReq := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(setupBody))
 	setupReq.Header.Set("Content-Type", "application/json")
@@ -1062,6 +1182,9 @@ func setupSessionForEventsTest(t *testing.T, handler http.Handler) string {
 		Session struct {
 			Token string `json:"token"`
 		} `json:"session"`
+		APIKey struct {
+			Secret string `json:"secret"`
+		} `json:"apiKey"`
 	}
 	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
 		t.Fatalf("decode setup response: %v", err)
@@ -1069,7 +1192,10 @@ func setupSessionForEventsTest(t *testing.T, handler http.Handler) string {
 	if setupResult.Session.Token == "" {
 		t.Fatal("setup response missing session token")
 	}
-	return setupResult.Session.Token
+	if setupResult.APIKey.Secret == "" {
+		t.Fatal("setup response missing api key")
+	}
+	return setupResult.Session.Token, setupResult.APIKey.Secret
 }
 
 type eventsTestClient struct {
