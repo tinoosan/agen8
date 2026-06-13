@@ -27,10 +27,6 @@ type projectHooksProvisioner struct {
 	logger  *slog.Logger
 }
 
-func newProjectHooksProvisioner(auth *authapp.Service, httpAddr string, logger *slog.Logger) *projectHooksProvisioner {
-	return &projectHooksProvisioner{auth: auth, baseURL: daemonBaseURL(httpAddr), logger: logger}
-}
-
 func newProjectHooksProvisionerWithBaseURL(auth *authapp.Service, baseURL string, logger *slog.Logger) *projectHooksProvisioner {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
