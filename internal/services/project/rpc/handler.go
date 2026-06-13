@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -139,7 +140,14 @@ func (h *Handler) ProjectDelete(ctx context.Context, p ProjectDeleteParams) (str
 		return struct{}{}, err
 	}
 	if err := h.svc.DeleteProject(ctx, projectID); err != nil {
-		return struct{}{}, internalError("delete project", err)
+		switch {
+		case errors.Is(err, projectdomain.ErrNotFound):
+			return struct{}{}, invalidParams(fmt.Sprintf("project %q not found", projectID))
+		case errors.Is(err, projectdomain.ErrNotArchived):
+			return struct{}{}, invalidParams("project must be archived before deletion")
+		default:
+			return struct{}{}, internalError("delete project", err)
+		}
 	}
 	return struct{}{}, nil
 }

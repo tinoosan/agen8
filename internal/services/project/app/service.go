@@ -336,8 +336,10 @@ func (s *Service) DeleteProject(ctx context.Context, projectID types.ProjectID) 
 		return err
 	}
 	if current.Status() != project.StatusArchived {
-		return fmt.Errorf("project %q must be archived before deletion", current.ID())
+		return fmt.Errorf("project %q: %w", current.ID(), project.ErrNotArchived)
 	}
+	// Deletion removes only the project record; the project's files on disk are
+	// never touched, so a missing root directory is irrelevant here.
 	return s.projects.Delete(ctx, current.ID())
 }
 

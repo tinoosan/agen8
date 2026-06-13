@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
 	"github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
@@ -55,5 +57,70 @@ func TestSaveProjectStampsOwningUser(t *testing.T) {
 	}
 	if proj.UserID() != "user-owner" {
 		t.Fatalf("project UserID=%q want user-owner", proj.UserID())
+	}
+}
+
+// Deletion is a deliberate two-step: a project must be archived before it can be
+// permanently removed. Deleting an open project must return ErrNotArchived (a
+// client precondition the RPC layer surfaces as invalid-params), NOT a generic
+// error the dispatcher would mask as a -32603 internal error. This is the
+// regression for the "delete returns internal error" report.
+func TestDeleteProjectRequiresArchiveFirst(t *testing.T) {
+	t.Parallel()
+	svc := newProjectServiceWithIssuer(t, &fakeLinkTokenIssuer{})
+	owner := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+
+	proj, err := svc.CreateProject(owner, CreateProjectInput{Root: "/work/app", Title: "App"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	err = svc.DeleteProject(owner, proj.ID())
+	if !errors.Is(err, project.ErrNotArchived) {
+		t.Fatalf("delete of an open project: got %v, want ErrNotArchived", err)
+	}
+
+	// The project must still be there - a refused delete may not remove anything.
+	if _, err := svc.GetProject(owner, proj.ID()); err != nil {
+		t.Fatalf("project should survive a refused delete: %v", err)
+	}
+}
+
+// Once archived, a delete succeeds and the record is gone. Deletion removes only
+// the record - it never touches the project's files on disk - so a missing root
+// directory is irrelevant to it. This is the success-path counterpart to the
+// archive-first guard, and it covers the user's "root already removed" scenario:
+// the record is the thing being deleted.
+func TestDeleteProjectAfterArchiveRemovesRecord(t *testing.T) {
+	t.Parallel()
+	svc := newProjectServiceWithIssuer(t, &fakeLinkTokenIssuer{})
+	owner := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+
+	proj, err := svc.CreateProject(owner, CreateProjectInput{Root: "/work/app", Title: "App"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if _, err := svc.ArchiveProject(owner, proj.ID()); err != nil {
+		t.Fatalf("ArchiveProject: %v", err)
+	}
+
+	if err := svc.DeleteProject(owner, proj.ID()); err != nil {
+		t.Fatalf("delete of an archived project should succeed: %v", err)
+	}
+	if _, err := svc.GetProject(owner, proj.ID()); !errors.Is(err, project.ErrNotFound) {
+		t.Fatalf("deleted project should be gone: got %v, want ErrNotFound", err)
+	}
+}
+
+// Deleting a project that does not exist returns ErrNotFound (a client error),
+// not a masked internal error.
+func TestDeleteProjectNotFound(t *testing.T) {
+	t.Parallel()
+	svc := newProjectServiceWithIssuer(t, &fakeLinkTokenIssuer{})
+	owner := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+
+	err := svc.DeleteProject(owner, types.ProjectID("does-not-exist"))
+	if !errors.Is(err, project.ErrNotFound) {
+		t.Fatalf("delete of a missing project: got %v, want ErrNotFound", err)
 	}
 }
