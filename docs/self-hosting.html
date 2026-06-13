@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Hosting - agen8</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="./">docs</a> / self-hosting</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Deploy</span>
+  <h1>Self-hosting Agen8</h1>
+  <p class="lede">
+    Run the Agen8 daemon with Docker or Kubernetes while keeping harness hooks
+    installed on each developer machine.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#model">Runtime model</a></li>
+      <li><a href="#docker">Docker</a></li>
+      <li><a href="#kubernetes">Kubernetes</a></li>
+      <li><a href="#harness">Connect a harness</a></li>
+      <li><a href="#hooks">Install attention hooks</a></li>
+      <li><a href="#security">Security checklist</a></li>
+      <li><a href="#upgrade">Upgrade notes</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="model">Runtime model</h2>
+  <p>
+    The important rule: the Agen8 daemon can be hosted remotely, but harness
+    hooks are installed on the local machine running Codex or Claude Code.
+  </p>
+  <p>
+    The hosted daemon receives MCP traffic at <code>/mcp</code> and attention
+    hook events at <code>/hooks/attention</code>. It cannot safely install
+    <code>.claude/settings.local.json</code> or <code>~/.codex/hooks.json</code>
+    for remote users, so hosted deployments should disable local hook
+    auto-provisioning.
+  </p>
+
+  <table>
+    <thead><tr><th>Side</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td>Server</td><td>Agen8 daemon, <code>/data</code>, web UI, <code>/mcp</code>, <code>/setup</code>, <code>/healthz</code>, <code>/events</code>, and <code>/hooks/attention</code>.</td></tr>
+      <tr><td>Client</td><td>Codex or Claude Code, local Agen8 skill installation, local MCP config, and local hook config.</td></tr>
+    </tbody>
+  </table>
+
+<pre><code class="lang-shell">AGEN8_DATA_DIR=/data
+AGEN8_PUBLIC_URL=https://agen8.example.com
+AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true</code></pre>
+
+  <p>
+    <code>AGEN8_PUBLIC_URL</code> must be the URL users can reach from their own
+    machines. Use HTTPS for any non-local deployment because MCP and hook
+    requests carry bearer tokens.
+  </p>
+
+<pre><code class="lang-shell">AGEN8_SETUP_TOKEN=&lt;long-random-token&gt;</code></pre>
+
+  <p>
+    <code>AGEN8_SETUP_TOKEN</code> is optional. If omitted, the daemon generates
+    a one-time setup token and prints the setup URL to logs. In Kubernetes,
+    setting it explicitly through a Secret is usually easier than scraping pod
+    logs.
+  </p>
+
+  <h2 id="docker">Docker</h2>
+  <p>Build the image:</p>
+
+<pre><code class="lang-shell">docker build -t agen8:local .</code></pre>
+
+  <p>Run locally with persistent SQLite data:</p>
+
+<pre><code class="lang-shell">docker run -d \
+  --name agen8 \
+  -p 7777:7777 \
+  -v agen8-data:/data \
+  -e AGEN8_PUBLIC_URL=http://127.0.0.1:7777 \
+  -e AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true \
+  agen8:local</code></pre>
+
+  <p>Run behind a reverse proxy:</p>
+
+<pre><code class="lang-shell">docker run -d \
+  --name agen8 \
+  -p 7777:7777 \
+  -v agen8-data:/data \
+  -e AGEN8_PUBLIC_URL=https://agen8.example.com \
+  -e AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true \
+  agen8:local</code></pre>
+
+  <p>Compose uses the same model:</p>
+
+<pre><code class="lang-shell">AGEN8_PUBLIC_URL=https://agen8.example.com docker compose up --build -d</code></pre>
+
+  <p>Check health:</p>
+
+<pre><code class="lang-shell">curl -fsS http://127.0.0.1:7777/healthz
+docker inspect --format '{{json .State.Health.Status}}' agen8</code></pre>
+
+  <h2 id="kubernetes">Kubernetes</h2>
+  <p>The sample manifest is at <code>deploy/kubernetes/agen8.yaml</code>.</p>
+
+  <p>Before applying it:</p>
+  <ol>
+    <li>Replace <code>ghcr.io/tinoosan/agen8:latest</code> with the image you publish.</li>
+    <li>Replace every <code>agen8.example.com</code> value with your real hostname.</li>
+    <li>Replace <code>replace-with-a-long-random-setup-token</code> with a generated token.</li>
+    <li>Adjust the ingress class and cert-manager issuer for your cluster.</li>
+    <li>Confirm your storage class supports a <code>ReadWriteOnce</code> PVC.</li>
+  </ol>
+
+<pre><code class="lang-shell">kubectl apply -f deploy/kubernetes/agen8.yaml
+kubectl -n agen8 rollout status deployment/agen8
+kubectl -n agen8 get pods,svc,ingress,pvc</code></pre>
+
+  <p>Open setup:</p>
+
+<pre><code class="lang-text">https://agen8.example.com/setup?token=&lt;AGEN8_SETUP_TOKEN&gt;</code></pre>
+
+  <p>The manifest intentionally uses:</p>
+  <ul>
+    <li><code>replicas: 1</code></li>
+    <li><code>strategy.type: Recreate</code></li>
+    <li>one PVC mounted at <code>/data</code></li>
+    <li>readiness and liveness probes on <code>/healthz</code></li>
+    <li><code>AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true</code></li>
+  </ul>
+
+  <p>
+    Do not scale the SQLite deployment above one replica. SQLite is the default
+    storage backend and should be treated as a single-writer deployment.
+    Horizontal scaling should wait for a documented shared database backend.
+  </p>
+
+  <h2 id="harness">Connect a harness</h2>
+  <p>
+    After first setup, Agen8 returns an API key beginning with <code>ak_</code>.
+    Use that key from the local machine that runs the harness.
+  </p>
+
+  <p>Codex MCP config:</p>
+
+<pre><code class="lang-toml">[mcp_servers.agen8]
+url = "https://agen8.example.com/mcp"
+bearer_token_env_var = "AGEN8_MCP_TOKEN"</code></pre>
+
+<pre><code class="lang-shell">export AGEN8_MCP_TOKEN='ak_...'</code></pre>
+
+  <p>Claude Code MCP config:</p>
+
+<pre><code class="lang-shell">claude mcp add --transport http --scope user agen8 \
+  'https://agen8.example.com/mcp' \
+  --header 'Authorization: Bearer ak_...'</code></pre>
+
+  <p>Install the Agen8 workflow skill locally:</p>
+
+<pre><code class="lang-shell">agen8 skill install --harness codex
+agen8 skill install --harness claude-cli</code></pre>
+
+  <h2 id="hooks">Install attention hooks</h2>
+  <p>
+    Hooks tell Agen8 when a harness session is waiting, asking, blocked on
+    approval, or active again. They are local harness configuration, not server
+    configuration.
+  </p>
+
+  <p>Codex:</p>
+
+<pre><code class="lang-shell">agen8 hooks install \
+  --harness codex \
+  --url https://agen8.example.com \
+  --token ak_...</code></pre>
+
+  <p>Claude Code:</p>
+
+<pre><code class="lang-shell">agen8 hooks install \
+  --harness claude \
+  --url https://agen8.example.com \
+  --token ak_... \
+  --project-dir /path/to/local/project</code></pre>
+
+  <table>
+    <thead><tr><th>Harness</th><th>Written file</th></tr></thead>
+    <tbody>
+      <tr><td>Codex</td><td><code>~/.codex/hooks.json</code></td></tr>
+      <tr><td>Claude Code</td><td><code>/path/to/local/project/.claude/settings.local.json</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    Do not run these commands inside the Kubernetes pod unless the harness also
+    runs inside that pod. For normal self-hosting, each user runs them on their
+    own machine.
+  </p>
+
+  <h2 id="security">Security checklist</h2>
+  <ul>
+    <li>Serve hosted Agen8 over HTTPS.</li>
+    <li>Keep API keys out of git, shell history, and shared logs.</li>
+    <li>Use <code>AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true</code> for remote deployments.</li>
+    <li>Rotate API keys when a user leaves or a machine is lost.</li>
+    <li>Restrict ingress to the hostnames you expect.</li>
+    <li>Back up the <code>/data</code> volume before upgrades.</li>
+  </ul>
+
+  <h2 id="upgrade">Upgrade notes</h2>
+  <p>For Docker, replace the container while keeping the named volume:</p>
+
+<pre><code class="lang-shell">docker pull &lt;image&gt;
+docker rm -f agen8
+docker run -d --name agen8 -p 7777:7777 -v agen8-data:/data &lt;image&gt;</code></pre>
+
+  <p>For Kubernetes, update the image and let the <code>Recreate</code> strategy restart the single pod:</p>
+
+<pre><code class="lang-shell">kubectl -n agen8 set image deployment/agen8 agen8=&lt;image&gt;
+kubectl -n agen8 rollout status deployment/agen8</code></pre>
+
+  <p>Always confirm:</p>
+
+<pre><code class="lang-shell">curl -fsS https://agen8.example.com/healthz</code></pre>
+
+</div>
+
+</body>
+</html>

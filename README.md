@@ -140,7 +140,7 @@ docker run --rm -p 7777:7777 -v "$PWD/.agen8-docker:/data" agen8:local
 ```
 
 For Kubernetes and remote self-hosting, see
-[docs/self-hosting.md](docs/self-hosting.md).
+[docs/self-hosting.html](docs/self-hosting.html).
 
 ### 4. Create your account
 
