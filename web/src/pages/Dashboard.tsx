@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { qk } from '../lib/queryKeys'
-import { useNavigation, strategyMapLink, type DashboardPanel } from '../lib/routing'
+import { useNavigation, strategyMapLink, filteredTasksLink, type DashboardPanel } from '../lib/routing'
 import { useLocation, useSearch } from 'wouter'
 import { useMissions } from '../hooks/useMissions'
 import { RefreshCw, PanelRight, Search } from 'lucide-react'
@@ -35,7 +35,7 @@ export default function Dashboard() {
   const searchParams = useMemo(() => new URLSearchParams(rawSearch), [rawSearch])
   const rawPanel = searchParams.get('panel')
   const dashboardPanel: DashboardPanel =
-    rawPanel === 'decisions' ? 'decisions' : rawPanel === 'tasks' ? 'tasks' : 'missions'
+    rawPanel === 'decisions' ? 'decisions' : 'missions'
 
   const activeMissionsQuery = useMissions(projectId, 'active')
   const activeMissionCount = useMemo(
@@ -81,8 +81,16 @@ export default function Dashboard() {
     }
   }, [isContextOverlay, toggleDashboardContext])
 
+  // Tasks moved to the Pulse page; honour old ?panel=tasks deep links by
+  // forwarding them there (carrying any status filter).
   useEffect(() => {
-    if (rawPanel !== 'missions' && rawPanel !== 'decisions' && rawPanel !== 'tasks') return
+    if (rawPanel !== 'tasks' || !projectId) return
+    const status = searchParams.get('status')
+    navigate(filteredTasksLink(projectId, status ?? 'all'))
+  }, [rawPanel, projectId, searchParams, navigate])
+
+  useEffect(() => {
+    if (rawPanel !== 'missions' && rawPanel !== 'decisions') return
     setContextCollapsed(false)
     writeStoredDashboardContextCollapsed(false)
     setContextDrawerOpen(true)

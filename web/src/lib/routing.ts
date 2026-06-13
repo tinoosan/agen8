@@ -4,7 +4,9 @@ import { useStore, type DefaultProjectView } from './store'
 import type { Project } from './types'
 
 export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy' | 'members' | 'pulse'
-export type DashboardPanel = 'missions' | 'decisions' | 'tasks'
+// The dashboard context rail no longer carries tasks — they live on the Pulse
+// page now (see tasksPanelLink). Only missions and decisions remain as rail tabs.
+export type DashboardPanel = 'missions' | 'decisions'
 
 /* ── Route constants ──────────────────────────────── */
 
@@ -22,15 +24,6 @@ export const ROUTES = {
 } as const
 
 /* ── Link helpers for cross-surface navigation (F26) ── */
-
-export function boardTaskLink(projectId: string, taskId: string): string {
-  const base = dashboardLink(projectId)
-  const params = new URLSearchParams()
-  params.set('panel', 'tasks')
-  if (taskId.trim()) params.set('task', taskId)
-  const qs = params.toString()
-  return qs ? `${base}?${qs}` : base
-}
 
 export function calendarLink(projectId: string, taskId?: string): string {
   const base = `/project/${encodeURIComponent(projectId)}/dashboard`
@@ -72,13 +65,19 @@ export function decisionsPanelLink(projectId: string): string {
   return dashboardLink(projectId, { panel: 'decisions' })
 }
 
+// Tasks now live on the Pulse page (not the dashboard rail), so the "go to
+// tasks" affordances resolve there.
 export function tasksPanelLink(projectId: string): string {
-  return dashboardLink(projectId, { panel: 'tasks' })
+  return pulseLink(projectId)
 }
 
-// Open the Tasks panel pre-filtered to a status bucket (e.g. from a dashboard tile).
+// Open the Tasks list pre-filtered to a status bucket (e.g. from a dashboard
+// tile). The Pulse page's task list reads ?status= off the URL. 'all' is the
+// default, so it's omitted.
 export function filteredTasksLink(projectId: string, status: string): string {
-  return dashboardLink(projectId, { panel: 'tasks', status })
+  const base = pulseLink(projectId)
+  if (!status || status === 'all') return base
+  return `${base}?status=${encodeURIComponent(status)}`
 }
 
 export function decisionsLink(projectId: string): string {

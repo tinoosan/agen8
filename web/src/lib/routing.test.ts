@@ -15,7 +15,7 @@ vi.mock('../hooks/useProjects', () => ({
   }),
 }))
 
-const { useNavigation, boardTaskLink, decisionDetailLink } = await import('./routing')
+const { useNavigation, tasksPanelLink, filteredTasksLink, decisionDetailLink } = await import('./routing')
 
 describe('useNavigation', () => {
   it('parses projectId from URL', () => {
@@ -39,12 +39,16 @@ describe('useNavigation', () => {
     expect(result.current.projectLoading).toBe(false)
   })
 
-  it('builds dashboard board task links', () => {
-    expect(boardTaskLink('proj-1', 'task-123')).toBe('/project/proj-1/dashboard?panel=tasks&task=task-123')
+  it('resolves the tasks list to the Pulse page', () => {
+    expect(tasksPanelLink('proj-1')).toBe('/project/proj-1/pulse')
   })
 
-  it('omits the task query parameter when the task id is empty', () => {
-    expect(boardTaskLink('proj-1', '')).toBe('/project/proj-1/dashboard?panel=tasks')
+  it('builds a status-filtered tasks link on the Pulse page', () => {
+    expect(filteredTasksLink('proj-1', 'active')).toBe('/project/proj-1/pulse?status=active')
+  })
+
+  it('omits the status query parameter for the default (all) filter', () => {
+    expect(filteredTasksLink('proj-1', 'all')).toBe('/project/proj-1/pulse')
   })
 
   it('builds routed decision detail links', () => {

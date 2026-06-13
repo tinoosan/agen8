@@ -28,9 +28,9 @@ const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: 'canceled', label: 'Canceled' },
 ]
 
-function TasksSkeleton({ embedded = false }: { embedded?: boolean }) {
+function TasksSkeleton() {
   return (
-    <div className={cn('flex flex-col gap-0.5', embedded && 'px-1')}>
+    <div className="flex flex-col gap-0.5">
       {[1, 2, 3].map((i) => (
         <div key={i} className="flex items-center gap-3 px-2 py-3">
           <Skeleton className="h-2 w-2 rounded-full shrink-0" />
@@ -45,19 +45,21 @@ function TasksSkeleton({ embedded = false }: { embedded?: boolean }) {
 
 interface DashboardTasksPanelProps {
   projectId: string | null
-  focusedProjectRoot: string | null
-  embedded?: boolean
 }
 
-export default function DashboardTasksPanel({
-  projectId,
-  embedded = false,
-}: DashboardTasksPanelProps) {
-  // Status filter lives in the URL (?status=) so dashboard tiles can deep-link
-  // straight to a filtered list and the view is shareable. 'all' is the default,
-  // so it's encoded as the absence of the param.
+/**
+ * DashboardTasksPanel — the project's full task list (status filters, search,
+ * paginated rows). It renders as a flow section inside a scrolling page (the
+ * Pulse page), not a fill-the-viewport panel: no internal scroll, no own width
+ * cap, so it composes with the throughput band and activity feed above/below it.
+ *
+ * The status filter and page live in the URL (?status=, ?page=) so a filtered
+ * list is shareable and survives reload. Filter changes navigate to the CURRENT
+ * path, so this works on whatever route mounts it (today: /pulse).
+ */
+export default function DashboardTasksPanel({ projectId }: DashboardTasksPanelProps) {
   const rawSearch = useSearch()
-  const [, navigate] = useLocation()
+  const [location, navigate] = useLocation()
   const searchParams = useMemo(() => new URLSearchParams(rawSearch), [rawSearch])
   const rawStatus = searchParams.get('status') ?? 'all'
   const statusFilter = STATUS_FILTERS.some((f) => f.value === rawStatus) ? rawStatus : 'all'
@@ -65,32 +67,31 @@ export default function DashboardTasksPanel({
     (value: string) => {
       if (!projectId) return
       const params = new URLSearchParams(rawSearch)
-      params.set('panel', 'tasks')
       // A new filter is a new list: the page param must not survive it. The
-      // page reset rides THIS navigation — calling setPage(1) separately races
-      // it (two navigations from stale closures resurrect the old page).
+      // reset rides THIS navigation — calling setPage(1) separately races it.
       params.delete('page')
       if (value === 'all') params.delete('status')
       else params.set('status', value)
       const qs = params.toString()
-      navigate(`/project/${encodeURIComponent(projectId)}/dashboard${qs ? `?${qs}` : ''}`)
+      // Route-relative: stay on whatever page mounts the list (e.g. /pulse).
+      navigate(`${location}${qs ? `?${qs}` : ''}`)
     },
-    [navigate, projectId, rawSearch],
+    [navigate, projectId, rawSearch, location],
   )
-	const [searchQuery, setSearchQuery] = useState('')
-	const [createDialogOpen, setCreateDialogOpen] = useState(false)
-	const [page, setPage] = usePageParam()
+  const [searchQuery, setSearchQuery] = useState('')
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [page, setPage] = usePageParam()
 
-	const changeStatusFilter = (value: string) => {
-		setStatusFilter(value)
-	}
+  const changeStatusFilter = (value: string) => {
+    setStatusFilter(value)
+  }
 
-	const changeSearchQuery = (value: string) => {
-		setPage(1)
-		setSearchQuery(value)
-	}
+  const changeSearchQuery = (value: string) => {
+    setPage(1)
+    setSearchQuery(value)
+  }
 
-	const { data: allTasks, isLoading, isError, error } = useProjectTasks(projectId)
+  const { data: allTasks, isLoading, isError, error } = useProjectTasks(projectId)
 
   const statusCounts = useMemo(
     () =>
@@ -120,34 +121,26 @@ export default function DashboardTasksPanel({
     return list
   }, [allTasks, statusFilter, searchQuery])
 
-	// House pagination (same pattern as the decisions panel): filters and search
-	// above operate on the FULL set; the page only bounds the DOM. Filter/search
-	// changes reset to page 1 in the handlers above.
-	const totalPages = Math.max(1, Math.ceil(filteredTasks.length / TASKS_PAGE_SIZE))
-	const visibleTasks = useMemo(() => pageSlice(filteredTasks, page, TASKS_PAGE_SIZE), [filteredTasks, page])
+  // House pagination: filters and search operate on the FULL set; the page only
+  // bounds the DOM. Filter/search changes reset to page 1 in the handlers above.
+  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / TASKS_PAGE_SIZE))
+  const visibleTasks = useMemo(() => pageSlice(filteredTasks, page, TASKS_PAGE_SIZE), [filteredTasks, page])
 
-  if (!projectId) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center p-8">
-        <ListChecks size={36} className="text-[var(--text-3)] opacity-30 mb-4" />
-        <h2 className="text-base font-semibold text-[var(--text-1)] mb-1">No project selected</h2>
-        <p className="text-sm text-[var(--text-3)]">Select a project to work with tasks.</p>
-      </div>
-    )
-  }
+  if (!projectId) return null
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className={cn('shrink-0', embedded ? 'px-[var(--dashboard-context-gutter)] pt-5 pb-3 border-b border-[color-mix(in_srgb,var(--border)_56%,transparent)]' : 'px-6 pt-8 pb-2 max-w-4xl mx-auto w-full')}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1
-              className="m-0 text-[var(--text-1)]"
-              style={{ fontSize: embedded ? '1.1875rem' : '1.75rem', fontWeight: 700, letterSpacing: embedded ? '-0.36px' : '-0.56px', lineHeight: embedded ? 1.18 : 1.14 }}
-            >
-              Tasks
-            </h1>
+    <section className="dashboard-section @container">
+      <div className="dashboard-section-heading mb-3">
+        <div className="dashboard-section-heading-main">
+          <div className="flex items-center gap-2">
+            <ListChecks size={14} className="text-[var(--accent)]" />
+            <span className="dashboard-section-title">Tasks</span>
           </div>
+        </div>
+        <div className="dashboard-section-meta flex items-center gap-3">
+          {allTasks && allTasks.length > 0 && (
+            <span className="dashboard-section-counter">{allTasks.length} total</span>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -161,66 +154,61 @@ export default function DashboardTasksPanel({
         </div>
       </div>
 
-      <div className={cn('shrink-0', embedded ? 'px-[var(--dashboard-context-gutter)] py-3 border-b border-[color-mix(in_srgb,var(--border)_42%,transparent)]' : 'px-6 pt-4 pb-2 max-w-4xl mx-auto w-full')}>
-        <div className="flex items-center gap-3">
-          <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5 flex-1 min-w-0">
-            {STATUS_FILTERS.map((filter) => {
-              const isActive = statusFilter === filter.value
-              const count = filter.value === 'all' ? (allTasks?.length ?? 0) : (statusCounts[filter.value] ?? 0)
-              return (
-                <button
-                  key={filter.value}
-									onClick={() => changeStatusFilter(filter.value)}
-                  aria-pressed={isActive}
-                  className="inline-flex items-center gap-1 border-none cursor-pointer transition-colors duration-150 whitespace-nowrap"
-                  style={{
-                    padding: embedded ? '4px 10px' : '4px 12px',
-                    borderRadius: '980px',
-                    fontSize: embedded ? '0.75rem' : '0.8125rem',
-                    fontWeight: isActive ? 600 : 400,
-                    letterSpacing: '-0.08px',
-                    background: isActive ? 'color-mix(in srgb, var(--accent-dim) 18%, var(--bg-panel) 82%)' : 'transparent',
-                    color: isActive ? 'var(--text-1)' : 'var(--text-2)',
-                  }}
+      {/* Status filter chips */}
+      <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5">
+        {STATUS_FILTERS.map((filter) => {
+          const isActive = statusFilter === filter.value
+          const count = filter.value === 'all' ? (allTasks?.length ?? 0) : (statusCounts[filter.value] ?? 0)
+          return (
+            <button
+              key={filter.value}
+              onClick={() => changeStatusFilter(filter.value)}
+              aria-pressed={isActive}
+              className="inline-flex items-center gap-1 border-none cursor-pointer transition-colors duration-150 whitespace-nowrap"
+              style={{
+                padding: '4px 12px',
+                borderRadius: '980px',
+                fontSize: '0.8125rem',
+                fontWeight: isActive ? 600 : 400,
+                letterSpacing: '-0.08px',
+                background: isActive ? 'color-mix(in srgb, var(--accent-dim) 18%, var(--bg-panel) 82%)' : 'transparent',
+                color: isActive ? 'var(--text-1)' : 'var(--text-2)',
+              }}
+            >
+              {filter.label}
+              {count > 0 && (
+                <span
+                  className="tabular-nums"
+                  style={{ fontSize: '0.6875rem', letterSpacing: '-0.06px', color: 'var(--text-3)' }}
                 >
-                  {filter.label}
-                  {count > 0 && (
-                    <span
-                      className="tabular-nums"
-                      style={{ fontSize: '0.6875rem', letterSpacing: '-0.06px', color: 'var(--text-3)' }}
-                    >
-                      {count}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        {!isLoading && !isError && allTasks && allTasks.length > 0 && (
-          <div className="mt-3 flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-3)] pointer-events-none" />
-              <input
-                value={searchQuery}
-									onChange={(e) => changeSearchQuery(e.target.value)}
-                placeholder="Search tasks…"
-                className={cn(
-                  'w-full pl-7 pr-3 py-1.5 rounded-[var(--r-md)] outline-none',
-                  'bg-[var(--dashboard-subsurface-bg)] border border-[color-mix(in_srgb,var(--border)_54%,transparent)]',
-                  'text-[var(--text-1)] placeholder:text-[var(--text-3)]',
-                  'focus:border-[var(--accent)]/40 transition-colors',
-                )}
-                style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}
-              />
-            </div>
-          </div>
-        )}
+                  {count}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
-      <div className={cn('flex-1 min-h-0 overflow-y-auto', embedded ? 'px-[var(--dashboard-context-gutter)] py-4' : 'px-6 py-2 max-w-4xl mx-auto w-full')}>
-        {isLoading && <TasksSkeleton embedded={embedded} />}
+      {!isLoading && !isError && allTasks && allTasks.length > 0 && (
+        <div className="mt-3 relative">
+          <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-3)] pointer-events-none" />
+          <input
+            value={searchQuery}
+            onChange={(e) => changeSearchQuery(e.target.value)}
+            placeholder="Search tasks…"
+            className={cn(
+              'w-full pl-7 pr-3 py-1.5 rounded-[var(--r-md)] outline-none',
+              'bg-[var(--dashboard-subsurface-bg)] border border-[color-mix(in_srgb,var(--border)_54%,transparent)]',
+              'text-[var(--text-1)] placeholder:text-[var(--text-3)]',
+              'focus:border-[var(--accent)]/40 transition-colors',
+            )}
+            style={{ fontSize: '0.75rem', letterSpacing: '-0.08px' }}
+          />
+        </div>
+      )}
+
+      <div className="mt-3">
+        {isLoading && <TasksSkeleton />}
 
         {isError && (
           <div className="flex items-center gap-2 px-4 py-3 rounded-[8px] bg-[var(--dashboard-subsurface-bg)] text-[0.8125rem] text-[var(--red)]" style={{ letterSpacing: '-0.08px' }}>
@@ -257,7 +245,7 @@ export default function DashboardTasksPanel({
                 <p className="text-[var(--text-3)] mb-5" style={{ fontSize: '0.875rem', letterSpacing: '-0.224px', lineHeight: 1.47 }}>
                   Try a different filter or search term.
                 </p>
-								<Button variant="secondary" onClick={() => { changeStatusFilter('all'); changeSearchQuery('') }} style={{ letterSpacing: '-0.12px' }}>
+                <Button variant="secondary" onClick={() => { changeStatusFilter('all'); changeSearchQuery('') }} style={{ letterSpacing: '-0.12px' }}>
                   Clear filters
                 </Button>
               </>
@@ -267,9 +255,9 @@ export default function DashboardTasksPanel({
 
         {!isLoading && !isError && visibleTasks.length > 0 && (
           <div className="flex flex-col gap-0.5">
-				{visibleTasks.map((task) => {
-					const assigneeLabel = taskAssignedMemberLabel(task)
-					return (
+            {visibleTasks.map((task) => {
+              const assigneeLabel = taskAssignedMemberLabel(task)
+              return (
                 <Link
                   key={task.id}
                   to={taskDetailLink(projectId, task.id)}
@@ -296,13 +284,13 @@ export default function DashboardTasksPanel({
                   </span>
                   <ExternalLink size={11} className="shrink-0 text-[var(--text-3)]" />
                 </Link>
-					)
-				})}
-				<div className="mt-3 px-1">
-					<ListPager page={page} totalPages={totalPages} onPageChange={setPage} />
-				</div>
-			</div>
-		)}
+              )
+            })}
+            <div className="mt-3 px-1">
+              <ListPager page={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
+          </div>
+        )}
       </div>
 
       <CreateTaskDialog
@@ -310,6 +298,6 @@ export default function DashboardTasksPanel({
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
       />
-    </div>
+    </section>
   )
 }

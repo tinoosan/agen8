@@ -4,7 +4,6 @@ import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/
 import { cn } from '@/lib/utils'
 import type { DashboardPanel } from '../../lib/routing'
 import DashboardMissionsPanel from './DashboardMissionsPanel'
-import DashboardTasksPanel from './DashboardTasksPanel'
 import DashboardDecisionsPanel from './DashboardDecisionsPanel'
 
 const CONTEXT_WIDTH_KEY = 'dashboard.context-panel-width'
@@ -131,16 +130,12 @@ export default function DashboardContextPanel({
       <div className="dashboard-context-header shrink-0 h-12 flex items-center px-[var(--dashboard-context-gutter)] border-b border-[color-mix(in_srgb,var(--border)_48%,transparent)]">
         <TabsList className="dashboard-context-tabs h-auto bg-transparent gap-0 p-0 rounded-none shrink-0">
           <TabsTrigger value="missions" className="dashboard-context-tab">Missions</TabsTrigger>
-          <TabsTrigger value="tasks" className="dashboard-context-tab">Tasks</TabsTrigger>
           <TabsTrigger value="decisions" className="dashboard-context-tab">Decisions</TabsTrigger>
         </TabsList>
       </div>
 
       <TabsContent value="missions" className="flex-1 min-h-0 mt-0 overflow-hidden">
         <DashboardMissionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
-      </TabsContent>
-      <TabsContent value="tasks" className="flex-1 min-h-0 mt-0 overflow-hidden">
-        <DashboardTasksPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
       </TabsContent>
       <TabsContent value="decisions" className="flex-1 min-h-0 mt-0 overflow-hidden">
         <DashboardDecisionsPanel projectId={projectId} focusedProjectRoot={focusedProjectRoot} embedded />
