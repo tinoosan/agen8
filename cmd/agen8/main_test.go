@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -95,6 +97,52 @@ func TestRunSkillInstallWritesSkill(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output %q missing %q", output, want)
 		}
+	}
+}
+
+func TestRunHelpListsCommands(t *testing.T) {
+	for _, arg := range []string{"help", "--help", "-h"} {
+		output := captureStdout(t, func() {
+			if err := run([]string{arg}); err != nil {
+				t.Fatalf("run %q: unexpected error %v", arg, err)
+			}
+		})
+		for _, want := range []string{"Usage:", "daemon start", "skill install", "hooks install", "healthcheck", "claude hook", "version"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("run %q output missing %q:\n%s", arg, want, output)
+			}
+		}
+	}
+}
+
+func TestRunBareInvocationPrintsHelpNotDaemon(t *testing.T) {
+	// Bare `agen8` must not start the daemon; it prints the synopsis and returns.
+	output := captureStdout(t, func() {
+		if err := run(nil); err != nil {
+			t.Fatalf("run with no args: unexpected error %v", err)
+		}
+	})
+	if !strings.Contains(output, "Usage:") || !strings.Contains(output, "daemon start") {
+		t.Fatalf("bare invocation did not print help:\n%s", output)
+	}
+}
+
+func TestRunUnknownCommandPointsToHelp(t *testing.T) {
+	err := run([]string{"bogus"})
+	if err == nil {
+		t.Fatal("unknown command unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "unknown command") || !strings.Contains(err.Error(), "agen8 help") {
+		t.Fatalf("error %q should name the bad command and point to help", err)
+	}
+}
+
+func TestRunSubcommandHelpIsNotAnError(t *testing.T) {
+	// flag's -h prints usage and returns flag.ErrHelp; run must surface exactly
+	// that sentinel so main() can treat it as a clean exit rather than a failure.
+	err := run([]string{"skill", "install", "-h"})
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("skill install -h returned %v, want flag.ErrHelp", err)
 	}
 }
 

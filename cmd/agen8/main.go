@@ -20,18 +20,47 @@ import (
 	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
 
+const usageText = `agen8 — durable work-context daemon and MCP server
+
+Usage:
+  agen8 <command> [flags]
+
+Commands:
+  daemon start     Start the daemon (HTTP listener + MCP server)
+  skill install    Install the agen8 skill tree into a harness (codex|claude-cli)
+  hooks install    Install attention hooks into a harness (claude|codex)
+  healthcheck      Probe the daemon /healthz endpoint
+  claude hook      Claude Code PreToolUse hook entrypoint (reads stdin)
+  version          Print version, commit, and build date
+  help             Show this help
+
+Run "agen8 <command> -h" for a command's flags.
+`
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		// A subcommand's -h/-help makes flag.Parse return flag.ErrHelp after it
+		// has already printed usage. Requesting help is success, not an error.
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
 		fmt.Fprintf(os.Stderr, "agen8: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
+	// Bare invocation prints help rather than starting the daemon: the daemon is
+	// always launched explicitly (.air.toml, Dockerfile CMD both pass "daemon
+	// start"), so a discoverable synopsis is the more useful default.
 	if len(args) == 0 {
-		return runDaemonStart(nil)
+		fmt.Fprint(os.Stdout, usageText)
+		return nil
 	}
 	switch args[0] {
+	case "help", "--help", "-h":
+		fmt.Fprint(os.Stdout, usageText)
+		return nil
 	case "version", "--version", "-v":
 		info := buildinfo.Current()
 		fmt.Printf("agen8 %s\ncommit: %s\n", info.Version, info.Commit)
@@ -49,7 +78,7 @@ func run(args []string) error {
 		return runHooks(args[1:])
 	}
 	if args[0] != "daemon" {
-		return fmt.Errorf("unknown command %q", args[0])
+		return fmt.Errorf("unknown command %q; run \"agen8 help\" for usage", args[0])
 	}
 	if len(args) < 2 || args[1] != "start" {
 		return fmt.Errorf("usage: agen8 daemon start [--data-dir DIR] [--listener http] [--http-addr ADDR]")
