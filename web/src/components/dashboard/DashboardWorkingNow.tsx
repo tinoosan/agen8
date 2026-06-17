@@ -3,11 +3,14 @@ import { Link } from 'wouter'
 import { Activity, ChevronRight } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectTasks } from '../../hooks/useProjectTasks'
+import { useProjectMembers } from '../../hooks/useProjectMembers'
 import { useListChangeSignals } from '../../hooks/useListChangeSignals'
 import { taskClaimedMemberLabel, taskAssignedMemberLabel } from '../../lib/taskMembers'
 import { taskStatusColor, taskStatusLabel } from '../../lib/statusLabels'
-import { taskDetailLink } from '../../lib/routing'
-import type { Task } from '../../lib/types'
+import { taskDetailLink, useNavigation } from '../../lib/routing'
+import ResumeSession from '../ResumeSession'
+import { isResumableSession } from '../../lib/sessionResume'
+import type { Task, ProjectMember } from '../../lib/types'
 import { formatRelative } from '@/lib/format'
 
 /* In-flight = work an agent is actively on, not queued and not finished:
@@ -48,11 +51,15 @@ function agentName(task: Task): string {
 function WorkingRow({
   projectId,
   task,
+  member,
+  projectRoot,
   first,
   changed,
 }: {
   projectId: string
   task: Task
+  member?: ProjectMember
+  projectRoot: string | null
   first: boolean
   changed: boolean
 }) {
@@ -62,6 +69,11 @@ function WorkingRow({
   const label = task.title || task.description
   // active === an agent actively working it → the status dot breathes.
   const isActive = task.status === 'active'
+  // Offer a way back into the agent's live session when its harness session is
+  // reopenable. The Resume trigger is a sibling of the row Link (a button can't
+  // live inside an anchor), so it sits in the trailing slot in place of the
+  // decorative chevron.
+  const canResume = isResumableSession(member?.harnessKind, member?.nativeSessionRef)
   // Entrance is CSS-on-mount: a row is keyed by task.id, so this only plays when
   // a task genuinely arrives (a new DOM node), not on a steady-state refetch.
   // `changed` adds a one-shot accent wash when an existing row's status moves.
@@ -72,48 +84,61 @@ function WorkingRow({
     >
       {/* Hairline inset to start under the text, the way iOS Settings lists read. */}
       {!first && <div className="ml-[64px] h-px bg-[var(--border)]" />}
-      <Link
-        to={taskDetailLink(projectId, task.id)}
-        aria-label={`${base} — ${label} (${taskStatusLabel(task.status)}) — open task`}
-        className="flex items-center gap-3 px-4 py-3 no-underline transition-colors hover:bg-[var(--bg-hover)]"
-      >
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[0.75rem] font-semibold"
-          style={{
-            background: `color-mix(in srgb, var(${token}) 20%, var(--bg-elevated))`,
-            color: `var(${token})`,
-          }}
-          aria-hidden
+      <div className="group flex items-center transition-colors hover:bg-[var(--bg-hover)]">
+        <Link
+          to={taskDetailLink(projectId, task.id)}
+          aria-label={`${base} — ${label} (${taskStatusLabel(task.status)}) — open task`}
+          className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 no-underline"
         >
-          {initials(base)}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[0.9375rem] font-semibold tracking-[-0.01em] text-[var(--text-1)]">
-            {base}
-            {role && (
-              <span className="ml-1.5 text-[0.75rem] font-normal text-[var(--text-3)]">{role}</span>
-            )}
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[0.75rem] font-semibold"
+            style={{
+              background: `color-mix(in srgb, var(${token}) 20%, var(--bg-elevated))`,
+              color: `var(${token})`,
+            }}
+            aria-hidden
+          >
+            {initials(base)}
           </div>
-          <div className="truncate text-[0.8125rem] text-[var(--text-3)]">{label}</div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-0.5">
-          <span className="flex items-center gap-1 text-[0.75rem] font-medium" style={{ color }}>
-            <span
-              className={`h-1.5 w-1.5 rounded-full${isActive ? ' live-dot-pulse' : ''}`}
-              style={
-                isActive
-                  ? ({ background: color, '--live-dot': color } as React.CSSProperties)
-                  : { background: color }
-              }
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[0.9375rem] font-semibold tracking-[-0.01em] text-[var(--text-1)]">
+              {base}
+              {role && (
+                <span className="ml-1.5 text-[0.75rem] font-normal text-[var(--text-3)]">{role}</span>
+              )}
+            </div>
+            <div className="truncate text-[0.8125rem] text-[var(--text-3)]">{label}</div>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-0.5">
+            <span className="flex items-center gap-1 text-[0.75rem] font-medium" style={{ color }}>
+              <span
+                className={`h-1.5 w-1.5 rounded-full${isActive ? ' live-dot-pulse' : ''}`}
+                style={
+                  isActive
+                    ? ({ background: color, '--live-dot': color } as React.CSSProperties)
+                    : { background: color }
+                }
+              />
+              <span className="hidden sm:inline">{taskStatusLabel(task.status)}</span>
+            </span>
+            <span className="hidden text-[0.6875rem] tabular-nums text-[var(--text-3)] sm:inline">
+              {formatRelative(task.updatedAt)}
+            </span>
+          </div>
+        </Link>
+        <div className="flex shrink-0 items-center pl-1 pr-3">
+          {canResume ? (
+            <ResumeSession
+              harnessKind={member?.harnessKind}
+              nativeSessionRef={member?.nativeSessionRef}
+              projectRoot={projectRoot}
+              label={false}
             />
-            <span className="hidden sm:inline">{taskStatusLabel(task.status)}</span>
-          </span>
-          <span className="hidden text-[0.6875rem] tabular-nums text-[var(--text-3)] sm:inline">
-            {formatRelative(task.updatedAt)}
-          </span>
+          ) : (
+            <ChevronRight size={16} className="text-[var(--text-3)]" aria-hidden />
+          )}
         </div>
-        <ChevronRight size={16} className="shrink-0 text-[var(--text-3)]" aria-hidden />
-      </Link>
+      </div>
     </div>
   )
 }
@@ -122,6 +147,20 @@ function WorkingRow({
 
 export default function DashboardWorkingNow({ projectId }: { projectId: string | null }) {
   const { data: tasks, isLoading, isError } = useProjectTasks(projectId)
+  const { focusedProjectRoot } = useNavigation()
+  const membersQuery = useProjectMembers(projectId)
+  const membersById = useMemo(() => {
+    const map = new Map<string, ProjectMember>()
+    for (const m of membersQuery.data ?? []) map.set(m.id, m)
+    return map
+  }, [membersQuery.data])
+
+  // Who's on it: prefer the claimer, fall back to the assignee — same rule the
+  // label uses — so Resume targets the member actually in the session.
+  const memberForTask = (t: Task) => {
+    const id = t.claimedByMemberId ?? t.assignedTo
+    return id ? membersById.get(id) : undefined
+  }
 
   const working = useMemo(
     () => (tasks ?? []).filter((t) => IN_FLIGHT.has(t.status ?? '')),
@@ -173,6 +212,8 @@ export default function DashboardWorkingNow({ projectId }: { projectId: string |
               key={t.id}
               projectId={projectId}
               task={t}
+              member={memberForTask(t)}
+              projectRoot={focusedProjectRoot}
               first={i === 0}
               changed={changedIds.has(t.id)}
             />
