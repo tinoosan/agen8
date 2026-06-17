@@ -9,6 +9,7 @@ import { computeMemberPerformance, type MemberPerformance } from '../lib/metrics
 import { formatCoarseDuration } from '../lib/taskTiming'
 import { ShareBar, SuccessPill } from '../components/metrics/leaderboardBits'
 import Sparkline from '../components/charts/Sparkline'
+import ResumeSession from '../components/ResumeSession'
 import { cn } from '@/lib/utils'
 import { formatRelative } from '@/lib/format'
 import { isUuid } from '@/lib/displaySanitizers'
@@ -78,7 +79,7 @@ function findDuplicateIds(members: ProjectMember[]): Set<string> {
 /* ── Page ────────────────────────────────────────────── */
 
 export default function Members() {
-  const { projectId } = useNavigation()
+  const { projectId, focusedProjectRoot } = useNavigation()
   const { data, isLoading, isError } = useProjectMembers(projectId)
   const members = useMemo(() => data ?? [], [data])
 
@@ -137,7 +138,7 @@ export default function Members() {
                   tone="warning"
                 />
               </div>
-              <MemberRoster members={active} dupeIds={dupeIds} perfById={perfById} />
+              <MemberRoster members={active} dupeIds={dupeIds} perfById={perfById} projectRoot={focusedProjectRoot} />
             </div>
           )
         )}
@@ -163,6 +164,7 @@ function MemberRoster(props: {
   members: ProjectMember[]
   dupeIds: Set<string>
   perfById: Map<string, MemberPerformance>
+  projectRoot: string | null
 }) {
   const maxDone = props.members.reduce(
     (m, member) => Math.max(m, props.perfById.get(member.id)?.done ?? 0),
@@ -181,6 +183,7 @@ function MemberRoster(props: {
             isDupe={props.dupeIds.has(m.id)}
             perf={props.perfById.get(m.id)}
             share={shareOf(m.id)}
+            projectRoot={props.projectRoot}
           />
         ))}
       </div>
@@ -235,11 +238,13 @@ function MemberCard({
   isDupe,
   perf,
   share,
+  projectRoot,
 }: {
   m: ProjectMember
   isDupe: boolean
   perf?: MemberPerformance
   share: number
+  projectRoot: string | null
 }) {
   const name = memberDisplayName(m.displayName, m.id) ?? m.id
   const handTyped = isHandTypedRef(m.nativeSessionRef)
@@ -269,7 +274,14 @@ function MemberCard({
         <PerformanceCell perf={perf} share={share} />
       </div>
       <div className="flex flex-col gap-1">
-        <CardLabel>Session ref</CardLabel>
+        <div className="flex items-center justify-between gap-2">
+          <CardLabel>Session ref</CardLabel>
+          <ResumeSession
+            harnessKind={m.harnessKind}
+            nativeSessionRef={m.nativeSessionRef}
+            projectRoot={projectRoot}
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <code className="break-all text-[0.75rem] text-[var(--text-3)]">
             {m.nativeSessionRef || '—'}
@@ -315,11 +327,13 @@ function MemberTable({
   dupeIds,
   perfById,
   shareOf,
+  projectRoot,
 }: {
   members: ProjectMember[]
   dupeIds: Set<string>
   perfById: Map<string, MemberPerformance>
   shareOf: (id: string) => number
+  projectRoot: string | null
 }) {
   return (
     <div className="hidden overflow-hidden rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--bg-surface)] @min-[720px]:block">
@@ -345,6 +359,7 @@ function MemberTable({
               isDupe={dupeIds.has(m.id)}
               perf={perfById.get(m.id)}
               share={shareOf(m.id)}
+              projectRoot={projectRoot}
             />
           ))}
         </TableBody>
@@ -366,11 +381,13 @@ function MemberRow({
   isDupe,
   perf,
   share,
+  projectRoot,
 }: {
   m: ProjectMember
   isDupe: boolean
   perf?: MemberPerformance
   share: number
+  projectRoot: string | null
 }) {
   const name = memberDisplayName(m.displayName, m.id) ?? m.id
   const handTyped = isHandTypedRef(m.nativeSessionRef)
@@ -408,7 +425,14 @@ function MemberRow({
       </TableCell>
       {(
         <TableCell className="px-4 py-3 text-right">
-          <RemoveMemberButton member={m} name={name} revealOnHover />
+          <div className="flex items-center justify-end gap-1">
+            <ResumeSession
+              harnessKind={m.harnessKind}
+              nativeSessionRef={m.nativeSessionRef}
+              projectRoot={projectRoot}
+            />
+            <RemoveMemberButton member={m} name={name} revealOnHover />
+          </div>
         </TableCell>
       )}
     </TableRow>
