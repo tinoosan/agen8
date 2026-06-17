@@ -521,12 +521,22 @@ func toolCallRPCBody(req *mcp.CallToolRequest) []byte {
 	if arguments == nil {
 		arguments = json.RawMessage(`{}`)
 	}
+	params := map[string]any{
+		"name":      strings.TrimSpace(req.Params.Name),
+		"arguments": arguments,
+	}
+	// Carry the request's _meta into this synthetic body. The per-call session
+	// re-resolve (resolveSessionForMCPCall) runs harness detection on THIS body,
+	// not the original wire body — and Codex self-identifies ONLY through _meta
+	// (x-codex-turn-metadata / sessionId). Dropping _meta here is why a Codex
+	// session resolved to harness "unknown" while Claude (which stamps
+	// arguments.session_id, preserved above) survived. (decision dec-…)
+	if len(req.Params.Meta) > 0 {
+		params["_meta"] = req.Params.Meta
+	}
 	payload := map[string]any{
 		"method": "tools/call",
-		"params": map[string]any{
-			"name":      strings.TrimSpace(req.Params.Name),
-			"arguments": arguments,
-		},
+		"params": params,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
