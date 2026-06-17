@@ -289,7 +289,7 @@ func TestRegisterMCPContextHarnessLabelDriftDoesNotForkMember(t *testing.T) {
 func TestResolveMCPContextCollapsesHarnessLabelForkSameProject(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	service := newProjectServiceForMCPContextTest(t)
+	service, members := newProjectServiceAndMembersForMCPContextTest(t)
 	root := filepath.Join(t.TempDir(), "repo")
 
 	first, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
@@ -304,19 +304,26 @@ func TestResolveMCPContextCollapsesHarnessLabelForkSameProject(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	// Fabricate the fork the old code left behind. The register path no longer creates
-	// it, so write the second member directly: same user, project, and native ref, a
-	// drifted harness label, and a distinct id.
-	authCtx := caller.ContextWithCaller(ctx, caller.Caller{UserID: "user-1"})
-	forked, err := service.UpsertExternalHarnessMember(authCtx, UpsertExternalHarnessMemberParams{
-		ID:               member.ID("member-forked-clic"),
+	// Fabricate the fork the old code left behind. The register path no longer
+	// creates it (harness kinds are normalized on write, so "claude" / "claude-cli"
+	// both collapse to "claude-code" and collide on the unique index), so plant the
+	// second row straight into the repo: same user, project, and native ref, a
+	// drifted (un-normalized) harness label, and a distinct id.
+	forkedID := member.ID("member-forked-clic")
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	if err := members.Create(ctx, member.Record{
+		ID:               forkedID,
 		UserID:           "user-1",
 		ProjectID:        first.ProjectID,
+		ChannelID:        "channel:" + first.ProjectID + ":member:" + string(forkedID),
 		NativeSessionRef: first.NativeSessionRef,
 		DisplayName:      "Atlas",
+		MemberType:       member.TypeCoordinator,
+		LifecycleState:   member.LifecycleActive,
 		HarnessKind:      "claude-cli",
-	})
-	if err != nil {
+		RegisteredAt:     now,
+		UpdatedAt:        now,
+	}); err != nil {
 		t.Fatalf("fabricate fork: %v", err)
 	}
 
@@ -329,8 +336,8 @@ func TestResolveMCPContextCollapsesHarnessLabelForkSameProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve over forked members must not error: %v", err)
 	}
-	if string(resolved.ID) != first.MemberID && resolved.ID != forked.ID {
-		t.Fatalf("resolved member=%q is neither fork member (%q / %q)", resolved.ID, first.MemberID, forked.ID)
+	if string(resolved.ID) != first.MemberID && resolved.ID != forkedID {
+		t.Fatalf("resolved member=%q is neither fork member (%q / %q)", resolved.ID, first.MemberID, forkedID)
 	}
 	if resolved.ProjectID != first.ProjectID {
 		t.Fatalf("resolved project=%q want %q", resolved.ProjectID, first.ProjectID)
@@ -704,6 +711,16 @@ func TestUpsertWorkspaceRequiresProjectAndRoot(t *testing.T) {
 
 func newProjectServiceForMCPContextTest(t *testing.T) *Service {
 	t.Helper()
+	service, _ := newProjectServiceAndMembersForMCPContextTest(t)
+	return service
+}
+
+// newProjectServiceAndMembersForMCPContextTest also hands back the member repo,
+// for tests that need to plant rows the app layer would normalize away — e.g. a
+// legacy harness-label fork, which the canonical-on-write normalization now
+// prevents but the resolve-side collapse must still heal.
+func newProjectServiceAndMembersForMCPContextTest(t *testing.T) (*Service, member.Repository) {
+	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{
 		Driver:  storagedb.DriverSQLite,
 		DataDir: filepath.Join(t.TempDir(), "data"),
@@ -736,7 +753,7 @@ func newProjectServiceForMCPContextTest(t *testing.T) *Service {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	return service
+	return service, members
 }
 
 func createGitWorktreeFixture(t *testing.T) (string, string) {

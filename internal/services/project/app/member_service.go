@@ -72,7 +72,7 @@ func (s *Service) UpsertExternalHarnessMember(ctx context.Context, p UpsertExter
 		DisplayName:      strings.TrimSpace(p.DisplayName),
 		MemberType:       memberType,
 		LifecycleState:   member.LifecycleActive,
-		HarnessKind:      strings.TrimSpace(p.HarnessKind),
+		HarnessKind:      member.CanonicalHarnessKind(p.HarnessKind),
 		Model:            strings.TrimSpace(p.Model),
 		Effort:           strings.TrimSpace(p.Effort),
 		PermissionMode:   permissionMode,
@@ -129,6 +129,9 @@ func (s *Service) RegisterMember(ctx context.Context, rosterMember member.Record
 	if err := s.requireRosterWriteAccess(ctx, caller, projectID); err != nil {
 		return RegisterMemberResult{}, err
 	}
+	// Store a canonical harness kind so the Claude family never persists as a
+	// stray "claude" / "claude-cli".
+	rosterMember.HarnessKind = member.CanonicalHarnessKind(rosterMember.HarnessKind)
 	if strings.TrimSpace(rosterMember.PermissionMode) == "" {
 		rosterMember.PermissionMode = s.defaultPermissionMode(rosterMember.HarnessKind)
 	}

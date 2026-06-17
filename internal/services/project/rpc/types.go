@@ -209,7 +209,9 @@ func NewMemberView(m member.Record) MemberView {
 		ChannelID:        string(m.ChannelID),
 		DisplayName:      m.DisplayName,
 		MemberType:       m.MemberType,
-		HarnessKind:      m.HarnessKind,
+		// Canonical so legacy "claude" / "claude-cli" rows reach the web as
+		// "claude-code" (no migration needed); consumers match exact strings.
+		HarnessKind:      member.CanonicalHarnessKind(m.HarnessKind),
 		LifecycleState:   m.LifecycleState,
 		RegisteredAt:     m.RegisteredAt,
 		UpdatedAt:        m.UpdatedAt,
