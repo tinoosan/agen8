@@ -21,13 +21,8 @@ import (
 	"github.com/tinoosan/agen8/internal/core/types"
 	"github.com/tinoosan/agen8/internal/logging"
 	"github.com/tinoosan/agen8/internal/mcp"
-	projecttool "github.com/tinoosan/agen8/internal/mcp/tools/project"
 	"github.com/tinoosan/agen8/internal/rpc"
 	"github.com/tinoosan/agen8/internal/services/attention"
-	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
-	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
-	userapp "github.com/tinoosan/agen8/internal/services/user/app"
 	"github.com/tinoosan/agen8/internal/web"
 	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
@@ -35,14 +30,15 @@ import (
 type loopbackIPLookup func(string) ([]net.IP, error)
 
 type Daemon struct {
-	cfg       Config
-	app       *app.Application
-	rpc       *rpc.Server
-	mcpTokens *mcp.TokenStore
-	mcp       *mcp.Server
-	events    *eventsHub
-	attention *attention.Service
-	logger    *slog.Logger
+	cfg         Config
+	app         *app.Application
+	rpc         *rpc.Server
+	mcpTokens   *mcp.TokenStore
+	mcp         *mcp.Server
+	mcpResolver *mcpSessionResolver
+	events      *eventsHub
+	attention   *attention.Service
+	logger      *slog.Logger
 }
 
 const maxRPCRequestBodyBytes = 1024 * 1024
@@ -123,6 +119,19 @@ func New(cfg Config) (*Daemon, error) {
 		rpc:       rpcServer,
 		mcpTokens: tokenStore,
 		mcp:       mcpServer,
+		mcpResolver: newMCPSessionResolver(mcpSessionResolverConfig{
+			tokenStore:      tokenStore,
+			auth:            application.AuthSvc,
+			users:           application.UserSvc,
+			projects:        application.ProjectSvc,
+			decisions:       application.DecisionSvc,
+			graph:           application.GraphSvc,
+			credentials:     application.CredentialSvc,
+			tasks:           application.TaskSvc,
+			files:           application.FileSvc,
+			missions:        application.MissionSvc,
+			externalBaseURL: cfg.externalBaseURL(),
+		}),
 		events:    newEventsHub(application.EventBus, logger.With("service", "events")),
 		attention: attentionSvc,
 		logger:    logger.With("service", "daemon"),
@@ -537,34 +546,6 @@ func deriveOriginFromReferer(r *http.Request) string {
 	return refererURL.Scheme + "://" + refererURL.Host
 }
 
-func (d *Daemon) mcpSession(token, userID, harnessKind string) mcp.Session {
-	return mcp.Session{
-		Token:       strings.TrimSpace(token),
-		Bootstrap:   false,
-		UserID:      strings.TrimSpace(userID),
-		HarnessKind: strings.TrimSpace(harnessKind),
-		ContextRegistrar: projectMCPContextRegistrar{
-			projects: d.app.ProjectSvc,
-			users:    d.app.UserSvc,
-			auth:     d.app.AuthSvc,
-			baseURL:  d.cfg.externalBaseURL(),
-		},
-		MemberDirectory: d.app.ProjectSvc,
-		MemberRegistrar: d.app.ProjectSvc,
-		TaskMembers:     d.app.ProjectSvc,
-		DecisionService: d.app.DecisionSvc,
-		GraphService:    d.app.GraphSvc,
-		CredentialResolver: httpCredentialResolver{
-			credentials: d.app.CredentialSvc,
-		},
-		TaskService:     d.app.TaskSvc,
-		TaskFiles:       d.app.FileSvc,
-		MissionService:  d.app.MissionSvc,
-		MissionKRs:      d.app.MissionSvc,
-		MissionProgress: d.app.MissionSvc,
-	}
-}
-
 func (c Config) externalBaseURL() string {
 	publicURL := strings.TrimRight(strings.TrimSpace(c.PublicURL), "/")
 	if publicURL != "" {
@@ -574,156 +555,10 @@ func (c Config) externalBaseURL() string {
 }
 
 func (d *Daemon) resolveMCPSession(ctx context.Context, token string, header http.Header, body []byte) (mcp.Session, error) {
-	session, err := d.mcpTokens.Resolve(token)
-	if err != nil {
-		// Token resolution priority: bootstrap/web-registered tokens (above) →
-		// wlt_ link tokens → ak_ API keys. A wlt_ token is recognised first and
-		// binds the session to a project server-side; an invalid one fails loudly
-		// rather than falling through to the API-key path.
-		if strings.HasPrefix(strings.TrimSpace(token), "wlt_") {
-			bind, bindErr := d.app.AuthSvc.ValidateLinkToken(ctx, token)
-			if bindErr != nil {
-				return mcp.Session{}, err
-			}
-			session = d.mcpSession(token, bind.User.ID.String(), "")
-			session.ProjectID = strings.TrimSpace(bind.ProjectID)
-		} else {
-			account, authErr := d.app.AuthSvc.ValidateAPIKey(ctx, token)
-			if authErr != nil {
-				return mcp.Session{}, err
-			}
-			session = d.mcpSession(token, account.ID.String(), "")
-		}
+	if d == nil || d.mcpResolver == nil {
+		return mcp.Session{}, fmt.Errorf("mcp session resolver is not configured")
 	}
-	// Prefer the in-band session refs carried in the JSON-RPC body over the
-	// transport header. The body is the authoritative per-call identity: Codex
-	// self-identifies via params._meta and Claude Code's PreToolUse hook stamps
-	// arguments.session_id - both land in the body. The Mcp-Session-Id transport
-	// header is only a connection-level memo and can be stale when several
-	// concurrent conversations share one token over one connection, so it must not
-	// outrank a fresh in-band id. Header remains the fallback for callers that send
-	// no in-band refs. This is Codex-safe: Codex sends no Agen8-Native-Session-Id
-	// header, so flipping precedence cannot demote a value it relies on.
-	bodyRefs := mcp.SessionRequestContextFromJSONRPCBody(body)
-	sessionID, threadID := bodyRefs.SessionID, bodyRefs.ThreadID
-	if sessionID == "" && threadID == "" {
-		sessionID, threadID = mcp.SessionRefsFromHTTPHeader(header)
-	}
-	// Auto-detect the calling harness from the registration fingerprint when the
-	// session carries none yet (a fresh, not-yet-resolved registration). The agent
-	// never enters this; it is read from how the client self-identifies in the body.
-	// An existing member's persisted HarnessKind is authoritative and is restored
-	// onto the session below, overriding this best-effort detection.
-	if strings.TrimSpace(session.HarnessKind) == "" {
-		nativeRef := sessionID
-		if nativeRef == "" {
-			nativeRef = threadID
-		}
-		session.HarnessKind = mcp.HarnessFromJSONRPCBody(body, nativeRef)
-	}
-	if sessionID == "" && threadID == "" {
-		return session, nil
-	}
-	userID := d.mcpUserID(ctx, token)
-	rosterMember, err := d.app.ProjectSvc.ResolveMCPContext(ctx, projectapp.ResolveMCPContextInput{
-		Token:     token,
-		UserID:    userID,
-		ProjectID: session.ProjectID,
-		// Resolve harness-agnostically. A shared user-scoped API key or link token can
-		// serve more than one harness, so the token's own HarnessKind must not filter
-		// the lookup. The (user, native_session_ref) pair identifies the member
-		// uniquely, and ResolveMCPContext fails loudly if it ever matches more than
-		// one. The resolved member's real HarnessKind is restored onto the session
-		// below.
-		HarnessKind: "",
-		SessionID:   sessionID,
-		ThreadID:    threadID,
-	})
-	if err != nil {
-		if errors.Is(err, member.ErrNotFound) {
-			return session, nil
-		}
-		return mcp.Session{}, err
-	}
-	session.UserID = strings.TrimSpace(rosterMember.UserID)
-	session.MemberID = strings.TrimSpace(string(rosterMember.ID))
-	session.ProjectID = strings.TrimSpace(rosterMember.ProjectID)
-	session.ChannelID = types.ChannelID(strings.TrimSpace(rosterMember.ChannelID))
-	session.HarnessKind = strings.TrimSpace(rosterMember.HarnessKind)
-	return session, nil
-}
-
-type projectMCPContextRegistrar struct {
-	projects *projectapp.Service
-	users    *userapp.Service
-	auth     *authapp.Service
-	baseURL  string
-}
-
-func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req projecttool.RegisterContextRequest) (projecttool.RegisterContextResult, error) {
-	if r.projects == nil {
-		return projecttool.RegisterContextResult{}, fmt.Errorf("project service is required")
-	}
-	result, err := r.projects.RegisterMCPContext(ctx, projectapp.RegisterMCPContextInput{
-		Token:            req.Token,
-		BoundProjectID:   req.BoundProjectID,
-		UserID:           mcpUserID(ctx, r.users, r.auth, req.Token),
-		ProjectID:        req.ProjectID,
-		ProjectRoot:      req.ProjectRoot,
-		LocationID:       req.LocationID,
-		DisplayName:      req.DisplayName,
-		HarnessKind:      req.HarnessKind,
-		SessionID:        req.SessionID,
-		ThreadID:         req.ThreadID,
-		NativeSessionRef: req.NativeSessionRef,
-		Model:            req.Model,
-		Effort:           req.Effort,
-		PermissionMode:   req.PermissionMode,
-		ConfigRef:        req.ConfigRef,
-	})
-	if err != nil {
-		return projecttool.RegisterContextResult{}, err
-	}
-	mcpURL := strings.TrimRight(r.baseURL, "/") + "/mcp?token=" + result.Token
-	return projecttool.RegisterContextResult{
-		ProjectID:         result.ProjectID,
-		ProjectRoot:       result.ProjectRoot,
-		LocationID:        result.LocationID,
-		MemberID:          result.MemberID,
-		DisplayName:       result.DisplayName,
-		MemberType:        result.MemberType,
-		ChannelID:         result.ChannelID,
-		SessionID:         result.SessionID,
-		ThreadID:          result.ThreadID,
-		NativeSessionRef:  result.NativeSessionRef,
-		Token:             result.Token,
-		URL:               mcpURL,
-		MCPServers:        result.MCPServers,
-		AlreadyRegistered: result.AlreadyRegistered,
-	}, nil
-}
-
-func (d *Daemon) mcpUserID(ctx context.Context, token string) string {
-	if d == nil || d.app == nil {
-		return "local"
-	}
-	return mcpUserID(ctx, d.app.UserSvc, d.app.AuthSvc, token)
-}
-
-func mcpUserID(ctx context.Context, users *userapp.Service, auth *authapp.Service, token string) string {
-	if auth != nil {
-		if strings.HasPrefix(strings.TrimSpace(token), "wlt_") {
-			binding, err := auth.ValidateLinkToken(ctx, token)
-			if err == nil && strings.TrimSpace(binding.User.ID.String()) != "" {
-				return strings.TrimSpace(binding.User.ID.String())
-			}
-		}
-		record, err := auth.ValidateAPIKey(ctx, token)
-		if err == nil && strings.TrimSpace(record.ID.String()) != "" {
-			return strings.TrimSpace(record.ID.String())
-		}
-	}
-	return "local"
+	return d.mcpResolver.Resolve(ctx, token, header, body)
 }
 
 type rpcEnvelope struct {

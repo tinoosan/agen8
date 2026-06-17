@@ -279,7 +279,12 @@ make dev remote
 internal/
   daemon/
     config.go              # listener config, env defaults, validation
-    daemon.go              # Application, RPC registry, /healthz, /rpc, /mcp, /events, setup, web UI/proxy
+    daemon.go              # Application, RPC registry, HTTP routes, web UI/proxy
+    mcp_session_resolver.go # MCP token/session/member resolution and context registration
+    http_setup.go          # setup HTTP gate and response routing
+    http_setup_flow.go     # first-user, password, session, and API-key creation
+    http_setup_mcp.go      # setup MCP URLs, client config, and shell commands
+    http_setup_render.go   # setup and completion HTML rendering
     daemon_test.go         # listener and setup tests
 
   web/
@@ -293,6 +298,8 @@ internal/
     server.go              # shared JSON-RPC server
     registry.go            # method registry
     identity.go            # request identity context</pre></div>
+
+  <p><code>internal/daemon</code> should stay a process and transport boundary. It may start listeners, mount routes, stamp request identity, resolve MCP transport sessions, render first-run setup, and delegate to services. It should not own task, mission, project, member, decision, credential, or notification business rules.</p>
 
   <h2 id="tests">8. Tests</h2>
 

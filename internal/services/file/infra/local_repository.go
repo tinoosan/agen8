@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,9 @@ func NewLocalRepository() LocalRepository {
 var _ filedomain.Repository = LocalRepository{}
 
 func (LocalRepository) Stat(_ context.Context, ref filedomain.Reference) (filedomain.Info, error) {
+	if err := ensureNoSymlinkPath(ref.Path); err != nil {
+		return filedomain.Info{}, err
+	}
 	info, err := os.Stat(ref.Path)
 	if err != nil {
 		return filedomain.Info{}, err
@@ -29,6 +33,9 @@ func (LocalRepository) Stat(_ context.Context, ref filedomain.Reference) (filedo
 }
 
 func (LocalRepository) ListDir(_ context.Context, ref filedomain.Reference) ([]filedomain.Entry, error) {
+	if err := ensureNoSymlinkPath(ref.Path); err != nil {
+		return nil, err
+	}
 	items, err := os.ReadDir(ref.Path)
 	if err != nil {
 		return nil, err
@@ -54,6 +61,9 @@ func (LocalRepository) ListDir(_ context.Context, ref filedomain.Reference) ([]f
 }
 
 func (LocalRepository) Read(_ context.Context, ref filedomain.Reference, maxBytes int64) (filedomain.Content, error) {
+	if err := ensureNoSymlinkPath(ref.Path); err != nil {
+		return filedomain.Content{}, err
+	}
 	info, err := os.Stat(ref.Path)
 	if err != nil {
 		return filedomain.Content{}, err
@@ -79,10 +89,16 @@ func (LocalRepository) Read(_ context.Context, ref filedomain.Reference, maxByte
 }
 
 func (LocalRepository) CreateDir(_ context.Context, ref filedomain.Reference) error {
+	if err := ensureNoSymlinkPath(ref.Path); err != nil {
+		return err
+	}
 	return os.MkdirAll(ref.Path, 0o755)
 }
 
 func (LocalRepository) CreateFile(_ context.Context, ref filedomain.Reference) error {
+	if err := ensureNoSymlinkPath(ref.Path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(ref.Path), 0o755); err != nil {
 		return err
 	}
@@ -94,6 +110,12 @@ func (LocalRepository) CreateFile(_ context.Context, ref filedomain.Reference) e
 }
 
 func (LocalRepository) Move(_ context.Context, source filedomain.Reference, destination filedomain.Reference) error {
+	if err := ensureNoSymlinkPath(source.Path); err != nil {
+		return err
+	}
+	if err := ensureNoSymlinkPath(destination.Path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(destination.Path), 0o755); err != nil {
 		return err
 	}
@@ -101,6 +123,12 @@ func (LocalRepository) Move(_ context.Context, source filedomain.Reference, dest
 }
 
 func (LocalRepository) Copy(_ context.Context, source filedomain.Reference, destination filedomain.Reference) error {
+	if err := ensureNoSymlinkPath(source.Path); err != nil {
+		return err
+	}
+	if err := ensureNoSymlinkPath(destination.Path); err != nil {
+		return err
+	}
 	info, err := os.Stat(source.Path)
 	if err != nil {
 		return err
@@ -109,10 +137,16 @@ func (LocalRepository) Copy(_ context.Context, source filedomain.Reference, dest
 }
 
 func (LocalRepository) Delete(_ context.Context, ref filedomain.Reference) error {
+	if err := ensureNoSymlinkPath(ref.Path); err != nil {
+		return err
+	}
 	return os.RemoveAll(ref.Path)
 }
 
 func (LocalRepository) WriteFile(_ context.Context, ref filedomain.Reference, contents []byte) error {
+	if err := ensureNoSymlinkPath(ref.Path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(ref.Path), 0o755); err != nil {
 		return err
 	}
@@ -120,6 +154,9 @@ func (LocalRepository) WriteFile(_ context.Context, ref filedomain.Reference, co
 }
 
 func (LocalRepository) WriteFileReader(_ context.Context, ref filedomain.Reference, contents io.Reader) error {
+	if err := ensureNoSymlinkPath(ref.Path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(ref.Path), 0o755); err != nil {
 		return err
 	}
@@ -157,9 +194,18 @@ func infoFromOS(info os.FileInfo) filedomain.Info {
 }
 
 func copyPath(src string, dst string, info os.FileInfo) error {
+	if err := ensureNoSymlinkPath(src); err != nil {
+		return err
+	}
+	if err := ensureNoSymlinkPath(dst); err != nil {
+		return err
+	}
 	if info.IsDir() {
 		return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
+				return err
+			}
+			if err := ensureNoSymlinkPath(path); err != nil {
 				return err
 			}
 			rel, err := filepath.Rel(src, path)
@@ -181,7 +227,13 @@ func copyPath(src string, dst string, info os.FileInfo) error {
 }
 
 func copyFile(src string, dst string, mode os.FileMode) error {
+	if err := ensureNoSymlinkPath(dst); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := ensureNoSymlinkPath(src); err != nil {
 		return err
 	}
 	in, err := os.Open(src)
@@ -198,4 +250,52 @@ func copyFile(src string, dst string, mode os.FileMode) error {
 		return err
 	}
 	return out.Close()
+}
+
+func ensureNoSymlinkPath(path string) error {
+	cleanPath := filepath.Clean(path)
+	isAbs := filepath.IsAbs(cleanPath)
+	parts := strings.Split(cleanPath, string(filepath.Separator))
+	var current string
+
+	for idx, part := range parts {
+		if part == "" {
+			if idx == 0 {
+				current = string(filepath.Separator)
+			}
+			continue
+		}
+
+		if current == "" {
+			current = part
+		} else if current == string(filepath.Separator) {
+			current = filepath.Join(current, part)
+		} else {
+			current = filepath.Join(current, part)
+		}
+
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if isAbs && idx == 1 {
+			// Keep first absolute path components flexible for host-level mounts.
+			// Systems like macOS can expose symlinked top-level directories (for
+			// example `/var`), and we only need to enforce path hardening for
+			// repository-local segments where untrusted input can redirect traversal.
+			continue
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink path is disallowed: %s", current)
+		}
+		if !info.IsDir() && idx < len(parts)-1 {
+			return fmt.Errorf("path component is not a directory: %s", current)
+		}
+	}
+
+	return nil
 }
