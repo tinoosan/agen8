@@ -14,6 +14,8 @@ import {
 import { useTask, useUpdateTask, useAssignTask } from '../hooks/useProjectTasks'
 import { useProjectMembers } from '../hooks/useProjectMembers'
 import { memberDisplayName } from '../lib/memberDisplay'
+import ResumeSession from '../components/ResumeSession'
+import { isResumableSession } from '../lib/sessionResume'
 import { useRecentDecisions } from '../hooks/useDecisions'
 import { useKeyResult, useMission, useProjectKRs } from '../hooks/useMissions'
 import { taskStatusLabel, taskStatusColor } from '../lib/statusLabels'
@@ -29,7 +31,7 @@ import {
   taskDuration,
   parseRetryTask,
 } from './boardHelpers'
-import { tasksPanelLink, missionDetailLink, decisionsLink, strategyMapLink, mapNodeId } from '../lib/routing'
+import { tasksPanelLink, missionDetailLink, decisionsLink, strategyMapLink, mapNodeId, useNavigation } from '../lib/routing'
 import { StatItem } from '../components/detail/StatItem'
 import { DetailNotFound, DetailError } from '../components/detail/DetailStates'
 import { DetailSkeleton } from '../components/detail/DetailSkeleton'
@@ -185,6 +187,7 @@ export default function TaskDetail() {
 
   const updateTask = useUpdateTask()
   const assignTask = useAssignTask()
+  const { focusedProjectRoot } = useNavigation()
 
   const { data: task, isLoading, isError, error } = useTask(taskId)
   const membersQuery = useProjectMembers(projectId)
@@ -229,6 +232,15 @@ export default function TaskDetail() {
   const assigneeLabel = taskAssignedMemberLabel(task)
   const claimedByLabel = taskClaimedMemberLabel(task)
   const createdByLabel = taskCreatedMemberLabel(task)
+
+  // The member to jump back to: whoever's actually on it (claimed), else the
+  // assignee. Resolve the full record so we can offer a resume affordance when
+  // its harness session is reopenable.
+  const workingMemberId = task.claimedByMemberId ?? task.assignedTo
+  const workingMember = workingMemberId
+    ? (membersQuery.data ?? []).find((m) => m.id === workingMemberId)
+    : undefined
+  const canResumeWorking = isResumableSession(workingMember?.harnessKind, workingMember?.nativeSessionRef)
 
   // Bind the post-guard narrowed task so the edit closures below don't see the
   // widened `Task | undefined` (TS won't carry the `if (!task)` narrowing in).
@@ -624,6 +636,18 @@ export default function TaskDetail() {
             {/* Kind is edited inline while editing; don't duplicate it here. */}
             {task.taskKind && !editing && <StatItem label="Kind" value={task.taskKind} />}
           </div>
+          {canResumeWorking && workingMember && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--border)]/60 pt-3">
+              <span className="text-[0.75rem] text-[var(--text-3)]">
+                Jump back into {memberDisplayName(workingMember.displayName, workingMember.id) ?? workingMember.id}&apos;s session
+              </span>
+              <ResumeSession
+                harnessKind={workingMember.harnessKind}
+                nativeSessionRef={workingMember.nativeSessionRef}
+                projectRoot={focusedProjectRoot}
+              />
+            </div>
+          )}
         </div>
 
         {/* Acceptance Criteria — editable rows in edit mode, read-only otherwise */}
