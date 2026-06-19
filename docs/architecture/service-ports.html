@@ -29,6 +29,7 @@
       <li><a href="#exceptions">Allowed exceptions</a></li>
       <li><a href="#examples">Agen8 examples</a></li>
       <li><a href="#guardrail">Guardrail test</a></li>
+      <li><a href="#allowlist">Allowlist discipline</a></li>
     </ol>
   </nav>
 
@@ -43,12 +44,17 @@
       <tr>
         <td>Service app package, such as <code>internal/services/question/app</code></td>
         <td>Its own domain, shared primitives, event contracts, and interfaces/DTOs declared in the same app package.</td>
-        <td>Sibling service app packages, such as <code>internal/services/decision/app</code>.</td>
+        <td>Sibling service app packages, such as <code>internal/services/decision/app</code>, and new imports of another service's domain package unless the import is explicitly allowlisted as migration debt.</td>
       </tr>
       <tr>
         <td>Service domain package</td>
-        <td>Domain-only dependencies and standard library support.</td>
-        <td>Application services, RPC adapters, infrastructure repositories, or another service's app package.</td>
+        <td>Domain-only dependencies and standard library support. This includes literal <code>domain</code> packages and service-owned model subpackages such as <code>internal/services/auth/password</code>, <code>apikey</code>, <code>session</code>, and <code>linktoken</code>.</td>
+        <td>Application services, RPC adapters, infrastructure repositories, service app packages, or another service's domain package unless the import is explicitly allowlisted as migration debt.</td>
+      </tr>
+      <tr>
+        <td>Service infra package, such as <code>internal/services/location/infra</code></td>
+        <td>Its own service domain, its own service app contracts when implementing a local adapter, storage and external-system dependencies.</td>
+        <td>Foreign service app packages. Cross-service orchestration belongs behind caller-owned ports and composition-root wiring.</td>
       </tr>
       <tr>
         <td>Composition root</td>
@@ -87,7 +93,7 @@
   <p>Composition-root adapters should be small translators. They may convert ids, copy fields, and handle process-level wiring concerns. They should not own domain validation, persistence decisions, retries, or lifecycle rules that belong to one of the services.</p>
 
   <h2 id="exceptions">4. Allowed exceptions</h2>
-  <p>The import rule is specifically about service app packages importing sibling service app packages. Delivery and infrastructure adapters have different jobs and therefore have narrower exceptions.</p>
+  <p>The import rules protect service-to-service boundaries. Delivery and infrastructure adapters have different jobs and therefore have narrower exceptions.</p>
 
   <table>
     <thead>
@@ -101,8 +107,8 @@
       </tr>
       <tr>
         <td>Infrastructure adapters: storage, filesystem, transport, crypto</td>
-        <td>They may import the service app or domain contracts they implement, plus infrastructure dependencies needed to do the work.</td>
-        <td>They adapt external systems to local service contracts.</td>
+        <td>They may import their own service app or domain contracts when implementing a local adapter, plus infrastructure dependencies needed to do the work.</td>
+        <td>They adapt external systems to local service contracts. They must not import a foreign service app package.</td>
       </tr>
       <tr>
         <td>Composition root: <code>internal/app</code></td>
@@ -113,6 +119,16 @@
         <td>Service app to service app</td>
         <td>Not allowed.</td>
         <td>This couples service application APIs and makes one service's orchestration depend on another service's app layer.</td>
+      </tr>
+      <tr>
+        <td>Service domain to foreign service domain</td>
+        <td>Only explicit allowlist entries for known migration debt.</td>
+        <td>Domain packages should own their concepts. Shared ids and snapshots should move to neutral primitives or caller-owned DTOs.</td>
+      </tr>
+      <tr>
+        <td>Service app to foreign service domain</td>
+        <td>Only explicit allowlist entries for known migration debt.</td>
+        <td>New app-layer cross-service data needs a caller-owned port or a neutral contract rather than a foreign aggregate type.</td>
       </tr>
     </tbody>
   </table>
@@ -133,11 +149,25 @@
   <p><code>notificationTaskSource</code> in <code>internal/app/application.go</code> adapts task service data into notification-owned snapshots so notification code does not import task domain or app types. <code>linkTokenIssuerAdapter</code> lets the project service request link-token behavior through project-owned DTOs while the composition root translates to auth service calls.</p>
 
   <h2 id="guardrail">6. Guardrail test</h2>
-  <p>The import boundary is enforced by <code>internal/architecture/service_app_imports_test.go</code>. The test parses every <code>internal/services/*/app</code> package and fails when one service app imports another service app. Run it directly with:</p>
+  <p>The import boundary is enforced by <code>internal/architecture/service_app_imports_test.go</code>. The test parses service app, domain, and infra packages and fails on these boundary directions:</p>
+
+  <ul>
+    <li><code>internal/services/*/app</code> importing another service's <code>app</code> package.</li>
+    <li>Service-owned domain packages importing another service's <code>domain</code> package unless the exact file and import path are allowlisted as debt. The scan covers literal <code>internal/services/*/domain</code> trees and non-adapter model subpackages under a service, excluding <code>app</code>, <code>infra</code>, and <code>rpc</code>.</li>
+    <li><code>internal/services/*/app</code> importing another service's <code>domain</code> package unless the exact file and import path are allowlisted as debt.</li>
+    <li><code>internal/services/*/infra</code> importing another service's <code>app</code> package. Own-service infra-to-app imports remain allowed for adapters that implement local service contracts.</li>
+  </ul>
+
+  <p>Run it directly with:</p>
 
 <pre><code>go test ./internal/architecture</code></pre>
 
-  <p>The guardrail catches the forbidden shape, but it does not judge adapter quality. Reviewers should still check that composition-root and infrastructure adapters are small translators and that caller-owned DTOs do not become copies of callee application structs.</p>
+  <p>Failure output includes the importer file, line, import path, and boundary direction. The guardrail catches the forbidden shape, but it does not judge adapter quality. Reviewers should still check that composition-root and infrastructure adapters are small translators and that caller-owned DTOs do not become copies of callee application structs.</p>
+
+  <h2 id="allowlist">7. Allowlist discipline</h2>
+  <p>Allowlist entries are temporary debt markers, not a general extension point. Each entry names the importer file and import path exactly, and the note should say what refactor will make the exception disappear.</p>
+
+  <p>Do not add a new allowlist entry for convenience. First prefer a caller-owned port, a local DTO, a neutral primitive id, or composition-root adapter wiring. If a refactor removes the crossing, delete the allowlist entry in the same change; stale entries fail the architecture test so the list stays honest.</p>
 </div>
 
 </body>

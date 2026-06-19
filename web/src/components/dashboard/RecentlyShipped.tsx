@@ -99,16 +99,17 @@ export default function RecentlyShipped({ projectId }: { projectId: string | nul
   const tasksQuery = useProjectTasks(projectId)
   const missionsQuery = useMissions(projectId)
   const krMapQuery = useProjectKRs(projectId)
+  const nowMs = Math.max(tasksQuery.dataUpdatedAt, missionsQuery.dataUpdatedAt, krMapQuery.dataUpdatedAt)
 
   const result = useMemo(() => {
-    if (!tasksQuery.data || !missionsQuery.data) return null
+    if (!tasksQuery.data || !missionsQuery.data || nowMs === 0) return null
     return groupRecentlyShipped(
       tasksQuery.data,
       missionsQuery.data,
       krMapQuery.data ?? new Map(),
-      Date.now(),
+      nowMs,
     )
-  }, [tasksQuery.data, missionsQuery.data, krMapQuery.data])
+  }, [tasksQuery.data, missionsQuery.data, krMapQuery.data, nowMs])
 
   if (!projectId) return null
   if (!result) return null
