@@ -195,25 +195,22 @@ export default function Dashboard() {
 
         <NeedsAttention projectId={projectId} />
 
-        <div className="mb-8">
-          <TaskSummary projectId={projectId} />
-        </div>
-
-        <div className="mb-8">
-          <DashboardWorkingNow projectId={projectId} />
-        </div>
-
-        <RecentlyShipped projectId={projectId} />
-
-        <div className="mt-0">
-          <div className="dashboard-flow">
-            <div className="dashboard-main-column">
-              <div className="dash-stagger dash-stagger-4">
-                <DecisionFeed projectId={projectId} />
-              </div>
-              <div className="dash-stagger dash-stagger-5">
-                <MissionSummary projectId={projectId} mode="active" />
-              </div>
+        {/* Two-column standing content. The dashboard's usable width is gated by
+            the inline sidebar, so reflow on a CONTAINER query, not the viewport:
+            side-by-side once the content area clears ~880px, single column below.
+            Banners above stay full-width. */}
+        <div className="@container">
+          <div className="grid grid-cols-1 items-start gap-x-8 gap-y-8 @min-[880px]:grid-cols-2">
+            {/* Left — state of the board */}
+            <div className="flex min-w-0 flex-col gap-8">
+              <TaskSummary projectId={projectId} />
+              <DashboardWorkingNow projectId={projectId} />
+              <MissionSummary projectId={projectId} mode="active" />
+            </div>
+            {/* Right — what's happened */}
+            <div className="flex min-w-0 flex-col gap-8">
+              <RecentlyShipped projectId={projectId} />
+              <DecisionFeed projectId={projectId} />
             </div>
           </div>
         </div>

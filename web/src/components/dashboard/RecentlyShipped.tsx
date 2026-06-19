@@ -45,7 +45,7 @@ function MissionGroup({
           {group.missionTitle}
         </span>
         <span className="shrink-0 text-[0.75rem] tabular-nums text-[var(--text-3)]">
-          {totalInGroup} shipped
+          {totalInGroup} done
         </span>
         <span className="shrink-0 text-[var(--text-3)]" aria-hidden>
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -117,12 +117,12 @@ export default function RecentlyShipped({ projectId }: { projectId: string | nul
 
   return (
     <div className="mb-8">
-      <section className="dashboard-section @container" aria-label="Recently shipped">
+      <section className="dashboard-section @container" aria-label="Recently completed">
         <div className="dashboard-section-heading mb-2">
           <div className="dashboard-section-heading-main">
             <div className="flex items-center gap-2">
               <CheckCircle size={14} className="text-[var(--green,var(--accent))]" aria-hidden />
-              <span className="dashboard-section-title">Recently shipped</span>
+              <span className="dashboard-section-title">Recently completed</span>
             </div>
           </div>
           <div className="dashboard-section-meta">
