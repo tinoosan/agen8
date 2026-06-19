@@ -2,10 +2,10 @@
 
 Agen8 is an MCP-first work-context layer for AI harnesses.
 
-Codex, Claude Code, and other harnesses remain the primary work surfaces. Agen8
-provides the durable structured record behind them: projects, members, missions,
-key results, tasks, decisions, files, credentials, HTTP actions, and the context
-map.
+Codex and Claude Code are the currently supported work surfaces, with support
+for other harnesses coming soon. Agen8 provides the durable structured record
+behind them: projects, members, missions, key results, tasks, decisions, files,
+credentials, HTTP actions, and the context map.
 
 ## Current Baseline
 
