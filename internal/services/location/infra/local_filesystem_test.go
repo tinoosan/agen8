@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	locationapp "github.com/tinoosan/agen8/internal/services/location/app"
 	locationdomain "github.com/tinoosan/agen8/internal/services/location/domain"
 )
 
@@ -272,6 +273,46 @@ func TestTransportLocalCopyAndReadFiles(t *testing.T) {
 	}
 }
 
+func TestTransportSSHAuthMethodsResolvePasswordCredential(t *testing.T) {
+	t.Parallel()
+
+	resolver := &recordingCredentialResolver{
+		result: locationapp.ResolvedCredential{
+			ID:      "cred_password",
+			Kind:    locationapp.CredentialKindSSHPassword,
+			Purpose: locationapp.CredentialPurposeLocationSSH,
+			Values:  map[string]string{"password": "secret"},
+		},
+	}
+	transport := NewTransport(TransportConfig{Credentials: resolver})
+	location := mustTestSSHLocation(t, "cred_password")
+
+	methods, err := transport.sshAuthMethods(context.Background(), location)
+	if err != nil {
+		t.Fatalf("sshAuthMethods: %v", err)
+	}
+	if len(methods) != 2 {
+		t.Fatalf("auth methods length = %d, want 2", len(methods))
+	}
+	if resolver.input.CredentialID != "cred_password" {
+		t.Fatalf("credential id = %q, want cred_password", resolver.input.CredentialID)
+	}
+	if resolver.input.Purpose != locationapp.CredentialPurposeLocationSSH {
+		t.Fatalf("credential purpose = %q, want %q", resolver.input.Purpose, locationapp.CredentialPurposeLocationSSH)
+	}
+}
+
+func TestTransportSSHAuthMethodsRejectMissingResolverForCredentialRef(t *testing.T) {
+	t.Parallel()
+
+	transport := NewTransport()
+	location := mustTestSSHLocation(t, "cred_password")
+
+	if _, err := transport.sshAuthMethods(context.Background(), location); err == nil {
+		t.Fatalf("expected missing credential resolver error")
+	}
+}
+
 func TestListAndReadHelpersRejectUnsafePaths(t *testing.T) {
 	t.Parallel()
 
@@ -302,6 +343,43 @@ func mustTestLocalLocation(t *testing.T) locationdomain.Location {
 		t.Fatalf("locationdomain.New: %v", err)
 	}
 	return location
+}
+
+func mustTestSSHLocation(t *testing.T, credentialRef string) locationdomain.Location {
+	t.Helper()
+	location, err := locationdomain.New(locationdomain.NewInput{
+		ID:   "ssh",
+		Kind: locationdomain.KindSSH,
+		Address: locationdomain.Address{
+			Host:     "example.test",
+			Port:     22,
+			Username: "agent",
+		},
+		Label:         "ssh",
+		Status:        locationdomain.StatusOnline,
+		Ready:         true,
+		CredentialRef: credentialRef,
+		CreatedAt:     fixedTestTime(),
+		UpdatedAt:     fixedTestTime(),
+	})
+	if err != nil {
+		t.Fatalf("locationdomain.New ssh: %v", err)
+	}
+	return location
+}
+
+type recordingCredentialResolver struct {
+	input  locationapp.ResolveCredentialInput
+	result locationapp.ResolvedCredential
+	err    error
+}
+
+func (r *recordingCredentialResolver) ResolveCredential(_ context.Context, input locationapp.ResolveCredentialInput) (locationapp.ResolvedCredential, error) {
+	r.input = input
+	if r.err != nil {
+		return locationapp.ResolvedCredential{}, r.err
+	}
+	return r.result, nil
 }
 
 func fixedTestTime() time.Time {

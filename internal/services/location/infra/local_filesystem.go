@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
-	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
-	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 	filedomain "github.com/tinoosan/agen8/internal/services/file/domain/file"
 	locationapp "github.com/tinoosan/agen8/internal/services/location/app"
 	locationdomain "github.com/tinoosan/agen8/internal/services/location/domain"
@@ -25,19 +23,15 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-type CredentialResolver interface {
-	ResolveCredential(ctx context.Context, input credentialapp.ResolveCredentialInput) (credentialdomain.ResolvedCredential, error)
-}
-
 type Transport struct {
-	credentials     CredentialResolver
+	credentials     locationapp.CredentialResolver
 	dialTimeout     time.Duration
 	localDaemonAddr string
 	logger          *slog.Logger
 }
 
 type TransportConfig struct {
-	Credentials     CredentialResolver
+	Credentials     locationapp.CredentialResolver
 	DialTimeout     time.Duration
 	LocalDaemonAddr string
 	Logger          *slog.Logger
@@ -762,17 +756,17 @@ func (t Transport) sshAuthMethods(ctx context.Context, location locationdomain.L
 	if t.credentials == nil {
 		return nil, fmt.Errorf("location credential resolver is required")
 	}
-	resolved, err := t.credentials.ResolveCredential(ctx, credentialapp.ResolveCredentialInput{
-		CredentialID: credentialdomain.ID(credentialID),
-		Purpose:      credentialdomain.PurposeLocationSSH,
+	resolved, err := t.credentials.ResolveCredential(ctx, locationapp.ResolveCredentialInput{
+		CredentialID: credentialID,
+		Purpose:      locationapp.CredentialPurposeLocationSSH,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve location ssh credential %s: %w", credentialID, err)
 	}
 	switch resolved.Kind {
-	case credentialdomain.KindSSHAgent:
+	case locationapp.CredentialKindSSHAgent:
 		return sshAgentAuth()
-	case credentialdomain.KindSSHKey:
+	case locationapp.CredentialKindSSHKey:
 		privateKey := strings.TrimSpace(resolved.Values["privateKey"])
 		if privateKey == "" {
 			return nil, fmt.Errorf("ssh_key credential %s is missing privateKey", credentialID)
@@ -788,7 +782,7 @@ func (t Transport) sshAuthMethods(ctx context.Context, location locationdomain.L
 			return nil, fmt.Errorf("parse ssh private key %s: %w", credentialID, err)
 		}
 		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
-	case credentialdomain.KindSSHPassword:
+	case locationapp.CredentialKindSSHPassword:
 		password := strings.TrimSpace(resolved.Values["password"])
 		if password == "" {
 			return nil, fmt.Errorf("ssh_password credential %s is missing password", credentialID)

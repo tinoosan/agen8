@@ -16,6 +16,7 @@ import (
 	authinfra "github.com/tinoosan/agen8/internal/services/auth/infra"
 	"github.com/tinoosan/agen8/internal/services/auth/linktoken"
 	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
+	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 	credentialinfra "github.com/tinoosan/agen8/internal/services/credential/infra"
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
 	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
@@ -172,7 +173,7 @@ func NewApplication(cfg Config) (*Application, error) {
 	locationSvc, err := locationapp.NewService(locationapp.Config{
 		Locations: locationRepo,
 		Transport: locationinfra.NewTransport(locationinfra.TransportConfig{
-			Credentials:     credentialSvc,
+			Credentials:     locationCredentialResolver{credentials: credentialSvc},
 			LocalDaemonAddr: cfg.DaemonHTTPAddr,
 			Logger:          logger.With("service", "location.transport"),
 		}),
@@ -189,7 +190,7 @@ func NewApplication(cfg Config) (*Application, error) {
 	fileRepo, err := fileinfra.NewLocationRepository(
 		locationRepo,
 		locationinfra.NewTransport(locationinfra.TransportConfig{
-			Credentials:     credentialSvc,
+			Credentials:     locationCredentialResolver{credentials: credentialSvc},
 			LocalDaemonAddr: cfg.DaemonHTTPAddr,
 			Logger:          logger.With("service", "file.location.transport"),
 		}),
@@ -374,6 +375,33 @@ func (a notificationTaskSource) Tasks(ctx context.Context, projectID string) ([]
 		})
 	}
 	return out, nil
+}
+
+type locationCredentialResolver struct {
+	credentials *credentialapp.Service
+}
+
+func (a locationCredentialResolver) ResolveCredential(ctx context.Context, input locationapp.ResolveCredentialInput) (locationapp.ResolvedCredential, error) {
+	if a.credentials == nil {
+		return locationapp.ResolvedCredential{}, fmt.Errorf("credential service is required")
+	}
+	resolved, err := a.credentials.ResolveCredential(ctx, credentialapp.ResolveCredentialInput{
+		CredentialID: credentialdomain.ID(strings.TrimSpace(input.CredentialID)),
+		Purpose:      credentialdomain.Purpose(strings.TrimSpace(string(input.Purpose))),
+	})
+	if err != nil {
+		return locationapp.ResolvedCredential{}, err
+	}
+	values := make(map[string]string, len(resolved.Values))
+	for key, value := range resolved.Values {
+		values[key] = value
+	}
+	return locationapp.ResolvedCredential{
+		ID:      string(resolved.ID),
+		Kind:    locationapp.CredentialKind(resolved.Kind),
+		Purpose: locationapp.CredentialPurpose(resolved.Purpose),
+		Values:  values,
+	}, nil
 }
 
 type permissiveRuntimeConfigValidator struct{}
