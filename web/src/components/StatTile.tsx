@@ -27,18 +27,17 @@ export default function StatTile({
   active?: boolean
 }) {
   const interactive = Boolean(onClick)
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={interactive ? Boolean(active) : undefined}
-      disabled={!interactive}
-      className={cn(
-        'flex flex-col gap-1.5 rounded-[14px] border bg-[var(--bg-elevated)] px-4 py-3 text-left',
-        interactive ? 'cursor-pointer transition-colors hover:bg-[var(--bg-hover)]' : 'cursor-default',
-        active ? 'border-[var(--accent)]' : 'border-[var(--border)]',
-      )}
-    >
+  // A non-interactive tile is a readout, not a control — render it as a <div>.
+  // Using a disabled <button> would grey it out (UA disabled styling) and pull
+  // it from the tab order, which is wrong for a tile that's just displaying a
+  // number. Only genuinely clickable (filter-shortcut) tiles are buttons.
+  const className = cn(
+    'flex flex-col gap-1.5 rounded-[14px] border bg-[var(--bg-elevated)] px-4 py-3 text-left',
+    interactive ? 'cursor-pointer transition-colors hover:bg-[var(--bg-hover)]' : '',
+    active ? 'border-[var(--accent)]' : 'border-[var(--border)]',
+  )
+  const content = (
+    <>
       <div className="flex items-center gap-1.5">
         <Icon size={13} style={{ color: tone }} aria-hidden />
         <span className="text-[0.6875rem] font-semibold uppercase tracking-[0.05em] text-[var(--text-3)]">
@@ -49,6 +48,16 @@ export default function StatTile({
         {value}
       </span>
       {sub && <span className="text-[0.75rem] text-[var(--text-3)]">{sub}</span>}
+    </>
+  )
+
+  if (!interactive) {
+    return <div className={className}>{content}</div>
+  }
+
+  return (
+    <button type="button" onClick={onClick} aria-pressed={Boolean(active)} className={className}>
+      {content}
     </button>
   )
 }
