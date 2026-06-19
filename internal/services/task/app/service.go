@@ -10,8 +10,6 @@ import (
 	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/core/types"
 	"github.com/tinoosan/agen8/internal/eventbus"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
-	"github.com/tinoosan/agen8/internal/services/project/domain/project"
 	"github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
@@ -28,12 +26,33 @@ type Service struct {
 
 type Caller = caller.Caller
 
+type MemberID = string
+
+const (
+	MemberTypeCoordinator = "coordinator"
+	MemberLifecycleActive = "active"
+)
+
+type MemberSnapshot struct {
+	ID             MemberID
+	ProjectID      types.ProjectID
+	DisplayName    string
+	MemberType     string
+	LifecycleState string
+	HarnessKind    string
+}
+
+type ProjectSnapshot struct {
+	ID     types.ProjectID
+	UserID string
+}
+
 type MemberLoader interface {
-	GetMember(ctx context.Context, memberID member.ID) (member.Record, error)
+	GetMember(ctx context.Context, memberID MemberID) (MemberSnapshot, error)
 }
 
 type ProjectLoader interface {
-	Get(ctx context.Context, projectID types.ProjectID) (project.Project, error)
+	Get(ctx context.Context, projectID types.ProjectID) (ProjectSnapshot, error)
 }
 
 type KeyResultMissionReader interface {
@@ -50,7 +69,7 @@ type EventPublisher interface {
 
 type CreateTaskParams struct {
 	ProjectID          types.ProjectID
-	AssignedTo         member.ID
+	AssignedTo         MemberID
 	Description        string
 	AcceptanceCriteria []string
 	Title              string
@@ -69,7 +88,7 @@ type CompleteTaskParams struct {
 
 type AssignTaskParams struct {
 	TaskID     domain.TaskID
-	AssignedTo member.ID
+	AssignedTo MemberID
 }
 
 type ReviewTaskParams struct {
@@ -160,8 +179,8 @@ func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.T
 		ProjectID:          params.ProjectID,
 		CreatedBy:          caller.ActorID(),
 		CreatedByLabel:     s.callerMemberLabel(ctx, caller, params.ProjectID),
-		AssignedTo:         assigned.ID,
-		AssignedToLabel:    memberRecordLabel(assigned),
+		AssignedTo:         domain.MemberIDFromString(assigned.ID),
+		AssignedToLabel:    memberSnapshotLabel(assigned),
 		Description:        params.Description,
 		AcceptanceCriteria: params.AcceptanceCriteria,
 		Title:              params.Title,
@@ -197,8 +216,8 @@ func (s *Service) Get(ctx context.Context, taskID domain.TaskID) (domain.Task, e
 
 func (s *Service) List(ctx context.Context, filter domain.TaskFilter) ([]domain.Task, error) {
 	filter.ProjectID = types.ProjectID(strings.TrimSpace(string(filter.ProjectID)))
-	filter.AssignedTo = member.ID(strings.TrimSpace(string(filter.AssignedTo)))
-	filter.ClaimedBy = member.ID(strings.TrimSpace(string(filter.ClaimedBy)))
+	filter.AssignedTo = domain.MemberIDFromString(string(filter.AssignedTo))
+	filter.ClaimedBy = domain.MemberIDFromString(string(filter.ClaimedBy))
 	filter.TaskKind = strings.TrimSpace(filter.TaskKind)
 	filter.SortBy = strings.TrimSpace(filter.SortBy)
 	if filter.Limit < 0 {
@@ -448,16 +467,16 @@ func (s *Service) Claim(ctx context.Context, taskID domain.TaskID) (domain.Task,
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireAssignedCaller(loaded, member.ID(caller.MemberID)); err != nil {
+	if err := s.requireAssignedCaller(loaded, caller.MemberID); err != nil {
 		return domain.Task{}, err
 	}
-	callerMemberID := member.ID(caller.MemberID)
-	next, err := loaded.Claim(callerMemberID, s.clock.Now())
+	callerMemberID := strings.TrimSpace(caller.MemberID)
+	next, err := loaded.Claim(domain.MemberIDFromString(callerMemberID), s.clock.Now())
 	if err != nil {
 		return domain.Task{}, err
 	}
 	next.ClaimedByMemberLabel = s.callerMemberLabel(ctx, caller, loaded.ProjectID)
-	if next.AssignedToLabel == "" && next.AssignedTo == callerMemberID {
+	if next.AssignedToLabel == "" && string(next.AssignedTo) == callerMemberID {
 		next.AssignedToLabel = next.ClaimedByMemberLabel
 	}
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
@@ -483,11 +502,11 @@ func (s *Service) Assign(ctx context.Context, params AssignTaskParams) (domain.T
 	if err != nil {
 		return domain.Task{}, err
 	}
-	next, err := loaded.Assign(assigned.ID, s.clock.Now())
+	next, err := loaded.Assign(domain.MemberIDFromString(assigned.ID), s.clock.Now())
 	if err != nil {
 		return domain.Task{}, err
 	}
-	next.AssignedToLabel = memberRecordLabel(assigned)
+	next.AssignedToLabel = memberSnapshotLabel(assigned)
 	if err := s.tasks.UpdateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("update task: %w", err)
 	}
@@ -507,7 +526,7 @@ func (s *Service) Complete(ctx context.Context, params CompleteTaskParams) (doma
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireClaimedCaller(loaded, member.ID(caller.MemberID)); err != nil {
+	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Complete(params.Summary, params.Artifacts, s.clock.Now())
@@ -539,7 +558,7 @@ func (s *Service) AttachArtifact(ctx context.Context, taskID domain.TaskID, ref 
 		return domain.Task{}, err
 	}
 	if caller.MemberID != "" {
-		if _, err := s.memberInProject(ctx, member.ID(caller.MemberID), loaded.ProjectID); err != nil {
+		if _, err := s.memberInProject(ctx, caller.MemberID, loaded.ProjectID); err != nil {
 			return domain.Task{}, err
 		}
 	} else if err := s.requireCoordinatorOrUserOwner(ctx, caller, loaded.ProjectID); err != nil {
@@ -668,7 +687,7 @@ func (s *Service) Block(ctx context.Context, taskID domain.TaskID, reason string
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireClaimedCaller(loaded, member.ID(caller.MemberID)); err != nil {
+	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Block(reason, s.clock.Now())
@@ -694,7 +713,7 @@ func (s *Service) Unblock(ctx context.Context, taskID domain.TaskID, note string
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireUnblockCaller(ctx, loaded, member.ID(caller.MemberID)); err != nil {
+	if err := s.requireUnblockCaller(ctx, loaded, caller.MemberID); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Unblock(note, s.clock.Now())
@@ -720,7 +739,7 @@ func (s *Service) Release(ctx context.Context, taskID domain.TaskID) (domain.Tas
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if err := s.requireClaimedCaller(loaded, member.ID(caller.MemberID)); err != nil {
+	if err := s.requireClaimedCaller(loaded, caller.MemberID); err != nil {
 		return domain.Task{}, err
 	}
 	next, err := loaded.Release(s.clock.Now())
@@ -778,7 +797,7 @@ func requireMemberCaller(caller Caller) error {
 
 func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Caller, projectID types.ProjectID) error {
 	if caller.MemberID != "" {
-		return s.requireCoordinator(ctx, member.ID(caller.MemberID), projectID)
+		return s.requireCoordinator(ctx, caller.MemberID, projectID)
 	}
 	userID := strings.TrimSpace(caller.UserID)
 	if userID == "" {
@@ -788,35 +807,35 @@ func (s *Service) requireCoordinatorOrUserOwner(ctx context.Context, caller Call
 	if err != nil {
 		return fmt.Errorf("load task project: %w", err)
 	}
-	if strings.TrimSpace(proj.UserID()) != userID {
+	if strings.TrimSpace(proj.UserID) != userID {
 		return fmt.Errorf("user %s does not own project %s", userID, projectID)
 	}
 	return nil
 }
 
-func (s *Service) requireCoordinator(ctx context.Context, memberID member.ID, projectID types.ProjectID) error {
+func (s *Service) requireCoordinator(ctx context.Context, memberID MemberID, projectID types.ProjectID) error {
 	_, err := s.memberInProject(ctx, memberID, projectID)
 	return err
 }
 
-func (s *Service) memberInProject(ctx context.Context, memberID member.ID, projectID types.ProjectID) (member.Record, error) {
-	memberID = member.ID(strings.TrimSpace(string(memberID)))
+func (s *Service) memberInProject(ctx context.Context, memberID MemberID, projectID types.ProjectID) (MemberSnapshot, error) {
+	memberID = strings.TrimSpace(memberID)
 	projectID = types.ProjectID(strings.TrimSpace(string(projectID)))
 	if memberID == "" {
-		return member.Record{}, fmt.Errorf("memberId is required")
+		return MemberSnapshot{}, fmt.Errorf("memberId is required")
 	}
 	if projectID == "" {
-		return member.Record{}, fmt.Errorf("projectId is required")
+		return MemberSnapshot{}, fmt.Errorf("projectId is required")
 	}
 	rosterMember, err := s.members.GetMember(ctx, memberID)
 	if err != nil {
-		return member.Record{}, fmt.Errorf("load member: %w", err)
+		return MemberSnapshot{}, fmt.Errorf("load member: %w", err)
 	}
-	if types.ProjectID(rosterMember.ProjectID) != projectID {
-		return member.Record{}, fmt.Errorf("member %s is not in project %s", memberID, projectID)
+	if rosterMember.ProjectID != projectID {
+		return MemberSnapshot{}, fmt.Errorf("member %s is not in project %s", memberID, projectID)
 	}
-	if strings.TrimSpace(rosterMember.LifecycleState) != "" && rosterMember.LifecycleState != member.LifecycleActive {
-		return member.Record{}, fmt.Errorf("member %s is not active", memberID)
+	if strings.TrimSpace(rosterMember.LifecycleState) != "" && rosterMember.LifecycleState != MemberLifecycleActive {
+		return MemberSnapshot{}, fmt.Errorf("member %s is not active", memberID)
 	}
 	return rosterMember, nil
 }
@@ -825,14 +844,14 @@ func (s *Service) callerMemberLabel(ctx context.Context, caller Caller, projectI
 	if caller.MemberID == "" {
 		return ""
 	}
-	rosterMember, err := s.memberInProject(ctx, member.ID(caller.MemberID), projectID)
+	rosterMember, err := s.memberInProject(ctx, caller.MemberID, projectID)
 	if err != nil {
 		return ""
 	}
-	return memberRecordLabel(rosterMember)
+	return memberSnapshotLabel(rosterMember)
 }
 
-func memberRecordLabel(rosterMember member.Record) string {
+func memberSnapshotLabel(rosterMember MemberSnapshot) string {
 	if label := strings.TrimSpace(rosterMember.DisplayName); label != "" {
 		return label
 	}
@@ -845,34 +864,34 @@ func memberRecordLabel(rosterMember member.Record) string {
 	return ""
 }
 
-func (s *Service) requireAssignedCaller(task domain.Task, memberID member.ID) error {
-	memberID = member.ID(strings.TrimSpace(string(memberID)))
+func (s *Service) requireAssignedCaller(task domain.Task, memberID MemberID) error {
+	memberID = strings.TrimSpace(memberID)
 	if memberID == "" {
 		return fmt.Errorf("registered member_id is required")
 	}
-	if task.AssignedTo != memberID {
+	if string(task.AssignedTo) != memberID {
 		return fmt.Errorf("task %s is assigned to %s, not %s", task.ID, task.AssignedTo, memberID)
 	}
 	return nil
 }
 
-func (s *Service) requireClaimedCaller(task domain.Task, memberID member.ID) error {
-	memberID = member.ID(strings.TrimSpace(string(memberID)))
+func (s *Service) requireClaimedCaller(task domain.Task, memberID MemberID) error {
+	memberID = strings.TrimSpace(memberID)
 	if memberID == "" {
 		return fmt.Errorf("registered member_id is required")
 	}
-	if task.ClaimedByMemberID != memberID {
+	if string(task.ClaimedByMemberID) != memberID {
 		return fmt.Errorf("task %s is claimed by %s, not %s", task.ID, task.ClaimedByMemberID, memberID)
 	}
 	return nil
 }
 
-func (s *Service) requireUnblockCaller(ctx context.Context, task domain.Task, memberID member.ID) error {
-	memberID = member.ID(strings.TrimSpace(string(memberID)))
+func (s *Service) requireUnblockCaller(ctx context.Context, task domain.Task, memberID MemberID) error {
+	memberID = strings.TrimSpace(memberID)
 	if memberID == "" {
 		return fmt.Errorf("registered member_id is required")
 	}
-	if task.ClaimedByMemberID == memberID {
+	if string(task.ClaimedByMemberID) == memberID {
 		return nil
 	}
 	return s.requireCoordinator(ctx, memberID, task.ProjectID)

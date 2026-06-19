@@ -11,20 +11,66 @@ import (
 
 	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/core/types"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 type testMemberLoader struct {
-	members map[member.ID]member.Record
+	members map[MemberID]MemberSnapshot
 }
 
-func (s testMemberLoader) GetMember(_ context.Context, id member.ID) (member.Record, error) {
+func (s testMemberLoader) GetMember(_ context.Context, id MemberID) (MemberSnapshot, error) {
 	record, ok := s.members[id]
 	if !ok {
-		return member.Record{}, member.ErrNotFound
+		return MemberSnapshot{}, errors.New("member not found")
 	}
 	return record, nil
+}
+
+type testProjectLoader struct {
+	projects map[types.ProjectID]ProjectSnapshot
+}
+
+func (l testProjectLoader) Get(_ context.Context, id types.ProjectID) (ProjectSnapshot, error) {
+	project, ok := l.projects[id]
+	if !ok {
+		return ProjectSnapshot{}, errors.New("project not found")
+	}
+	return project, nil
+}
+
+func newBoundaryService(repo *fakeTaskRepository, caller caller.Caller) *Service {
+	return &Service{
+		clock:  taskdomain.FixedClock{T: time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)},
+		logger: slog.Default(),
+		tasks:  repo,
+		caller: fakeCallerResolver{Caller: caller},
+		members: testMemberLoader{members: map[MemberID]MemberSnapshot{
+			"coord-1": {
+				ID:             "coord-1",
+				ProjectID:      "space-1",
+				MemberType:     MemberTypeCoordinator,
+				DisplayName:    "Coordinator One",
+				LifecycleState: MemberLifecycleActive,
+			},
+			"worker-1": {
+				ID:             "worker-1",
+				ProjectID:      "space-1",
+				MemberType:     "worker",
+				DisplayName:    "Worker One",
+				LifecycleState: MemberLifecycleActive,
+			},
+			"reviewer-1": {
+				ID:             "reviewer-1",
+				ProjectID:      "space-1",
+				MemberType:     MemberTypeCoordinator,
+				DisplayName:    "Reviewer One",
+				LifecycleState: MemberLifecycleActive,
+			},
+		}},
+		projects: testProjectLoader{projects: map[types.ProjectID]ProjectSnapshot{
+			"space-1": {ID: "space-1", UserID: "owner-1"},
+		}},
+	}
 }
 
 func TestMergeTaskMetadataPreservesExistingValues(t *testing.T) {
@@ -47,6 +93,104 @@ func TestMergeTaskMetadataPreservesExistingValues(t *testing.T) {
 	}
 }
 
+func TestCreateUsesTaskOwnedMemberSnapshotsForLabels(t *testing.T) {
+	repo := &fakeTaskRepository{}
+	svc := newBoundaryService(repo, caller.Caller{MemberID: "coord-1"})
+
+	created, err := svc.Create(context.Background(), CreateTaskParams{
+		ProjectID:          "space-1",
+		AssignedTo:         "worker-1",
+		Title:              "Snapshot task",
+		Description:        "Use task-owned boundary values",
+		AcceptanceCriteria: []string{"done"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.AssignedToLabel != "Worker One" {
+		t.Fatalf("AssignedToLabel=%q want Worker One", created.AssignedToLabel)
+	}
+	if created.CreatedByLabel != "Coordinator One" {
+		t.Fatalf("CreatedByLabel=%q want Coordinator One", created.CreatedByLabel)
+	}
+}
+
+func TestCreateAllowsProjectUserOwnerFromTaskOwnedProjectSnapshot(t *testing.T) {
+	repo := &fakeTaskRepository{}
+	svc := newBoundaryService(repo, caller.Caller{UserID: "owner-1"})
+
+	created, err := svc.Create(context.Background(), CreateTaskParams{
+		ProjectID:          "space-1",
+		AssignedTo:         "worker-1",
+		Title:              "Owner task",
+		Description:        "Created by owner",
+		AcceptanceCriteria: []string{"done"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.CreatedBy != "owner-1" {
+		t.Fatalf("CreatedBy=%q want owner-1", created.CreatedBy)
+	}
+	if created.AssignedToLabel != "Worker One" {
+		t.Fatalf("AssignedToLabel=%q want Worker One", created.AssignedToLabel)
+	}
+}
+
+func TestAssignUsesTaskOwnedMemberSnapshotForAssigneeLabel(t *testing.T) {
+	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
+		"task-1": {ID: "task-1", ProjectID: "space-1", AssignedTo: "coord-1", Status: taskdomain.TaskStatusActive},
+	}}
+	svc := newBoundaryService(repo, caller.Caller{MemberID: "coord-1"})
+
+	assigned, err := svc.Assign(context.Background(), AssignTaskParams{TaskID: "task-1", AssignedTo: "worker-1"})
+	if err != nil {
+		t.Fatalf("Assign: %v", err)
+	}
+	if assigned.AssignedToLabel != "Worker One" {
+		t.Fatalf("AssignedToLabel=%q want Worker One", assigned.AssignedToLabel)
+	}
+	if repo.updatedTask.AssignedToLabel != "Worker One" {
+		t.Fatalf("persisted AssignedToLabel=%q want Worker One", repo.updatedTask.AssignedToLabel)
+	}
+}
+
+func TestClaimUsesTaskOwnedMemberSnapshotForClaimLabel(t *testing.T) {
+	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
+		"task-1": {ID: "task-1", ProjectID: "space-1", AssignedTo: "worker-1", Status: taskdomain.TaskStatusPending},
+	}}
+	svc := newBoundaryService(repo, caller.Caller{MemberID: "worker-1"})
+
+	claimed, err := svc.Claim(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if claimed.ClaimedByMemberLabel != "Worker One" {
+		t.Fatalf("ClaimedByMemberLabel=%q want Worker One", claimed.ClaimedByMemberLabel)
+	}
+	if claimed.AssignedToLabel != "Worker One" {
+		t.Fatalf("AssignedToLabel=%q want Worker One", claimed.AssignedToLabel)
+	}
+}
+
+func TestApproveReviewUsesTaskOwnedMemberSnapshotForReviewerLabel(t *testing.T) {
+	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
+		"task-1": {ID: "task-1", ProjectID: "space-1", Status: taskdomain.TaskStatusInReview},
+	}}
+	svc := newBoundaryService(repo, caller.Caller{MemberID: "reviewer-1"})
+
+	reviewed, err := svc.ApproveReview(context.Background(), ReviewTaskParams{
+		TaskID:  "task-1",
+		Summary: "looks good",
+	})
+	if err != nil {
+		t.Fatalf("ApproveReview: %v", err)
+	}
+	if reviewed.Metadata["reviewerRole"] != "Reviewer One" {
+		t.Fatalf("reviewerRole=%v want Reviewer One", reviewed.Metadata["reviewerRole"])
+	}
+}
+
 func TestMergeTaskMetadataCopiesExistingWhenNoUpdates(t *testing.T) {
 	existing := map[string]any{"missionRef": "mission-1"}
 	merged := mergeTaskMetadata(existing, nil)
@@ -60,13 +204,13 @@ func TestMergeTaskMetadataCopiesExistingWhenNoUpdates(t *testing.T) {
 func TestReviewMetadataPersistsReasonSummaryAndNote(t *testing.T) {
 	svc := &Service{
 		clock: taskdomain.FixedClock{T: time.Date(2026, 6, 7, 0, 0, 0, 0, time.UTC)},
-		members: testMemberLoader{members: map[member.ID]member.Record{
+		members: testMemberLoader{members: map[MemberID]MemberSnapshot{
 			"coord-1": {
 				ID:             "coord-1",
 				ProjectID:      "space-1",
-				MemberType:     member.TypeCoordinator,
+				MemberType:     MemberTypeCoordinator,
 				DisplayName:    "QA Reviewer",
-				LifecycleState: member.LifecycleActive,
+				LifecycleState: MemberLifecycleActive,
 			},
 		}},
 	}
@@ -186,12 +330,12 @@ func TestUpdateRejectsMismatchedKeyResultAndMetadataMissionRef(t *testing.T) {
 		logger: slog.Default(),
 		tasks:  repo,
 		caller: fakeCallerResolver{Caller: caller.Caller{MemberID: "member-1"}},
-		members: testMemberLoader{members: map[member.ID]member.Record{
+		members: testMemberLoader{members: map[MemberID]MemberSnapshot{
 			"member-1": {
 				ID:             "member-1",
 				ProjectID:      "space-1",
-				MemberType:     member.TypeCoordinator,
-				LifecycleState: member.LifecycleActive,
+				MemberType:     MemberTypeCoordinator,
+				LifecycleState: MemberLifecycleActive,
 			},
 		}},
 		missions: fakeKeyResultMissionReader{missions: map[string]string{
@@ -230,12 +374,12 @@ func TestUpdateNormalizesMissionMetadataForKeyResultRef(t *testing.T) {
 		logger: slog.Default(),
 		tasks:  repo,
 		caller: fakeCallerResolver{Caller: caller.Caller{MemberID: "member-1"}},
-		members: testMemberLoader{members: map[member.ID]member.Record{
+		members: testMemberLoader{members: map[MemberID]MemberSnapshot{
 			"member-1": {
 				ID:             "member-1",
 				ProjectID:      "space-1",
-				MemberType:     member.TypeCoordinator,
-				LifecycleState: member.LifecycleActive,
+				MemberType:     MemberTypeCoordinator,
+				LifecycleState: MemberLifecycleActive,
 			},
 		}},
 		missions: fakeKeyResultMissionReader{missions: map[string]string{
@@ -282,12 +426,12 @@ func TestUpdateRejectsMetadataMissionRefDriftForExistingKeyResult(t *testing.T) 
 		logger: slog.Default(),
 		tasks:  repo,
 		caller: fakeCallerResolver{Caller: caller.Caller{MemberID: "member-1"}},
-		members: testMemberLoader{members: map[member.ID]member.Record{
+		members: testMemberLoader{members: map[MemberID]MemberSnapshot{
 			"member-1": {
 				ID:             "member-1",
 				ProjectID:      "space-1",
-				MemberType:     member.TypeCoordinator,
-				LifecycleState: member.LifecycleActive,
+				MemberType:     MemberTypeCoordinator,
+				LifecycleState: MemberLifecycleActive,
 			},
 		}},
 		missions: fakeKeyResultMissionReader{missions: map[string]string{
@@ -314,18 +458,18 @@ func attachTestService(repo *fakeTaskRepository, callerID string) *Service {
 		logger: slog.Default(),
 		tasks:  repo,
 		caller: fakeCallerResolver{Caller: caller.Caller{MemberID: callerID}},
-		members: testMemberLoader{members: map[member.ID]member.Record{
+		members: testMemberLoader{members: map[MemberID]MemberSnapshot{
 			"worker-1": {
 				ID:             "worker-1",
 				ProjectID:      "space-1",
-				MemberType:     member.TypeWorker,
-				LifecycleState: member.LifecycleActive,
+				MemberType:     "worker",
+				LifecycleState: MemberLifecycleActive,
 			},
 			"outsider-1": {
 				ID:             "outsider-1",
 				ProjectID:      "space-other",
-				MemberType:     member.TypeWorker,
-				LifecycleState: member.LifecycleActive,
+				MemberType:     "worker",
+				LifecycleState: MemberLifecycleActive,
 			},
 		}},
 	}

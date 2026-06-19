@@ -53,7 +53,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		}
 		task, err := call.Tasks.Create(taskCtx, taskapp.CreateTaskParams{
 			ProjectID:          actor.ProjectID,
-			AssignedTo:         assignee.MemberID,
+			AssignedTo:         string(assignee.MemberID),
 			Description:        description,
 			AcceptanceCriteria: input.AcceptanceCriteria,
 			Title:              input.Title,
@@ -132,7 +132,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		if err != nil {
 			return Result{}, err
 		}
-		task, err := call.Tasks.Assign(taskCtx, taskapp.AssignTaskParams{TaskID: id, AssignedTo: assignee.MemberID})
+		task, err := call.Tasks.Assign(taskCtx, taskapp.AssignTaskParams{TaskID: id, AssignedTo: string(assignee.MemberID)})
 		return h.leanTaskResultForActor("reassign", task, err, nil, actor)
 	case "update":
 		id, err := requireTaskID(input.TaskID)

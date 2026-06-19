@@ -25,6 +25,10 @@ type TaskFilter struct {
 	MetadataFilter map[string]string
 }
 
+func MemberIDFromString(id string) member.ID {
+	return member.ID(strings.TrimSpace(id))
+}
+
 type TaskBlocker struct {
 	Kind      string
 	ID        string

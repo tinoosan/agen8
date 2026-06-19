@@ -12,7 +12,6 @@ import (
 	"github.com/tinoosan/agen8/internal/core/types"
 	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
-	"github.com/tinoosan/agen8/internal/services/project/domain/project"
 	projectinfra "github.com/tinoosan/agen8/internal/services/project/infra"
 	taskapp "github.com/tinoosan/agen8/internal/services/task/app"
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
@@ -132,7 +131,7 @@ func TestApproveReviewRecordsReviewerNote(t *testing.T) {
 
 	created, err := taskSvc.Create(callerCtx, taskapp.CreateTaskParams{
 		ProjectID:   types.ProjectID(registered.ProjectID),
-		AssignedTo:  member.ID(registered.MemberID),
+		AssignedTo:  registered.MemberID,
 		Title:       "Wire the reviewer note",
 		Description: "Persist the approve verdict on the task record",
 	})
@@ -213,17 +212,37 @@ func newRPCTaskStack(t *testing.T) (*projectapp.Service, *taskinfra.SQLiteReposi
 	if err != nil {
 		t.Fatalf("new task repo: %v", err)
 	}
-	taskSvc, err := taskapp.NewService(taskRepo, taskdomain.FixedClock{T: time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)}, caller.ContextResolver{}, projectSvc, rpcTaskProjectLoader{projectSvc}, slog.Default())
+	taskProjectAdapter := rpcTaskProjectAdapter{projects: projectSvc}
+	taskSvc, err := taskapp.NewService(taskRepo, taskdomain.FixedClock{T: time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)}, caller.ContextResolver{}, taskProjectAdapter, taskProjectAdapter, slog.Default())
 	if err != nil {
 		t.Fatalf("new task service: %v", err)
 	}
 	return projectSvc, taskRepo, taskSvc
 }
 
-type rpcTaskProjectLoader struct {
+type rpcTaskProjectAdapter struct {
 	projects *projectapp.Service
 }
 
-func (l rpcTaskProjectLoader) Get(ctx context.Context, projectID types.ProjectID) (project.Project, error) {
-	return l.projects.GetProject(ctx, projectID)
+func (l rpcTaskProjectAdapter) GetMember(ctx context.Context, memberID taskapp.MemberID) (taskapp.MemberSnapshot, error) {
+	rosterMember, err := l.projects.GetMember(ctx, member.ID(memberID))
+	if err != nil {
+		return taskapp.MemberSnapshot{}, err
+	}
+	return taskapp.MemberSnapshot{
+		ID:             string(rosterMember.ID),
+		ProjectID:      types.ProjectID(rosterMember.ProjectID),
+		DisplayName:    rosterMember.DisplayName,
+		MemberType:     rosterMember.MemberType,
+		LifecycleState: rosterMember.LifecycleState,
+		HarnessKind:    rosterMember.HarnessKind,
+	}, nil
+}
+
+func (l rpcTaskProjectAdapter) Get(ctx context.Context, projectID types.ProjectID) (taskapp.ProjectSnapshot, error) {
+	project, err := l.projects.GetProject(ctx, projectID)
+	if err != nil {
+		return taskapp.ProjectSnapshot{}, err
+	}
+	return taskapp.ProjectSnapshot{ID: project.ID(), UserID: project.UserID()}, nil
 }

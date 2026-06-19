@@ -40,6 +40,7 @@ import (
 	pinapp "github.com/tinoosan/agen8/internal/services/pin/app"
 	pininfra "github.com/tinoosan/agen8/internal/services/pin/infra"
 	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
+	memberdomain "github.com/tinoosan/agen8/internal/services/project/domain/member"
 	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 	projectinfra "github.com/tinoosan/agen8/internal/services/project/infra"
 	questionapp "github.com/tinoosan/agen8/internal/services/question/app"
@@ -211,8 +212,8 @@ func NewApplication(cfg Config) (*Application, error) {
 		taskRepo,
 		taskdomain.SystemClock{},
 		caller.ContextResolver{},
-		projectSvc,
-		projectLoaderAdapter{projects: projectSvc},
+		taskProjectAdapter{projects: projectSvc},
+		taskProjectAdapter{projects: projectSvc},
 		logger.With("service", "task"),
 	)
 	if err != nil {
@@ -425,15 +426,40 @@ func (permissiveRuntimeConfigValidator) CompatibilityPermissionMode(harnessKind 
 	return strings.TrimSpace(harnessKind) + "/default"
 }
 
-type projectLoaderAdapter struct {
+type taskProjectAdapter struct {
 	projects *projectapp.Service
 }
 
-func (a projectLoaderAdapter) Get(ctx context.Context, projectID types.ProjectID) (projectdomain.Project, error) {
+func (a taskProjectAdapter) GetMember(ctx context.Context, memberID taskapp.MemberID) (taskapp.MemberSnapshot, error) {
 	if a.projects == nil {
-		return projectdomain.Project{}, fmt.Errorf("project service is required")
+		return taskapp.MemberSnapshot{}, fmt.Errorf("project service is required")
 	}
-	return a.projects.GetProject(ctx, projectID)
+	rosterMember, err := a.projects.GetMember(ctx, memberdomain.ID(strings.TrimSpace(memberID)))
+	if err != nil {
+		return taskapp.MemberSnapshot{}, err
+	}
+	return taskapp.MemberSnapshot{
+		ID:             taskapp.MemberID(rosterMember.ID),
+		ProjectID:      types.ProjectID(strings.TrimSpace(rosterMember.ProjectID)),
+		DisplayName:    rosterMember.DisplayName,
+		MemberType:     rosterMember.MemberType,
+		LifecycleState: rosterMember.LifecycleState,
+		HarnessKind:    rosterMember.HarnessKind,
+	}, nil
+}
+
+func (a taskProjectAdapter) Get(ctx context.Context, projectID types.ProjectID) (taskapp.ProjectSnapshot, error) {
+	if a.projects == nil {
+		return taskapp.ProjectSnapshot{}, fmt.Errorf("project service is required")
+	}
+	project, err := a.projects.GetProject(ctx, projectID)
+	if err != nil {
+		return taskapp.ProjectSnapshot{}, err
+	}
+	return taskapp.ProjectSnapshot{
+		ID:     project.ID(),
+		UserID: project.UserID(),
+	}, nil
 }
 
 // fileProjectLoaderAdapter is the composition-root bridge from project-owned

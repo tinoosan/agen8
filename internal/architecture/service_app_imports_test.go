@@ -74,13 +74,10 @@ func TestServiceAppPackagesDoNotImportUnapprovedForeignServiceDomainPackages(t *
 		// ProjectSnapshot, mission/app owns LinkedTaskSnapshot, and internal/app
 		// adapts foreign aggregates before they cross service boundaries.
 		allowedForeignImports: map[importAllowance]string{
-			{file: "internal/services/auth/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/user/domain"}:                "debt: auth app still accepts user domain ids while identity ports are split out",
-			{file: "internal/services/auth/app/service_test.go", importPath: "github.com/tinoosan/agen8/internal/services/user/domain"}:           "debt: auth app tests cover the current user domain id coupling",
-			{file: "internal/services/decision/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/graph/domain"}:           "debt: decision app still writes graph refs using graph domain types",
-			{file: "internal/services/decision/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/member"}:  "debt: decision app still records author ids as project member ids",
-			{file: "internal/services/task/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/member"}:      "debt: task app still uses project member ids for assignment",
-			{file: "internal/services/task/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/project"}:     "debt: task app still scopes tasks with project domain ids",
-			{file: "internal/services/task/app/service_test.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/member"}: "debt: task app tests cover the current member id coupling",
+			{file: "internal/services/auth/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/user/domain"}:               "debt: auth app still accepts user domain ids while identity ports are split out",
+			{file: "internal/services/auth/app/service_test.go", importPath: "github.com/tinoosan/agen8/internal/services/user/domain"}:          "debt: auth app tests cover the current user domain id coupling",
+			{file: "internal/services/decision/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/graph/domain"}:          "debt: decision app still writes graph refs using graph domain types",
+			{file: "internal/services/decision/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/member"}: "debt: decision app still records author ids as project member ids",
 		},
 	})
 }

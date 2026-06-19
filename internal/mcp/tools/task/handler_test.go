@@ -43,7 +43,7 @@ func (s *stubService) capture(ctx context.Context, called string) {
 func (s *stubService) Create(ctx context.Context, req taskapp.CreateTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "create")
 	s.createReq = req
-	return taskdomain.Task{ID: "task-1", ProjectID: req.ProjectID, AssignedTo: req.AssignedTo, AssignedToLabel: "Worker engineer", Description: req.Description, Status: taskdomain.TaskStatusPending}, nil
+	return taskdomain.Task{ID: "task-1", ProjectID: req.ProjectID, AssignedTo: taskdomain.MemberIDFromString(req.AssignedTo), AssignedToLabel: "Worker engineer", Description: req.Description, Status: taskdomain.TaskStatusPending}, nil
 }
 
 func (s *stubService) Get(ctx context.Context, id taskdomain.TaskID) (taskdomain.Task, error) {
@@ -95,7 +95,7 @@ func (s *stubService) Unblock(ctx context.Context, id taskdomain.TaskID, note st
 func (s *stubService) Assign(ctx context.Context, req taskapp.AssignTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "assign")
 	s.assignReq = req
-	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: req.AssignedTo, Status: taskdomain.TaskStatusPending}, nil
+	return taskdomain.Task{ID: req.TaskID, ProjectID: "space-1", AssignedTo: taskdomain.MemberIDFromString(req.AssignedTo), Status: taskdomain.TaskStatusPending}, nil
 }
 
 func (s *stubService) Cancel(ctx context.Context, id taskdomain.TaskID, reason string) (taskdomain.Task, error) {

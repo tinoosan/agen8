@@ -43,7 +43,7 @@ func (h *Handler) Create(ctx context.Context, p TaskCreateParams) (TaskCreateRes
 
 	task, err := h.svc.Create(ctx, taskapp.CreateTaskParams{
 		ProjectID:          types.ProjectID(projectID),
-		AssignedTo:         member.ID(assignedTo),
+		AssignedTo:         assignedTo,
 		Description:        description,
 		AcceptanceCriteria: append([]string(nil), p.AcceptanceCriteria...),
 		Title:              strings.TrimSpace(p.Title),
@@ -175,7 +175,7 @@ func (h *Handler) Assign(ctx context.Context, p TaskAssignParams) (TaskAssignRes
 	}
 	task, err := h.svc.Assign(ctx, taskapp.AssignTaskParams{
 		TaskID:     domain.TaskID(taskID),
-		AssignedTo: member.ID(assignedTo),
+		AssignedTo: assignedTo,
 	})
 	if err != nil {
 		return TaskAssignResult{}, internalError("assign task", err)
