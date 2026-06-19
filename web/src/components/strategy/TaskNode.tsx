@@ -8,6 +8,7 @@ import { useStrategyMapStore } from './strategyMapStore'
 export interface TaskNodeData {
   task: Task
   clusterColor?: string
+  isMissionDirect?: boolean
   [key: string]: unknown
 }
 
@@ -91,6 +92,7 @@ function taskOwnerLabel(task: Task): string | null {
 export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps) {
   const d = data as unknown as TaskNodeData
   const { task } = d
+  const isMissionDirect = d.isMissionDirect === true
   const color = d.clusterColor ?? 'var(--border-strong)'
   const status = task.status ?? 'pending'
   const statusMeta = STATUS_META[status] ?? { label: status.replaceAll('_', ' '), tone: 'var(--text-3)', progress: 0, centerGlyph: 'none' as const }
@@ -124,7 +126,15 @@ export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps
           style={{ left: '50%', top: '50%', opacity: 0, pointerEvents: 'none' }} />
         <div
           className="rounded-full"
-          style={{ width: 11, height: 11, background: dotColor, opacity: 0.9 }}
+          data-testid={isMissionDirect ? 'mission-direct-task-dot' : undefined}
+          style={{
+            width: 11,
+            height: 11,
+            background: dotColor,
+            opacity: 0.9,
+            border: isMissionDirect ? `1.5px dashed var(--bg-panel)` : undefined,
+            boxShadow: isMissionDirect ? `0 0 0 1px ${dotColor}` : undefined,
+          }}
         />
       </div>
     )
@@ -166,6 +176,17 @@ export const TaskNode = memo(function TaskNode({ data, selected, id }: NodeProps
         background: 'var(--bg-panel)',
         transition: 'background 0.2s ease',
       }}>
+        {isMissionDirect && (
+          <span
+            aria-label="Linked directly to mission"
+            data-testid="mission-direct-task-marker"
+            className="absolute left-1/2 top-0 h-[2px] w-8 -translate-x-1/2 rounded-full"
+            style={{
+              background: `repeating-linear-gradient(90deg, ${color} 0 4px, transparent 4px 7px)`,
+              opacity: isActive ? 0.95 : 0.75,
+            }}
+          />
+        )}
         {/* Hover wash */}
         <div className="absolute inset-0 rounded-[6px] opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none"
           style={{ background: `color-mix(in srgb, ${statusMeta.tone} 5%, transparent)` }} />

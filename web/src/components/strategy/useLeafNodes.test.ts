@@ -28,6 +28,9 @@ describe('useLeafNodes task topology', () => {
     const { result } = renderHook(() => useLeafNodes('playground'))
 
     expect(result.current.nodes.map((n) => n.id)).toContain('task:task-m')
+    expect(result.current.nodes.find((n) => n.id === 'task:task-m')?.data).toMatchObject({
+      isMissionDirect: true,
+    })
     expect(result.current.edges).toContainEqual(
       expect.objectContaining({ source: 'mis-1', target: 'task:task-m' }),
     )
@@ -42,6 +45,9 @@ describe('useLeafNodes task topology', () => {
     const { result } = renderHook(() => useLeafNodes('playground'))
 
     expect(result.current.nodes.map((n) => n.id)).toContain('task:task-k')
+    expect(result.current.nodes.find((n) => n.id === 'task:task-k')?.data).toMatchObject({
+      isMissionDirect: false,
+    })
     expect(result.current.edges).toContainEqual(
       expect.objectContaining({ source: 'kr-1', target: 'task:task-k' }),
     )
@@ -60,6 +66,9 @@ describe('useLeafNodes task topology', () => {
     expect(result.current.edges).toContainEqual(
       expect.objectContaining({ source: 'kr-1', target: 'task:task-b' }),
     )
+    expect(result.current.nodes.find((n) => n.id === 'task:task-b')?.data).toMatchObject({
+      isMissionDirect: false,
+    })
     expect(result.current.edges.some((e) => e.source === 'mis-1')).toBe(false)
   })
 

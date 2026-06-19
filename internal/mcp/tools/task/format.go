@@ -9,6 +9,8 @@ import (
 	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
+const missionDirectTaskCreateAdvisory = "This task is not linked to a key result. It can still be created, but mission progress will not reflect it until it is linked to a key result."
+
 // taskEntry is the FULL detail returned only by the `get` action — the explicit
 // "I want the details" fetch. Mutations and list return the leaner shapes below.
 // Card-era display labels (assignedToLabel/claimedByMemberLabel/createdByLabel)
@@ -112,7 +114,17 @@ func taskResponseGuidance(action string, task taskdomain.Task, actorID member.ID
 		return "", ""
 	}
 	switch action {
-	case "create", "reassign":
+	case "create":
+		nextAction, guidance := "", ""
+		if task.Status == taskdomain.TaskStatusPending && task.AssignedTo == actorID {
+			nextAction = "claim"
+			guidance = "Claim the task before starting work. Fetch the task when you need the full description and acceptance criteria."
+		}
+		if strings.TrimSpace(task.KeyResultRef) == "" {
+			guidance = appendGuidance(guidance, missionDirectTaskCreateAdvisory)
+		}
+		return nextAction, guidance
+	case "reassign":
 		if task.Status == taskdomain.TaskStatusPending && task.AssignedTo == actorID {
 			return "claim", "Claim the task before starting work. Fetch the task when you need the full description and acceptance criteria."
 		}
@@ -122,6 +134,18 @@ func taskResponseGuidance(action string, task taskdomain.Task, actorID member.ID
 		}
 	}
 	return "", ""
+}
+
+func appendGuidance(existing, advisory string) string {
+	existing = strings.TrimSpace(existing)
+	advisory = strings.TrimSpace(advisory)
+	if existing == "" {
+		return advisory
+	}
+	if advisory == "" {
+		return existing
+	}
+	return existing + " " + advisory
 }
 
 func (h Handler) listResult(tasks []taskdomain.Task, err error, input requestInput) (Result, error) {

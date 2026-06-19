@@ -43,7 +43,14 @@ func (s *stubService) capture(ctx context.Context, called string) {
 func (s *stubService) Create(ctx context.Context, req taskapp.CreateTaskParams) (taskdomain.Task, error) {
 	s.capture(ctx, "create")
 	s.createReq = req
-	return taskdomain.Task{ID: "task-1", ProjectID: req.ProjectID, AssignedTo: taskdomain.MemberIDFromString(req.AssignedTo), AssignedToLabel: "Worker engineer", Description: req.Description, Status: taskdomain.TaskStatusPending}, nil
+	metadata := req.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	if strings.TrimSpace(req.MissionRef) != "" {
+		metadata["missionRef"] = strings.TrimSpace(req.MissionRef)
+	}
+	return taskdomain.Task{ID: "task-1", ProjectID: req.ProjectID, AssignedTo: taskdomain.MemberIDFromString(req.AssignedTo), AssignedToLabel: "Worker engineer", Description: req.Description, KeyResultRef: req.KeyResultRef, Metadata: metadata, Status: taskdomain.TaskStatusPending}, nil
 }
 
 func (s *stubService) Get(ctx context.Context, id taskdomain.TaskID) (taskdomain.Task, error) {
@@ -221,7 +228,7 @@ func TestHandleCreateCallsTaskService(t *testing.T) {
 
 func TestHandleCreateAssignedToSelfReturnsClaimGuidance(t *testing.T) {
 	svc := &stubService{}
-	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"coord-1"}`))
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"coord-1","key_result_ref":"kr-1"}`))
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -234,9 +241,54 @@ func TestHandleCreateAssignedToSelfReturnsClaimGuidance(t *testing.T) {
 	}
 }
 
+func TestHandleCreateWithoutKeyResultReturnsMissionProgressAdvisory(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1","mission_ref":"mission-1"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	guidance, _ := structured["guidance"].(string)
+	if !strings.Contains(guidance, "not linked to a key result") || !strings.Contains(guidance, "mission progress will not reflect it") {
+		t.Fatalf("guidance=%q want mission progress advisory", guidance)
+	}
+	if got := structured["nextAction"]; got != nil {
+		t.Fatalf("nextAction=%v want omitted for worker assignment", got)
+	}
+}
+
+func TestHandleCreateWithKeyResultOmitsMissionProgressAdvisory(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1","key_result_ref":"kr-1"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	guidance, _ := structured["guidance"].(string)
+	if strings.Contains(guidance, "mission progress will not reflect it") {
+		t.Fatalf("guidance=%q should not include mission progress advisory", guidance)
+	}
+}
+
+func TestHandleCreateAssignedToSelfWithoutKeyResultAppendsMissionProgressAdvisory(t *testing.T) {
+	svc := &stubService{}
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"coord-1","mission_ref":"mission-1"}`))
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	structured := result.Structured.(map[string]any)
+	if got := structured["nextAction"]; got != "claim" {
+		t.Fatalf("nextAction=%v want claim", got)
+	}
+	guidance, _ := structured["guidance"].(string)
+	if !strings.Contains(guidance, "Claim the task") || !strings.Contains(guidance, "mission progress will not reflect it") {
+		t.Fatalf("guidance=%q want claim guidance plus mission progress advisory", guidance)
+	}
+}
+
 func TestHandleCreateAssignedToWorkerDoesNotReturnClaimGuidance(t *testing.T) {
 	svc := &stubService{}
-	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1"}`))
+	result, err := NewHandler().Handle(context.Background(), callContext(svc, "coord-1"), json.RawMessage(`{"action":"create","description":"ship it","assignee_member_id":"worker-1","key_result_ref":"kr-1"}`))
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}

@@ -50,7 +50,7 @@ export function useLeafNodes(projectId: string | null): {
       if (addedTaskIds.has(taskId)) return nodeId
       const task = taskMap.get(taskId)
       if (!task) return undefined
-      const taskData: TaskNodeData = { task }
+      const taskData: TaskNodeData = { task, isMissionDirect: !task.keyResultRef && !!task.missionRef }
       nodes.push({
         id: nodeId,
         type: 'task',
