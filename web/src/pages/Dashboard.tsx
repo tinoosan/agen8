@@ -10,7 +10,6 @@ import { useStore } from '../lib/store'
 import { cn } from '@/lib/utils'
 import DecisionFeed from '../components/dashboard/DecisionFeed'
 import MissionSummary from '../components/dashboard/MissionSummary'
-import TaskSummary from '../components/dashboard/TaskSummary'
 import DashboardWorkingNow from '../components/dashboard/DashboardWorkingNow'
 import NeedsAttention from '../components/dashboard/NeedsAttention'
 import GettingStartedCard from '../components/dashboard/GettingStartedCard'
@@ -205,9 +204,10 @@ export default function Dashboard() {
             Banners above stay full-width. */}
         <div className="@container">
           <div className="grid grid-cols-1 items-start gap-x-8 gap-y-8 @min-[880px]:grid-cols-2">
-            {/* Left — state of the board */}
+            {/* Left — state of the board. The per-status task counts moved up
+                into the hero briefing line, so this column is the live "who's on
+                what" plus active missions, not a tile grid. */}
             <div className="flex min-w-0 flex-col gap-8">
-              <TaskSummary projectId={projectId} />
               <DashboardWorkingNow projectId={projectId} />
               <MissionSummary projectId={projectId} mode="active" />
             </div>

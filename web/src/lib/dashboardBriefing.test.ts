@@ -65,14 +65,25 @@ describe('computeBriefing — board states (point-in-time)', () => {
     expect(b.needsYou).toBe(0)
   })
 
-  it('does not count pending / failed / canceled toward needs-you or in-flight', () => {
+  it('counts pending as "queued", not needs-you or in-flight', () => {
     const tasks = [
       makeTask({ id: 't-1', status: 'pending' }),
-      makeTask({ id: 't-2', status: 'failed' }),
-      makeTask({ id: 't-3', status: 'canceled' }),
+      makeTask({ id: 't-2', status: 'pending' }),
+    ]
+    const b = computeBriefing(tasks, [], [], NOW)
+    expect(b.queued).toBe(2)
+    expect(b.needsYou).toBe(0)
+    expect(b.inFlight).toBe(0)
+  })
+
+  it('does not count failed / canceled toward any board bucket', () => {
+    const tasks = [
+      makeTask({ id: 't-1', status: 'failed' }),
+      makeTask({ id: 't-2', status: 'canceled' }),
     ]
     const b = computeBriefing(tasks, [], [], NOW)
     expect(b.needsYou).toBe(0)
+    expect(b.queued).toBe(0)
     expect(b.inFlight).toBe(0)
     expect(b.completed).toBe(0)
   })

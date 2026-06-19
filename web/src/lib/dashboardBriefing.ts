@@ -19,6 +19,8 @@ import type { Task, DecisionView, MissionView } from './types'
 export interface DashboardBriefing {
   /** Tasks the board is holding for a person: blocked + in_review. */
   needsYou: number
+  /** Tasks queued but not yet started: pending. */
+  queued: number
   /** Tasks an agent is actively working right now: active. */
   inFlight: number
   /** Tasks that succeeded within the look-back window. */
@@ -57,6 +59,7 @@ export function computeBriefing(
   const since = nowMs - windowMs
 
   let needsYou = 0
+  let queued = 0
   let inFlight = 0
   let completed = 0
 
@@ -64,6 +67,8 @@ export function computeBriefing(
     const status = t.status ?? ''
     if (status === 'blocked' || status === 'in_review') {
       needsYou += 1
+    } else if (status === 'pending') {
+      queued += 1
     } else if (status === 'active') {
       inFlight += 1
     }
@@ -84,6 +89,7 @@ export function computeBriefing(
 
   return {
     needsYou,
+    queued,
     inFlight,
     completed,
     decisions: decisionsInWindow,
@@ -100,6 +106,7 @@ export function computeBriefing(
 export function briefingIsEmpty(b: DashboardBriefing): boolean {
   return (
     b.needsYou === 0 &&
+    b.queued === 0 &&
     b.inFlight === 0 &&
     b.completed === 0 &&
     b.decisions === 0 &&

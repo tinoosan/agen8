@@ -14,8 +14,8 @@ import type { Task, ProjectMember } from '../../lib/types'
 import { formatRelative } from '@/lib/format'
 
 /* In-flight = work an agent is actively on, not queued and not finished:
- * active, blocked, and in_review. Pending/terminal states live in the count
- * tiles above (TaskSummary); this strip is the live "who's on what" view. */
+ * active, blocked, and in_review. Pending/terminal counts live in the hero
+ * briefing line; this strip is the live "who's on what" view. */
 const IN_FLIGHT = new Set(['active', 'blocked', 'in_review'])
 
 /* "Atlas (Backend Engineer)" → { base: 'Atlas', role: 'Backend Engineer' } so
@@ -190,9 +190,9 @@ export default function DashboardWorkingNow({ projectId }: { projectId: string |
     )
   }
 
-  // The board query is shared with TaskSummary, which renders the error message
-  // directly above this section — so on failure we stay quiet rather than print
-  // the same error twice. Hiding nothing: the user still sees it up there.
+  // The board query is shared with the hero briefing line, which renders the
+  // load error near the top of the dashboard — so on failure we stay quiet
+  // rather than print the same error twice. Hiding nothing: it shows up there.
   if (isError) return null
 
   // Hide entirely until the project has tasks at all (mirrors TaskSummary).

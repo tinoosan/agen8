@@ -22,8 +22,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'wouter'
 import {
   Activity,
+  AlertCircle,
   CircleAlert,
   CircleCheck,
+  CircleDashed,
   ScrollText,
   Target,
   type LucideIcon,
@@ -108,12 +110,28 @@ export default function DashboardBriefing({ projectId }: { projectId: string | n
   }, [tasksQuery.data, decisionsQuery.data, activeMissionsQuery.data, nowMs])
 
   if (!projectId) return null
-  // Hide until the project has tasks at all — mirrors TaskSummary, so an empty
-  // project shows the getting-started card instead of a line of zeros.
+
+  // The briefing is the topmost consumer of the shared tasks query, so it owns
+  // the load-error surface for the task-driven sections below (Working now
+  // stays quiet on error, expecting the error to show up here).
+  if (tasksQuery.isError) {
+    return (
+      <div className="mb-8 flex items-center gap-2 px-1 py-2 text-[0.75rem] text-[var(--red)]">
+        <AlertCircle size={13} aria-hidden />
+        <span>
+          Failed to load tasks:{' '}
+          {tasksQuery.error instanceof Error ? tasksQuery.error.message : 'Unknown error'}
+        </span>
+      </div>
+    )
+  }
+
+  // Hide until the project has tasks at all — so an empty project shows the
+  // getting-started card instead of a line of zeros.
   if (!tasksQuery.data || tasksQuery.data.length === 0) return null
   if (!briefing) return null
 
-  const { needsYou, inFlight, completed, decisions, activeMissions } = briefing
+  const { needsYou, queued, inFlight, completed, decisions, activeMissions } = briefing
 
   return (
     <nav
@@ -150,6 +168,17 @@ export default function DashboardBriefing({ projectId }: { projectId: string | n
           label="in flight"
           title="Tasks an agent is actively working right now"
           tone="var(--accent)"
+        />
+      )}
+
+      {queued > 0 && (
+        <Stat
+          to={filteredTasksLink(projectId, 'pending')}
+          icon={CircleDashed}
+          count={queued}
+          label="queued"
+          title="Tasks waiting to be picked up"
+          tone="var(--text-3)"
         />
       )}
 
