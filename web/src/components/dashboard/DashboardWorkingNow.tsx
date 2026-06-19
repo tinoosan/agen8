@@ -195,31 +195,42 @@ export default function DashboardWorkingNow({ projectId }: { projectId: string |
   // rather than print the same error twice. Hiding nothing: it shows up there.
   if (isError) return null
 
-  // Hide entirely until the project has tasks at all (mirrors TaskSummary).
+  // Hide entirely until the project has tasks at all.
   if (!tasks || tasks.length === 0) return null
+
+  // Idle: collapse to a single slim line instead of a full empty card. The hero
+  // briefing line already carries the in-flight count, so an empty "Working now"
+  // card would be pure scroll cost — this keeps the section recognizable in
+  // ~24px instead of ~120px.
+  if (working.length === 0) {
+    return (
+      <section className="dashboard-section">
+        <div className="flex items-center gap-2 text-[0.8125rem]">
+          <Activity size={14} className="text-[var(--text-3)]" aria-hidden />
+          <span className="font-medium text-[var(--text-2)]">Working now</span>
+          <span className="text-[var(--text-3)]" aria-hidden>·</span>
+          <span className="text-[var(--text-3)]">no active work</span>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section className="dashboard-section">
       <Heading count={working.length} />
-      {working.length === 0 ? (
-        <div className="max-w-[720px] rounded-[18px] border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-6 text-center text-[0.8125rem] text-[var(--text-3)]">
-          Nobody&apos;s mid-task right now.
-        </div>
-      ) : (
-        <div className="max-w-[720px] overflow-hidden rounded-[18px] border border-[var(--border)] bg-[var(--bg-elevated)]">
-          {working.map((t, i) => (
-            <WorkingRow
-              key={t.id}
-              projectId={projectId}
-              task={t}
-              member={memberForTask(t)}
-              projectRoot={focusedProjectRoot}
-              first={i === 0}
-              changed={changedIds.has(t.id)}
-            />
-          ))}
-        </div>
-      )}
+      <div className="max-w-[720px] overflow-hidden rounded-[18px] border border-[var(--border)] bg-[var(--bg-elevated)]">
+        {working.map((t, i) => (
+          <WorkingRow
+            key={t.id}
+            projectId={projectId}
+            task={t}
+            member={memberForTask(t)}
+            projectRoot={focusedProjectRoot}
+            first={i === 0}
+            changed={changedIds.has(t.id)}
+          />
+        ))}
+      </div>
     </section>
   )
 }
