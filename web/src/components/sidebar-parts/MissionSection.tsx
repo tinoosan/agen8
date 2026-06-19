@@ -6,8 +6,9 @@ import { useLocation } from 'wouter'
 import { Clock, CircleCheck, CircleAlert, CircleX, Target } from 'lucide-react'
 import { useMissions, useKeyResults } from '../../hooks/useMissions'
 import { missionDetailLink, missionsPanelLink } from '../../lib/routing'
+import { keyResultProgressSummary, missionProgressColor } from '../../lib/missionProgress'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { KeyResultView, MissionView } from '../../lib/types'
+import type { MissionView } from '../../lib/types'
 
 /* ── Helpers ───────────────────────────────────────── */
 
@@ -24,29 +25,6 @@ function MissionStatusIcon({ status }: { status: MissionView['status'] }) {
     default:
       return <Target size={13} className="shrink-0 text-[var(--text-3)]" />
   }
-}
-
-function missionProgressColor(status: MissionView['status']): string {
-  switch (status) {
-    case 'active': return 'var(--accent)'
-    case 'completed': return 'var(--green)'
-    case 'paused': return 'var(--amber)'
-    default: return 'var(--text-3)'
-  }
-}
-
-function keyResultProgressSummary(krs: KeyResultView[] | undefined) {
-  const liveKRs = (krs ?? []).filter(kr => kr.status !== 'dropped')
-  if (liveKRs.length === 0) return null
-
-  const progress = liveKRs.reduce((sum, kr) => {
-    const value = Number.isFinite(kr.progressPercent) ? kr.progressPercent : 0
-    return sum + Math.min(100, Math.max(0, value))
-  }, 0)
-  const pct = Math.round(progress / liveKRs.length)
-  const completed = liveKRs.filter(kr => kr.status === 'completed').length
-
-  return { pct, completed, total: liveKRs.length }
 }
 
 function MissionKRProgress({ missionId }: { missionId: string }) {
