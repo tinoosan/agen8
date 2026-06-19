@@ -211,11 +211,11 @@ func NewMemberView(m member.Record) MemberView {
 		MemberType:       m.MemberType,
 		// Canonical so legacy "claude" / "claude-cli" rows reach the web as
 		// "claude-code" (no migration needed); consumers match exact strings.
-		HarnessKind:      member.CanonicalHarnessKind(m.HarnessKind),
-		LifecycleState:   m.LifecycleState,
-		RegisteredAt:     m.RegisteredAt,
-		UpdatedAt:        m.UpdatedAt,
-		LastSeenAt:       m.LastSeenAt,
+		HarnessKind:    member.CanonicalHarnessKind(m.HarnessKind),
+		LifecycleState: m.LifecycleState,
+		RegisteredAt:   m.RegisteredAt,
+		UpdatedAt:      m.UpdatedAt,
+		LastSeenAt:     m.LastSeenAt,
 	}
 }
 

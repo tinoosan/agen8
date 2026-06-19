@@ -25,6 +25,7 @@ import (
 	graphapp "github.com/tinoosan/agen8/internal/services/graph/app"
 	"github.com/tinoosan/agen8/internal/services/graph/contextlink"
 	graphdomain "github.com/tinoosan/agen8/internal/services/graph/domain"
+	"github.com/tinoosan/agen8/internal/services/lastseen"
 	locationapp "github.com/tinoosan/agen8/internal/services/location/app"
 	locationdomain "github.com/tinoosan/agen8/internal/services/location/domain"
 	locationinfra "github.com/tinoosan/agen8/internal/services/location/infra"
@@ -35,7 +36,6 @@ import (
 	notificationapp "github.com/tinoosan/agen8/internal/services/notification/app"
 	notificationdomain "github.com/tinoosan/agen8/internal/services/notification/domain"
 	notificationinfra "github.com/tinoosan/agen8/internal/services/notification/infra"
-	"github.com/tinoosan/agen8/internal/services/lastseen"
 	pinapp "github.com/tinoosan/agen8/internal/services/pin/app"
 	pininfra "github.com/tinoosan/agen8/internal/services/pin/infra"
 	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
@@ -265,7 +265,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		Questions: questionRepo,
 		Clock:     questiondomain.SystemClock{},
 		Events:    bus,
-		Decisions: decisionSvc,
+		Decisions: newQuestionDecisionLogger(decisionSvc),
 		Logger:    logger.With("service", "question"),
 	})
 	if err != nil {

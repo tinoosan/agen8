@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/tinoosan/agen8/internal/eventbus"
-	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
 	"github.com/tinoosan/agen8/internal/services/question/domain"
 )
 
@@ -95,7 +94,7 @@ func TestServiceAnswerAsDecisionLogsAndLinksDecision(t *testing.T) {
 	clock := fixedClock{now: time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC)}
 	repo := newRecordingQuestionRepo()
 	events := &recordingEvents{}
-	decisions := &recordingDecisionLogger{result: decisionapp.Result{ID: "dec-1"}}
+	decisions := &recordingDecisionLogger{result: DecisionLogResult{ID: "dec-1"}}
 	svc, err := NewService(Config{Questions: repo, Clock: clock, Events: events, Decisions: decisions})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -194,11 +193,11 @@ func (e *recordingEvents) Publish(topic string, event any) error {
 }
 
 type recordingDecisionLogger struct {
-	result   decisionapp.Result
-	requests []decisionapp.LogRequest
+	result   DecisionLogResult
+	requests []LogDecisionRequest
 }
 
-func (l *recordingDecisionLogger) Log(_ context.Context, req decisionapp.LogRequest) (decisionapp.Result, error) {
+func (l *recordingDecisionLogger) LogDecision(_ context.Context, req LogDecisionRequest) (DecisionLogResult, error) {
 	l.requests = append(l.requests, req)
 	return l.result, nil
 }

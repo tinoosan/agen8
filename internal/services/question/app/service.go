@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/agen8/internal/eventbus"
-	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
 	"github.com/tinoosan/agen8/internal/services/question/domain"
 )
 
@@ -26,7 +25,23 @@ type EventPublisher interface {
 }
 
 type DecisionLogger interface {
-	Log(ctx context.Context, req decisionapp.LogRequest) (decisionapp.Result, error)
+	LogDecision(ctx context.Context, req LogDecisionRequest) (DecisionLogResult, error)
+}
+
+type LogDecisionRequest struct {
+	ProjectID    string
+	MemberID     string
+	Title        string
+	Rationale    string
+	Context      string
+	Confidence   float64
+	TaskRef      string
+	KeyResultRef string
+	MissionRef   string
+}
+
+type DecisionLogResult struct {
+	ID string
 }
 
 type Config struct {
@@ -141,7 +156,7 @@ func (s *Service) Answer(ctx context.Context, req AnswerRequest) (Result, error)
 		if s.decisions == nil {
 			return Result{}, errors.New("question service: decision logger is required for asDecision answer")
 		}
-		decision, err := s.decisions.Log(ctx, decisionapp.LogRequest{
+		decision, err := s.decisions.LogDecision(ctx, LogDecisionRequest{
 			ProjectID:    answered.ProjectID,
 			MemberID:     answered.Answer.AnsweredByMemberID,
 			Title:        decisionTitle(answered.Text),
