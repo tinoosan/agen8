@@ -142,4 +142,8 @@ export const qk = {
     ['graph.linksByTarget', targetType, targetId] as const,
   graphLinksBySource: (sourceType: string, sourceId: string) =>
     ['graph.linksBySource', sourceType, sourceId] as const,
+
+  // ── last-seen marker (per user+project, server-side) ──
+  lastSeenAll: ['lastseen.get'] as const,
+  lastSeen: (projectId: string | null) => ['lastseen.get', projectId ?? ''] as const,
 }

@@ -35,6 +35,7 @@ import (
 	notificationapp "github.com/tinoosan/agen8/internal/services/notification/app"
 	notificationdomain "github.com/tinoosan/agen8/internal/services/notification/domain"
 	notificationinfra "github.com/tinoosan/agen8/internal/services/notification/infra"
+	"github.com/tinoosan/agen8/internal/services/lastseen"
 	pinapp "github.com/tinoosan/agen8/internal/services/pin/app"
 	pininfra "github.com/tinoosan/agen8/internal/services/pin/infra"
 	projectapp "github.com/tinoosan/agen8/internal/services/project/app"
@@ -70,6 +71,7 @@ type Application struct {
 	QuestionSvc     *questionapp.Service
 	PinSvc          *pinapp.Service
 	NotificationSvc *notificationapp.Service
+	LastSeenStore   *lastseen.Store
 }
 
 // NewApplication builds the retained service graph.
@@ -319,6 +321,11 @@ func NewApplication(cfg Config) (*Application, error) {
 		return nil, fmt.Errorf("build notification service: %w", err)
 	}
 
+	lastSeenStore, err := lastseen.NewStore(handle)
+	if err != nil {
+		return nil, fmt.Errorf("build last-seen store: %w", err)
+	}
+
 	return &Application{
 		AuthSvc:         authSvc,
 		UserSvc:         userSvc,
@@ -335,6 +342,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		QuestionSvc:     questionSvc,
 		PinSvc:          pinSvc,
 		NotificationSvc: notificationSvc,
+		LastSeenStore:   lastSeenStore,
 	}, nil
 }
 

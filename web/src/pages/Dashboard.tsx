@@ -14,6 +14,7 @@ import TaskSummary from '../components/dashboard/TaskSummary'
 import DashboardWorkingNow from '../components/dashboard/DashboardWorkingNow'
 import NeedsAttention from '../components/dashboard/NeedsAttention'
 import GettingStartedCard from '../components/dashboard/GettingStartedCard'
+import SinceYouWereAway from '../components/dashboard/SinceYouWereAway'
 import { StrategyMapSearch } from '../components/strategy/StrategyMapSearch'
 import { useStrategyGraph } from '../components/strategy/useStrategyGraph'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
@@ -188,6 +189,8 @@ export default function Dashboard() {
         </div>
 
         <GettingStartedCard projectId={projectId} />
+
+        <SinceYouWereAway projectId={projectId} />
 
         <NeedsAttention projectId={projectId} />
 

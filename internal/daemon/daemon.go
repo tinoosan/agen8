@@ -99,6 +99,7 @@ func New(cfg Config) (*Daemon, error) {
 		func() error { return rpc.RegisterPin(reg, application.PinSvc) },
 		func() error { return rpc.RegisterNotification(reg, application.NotificationSvc) },
 		func() error { return rpc.RegisterAttention(reg, attentionSvc) },
+		func() error { return rpc.RegisterLastSeen(reg, application.LastSeenStore) },
 	} {
 		if err := register(); err != nil {
 			return nil, err
