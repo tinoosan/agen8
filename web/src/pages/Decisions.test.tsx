@@ -155,8 +155,13 @@ describe('Decisions page', () => {
     }))
   })
 
-  it('does not render the removed stat tiles', () => {
+  it('renders decision stat tiles from decision.stats', () => {
     renderPage()
+    // The page now leads with server-computed tiles.
+    expect(screen.getByText('Total')).toBeInTheDocument()
+    expect(screen.getByText('Low confidence')).toBeInTheDocument()
+    expect(screen.getByText('Unlinked')).toBeInTheDocument()
+    // The earlier, deliberately-removed tiles stay gone.
     expect(screen.queryByText('Needs review')).not.toBeInTheDocument()
     expect(screen.queryByText('Revisit conditions')).not.toBeInTheDocument()
   })
