@@ -17,6 +17,10 @@ func NewLogger(cfg Config) (*slog.Logger, error) {
 	if file == "" {
 		return NewTextLogger(os.Stderr, cfg)
 	}
+	file, err := cleanLogFilePath(file)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return nil, fmt.Errorf("logging: create log directory: %w", err)
 	}
@@ -25,6 +29,14 @@ func NewLogger(cfg Config) (*slog.Logger, error) {
 		return nil, fmt.Errorf("logging: open log file: %w", err)
 	}
 	return NewTextLogger(io.MultiWriter(os.Stderr, f), cfg)
+}
+
+func cleanLogFilePath(file string) (string, error) {
+	clean := filepath.Clean(file)
+	if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("logging: log file path must be a relative path within the current working directory")
+	}
+	return clean, nil
 }
 
 func NewTextLogger(w io.Writer, cfg Config) (*slog.Logger, error) {
