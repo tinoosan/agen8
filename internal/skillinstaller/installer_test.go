@@ -43,6 +43,9 @@ func TestInstallWritesCodexSkillTree(t *testing.T) {
 	if !slices.Contains(result.Skills, "agen8") {
 		t.Fatalf("skills = %v, want it to include agen8", result.Skills)
 	}
+	if !slices.Contains(result.Skills, "agen8-coordination") {
+		t.Fatalf("skills = %v, want it to include agen8-coordination", result.Skills)
+	}
 }
 
 func TestInstallWritesClaudeSkillTree(t *testing.T) {
@@ -62,6 +65,9 @@ func TestInstallWritesClaudeSkillTree(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(wantRoot, "agen8", "SKILL.md")); err != nil {
 		t.Fatalf("core agen8 skill not installed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wantRoot, "agen8-coordination", "SKILL.md")); err != nil {
+		t.Fatalf("coordination skill not installed: %v", err)
 	}
 }
 

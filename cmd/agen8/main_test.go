@@ -139,10 +139,13 @@ func TestRunSkillInstallWritesSkill(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wantRoot, "agen8-graph", "SKILL.md")); err != nil {
 		t.Fatalf("expected installed graph skill: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(wantRoot, "agen8-coordination", "SKILL.md")); err != nil {
+		t.Fatalf("expected installed coordination skill: %v", err)
+	}
 	for _, want := range []string{
 		"installed agen8 skills for codex",
 		"root: " + wantRoot,
-		"skills: agen8, agen8-graph",
+		"skills: agen8, agen8-coordination, agen8-graph",
 		"rerun this command to refresh",
 	} {
 		if !strings.Contains(output, want) {

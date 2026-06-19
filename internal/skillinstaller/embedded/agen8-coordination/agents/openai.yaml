@@ -1,0 +1,7 @@
+interface:
+  display_name: "Agen8 Coordination"
+  short_description: "Coordinate multi-agent Agen8 work"
+  default_prompt: "Use $agen8-coordination to coordinate this work through Agen8 roles, tasks, evidence, review, and closeout."
+
+policy:
+  allow_implicit_invocation: true
