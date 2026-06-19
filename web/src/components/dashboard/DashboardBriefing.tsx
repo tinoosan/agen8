@@ -18,7 +18,7 @@
  * count "completed" / "in flight", never "shipped" / "deployed".
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'wouter'
 import {
   Activity,
@@ -87,20 +87,19 @@ export default function DashboardBriefing({ projectId }: { projectId: string | n
   const decisionsQuery = useRecentDecisions(projectId)
   const activeMissionsQuery = useMissions(projectId, 'active')
 
-  // The look-back windows ("completed"/"decisions" in 48 h) need the current
-  // time, but reading the clock during render is impure. Read it in an effect
-  // and refresh on a slow tick so the window stays current over a long-lived
-  // session — same shape as NeedsAttention's `now`.
-  const [nowMs, setNowMs] = useState<number | null>(null)
-  useEffect(() => {
-    const updateNow = () => setNowMs(Date.now())
-    updateNow()
-    const interval = window.setInterval(updateNow, 60_000)
-    return () => window.clearInterval(interval)
-  }, [])
+  // The look-back windows ("completed"/"decisions" in 48 h) need a "now", but
+  // reading the clock during render is impure. Derive it from react-query's
+  // fetch timestamps (the latest of the three) — pure, no timer, renders on
+  // first data, and the window aligns to the data snapshot. Same pattern as
+  // RecentlyShipped.
+  const nowMs = Math.max(
+    tasksQuery.dataUpdatedAt,
+    decisionsQuery.dataUpdatedAt,
+    activeMissionsQuery.dataUpdatedAt,
+  )
 
   const briefing = useMemo(() => {
-    if (!tasksQuery.data || nowMs === null) return null
+    if (!tasksQuery.data || nowMs === 0) return null
     return computeBriefing(
       tasksQuery.data,
       decisionsQuery.data ?? [],
