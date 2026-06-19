@@ -23,6 +23,7 @@ import ListPager from '../components/ListPager'
 import CreateMissionDialog from '../components/mission/CreateMissionDialog'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import StatTile from '../components/StatTile'
 import { cn } from '@/lib/utils'
 import {
   keyResultProgressSummary,
@@ -75,52 +76,6 @@ function MissionStatusIcon({ status }: { status: MissionStatus }) {
     default:
       return <Target size={14} className="shrink-0 text-[var(--text-3)]" aria-hidden />
   }
-}
-
-/* ── Aggregate tile ───────────────────────────────────── */
-
-function Tile({
-  label,
-  value,
-  sub,
-  tone,
-  icon: Icon,
-  onClick,
-  active,
-}: {
-  label: string
-  value: string | number
-  sub?: string
-  tone: string
-  icon: typeof Clock
-  onClick?: () => void
-  active?: boolean
-}) {
-  const interactive = Boolean(onClick)
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={interactive ? Boolean(active) : undefined}
-      disabled={!interactive}
-      className={cn(
-        'flex flex-col gap-1.5 rounded-[14px] border bg-[var(--bg-elevated)] px-4 py-3 text-left',
-        interactive ? 'cursor-pointer transition-colors hover:bg-[var(--bg-hover)]' : 'cursor-default',
-        active ? 'border-[var(--accent)]' : 'border-[var(--border)]',
-      )}
-    >
-      <div className="flex items-center gap-1.5">
-        <Icon size={13} style={{ color: tone }} aria-hidden />
-        <span className="text-[0.6875rem] font-semibold uppercase tracking-[0.05em] text-[var(--text-3)]">
-          {label}
-        </span>
-      </div>
-      <span className="text-[1.5rem] font-semibold leading-none tabular-nums" style={{ color: tone }}>
-        {value}
-      </span>
-      {sub && <span className="text-[0.75rem] text-[var(--text-3)]">{sub}</span>}
-    </button>
-  )
 }
 
 /* ── Page ─────────────────────────────────────────────── */
@@ -233,7 +188,7 @@ export default function Missions() {
         {hasMissions && !isError && (
           <div className="@container mb-6">
             <div className="grid grid-cols-2 gap-3 @min-[640px]:grid-cols-4">
-              <Tile
+              <StatTile
                 label="Active"
                 value={overview.active}
                 tone="var(--accent)"
@@ -241,14 +196,14 @@ export default function Missions() {
                 onClick={() => setStatusFilter(statusFilter === 'active' ? 'all' : 'active')}
                 active={statusFilter === 'active'}
               />
-              <Tile
+              <StatTile
                 label="Avg progress"
                 value={overview.avgActiveProgress === null ? '—' : `${overview.avgActiveProgress}%`}
                 sub="across active"
                 tone="var(--blue,var(--accent))"
                 icon={TrendingUp}
               />
-              <Tile
+              <StatTile
                 label="Completed"
                 value={overview.completed}
                 tone="var(--green,var(--accent))"
@@ -256,7 +211,7 @@ export default function Missions() {
                 onClick={() => setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed')}
                 active={statusFilter === 'completed'}
               />
-              <Tile
+              <StatTile
                 label="Needs attention"
                 value={overview.attentionCount}
                 sub={

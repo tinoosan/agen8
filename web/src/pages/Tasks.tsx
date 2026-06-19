@@ -10,7 +10,6 @@ import {
   Eye,
   Ban,
   CircleCheck,
-  type LucideIcon,
 } from 'lucide-react'
 import { useNavigation, taskDetailLink } from '../lib/routing'
 import { useProjectTasks } from '../hooks/useProjectTasks'
@@ -24,6 +23,7 @@ import { taskStatusLabel, taskStatusColor } from '../lib/statusLabels'
 import { taskClaimedMemberLabel, taskAssignedMemberLabel } from '../lib/taskMembers'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import StatTile from '../components/StatTile'
 import { cn } from '@/lib/utils'
 import type { Task } from '../lib/types'
 
@@ -60,49 +60,6 @@ function matchesFilter(status: string, filter: string): boolean {
   if (filter === 'all') return true
   if (filter === 'open') return OPEN_STATUSES.includes(status)
   return status === filter
-}
-
-/* ── Aggregate tile ───────────────────────────────────── */
-
-function Tile({
-  label,
-  value,
-  tone,
-  icon: Icon,
-  onClick,
-  active,
-}: {
-  label: string
-  value: number
-  tone: string
-  icon: LucideIcon
-  onClick?: () => void
-  active?: boolean
-}) {
-  const interactive = Boolean(onClick)
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={interactive ? Boolean(active) : undefined}
-      disabled={!interactive}
-      className={cn(
-        'flex flex-col gap-1.5 rounded-[14px] border bg-[var(--bg-elevated)] px-4 py-3 text-left',
-        interactive ? 'cursor-pointer transition-colors hover:bg-[var(--bg-hover)]' : 'cursor-default',
-        active ? 'border-[var(--accent)]' : 'border-[var(--border)]',
-      )}
-    >
-      <div className="flex items-center gap-1.5">
-        <Icon size={13} style={{ color: tone }} aria-hidden />
-        <span className="text-[0.6875rem] font-semibold uppercase tracking-[0.05em] text-[var(--text-3)]">
-          {label}
-        </span>
-      </div>
-      <span className="text-[1.5rem] font-semibold leading-none tabular-nums" style={{ color: tone }}>
-        {value}
-      </span>
-    </button>
-  )
 }
 
 /* ── Page ─────────────────────────────────────────────── */
@@ -236,7 +193,7 @@ export default function Tasks() {
         {hasTasks && !isError && (
           <div className="@container mb-6">
             <div className="grid grid-cols-2 gap-3 @min-[640px]:grid-cols-4">
-              <Tile
+              <StatTile
                 label="In flight"
                 value={overview.inFlight}
                 tone="var(--accent)"
@@ -244,7 +201,7 @@ export default function Tasks() {
                 onClick={() => setStatusFilter(statusFilter === 'active' ? 'open' : 'active')}
                 active={statusFilter === 'active'}
               />
-              <Tile
+              <StatTile
                 label="Needs review"
                 value={overview.inReview}
                 tone={overview.inReview > 0 ? 'var(--amber)' : 'var(--text-3)'}
@@ -252,7 +209,7 @@ export default function Tasks() {
                 onClick={() => setStatusFilter(statusFilter === 'in_review' ? 'open' : 'in_review')}
                 active={statusFilter === 'in_review'}
               />
-              <Tile
+              <StatTile
                 label="Blocked"
                 value={overview.blocked}
                 tone={overview.blocked > 0 ? 'var(--red)' : 'var(--text-3)'}
@@ -260,7 +217,7 @@ export default function Tasks() {
                 onClick={() => setStatusFilter(statusFilter === 'blocked' ? 'open' : 'blocked')}
                 active={statusFilter === 'blocked'}
               />
-              <Tile
+              <StatTile
                 label="Done this week"
                 value={overview.completed}
                 tone="var(--green,var(--accent))"
