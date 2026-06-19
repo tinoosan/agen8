@@ -2,17 +2,32 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/tinoosan/agen8/internal/core/types"
-	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
+type ProjectSnapshot struct {
+	ID           types.ProjectID
+	LocationID   types.LocationID
+	Root         string
+	ResolvedRoot string
+}
+
+func (p ProjectSnapshot) EffectiveRoot() string {
+	if resolved := strings.TrimSpace(p.ResolvedRoot); resolved != "" {
+		return resolved
+	}
+	return strings.TrimSpace(p.Root)
+}
+
+type ProjectFilter struct {
+	Status string
+	Limit  int
+	Offset int
+}
+
 type ProjectLoader interface {
-	GetProject(ctx context.Context, projectID types.ProjectID) (projectdomain.Project, error)
-	ListProjects(ctx context.Context, filter projectdomain.Filter) ([]projectdomain.Project, error)
-	// ResolveRoot returns the project's effective filesystem root: the live
-	// workspace root when one is known, otherwise the stored project.root. File
-	// operations resolve against this so they follow a folder that was moved or
-	// renamed on disk after the project was first linked.
-	ResolveRoot(ctx context.Context, p projectdomain.Project) string
+	GetProject(ctx context.Context, projectID types.ProjectID) (ProjectSnapshot, error)
+	ListProjects(ctx context.Context, filter ProjectFilter) ([]ProjectSnapshot, error)
 }

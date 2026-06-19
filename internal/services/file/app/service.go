@@ -19,7 +19,6 @@ import (
 
 	"github.com/tinoosan/agen8/internal/core/types"
 	filedomain "github.com/tinoosan/agen8/internal/services/file/domain/file"
-	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 const (
@@ -490,34 +489,31 @@ func (s *Service) validProject(ctx context.Context, projectID types.ProjectID, r
 		if err != nil {
 			return projectContext{}, fmt.Errorf("load project %s: %w", projectID, err)
 		}
-		locationID := project.LocationID()
+		locationID := project.LocationID
 		if locationID == "" {
 			locationID = "local"
 		}
-		// Resolve against the live workspace root rather than the stored seed so
-		// file ops follow a folder that was moved or renamed after first link.
-		effectiveRoot := strings.TrimSpace(s.projects.ResolveRoot(ctx, project))
-		return projectContext{id: project.ID(), root: effectiveRoot, locationID: locationID}, nil
+		return projectContext{id: project.ID, root: project.EffectiveRoot(), locationID: locationID}, nil
 	}
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return projectContext{}, fmt.Errorf("projectId is required")
 	}
-	projects, err := s.projects.ListProjects(ctx, projectdomain.Filter{})
+	projects, err := s.projects.ListProjects(ctx, ProjectFilter{})
 	if err != nil {
 		return projectContext{}, fmt.Errorf("check projectRoot: %w", err)
 	}
 	for _, project := range projects {
-		locationID := project.LocationID()
+		locationID := project.LocationID
 		if locationID == "" {
 			locationID = "local"
 		}
-		matches, err := projectRootMatches(locationID, project.Root(), root)
+		matches, err := projectRootMatches(locationID, project.Root, root)
 		if err != nil {
 			return projectContext{}, err
 		}
 		if matches {
-			return projectContext{id: project.ID(), root: strings.TrimSpace(project.Root()), locationID: locationID}, nil
+			return projectContext{id: project.ID, root: strings.TrimSpace(project.Root), locationID: locationID}, nil
 		}
 	}
 	return projectContext{}, fmt.Errorf("projectRoot is not registered")

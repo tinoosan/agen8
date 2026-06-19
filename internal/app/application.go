@@ -198,7 +198,7 @@ func NewApplication(cfg Config) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build file repository: %w", err)
 	}
-	fileSvc, err := fileapp.NewService(fileapp.Config{Files: fileRepo, Projects: projectSvc})
+	fileSvc, err := fileapp.NewService(fileapp.Config{Files: fileRepo, Projects: fileProjectLoaderAdapter{projects: projectSvc}})
 	if err != nil {
 		return nil, fmt.Errorf("build file service: %w", err)
 	}
@@ -434,6 +434,52 @@ func (a projectLoaderAdapter) Get(ctx context.Context, projectID types.ProjectID
 		return projectdomain.Project{}, fmt.Errorf("project service is required")
 	}
 	return a.projects.GetProject(ctx, projectID)
+}
+
+// fileProjectLoaderAdapter is the composition-root bridge from project-owned
+// aggregates to file-owned project snapshots. The file service depends only on
+// the fields needed for path validation and root resolution.
+type fileProjectLoaderAdapter struct {
+	projects *projectapp.Service
+}
+
+func (a fileProjectLoaderAdapter) GetProject(ctx context.Context, projectID types.ProjectID) (fileapp.ProjectSnapshot, error) {
+	if a.projects == nil {
+		return fileapp.ProjectSnapshot{}, fmt.Errorf("project service is required")
+	}
+	project, err := a.projects.GetProject(ctx, projectID)
+	if err != nil {
+		return fileapp.ProjectSnapshot{}, err
+	}
+	return a.projectSnapshot(ctx, project), nil
+}
+
+func (a fileProjectLoaderAdapter) ListProjects(ctx context.Context, filter fileapp.ProjectFilter) ([]fileapp.ProjectSnapshot, error) {
+	if a.projects == nil {
+		return nil, fmt.Errorf("project service is required")
+	}
+	projects, err := a.projects.ListProjects(ctx, projectdomain.Filter{
+		Status: projectdomain.Status(strings.TrimSpace(filter.Status)),
+		Limit:  filter.Limit,
+		Offset: filter.Offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]fileapp.ProjectSnapshot, 0, len(projects))
+	for _, project := range projects {
+		out = append(out, a.projectSnapshot(ctx, project))
+	}
+	return out, nil
+}
+
+func (a fileProjectLoaderAdapter) projectSnapshot(ctx context.Context, p projectdomain.Project) fileapp.ProjectSnapshot {
+	return fileapp.ProjectSnapshot{
+		ID:           p.ID(),
+		LocationID:   p.LocationID(),
+		Root:         p.Root(),
+		ResolvedRoot: a.projects.ResolveRoot(ctx, p),
+	}
 }
 
 // linkTokenIssuerAdapter lets the project service mint wlt_ link tokens without

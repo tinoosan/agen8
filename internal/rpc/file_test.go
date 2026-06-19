@@ -6,13 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinoosan/agen8/internal/core/types"
 	fileapp "github.com/tinoosan/agen8/internal/services/file/app"
 	fileinfra "github.com/tinoosan/agen8/internal/services/file/infra"
-	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 func TestRegisterFileDispatchesListDirAndGet(t *testing.T) {
@@ -97,31 +95,24 @@ type rpcFileProjectLoader struct {
 	root string
 }
 
-func (l rpcFileProjectLoader) GetProject(_ context.Context, projectID types.ProjectID) (projectdomain.Project, error) {
-	projects, err := l.ListProjects(context.Background(), projectdomain.Filter{})
+func (l rpcFileProjectLoader) GetProject(_ context.Context, projectID types.ProjectID) (fileapp.ProjectSnapshot, error) {
+	projects, err := l.ListProjects(context.Background(), fileapp.ProjectFilter{})
 	if err != nil {
-		return projectdomain.Project{}, err
+		return fileapp.ProjectSnapshot{}, err
 	}
 	for _, project := range projects {
-		if project.ID() == projectID {
+		if project.ID == projectID {
 			return project, nil
 		}
 	}
-	return projectdomain.Project{}, os.ErrNotExist
+	return fileapp.ProjectSnapshot{}, os.ErrNotExist
 }
 
-func (l rpcFileProjectLoader) ResolveRoot(_ context.Context, p projectdomain.Project) string {
-	return p.Root()
-}
-
-func (l rpcFileProjectLoader) ListProjects(context.Context, projectdomain.Filter) ([]projectdomain.Project, error) {
-	project, err := projectdomain.New(projectdomain.NewInput{
-		ID:        types.ProjectID("project-test"),
-		Root:      l.root,
-		CreatedAt: time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return []projectdomain.Project{project}, nil
+func (l rpcFileProjectLoader) ListProjects(context.Context, fileapp.ProjectFilter) ([]fileapp.ProjectSnapshot, error) {
+	return []fileapp.ProjectSnapshot{{
+		ID:           types.ProjectID("project-test"),
+		LocationID:   "local",
+		Root:         l.root,
+		ResolvedRoot: l.root,
+	}}, nil
 }

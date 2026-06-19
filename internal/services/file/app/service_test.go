@@ -16,7 +16,6 @@ import (
 	"github.com/tinoosan/agen8/internal/core/types"
 	filedomain "github.com/tinoosan/agen8/internal/services/file/domain/file"
 	fileinfra "github.com/tinoosan/agen8/internal/services/file/infra"
-	projectdomain "github.com/tinoosan/agen8/internal/services/project/domain/project"
 )
 
 func TestServiceListDirUsesFileRepositoryAfterProjectRootValidation(t *testing.T) {
@@ -101,6 +100,30 @@ func TestServiceGetUsesProjectIDBeforeProjectRoot(t *testing.T) {
 	require.Equal(t, []filedomain.Reference{{LocationID: "ssh-build", Path: "/srv/app/README.md"}}, repo.readPaths)
 }
 
+func TestServiceGetUsesResolvedRootForProjectID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &spyFileRepository{
+		stats: map[filedomain.Reference]filedomain.Info{
+			{LocationID: "local", Path: "/moved/app/README.md"}: {Size: 7, ModifiedAt: time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)},
+		},
+	}
+	svc := newTestServiceWithProjects(t, repo, testProject{
+		root:         "/stored/app",
+		resolvedRoot: "/moved/app",
+		locationID:   "local",
+	})
+
+	_, err := svc.Get(ctx, GetInput{
+		ProjectID: "project-test-0",
+		Path:      "/project/README.md",
+		MaxBytes:  1024,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []filedomain.Reference{{LocationID: "local", Path: "/moved/app/README.md"}}, repo.statPaths)
+	require.Equal(t, []filedomain.Reference{{LocationID: "local", Path: "/moved/app/README.md"}}, repo.readPaths)
+}
+
 func newTestService(t *testing.T, projectRoot string, repo filedomain.Repository) *Service {
 	t.Helper()
 	return newTestServiceWithProjects(t, repo, testProject{root: projectRoot, locationID: "local"})
@@ -119,53 +142,42 @@ func newTestServiceWithProjects(t *testing.T, repo filedomain.Repository, projec
 }
 
 type testProject struct {
-	root       string
-	locationID types.LocationID
+	root         string
+	resolvedRoot string
+	locationID   types.LocationID
 }
 
 type staticProjectLoader struct {
 	projects []testProject
 }
 
-func (l staticProjectLoader) GetProject(_ context.Context, projectID types.ProjectID) (projectdomain.Project, error) {
-	projects, err := l.ListProjects(context.Background(), projectdomain.Filter{})
+func (l staticProjectLoader) GetProject(_ context.Context, projectID types.ProjectID) (ProjectSnapshot, error) {
+	projects, err := l.ListProjects(context.Background(), ProjectFilter{})
 	if err != nil {
-		return projectdomain.Project{}, err
+		return ProjectSnapshot{}, err
 	}
 	for _, project := range projects {
-		if project.ID() == projectID {
+		if project.ID == projectID {
 			return project, nil
 		}
 	}
-	return projectdomain.Project{}, fmt.Errorf("project not found")
+	return ProjectSnapshot{}, fmt.Errorf("project not found")
 }
 
-// ResolveRoot mirrors the production resolver's fallback path: with no
-// workspace records to consult, the effective root is the stored project root.
-// The workspace-sourced override is exercised in the project app tests where
-// the real workspace repository lives.
-func (l staticProjectLoader) ResolveRoot(_ context.Context, p projectdomain.Project) string {
-	return p.Root()
-}
-
-func (l staticProjectLoader) ListProjects(context.Context, projectdomain.Filter) ([]projectdomain.Project, error) {
-	out := make([]projectdomain.Project, 0, len(l.projects))
+func (l staticProjectLoader) ListProjects(context.Context, ProjectFilter) ([]ProjectSnapshot, error) {
+	out := make([]ProjectSnapshot, 0, len(l.projects))
 	for i, input := range l.projects {
-		project, err := projectdomain.New(projectdomain.NewInput{
-			ID:         projectdomainID(i),
-			LocationID: input.locationID,
-			Root:       input.root,
-			CreatedAt:  time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC),
+		out = append(out, ProjectSnapshot{
+			ID:           projectSnapshotID(i),
+			LocationID:   input.locationID,
+			Root:         input.root,
+			ResolvedRoot: input.resolvedRoot,
 		})
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, project)
 	}
 	return out, nil
 }
 
-func projectdomainID(index int) types.ProjectID {
+func projectSnapshotID(index int) types.ProjectID {
 	return types.ProjectID(fmt.Sprintf("project-test-%d", index))
 }
 
