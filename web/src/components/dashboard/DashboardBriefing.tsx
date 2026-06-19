@@ -130,7 +130,11 @@ export default function DashboardBriefing({ projectId }: { projectId: string | n
   if (!tasksQuery.data || tasksQuery.data.length === 0) return null
   if (!briefing) return null
 
-  const { needsYou, queued, inFlight, completed, decisions, activeMissions } = briefing
+  const { needsYou, inReview, queued, inFlight, completed, decisions, activeMissions } = briefing
+  // "Needs you" spans two statuses but the Tasks page filters one at a time, so
+  // land on the actionable queue: review (the dominant human gate) when there's
+  // anything in review, otherwise blocked.
+  const needsYouStatus = inReview > 0 ? 'in_review' : 'blocked'
 
   return (
     <nav
@@ -140,11 +144,11 @@ export default function DashboardBriefing({ projectId }: { projectId: string | n
       {/* Needs you — always shown; the only chip that draws the eye when active. */}
       {needsYou > 0 ? (
         <Stat
-          to={tasksLink(projectId)}
+          to={filteredTasksLink(projectId, needsYouStatus)}
           icon={CircleAlert}
           count={needsYou}
           label={needsYou === 1 ? 'needs you' : 'need you'}
-          title="Tasks waiting on a person (blocked or in review)"
+          title="Tasks waiting on a person (in review or blocked)"
           tone="var(--amber)"
           emphasis
         />

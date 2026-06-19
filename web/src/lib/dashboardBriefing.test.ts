@@ -44,7 +44,7 @@ function makeMission(overrides: Partial<MissionView>): MissionView {
 }
 
 describe('computeBriefing — board states (point-in-time)', () => {
-  it('counts blocked and in_review as "needs you"', () => {
+  it('counts blocked and in_review as "needs you", and exposes the split', () => {
     const tasks = [
       makeTask({ id: 't-1', status: 'blocked' }),
       makeTask({ id: 't-2', status: 'in_review' }),
@@ -52,6 +52,9 @@ describe('computeBriefing — board states (point-in-time)', () => {
     ]
     const b = computeBriefing(tasks, [], [], NOW)
     expect(b.needsYou).toBe(3)
+    expect(b.inReview).toBe(2)
+    expect(b.blocked).toBe(1)
+    expect(b.needsYou).toBe(b.inReview + b.blocked)
     expect(b.inFlight).toBe(0)
   })
 

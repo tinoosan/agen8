@@ -19,6 +19,10 @@ import type { Task, DecisionView, MissionView } from './types'
 export interface DashboardBriefing {
   /** Tasks the board is holding for a person: blocked + in_review. */
   needsYou: number
+  /** Subset of needsYou awaiting review (in_review). Drives the chip's link target. */
+  inReview: number
+  /** Subset of needsYou blocked (blocked). Link fallback when nothing is in review. */
+  blocked: number
   /** Tasks queued but not yet started: pending. */
   queued: number
   /** Tasks an agent is actively working right now: active. */
@@ -58,15 +62,18 @@ export function computeBriefing(
 ): DashboardBriefing {
   const since = nowMs - windowMs
 
-  let needsYou = 0
+  let inReview = 0
+  let blocked = 0
   let queued = 0
   let inFlight = 0
   let completed = 0
 
   for (const t of tasks) {
     const status = t.status ?? ''
-    if (status === 'blocked' || status === 'in_review') {
-      needsYou += 1
+    if (status === 'in_review') {
+      inReview += 1
+    } else if (status === 'blocked') {
+      blocked += 1
     } else if (status === 'pending') {
       queued += 1
     } else if (status === 'active') {
@@ -76,6 +83,8 @@ export function computeBriefing(
       completed += 1
     }
   }
+
+  const needsYou = inReview + blocked
 
   const decisionsInWindow = decisions.reduce(
     (n, d) => (new Date(d.createdAt).getTime() > since ? n + 1 : n),
@@ -89,6 +98,8 @@ export function computeBriefing(
 
   return {
     needsYou,
+    inReview,
+    blocked,
     queued,
     inFlight,
     completed,
