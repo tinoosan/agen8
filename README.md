@@ -7,10 +7,6 @@ provides the durable structured record behind them: projects, members, missions,
 key results, tasks, decisions, files, credentials, HTTP actions, and the context
 map.
 
-This repository is being reshaped from selected Agen8 code. It intentionally
-does not continue the old product as a replacement chat UI or as a default
-harness session manager.
-
 ## Current Baseline
 
 - Binary: `agen8`
@@ -37,6 +33,17 @@ Agen8 ships as a single self-contained binary: the web UI is compiled into it,
 so once it is built there is nothing else to serve. Run it locally, create an
 account in the browser, then point your AI harness at it.
 
+Fast path for a local install:
+
+```sh
+make build
+./bin/agen8
+```
+
+Open the setup URL printed by the daemon, create the first account, save the
+returned `ak_...` API key, then configure your harness to call
+`http://127.0.0.1:7777/mcp` with that API key as a bearer token.
+
 ### 1. Prerequisites
 
 - **Go 1.25+** — to compile the daemon.
@@ -44,6 +51,8 @@ account in the browser, then point your AI harness at it.
   binary.
 - An MCP-capable harness to connect (e.g. Codex or Claude Code). Optional, but
   it is what Agen8 exists to support.
+- Optional: **Docker** and Docker Compose for containerized local or hosted
+  runs.
 
 ### 2. Build
 
@@ -159,6 +168,13 @@ root is a ready-to-copy template. Copy it to `.mcp.json`, then set
 `AGEN8_MCP_TOKEN` to your key before starting the MCP client. Keep the real
 `.mcp.json` local — it is gitignored because it is machine-specific.
 
+Minimal local setup:
+
+```sh
+cp .mcp.example.json .mcp.json
+export AGEN8_MCP_TOKEN='<your-agen8-api-key>'
+```
+
 For Codex or managed environments where you want the server URL to stay stable
 while the secret lives separately, use an environment-backed bearer token:
 
@@ -245,23 +261,6 @@ or canonical project root and a readable `display_name` such as
 and graph records stay understandable. From there you create missions and key
 results, then run tasks against them.
 
-If a worker uses a git worktree, treat that worktree as an execution checkout
-only. It is not a new Agen8 project boundary. Create or enter the worktree for
-file edits, but register and log against the canonical Agen8 project:
-
-```json
-{
-  "action": "register",
-  "project_id": "<canonical-project-id>",
-  "project_root": "<canonical-main-checkout-root>",
-  "display_name": "Atlas (Backend Engineer)"
-}
-```
-
-Do not register with only a temporary worktree path, because that can mint a
-throwaway project and hide tasks, submissions, and decisions from the canonical
-work graph.
-
 Your runtime data lives outside the repository (default `~/.agen8`). It is never
 removed by routine cleanup — resetting the database is an explicit, deliberate
 action.
@@ -284,10 +283,21 @@ Override runtime state only when an isolated run is intentional, via `DATA_DIR=`
 `AGEN8_DATA_DIR`, or `--data-dir`. `make clean` removes build artifacts and logs
 but never the live SQLite database.
 
+Common development commands:
+
+```sh
+make build-go          # Go-only rebuild
+make test-go           # Go test suite
+make test-web          # web vitest suite
+make lint              # go vet + web lint
+make fmt-check         # gofmt guard
+make docs              # serve static docs on the LAN
+```
+
 ## Pre-Push Check
 
-Before publishing or tagging the baseline, run the same gate used for the
-current local release checks:
+Before publishing or tagging a baseline, run the same gate used for local
+release checks:
 
 ```sh
 git status --short
@@ -306,6 +316,16 @@ tracked, so `npm run build` regenerating the bundle leaves git status clean.
 The binary embeds the freshly built bundle at `make build` time. Publish
 `.mcp.example.json`, not a real local `.mcp.json`.
 
+## Repository Management
+
+- Keep runtime state out of git. Local data defaults to `~/.agen8`; use
+  `AGEN8_DATA_DIR`, `DATA_DIR`, or `--data-dir` only when an isolated run is
+  intentional.
+- Keep `.mcp.json`, API keys, setup tokens, and local hook configuration out of
+  commits. Commit `.mcp.example.json` instead.
+- Keep generated binaries, temporary daemon logs, and rebuilt web bundles out of
+  commits unless a release process explicitly says otherwise.
+
 ## Initial Repository Shape
 
 ```text
@@ -317,5 +337,9 @@ internal/services/           # service-owned domains, apps, repos, RPC adapters
 internal/store/              # SQLite baseline schema and preserving checks
 web/                         # focused local UI
 docs/                        # HTML architecture and release docs
-skills/agen8/                # installable Agen8 workflow skill template
+plugins/agen8/skills/        # installable Agen8 skill templates mirrored from the embedded installer
 ```
+
+## License
+
+Agen8 is released under the MIT License. See [LICENSE](LICENSE).
