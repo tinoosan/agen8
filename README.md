@@ -7,25 +7,15 @@ for other harnesses coming soon. Agen8 provides the durable structured record
 behind them: projects, members, missions, key results, tasks, decisions, files,
 credentials, HTTP actions, and the context map.
 
-## Current Baseline
+## What Agen8 Provides
 
-- Binary: `agen8`
-- Default local data directory: `~/.agen8` (`--data-dir` or
-  `AGEN8_DATA_DIR` can point isolated runs somewhere else)
-- Development daemon: `make dev remote`
-- Build command: `make build` (full binary with embedded UI; `make build-go`
-  recompiles only the Go side)
-- Version check: `./bin/agen8 version`
-- Health check: `GET http://127.0.0.1:7777/healthz`
-- MCP endpoint: `http://127.0.0.1:7777/mcp` with
-  `Authorization: Bearer <token>`
-- Retained MCP tools: `project`, `mission`, `task`, `decision`,
-  `graph_query`, and `http`
-- Pre-push gate: clean git status, Go tests, frontend lint/tests/build,
-  `npm audit`, and `govulncheck`
-
-See `docs/release-baseline.html` for the setup, verification, and release
-baseline checklist.
+- A local MCP server for Codex and Claude Code.
+- A browser UI for projects, missions, key results, tasks, decisions, and
+  related context.
+- Durable local storage for agent work records, separate from your chat
+  harness history.
+- Optional attention hooks for supported harnesses.
+- Docker and self-hosting support for teams that want a shared daemon.
 
 ## Getting Started
 
@@ -194,8 +184,7 @@ origin, for example `https://agen8.example.com`.
 
 ### 6. Install the Agen8 workflow skill
 
-Install the workflow skill into your harness so it knows how to drive Agen8
-(register, plan missions/key results, run tasks, log decisions):
+Install the workflow skill into your harness so it knows how to use Agen8:
 
 ```sh
 ./bin/agen8 skill install --harness codex
@@ -204,10 +193,6 @@ Install the workflow skill into your harness so it knows how to drive Agen8
 ```
 
 Re-run the same command any time to refresh the installed skill.
-
-Claude Code's Agen8 hook is not a separate binary. It is the same installed
-`agen8` binary invoked as `agen8 claude hook`, so local development should only
-produce `./bin/agen8` for releases and `./tmp/agen8-dev` while Air is running.
 
 Attention hooks are installed separately from the skill:
 
@@ -255,11 +240,9 @@ identity = { url = "http://127.0.0.1:7777/mcp" }
 
 ### 7. Start working
 
-From inside your harness, call `project.register` with the canonical project id
-or canonical project root and a readable `display_name` such as
-`Atlas (Backend Engineer)` or `Iris (Frontend Reviewer)`, so tasks, decisions,
-and graph records stay understandable. From there you create missions and key
-results, then run tasks against them.
+From inside your harness, register a project and start recording work. Agen8 is
+designed to keep plans, tasks, decisions, files, and related context available
+across harness sessions.
 
 Your runtime data lives outside the repository (default `~/.agen8`). It is never
 removed by routine cleanup — resetting the database is an explicit, deliberate
@@ -294,51 +277,22 @@ make fmt-check         # gofmt guard
 make docs              # serve static docs on the LAN
 ```
 
-## Pre-Push Check
+## Contributing
 
-Before publishing or tagging a baseline, run the same gate used for local
-release checks:
+Before opening a pull request, run the local checks:
 
 ```sh
-git status --short
 go test ./... -count=1
 npm --prefix web run lint
 npm --prefix web run test -- --run
 npm --prefix web run build
 npm --prefix web audit --audit-level=moderate
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-git status --short
 ```
 
-The final status should be clean. The generated web bundle in
-`internal/web/dist` is **not** committed — only the `.gitkeep` placeholder is
-tracked, so `npm run build` regenerating the bundle leaves git status clean.
-The binary embeds the freshly built bundle at `make build` time. Publish
-`.mcp.example.json`, not a real local `.mcp.json`.
-
-## Repository Management
-
-- Keep runtime state out of git. Local data defaults to `~/.agen8`; use
-  `AGEN8_DATA_DIR`, `DATA_DIR`, or `--data-dir` only when an isolated run is
-  intentional.
-- Keep `.mcp.json`, API keys, setup tokens, and local hook configuration out of
-  commits. Commit `.mcp.example.json` instead.
-- Keep generated binaries, temporary daemon logs, and rebuilt web bundles out of
-  commits unless a release process explicitly says otherwise.
-
-## Initial Repository Shape
-
-```text
-cmd/agen8/                   # daemon CLI entrypoint
-internal/app/                # retained service graph construction
-internal/daemon/             # HTTP daemon, setup, web serving, MCP mount
-internal/mcp/                # retained MCP tool definitions and dispatch
-internal/services/           # service-owned domains, apps, repos, RPC adapters
-internal/store/              # SQLite baseline schema and preserving checks
-web/                         # focused local UI
-docs/                        # HTML architecture and release docs
-plugins/agen8/skills/        # installable Agen8 skill templates mirrored from the embedded installer
-```
+Do not commit local runtime data, API keys, setup tokens, generated binaries, or
+machine-specific MCP configuration. Use `.mcp.example.json` as the shareable
+template for local MCP setup.
 
 ## License
 
