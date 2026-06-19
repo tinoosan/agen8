@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -117,4 +118,64 @@ func TestNewLoggerWritesLegitimateRelativePath(t *testing.T) {
 	if !strings.Contains(string(out), "probe") {
 		t.Fatalf("log file missing message: %s", out)
 	}
+}
+
+func TestNewLoggerUsesSecurePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission mode assertions are Unix-specific")
+	}
+
+	// cleanLogFilePath only accepts relative paths, so create the log under a
+	// temp working directory and assert the modes on what NewLogger created.
+	root := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("restore wd: %v", err)
+		}
+	})
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+
+	logger, err := NewLogger(Config{File: "logs/app.log", Level: "warn"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	if logger == nil {
+		t.Fatalf("NewLogger returned nil logger")
+	}
+
+	logger.Info("secure mode check")
+
+	if got := dirMode(t, filepath.Join(root, "logs")).Perm(); got != 0o700 {
+		t.Fatalf("log dir mode = %04o, want %04o", got, 0o700)
+	}
+
+	if got := fileMode(t, filepath.Join(root, "logs", "app.log")).Perm(); got != 0o600 {
+		t.Fatalf("log file mode = %04o, want %04o", got, 0o600)
+	}
+}
+
+func dirMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	return info.Mode()
+}
+
+func fileMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat file: %v", err)
+	}
+	return info.Mode()
 }
