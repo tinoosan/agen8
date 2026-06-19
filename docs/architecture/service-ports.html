@@ -8,7 +8,7 @@
 </head>
 <body>
 
-<nav class="topnav">
+<nav class="topnav" aria-label="Breadcrumb">
   <div class="topnav-inner">
     <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
     <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / service-ports</span>
@@ -26,6 +26,7 @@
       <li><a href="#rule">Port ownership rule</a></li>
       <li><a href="#dtos">Caller-owned DTOs</a></li>
       <li><a href="#composition">Composition root</a></li>
+      <li><a href="#read-models">Cross-service read models</a></li>
       <li><a href="#exceptions">Allowed exceptions</a></li>
       <li><a href="#examples">Agen8 examples</a></li>
       <li><a href="#guardrail">Guardrail test</a></li>
@@ -49,7 +50,7 @@
       <tr>
         <td>Service domain package</td>
         <td>Domain-only dependencies and standard library support. This includes literal <code>domain</code> packages and service-owned model subpackages such as <code>internal/services/auth/password</code>, <code>apikey</code>, <code>session</code>, and <code>linktoken</code>.</td>
-        <td>Application services, RPC adapters, infrastructure repositories, service app packages, or another service's domain package unless the import is explicitly allowlisted as migration debt.</td>
+        <td>Application services, RPC adapters, infrastructure repositories, service app packages, composition-root packages, read-model adapters, or another service's domain package unless the import is explicitly allowlisted as migration debt.</td>
       </tr>
       <tr>
         <td>Service infra package, such as <code>internal/services/location/infra</code></td>
@@ -92,7 +93,22 @@
 
   <p>Composition-root adapters should be small translators. They may convert ids, copy fields, and handle process-level wiring concerns. They should not own domain validation, persistence decisions, retries, or lifecycle rules that belong to one of the services.</p>
 
-  <h2 id="exceptions">4. Allowed exceptions</h2>
+  <h2 id="read-models">4. Cross-service read models</h2>
+  <p>A read model or projection may compose facts from several services, but it must live outside the domains being read. The service domain remains the owner of invariants and state transitions; the read model owns a flattened view for lookup, hydration, search, notification, or display.</p>
+
+  <p>The direction is:</p>
+
+<pre><code>service domain -&gt; no cross-service read model imports
+service app    -&gt; owns narrow row/snapshot ports when it needs a view
+internal/app   -&gt; owns concrete adapters that translate service records into those rows/snapshots</code></pre>
+
+  <p>Graph hydration is the reference pattern. <code>internal/services/graph/app/hydrators.go</code> owns <code>TaskHydrationReader</code>, <code>DecisionHydrationReader</code>, <code>MissionHydrationReader</code>, and their row DTOs. Those row DTOs are graph-owned and do not import task, decision, or mission domain records. <code>internal/app/graph_hydration.go</code> is the concrete adapter: it imports the task, decision, and mission services, reads their domain records, and maps them into <code>graphapp.*HydrationRow</code> values for the graph service.</p>
+
+  <p>Notification derivation is the projection pattern. <code>internal/services/notification/domain</code> owns <code>TaskSnapshot</code>, the minimal neutral task view needed by <code>Derive</code>. <code>internal/services/notification/app</code> owns the <code>TaskSource</code> port that returns those snapshots. <code>internal/app/application.go</code> wires <code>notificationTaskSource</code>, reads tasks through the task service, and maps them into <code>notificationdomain.TaskSnapshot</code>. The notification service never imports task aggregates or <code>task/app</code>.</p>
+
+  <p>Do not move these adapters into a service domain to make a dependency convenient. That reverses the boundary: a domain would start depending on a projection of other domains, and the next rule change in one service could silently change another service's invariants.</p>
+
+  <h2 id="exceptions">5. Allowed exceptions</h2>
   <p>The import rules protect service-to-service boundaries. Delivery and infrastructure adapters have different jobs and therefore have narrower exceptions.</p>
 
   <table>
@@ -133,7 +149,7 @@
     </tbody>
   </table>
 
-  <h2 id="examples">5. Agen8 examples</h2>
+  <h2 id="examples">6. Agen8 examples</h2>
 
   <h3>Question to decision</h3>
   <p><code>internal/services/question/app</code> owns the <code>DecisionLogger</code> port, <code>LogDecisionRequest</code>, and <code>DecisionLogResult</code>. When an answered question is marked <code>AsDecision</code>, the question service calls that local port. It does not import <code>internal/services/decision/app</code>.</p>
@@ -148,14 +164,18 @@
   <h3>Other reference patterns</h3>
   <p><code>notificationTaskSource</code> in <code>internal/app/application.go</code> adapts task service data into notification-owned snapshots so notification code does not import task domain or app types. <code>linkTokenIssuerAdapter</code> lets the project service request link-token behavior through project-owned DTOs while the composition root translates to auth service calls.</p>
 
-  <h2 id="guardrail">6. Guardrail test</h2>
+  <h2 id="guardrail">7. Guardrail test</h2>
   <p>The import boundary is enforced by <code>internal/architecture/service_app_imports_test.go</code>. The test parses service app, domain, and infra packages and fails on these boundary directions:</p>
 
   <ul>
     <li><code>internal/services/*/app</code> importing another service's <code>app</code> package.</li>
     <li>Service-owned domain packages importing another service's <code>domain</code> package unless the exact file and import path are allowlisted as debt. The scan covers literal <code>internal/services/*/domain</code> trees and non-adapter model subpackages under a service, excluding <code>app</code>, <code>infra</code>, and <code>rpc</code>.</li>
+    <li>Service-owned domain packages importing any service <code>app</code> package, including their own service's app package.</li>
+    <li>Service-owned domain packages importing <code>internal/app</code>, where concrete read-model and projection adapters belong.</li>
     <li><code>internal/services/*/app</code> importing another service's <code>domain</code> package unless the exact file and import path are allowlisted as debt.</li>
     <li><code>internal/services/*/infra</code> importing another service's <code>app</code> package. Own-service infra-to-app imports remain allowed for adapters that implement local service contracts.</li>
+    <li><code>internal/services/graph/app</code> importing task, decision, or mission implementation records instead of graph-owned hydration row ports.</li>
+    <li><code>internal/services/notification/app</code> or <code>internal/services/notification/domain</code> importing task aggregates or <code>task/app</code> instead of using notification-owned <code>TaskSnapshot</code> values through <code>TaskSource</code>.</li>
   </ul>
 
   <p>Run it directly with:</p>
@@ -164,7 +184,7 @@
 
   <p>Failure output includes the importer file, line, import path, and boundary direction. The guardrail catches the forbidden shape, but it does not judge adapter quality. Reviewers should still check that composition-root and infrastructure adapters are small translators and that caller-owned DTOs do not become copies of callee application structs.</p>
 
-  <h2 id="allowlist">7. Allowlist discipline</h2>
+  <h2 id="allowlist">8. Allowlist discipline</h2>
   <p>Allowlist entries are temporary debt markers, not a general extension point. Each entry names the importer file and import path exactly, and the note should say what refactor will make the exception disappear.</p>
 
   <p>Do not add a new allowlist entry for convenience. First prefer a caller-owned port, a local DTO, a neutral primitive id, or composition-root adapter wiring. If a refactor removes the crossing, delete the allowlist entry in the same change; stale entries fail the architecture test so the list stays honest.</p>

@@ -43,6 +43,28 @@ func TestServiceDomainPackagesDoNotImportUnapprovedForeignServiceDomainPackages(
 	})
 }
 
+func TestServiceDomainPackagesDoNotImportServiceAppPackages(t *testing.T) {
+	assertServiceImportBoundary(t, serviceImportBoundary{
+		name:               "service domain packages must not import service app packages",
+		importerLayer:      "domain",
+		importedLayer:      "app",
+		includeSameService: true,
+	})
+}
+
+func TestServiceDomainPackagesDoNotImportCompositionRootReadModels(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	modulePath := readModulePath(t, filepath.Join(repoRoot, "go.mod"))
+	importerRoots := serviceImporterRoots(t, repoRoot, "domain", serviceLayerDirs(t, repoRoot, "domain"))
+
+	assertImporterRootsDoNotImport(t, "service domain packages must not import composition-root read models", repoRoot, importerRoots, []forbiddenImportRule{
+		{
+			direction: "service domain -> composition root read-model/projection adapter",
+			pattern:   repoImportPattern(modulePath, `internal/app`),
+		},
+	})
+}
+
 func TestServiceAppPackagesDoNotImportUnapprovedForeignServiceDomainPackages(t *testing.T) {
 	assertServiceImportBoundary(t, serviceImportBoundary{
 		name:          "service app packages must not import unapproved foreign service domain packages",
@@ -66,6 +88,83 @@ func TestServiceAppPackagesDoNotImportUnapprovedForeignServiceDomainPackages(t *
 	})
 }
 
+func TestGraphHydrationReadModelsStayInGraphAppAndCompositionAdapters(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	modulePath := readModulePath(t, filepath.Join(repoRoot, "go.mod"))
+
+	assertImporterRootsDoNotImport(t, "graph app hydration rows must not import foreign service records", repoRoot, []serviceImporterRoot{
+		{path: filepath.Join(repoRoot, "internal", "services", "graph", "app"), service: "graph"},
+	}, []forbiddenImportRule{
+		{
+			direction: "graph app hydration row port -> task service implementation",
+			pattern:   repoImportPattern(modulePath, `internal/services/task/(app|domain)`),
+		},
+		{
+			direction: "graph app hydration row port -> decision service implementation",
+			pattern:   repoImportPattern(modulePath, `internal/services/decision/(app|domain)`),
+		},
+		{
+			direction: "graph app hydration row port -> mission service implementation",
+			pattern:   repoImportPattern(modulePath, `internal/services/mission/(app|domain)`),
+		},
+	})
+
+	graphHydration := filepath.Join(repoRoot, "internal", "app", "graph_hydration.go")
+	requiredImports := []string{
+		modulePath + "/internal/services/graph/app",
+		modulePath + "/internal/services/task/app",
+		modulePath + "/internal/services/task/domain",
+		modulePath + "/internal/services/decision/app",
+		modulePath + "/internal/services/decision/domain",
+		modulePath + "/internal/services/mission/app",
+		modulePath + "/internal/services/mission/domain/mission",
+		modulePath + "/internal/services/mission/domain/kr",
+	}
+	imports := importsByPath(t, graphHydration)
+	for _, required := range requiredImports {
+		if _, ok := imports[required]; !ok {
+			t.Fatalf("%s must own graph hydration adapters and import %s", slashRelPath(t, repoRoot, graphHydration), required)
+		}
+	}
+
+	for _, token := range []string{
+		"graphTaskHydrationRow(task taskdomain.Task) graphapp.TaskHydrationRow",
+		"graphDecisionHydrationRow(decision decisiondomain.Decision) graphapp.DecisionHydrationRow",
+		"graphMissionHydrationRow(mission missiondomain.Mission) graphapp.MissionHydrationRow",
+		"graphKeyResultHydrationRow(kr krdomain.KeyResult) graphapp.KeyResultHydrationRow",
+	} {
+		assertFileContains(t, repoRoot, graphHydration, token)
+	}
+}
+
+func TestNotificationProjectionUsesOwnedTaskSnapshot(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	modulePath := readModulePath(t, filepath.Join(repoRoot, "go.mod"))
+
+	assertImporterRootsDoNotImport(t, "notification projection must not import task aggregate or task app packages", repoRoot, []serviceImporterRoot{
+		{path: filepath.Join(repoRoot, "internal", "services", "notification", "app"), service: "notification"},
+		{path: filepath.Join(repoRoot, "internal", "services", "notification", "domain"), service: "notification"},
+	}, []forbiddenImportRule{
+		{
+			direction: "notification projection -> task aggregate",
+			pattern:   repoImportPattern(modulePath, `internal/services/task/domain`),
+		},
+		{
+			direction: "notification projection -> task app",
+			pattern:   repoImportPattern(modulePath, `internal/services/task/app`),
+		},
+	})
+
+	notificationDomain := filepath.Join(repoRoot, "internal", "services", "notification", "domain", "notification.go")
+	notificationApp := filepath.Join(repoRoot, "internal", "services", "notification", "app", "service.go")
+	internalApp := filepath.Join(repoRoot, "internal", "app", "application.go")
+	assertFileContains(t, repoRoot, notificationDomain, "type TaskSnapshot struct")
+	assertFileContains(t, repoRoot, notificationApp, "type TaskSource interface")
+	assertFileContains(t, repoRoot, notificationApp, "Tasks(ctx context.Context, projectID string) ([]domain.TaskSnapshot, error)")
+	assertFileContains(t, repoRoot, internalApp, "type notificationTaskSource struct")
+	assertFileContains(t, repoRoot, internalApp, "[]notificationdomain.TaskSnapshot")
+}
+
 func TestServiceInfraPackagesDoNotImportForeignServiceAppPackages(t *testing.T) {
 	assertServiceImportBoundary(t, serviceImportBoundary{
 		name:          "service infra packages must not import foreign service app packages",
@@ -78,6 +177,7 @@ type serviceImportBoundary struct {
 	name                  string
 	importerLayer         string
 	importedLayer         string
+	includeSameService    bool
 	allowedForeignImports map[importAllowance]string
 }
 
@@ -93,11 +193,7 @@ func assertServiceImportBoundary(t *testing.T, boundary serviceImportBoundary) {
 	modulePath := readModulePath(t, filepath.Join(repoRoot, "go.mod"))
 	importPattern := regexp.MustCompile("^" + regexp.QuoteMeta(modulePath) + `/internal/services/([^/]+)/` + regexp.QuoteMeta(boundary.importedLayer) + `(?:/.*)?$`)
 
-	importerDirs, err := filepath.Glob(filepath.Join(repoRoot, "internal", "services", "*", boundary.importerLayer))
-	if err != nil {
-		t.Fatalf("find service %s packages: %v", boundary.importerLayer, err)
-	}
-	importerRoots := serviceImporterRoots(t, repoRoot, boundary.importerLayer, importerDirs)
+	importerRoots := serviceImporterRoots(t, repoRoot, boundary.importerLayer, serviceLayerDirs(t, repoRoot, boundary.importerLayer))
 
 	usedAllowances := make(map[importAllowance]struct{})
 	var violations []string
@@ -218,7 +314,7 @@ func serviceImportViolations(t *testing.T, repoRoot, goFile, importingService st
 			continue
 		}
 		importedService := matches[1]
-		if importedService == importingService {
+		if importedService == importingService && !boundary.includeSameService {
 			continue
 		}
 
@@ -240,6 +336,98 @@ func serviceImportViolations(t *testing.T, repoRoot, goFile, importingService st
 		))
 	}
 	return violations
+}
+
+type forbiddenImportRule struct {
+	direction string
+	pattern   *regexp.Regexp
+}
+
+func assertImporterRootsDoNotImport(t *testing.T, name, repoRoot string, importerRoots []serviceImporterRoot, rules []forbiddenImportRule) {
+	t.Helper()
+
+	var violations []string
+	for _, importerRoot := range importerRoots {
+		goFiles := goFilesUnder(t, importerRoot.path)
+		for _, goFile := range goFiles {
+			fileViolations := forbiddenImportViolations(t, repoRoot, goFile, rules)
+			violations = append(violations, fileViolations...)
+		}
+	}
+	if len(violations) > 0 {
+		t.Fatalf("%s:\n%s", name, strings.Join(violations, "\n"))
+	}
+}
+
+func forbiddenImportViolations(t *testing.T, repoRoot, goFile string, rules []forbiddenImportRule) []string {
+	t.Helper()
+
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, goFile, nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("parse imports from %s: %v", goFile, err)
+	}
+
+	var violations []string
+	relFile := slashRelPath(t, repoRoot, goFile)
+	for _, imported := range parsed.Imports {
+		importPath := strings.Trim(imported.Path.Value, `"`)
+		for _, rule := range rules {
+			if !rule.pattern.MatchString(importPath) {
+				continue
+			}
+			position := fileSet.Position(imported.Pos())
+			violations = append(violations, fmt.Sprintf(
+				"- %s:%s imports %s (%s)",
+				relFile,
+				positionString(position.Line),
+				importPath,
+				rule.direction,
+			))
+		}
+	}
+	return violations
+}
+
+func repoImportPattern(modulePath, suffixPattern string) *regexp.Regexp {
+	return regexp.MustCompile("^" + regexp.QuoteMeta(modulePath) + "/" + suffixPattern + `(?:/.*)?$`)
+}
+
+func serviceLayerDirs(t *testing.T, repoRoot, layer string) []string {
+	t.Helper()
+
+	dirs, err := filepath.Glob(filepath.Join(repoRoot, "internal", "services", "*", layer))
+	if err != nil {
+		t.Fatalf("find service %s packages: %v", layer, err)
+	}
+	return dirs
+}
+
+func importsByPath(t *testing.T, goFile string) map[string]struct{} {
+	t.Helper()
+
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, goFile, nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("parse imports from %s: %v", goFile, err)
+	}
+	imports := make(map[string]struct{}, len(parsed.Imports))
+	for _, imported := range parsed.Imports {
+		imports[strings.Trim(imported.Path.Value, `"`)] = struct{}{}
+	}
+	return imports
+}
+
+func assertFileContains(t *testing.T, repoRoot, path, token string) {
+	t.Helper()
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !strings.Contains(string(content), token) {
+		t.Fatalf("%s must contain %q", slashRelPath(t, repoRoot, path), token)
+	}
 }
 
 func unusedAllowances(boundary serviceImportBoundary, usedAllowances map[importAllowance]struct{}) []string {
