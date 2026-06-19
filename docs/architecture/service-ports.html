@@ -70,6 +70,8 @@
   <h2 id="dtos">2. Caller-owned DTOs</h2>
   <p>Data that crosses a port is owned by the caller side. The caller defines request and result DTOs that describe the data it needs, not the callee's public application structs.</p>
 
+  <p>The same rule applies when the caller needs a read-only view of another service's aggregate. The caller defines a narrow snapshot or filter type with only the fields needed for its workflow. It does not accept the foreign aggregate, repository filter, or app response shape just because those already exist.</p>
+
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">DecisionLogger</span> <span class="tok-kw">interface</span> {
     <span class="tok-fn">LogDecision</span>(ctx context.<span class="tok-type">Context</span>, req <span class="tok-type">LogDecisionRequest</span>) (<span class="tok-type">DecisionLogResult</span>, <span class="tok-type">error</span>)
 }
@@ -88,10 +90,14 @@
 
   <p>This keeps the caller stable when the callee's application API changes. The adapter is responsible for translating the caller-owned DTO into the callee-owned request shape.</p>
 
+  <p>Current snapshot examples include <code>file/app</code> owning <code>ProjectSnapshot</code> and <code>ProjectFilter</code> for project root resolution and listing, <code>mission/app</code> owning <code>LinkedTaskSnapshot</code> and terminal linked-task status values, <code>task/app</code> owning <code>MemberSnapshot</code> and <code>ProjectSnapshot</code> for authorization and labels, graph hydration owning <code>*HydrationRow</code> DTOs, and notification derivation owning <code>TaskSnapshot</code>.</p>
+
   <h2 id="composition">3. Composition root</h2>
   <p><code>internal/app</code> is the composition root. It builds repositories and services, then connects service-local ports to concrete adapters. Those adapters may import both sides because they live at the process wiring boundary, not inside a service application package.</p>
 
   <p>Composition-root adapters should be small translators. They may convert ids, copy fields, and handle process-level wiring concerns. They should not own domain validation, persistence decisions, retries, or lifecycle rules that belong to one of the services.</p>
+
+  <p>For aggregate-to-snapshot boundaries, the translator belongs in <code>internal/app</code> or another process-level adapter. Service app and domain packages own the snapshot contract and business behavior; they do not import the foreign aggregate just to build their own snapshot.</p>
 
   <h2 id="read-models">4. Cross-service read models</h2>
   <p>A read model or projection may compose facts from several services, but it must live outside the domains being read. The service domain remains the owner of invariants and state transitions; the read model owns a flattened view for lookup, hydration, search, notification, or display.</p>
@@ -106,7 +112,9 @@ internal/app   -&gt; owns concrete adapters that translate service records into 
 
   <p>Notification derivation is the projection pattern. <code>internal/services/notification/domain</code> owns <code>TaskSnapshot</code>, the minimal neutral task view needed by <code>Derive</code>. <code>internal/services/notification/app</code> owns the <code>TaskSource</code> port that returns those snapshots. <code>internal/app/application.go</code> wires <code>notificationTaskSource</code>, reads tasks through the task service, and maps them into <code>notificationdomain.TaskSnapshot</code>. The notification service never imports task aggregates or <code>task/app</code>.</p>
 
-  <p>Do not move these adapters into a service domain to make a dependency convenient. That reverses the boundary: a domain would start depending on a projection of other domains, and the next rule change in one service could silently change another service's invariants.</p>
+  <p>File, mission, and task app snapshots follow the same shape at the service-port layer. <code>fileProjectLoaderAdapter</code> maps project service data into <code>fileapp.ProjectSnapshot</code>, <code>missionTaskSnapshotLoader</code> maps task service data into <code>missionapp.LinkedTaskSnapshot</code>, and <code>taskProjectAdapter</code> maps project member/project records into <code>taskapp.MemberSnapshot</code> and <code>taskapp.ProjectSnapshot</code>. The mapping is allowed to know both sides because it is in the composition root; the service app packages remain independent of the foreign aggregates.</p>
+
+  <p>Do not move these adapters into a service app or domain to make a dependency convenient. That reverses the boundary: a service would start depending on another service's implementation records, and the next rule change in one service could silently change another service's behavior.</p>
 
   <h2 id="exceptions">5. Allowed exceptions</h2>
   <p>The import rules protect service-to-service boundaries. Delivery and infrastructure adapters have different jobs and therefore have narrower exceptions.</p>
@@ -161,8 +169,15 @@ internal/app   -&gt; owns concrete adapters that translate service records into 
 
   <p>The SSH transport implementation in <code>internal/services/location/infra</code> needs credentials to open remote connections, so the infrastructure adapter defines a <code>CredentialResolver</code> dependency and resolves credential material while performing transport work. <code>internal/app/application.go</code> wires the concrete credential service into that transport with <code>locationinfra.NewTransport(locationinfra.TransportConfig{Credentials: credentialSvc})</code>.</p>
 
+  <h3>Snapshot ports after aggregate decoupling</h3>
+  <p><code>internal/services/file/app</code> owns <code>ProjectSnapshot</code>, <code>ProjectFilter</code>, and <code>ProjectLoader</code>. <code>internal/app/application.go</code> wires <code>fileProjectLoaderAdapter</code>, which reads project-owned data and translates it before file root resolution sees it.</p>
+
+  <p><code>internal/services/mission/app</code> owns <code>LinkedTaskID</code>, <code>LinkedTaskStatus</code>, <code>LinkedTaskSnapshot</code>, and the linked task loader ports used by key-result completion behavior. <code>missionTaskSnapshotLoader</code> translates task service data into the mission-owned terminal-status view.</p>
+
+  <p><code>internal/services/task/app</code> owns <code>MemberSnapshot</code> and <code>ProjectSnapshot</code> for authorization, ownership, and label decisions. <code>taskProjectAdapter</code> translates project member/project records in the composition root, while task domain member-id coupling remains separately tracked migration debt.</p>
+
   <h3>Other reference patterns</h3>
-  <p><code>notificationTaskSource</code> in <code>internal/app/application.go</code> adapts task service data into notification-owned snapshots so notification code does not import task domain or app types. <code>linkTokenIssuerAdapter</code> lets the project service request link-token behavior through project-owned DTOs while the composition root translates to auth service calls.</p>
+  <p><code>internal/app/graph_hydration.go</code> adapts task, decision, and mission records into graph-owned hydration rows. <code>notificationTaskSource</code> in <code>internal/app/application.go</code> adapts task service data into notification-owned snapshots so notification code does not import task domain or app types. <code>linkTokenIssuerAdapter</code> lets the project service request link-token behavior through project-owned DTOs while the composition root translates to auth service calls.</p>
 
   <h2 id="guardrail">7. Guardrail test</h2>
   <p>The import boundary is enforced by <code>internal/architecture/service_app_imports_test.go</code>. The test parses service app, domain, and infra packages and fails on these boundary directions:</p>
@@ -174,6 +189,8 @@ internal/app   -&gt; owns concrete adapters that translate service records into 
     <li>Service-owned domain packages importing <code>internal/app</code>, where concrete read-model and projection adapters belong.</li>
     <li><code>internal/services/*/app</code> importing another service's <code>domain</code> package unless the exact file and import path are allowlisted as debt.</li>
     <li><code>internal/services/*/infra</code> importing another service's <code>app</code> package. Own-service infra-to-app imports remain allowed for adapters that implement local service contracts.</li>
+    <li>The current snapshot exemplars staying visible: file-owned <code>ProjectSnapshot</code>, mission-owned <code>LinkedTaskSnapshot</code>, task-owned <code>MemberSnapshot</code>/<code>ProjectSnapshot</code>, notification-owned <code>TaskSnapshot</code>, and their composition-root adapters.</li>
+    <li>No stale service-app allowlist entries for the resolved file, mission, and task aggregate boundaries.</li>
     <li><code>internal/services/graph/app</code> importing task, decision, or mission implementation records instead of graph-owned hydration row ports.</li>
     <li><code>internal/services/notification/app</code> or <code>internal/services/notification/domain</code> importing task aggregates or <code>task/app</code> instead of using notification-owned <code>TaskSnapshot</code> values through <code>TaskSource</code>.</li>
   </ul>

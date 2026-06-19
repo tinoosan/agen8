@@ -71,8 +71,9 @@ func TestServiceAppPackagesDoNotImportUnapprovedForeignServiceDomainPackages(t *
 		importerLayer: "app",
 		importedLayer: "domain",
 		// Snapshot ports are the reference pattern for this boundary: file/app owns
-		// ProjectSnapshot, mission/app owns LinkedTaskSnapshot, and internal/app
-		// adapts foreign aggregates before they cross service boundaries.
+		// ProjectSnapshot, mission/app owns LinkedTaskSnapshot, task/app owns
+		// MemberSnapshot and ProjectSnapshot, and internal/app adapts foreign
+		// aggregates before they cross service boundaries.
 		allowedForeignImports: map[importAllowance]string{
 			{file: "internal/services/auth/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/user/domain"}:               "debt: auth app still accepts user domain ids while identity ports are split out",
 			{file: "internal/services/auth/app/service_test.go", importPath: "github.com/tinoosan/agen8/internal/services/user/domain"}:          "debt: auth app tests cover the current user domain id coupling",
@@ -80,6 +81,68 @@ func TestServiceAppPackagesDoNotImportUnapprovedForeignServiceDomainPackages(t *
 			{file: "internal/services/decision/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/member"}: "debt: decision app still records author ids as project member ids",
 		},
 	})
+}
+
+func TestSnapshotBoundaryExemplarsStayDocumented(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	modulePath := readModulePath(t, filepath.Join(repoRoot, "go.mod"))
+
+	fileApp := filepath.Join(repoRoot, "internal", "services", "file", "app", "ports.go")
+	missionApp := filepath.Join(repoRoot, "internal", "services", "mission", "app", "ports.go")
+	taskApp := filepath.Join(repoRoot, "internal", "services", "task", "app", "service.go")
+	notificationDomain := filepath.Join(repoRoot, "internal", "services", "notification", "domain", "notification.go")
+	internalApp := filepath.Join(repoRoot, "internal", "app", "application.go")
+
+	for _, token := range []string{
+		"type ProjectSnapshot struct",
+		"type ProjectFilter struct",
+		"type ProjectLoader interface",
+	} {
+		assertFileContains(t, repoRoot, fileApp, token)
+	}
+	for _, token := range []string{
+		"type LinkedTaskID string",
+		"type LinkedTaskStatus string",
+		"type LinkedTaskSnapshot struct",
+		"type TaskLoader interface",
+	} {
+		assertFileContains(t, repoRoot, missionApp, token)
+	}
+	for _, token := range []string{
+		"type MemberID = string",
+		"type MemberSnapshot struct",
+		"type ProjectSnapshot struct",
+		"type MemberLoader interface",
+		"type ProjectLoader interface",
+	} {
+		assertFileContains(t, repoRoot, taskApp, token)
+	}
+	assertFileContains(t, repoRoot, notificationDomain, "type TaskSnapshot struct")
+
+	for _, token := range []string{
+		"type fileProjectLoaderAdapter struct",
+		"type missionTaskSnapshotLoader struct",
+		"type taskProjectAdapter struct",
+		"type notificationTaskSource struct",
+	} {
+		assertFileContains(t, repoRoot, internalApp, token)
+	}
+
+	guardrail := filepath.Join(repoRoot, "internal", "architecture", "service_app_imports_test.go")
+	for _, staleAllowance := range []importAllowance{
+		{file: "internal/services/file/app/ports.go", importPath: modulePath + "/internal/services/project/domain/project"},
+		{file: "internal/services/file/app/service.go", importPath: modulePath + "/internal/services/project/domain/project"},
+		{file: "internal/services/file/app/service_test.go", importPath: modulePath + "/internal/services/project/domain/project"},
+		{file: "internal/services/mission/app/ports.go", importPath: modulePath + "/internal/services/task/domain"},
+		{file: "internal/services/mission/app/service.go", importPath: modulePath + "/internal/services/task/domain"},
+		{file: "internal/services/mission/app/service_test.go", importPath: modulePath + "/internal/services/task/domain"},
+		{file: "internal/services/task/app/service.go", importPath: modulePath + "/internal/services/project/domain/member"},
+		{file: "internal/services/task/app/service.go", importPath: modulePath + "/internal/services/project/domain/project"},
+		{file: "internal/services/task/app/service_test.go", importPath: modulePath + "/internal/services/project/domain/member"},
+		{file: "internal/services/task/app/service_test.go", importPath: modulePath + "/internal/services/project/domain/project"},
+	} {
+		assertFileNotContains(t, repoRoot, guardrail, fmt.Sprintf("%q, importPath: %q", staleAllowance.file, staleAllowance.importPath))
+	}
 }
 
 func TestGraphHydrationReadModelsStayInGraphAppAndCompositionAdapters(t *testing.T) {
@@ -421,6 +484,18 @@ func assertFileContains(t *testing.T, repoRoot, path, token string) {
 	}
 	if !strings.Contains(string(content), token) {
 		t.Fatalf("%s must contain %q", slashRelPath(t, repoRoot, path), token)
+	}
+}
+
+func assertFileNotContains(t *testing.T, repoRoot, path, token string) {
+	t.Helper()
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if strings.Contains(string(content), token) {
+		t.Fatalf("%s must not contain %q", slashRelPath(t, repoRoot, path), token)
 	}
 }
 
