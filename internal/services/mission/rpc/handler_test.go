@@ -13,7 +13,6 @@ import (
 	missionapp "github.com/tinoosan/agen8/internal/services/mission/app"
 	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 var rpcTestNow = time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
@@ -628,13 +627,13 @@ func (fakeCallerResolver) ResolveCaller(context.Context) (caller.Caller, error) 
 
 type fakeTaskLoader struct{}
 
-func (fakeTaskLoader) Get(context.Context, taskdomain.TaskID) (taskdomain.Task, error) {
-	return taskdomain.Task{}, fmt.Errorf("task not found")
+func (fakeTaskLoader) Get(context.Context, missionapp.LinkedTaskID) (missionapp.LinkedTaskSnapshot, error) {
+	return missionapp.LinkedTaskSnapshot{}, fmt.Errorf("task not found")
 }
 
 type fakeLinkedTaskLoader struct{}
 
-func (fakeLinkedTaskLoader) ListTaskIDsForKeyResult(context.Context, krdomain.KeyResultID) ([]taskdomain.TaskID, error) {
+func (fakeLinkedTaskLoader) ListTaskIDsForKeyResult(context.Context, krdomain.KeyResultID) ([]missionapp.LinkedTaskID, error) {
 	return nil, nil
 }
 

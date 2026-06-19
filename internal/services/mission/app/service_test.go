@@ -13,7 +13,6 @@ import (
 	"github.com/tinoosan/agen8/internal/core/types"
 	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 var serviceTestNow = time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
@@ -165,34 +164,34 @@ func (fakeCallerResolver) ResolveCaller(context.Context) (caller.Caller, error) 
 
 type fakeTaskLoader struct{}
 
-func (fakeTaskLoader) Get(context.Context, taskdomain.TaskID) (taskdomain.Task, error) {
-	return taskdomain.Task{}, fmt.Errorf("task not found")
+func (fakeTaskLoader) Get(context.Context, LinkedTaskID) (LinkedTaskSnapshot, error) {
+	return LinkedTaskSnapshot{}, fmt.Errorf("task not found")
 }
 
 type fakeTaskLoaderWithTasks struct {
-	tasks map[string]taskdomain.Task
+	tasks map[string]LinkedTaskSnapshot
 }
 
-func (l fakeTaskLoaderWithTasks) Get(_ context.Context, taskID taskdomain.TaskID) (taskdomain.Task, error) {
+func (l fakeTaskLoaderWithTasks) Get(_ context.Context, taskID LinkedTaskID) (LinkedTaskSnapshot, error) {
 	task, ok := l.tasks[string(taskID)]
 	if !ok {
-		return taskdomain.Task{}, fmt.Errorf("task %s not found", taskID)
+		return LinkedTaskSnapshot{}, fmt.Errorf("task %s not found", taskID)
 	}
 	return task, nil
 }
 
 type fakeLinkedTaskLoader struct {
-	taskIDs []taskdomain.TaskID
+	taskIDs []LinkedTaskID
 	calls   int
 	err     error
 }
 
-func (l *fakeLinkedTaskLoader) ListTaskIDsForKeyResult(_ context.Context, _ krdomain.KeyResultID) ([]taskdomain.TaskID, error) {
+func (l *fakeLinkedTaskLoader) ListTaskIDsForKeyResult(_ context.Context, _ krdomain.KeyResultID) ([]LinkedTaskID, error) {
 	l.calls++
 	if l.err != nil {
 		return nil, l.err
 	}
-	return append([]taskdomain.TaskID(nil), l.taskIDs...), nil
+	return append([]LinkedTaskID(nil), l.taskIDs...), nil
 }
 
 type fakeEventPublisher struct {
@@ -1339,7 +1338,7 @@ func TestUpdateProgressCompletesKeyResultWhenLinkedTasksAreTerminal(t *testing.T
 	}
 	keyResults := newFakeKeyResultRepository(keyResult)
 	progressEntries := &fakeProgressEntryRepository{}
-	linkedTasks := &fakeLinkedTaskLoader{taskIDs: []taskdomain.TaskID{"task-1", "task-2", "task-3"}}
+	linkedTasks := &fakeLinkedTaskLoader{taskIDs: []LinkedTaskID{"task-1", "task-2", "task-3"}}
 	svc, err := NewService(
 		newFakeMissionRepository(missionForServiceTest(t, missiondomain.MissionStatusActive)),
 		keyResults,
@@ -1347,10 +1346,10 @@ func TestUpdateProgressCompletesKeyResultWhenLinkedTasksAreTerminal(t *testing.T
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
-			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusSucceeded},
-			"task-2": {ID: "task-2", Status: taskdomain.TaskStatusFailed},
-			"task-3": {ID: "task-3", Status: taskdomain.TaskStatusCanceled},
+		fakeTaskLoaderWithTasks{tasks: map[string]LinkedTaskSnapshot{
+			"task-1": {ID: "task-1", Status: LinkedTaskStatusSucceeded},
+			"task-2": {ID: "task-2", Status: LinkedTaskStatusFailed},
+			"task-3": {ID: "task-3", Status: LinkedTaskStatusCanceled},
 		}},
 		linkedTasks,
 		&fakeEventPublisher{},
@@ -1401,10 +1400,10 @@ func TestUpdateProgressPublishesCompletedEventWhenProgressCompletesKeyResult(t *
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
-			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusSucceeded},
+		fakeTaskLoaderWithTasks{tasks: map[string]LinkedTaskSnapshot{
+			"task-1": {ID: "task-1", Status: LinkedTaskStatusSucceeded},
 		}},
-		&fakeLinkedTaskLoader{taskIDs: []taskdomain.TaskID{"task-1"}},
+		&fakeLinkedTaskLoader{taskIDs: []LinkedTaskID{"task-1"}},
 		events,
 		slog.Default(),
 	)
@@ -1734,10 +1733,10 @@ func TestUpdateProgressRejectsKeyResultCompletionWhenLinkedTaskIsNonTerminalBefo
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
-			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusActive},
+		fakeTaskLoaderWithTasks{tasks: map[string]LinkedTaskSnapshot{
+			"task-1": {ID: "task-1", Status: LinkedTaskStatus("active")},
 		}},
-		&fakeLinkedTaskLoader{taskIDs: []taskdomain.TaskID{"task-1"}},
+		&fakeLinkedTaskLoader{taskIDs: []LinkedTaskID{"task-1"}},
 		&fakeEventPublisher{},
 		slog.Default(),
 	)
@@ -1781,7 +1780,7 @@ func TestUpdateProgressBelowCompletionDoesNotLoadLinkedTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewKeyResult: %v", err)
 	}
-	linkedTasks := &fakeLinkedTaskLoader{taskIDs: []taskdomain.TaskID{"task-1"}}
+	linkedTasks := &fakeLinkedTaskLoader{taskIDs: []LinkedTaskID{"task-1"}}
 	svc, err := NewService(
 		newFakeMissionRepository(missionForServiceTest(t, missiondomain.MissionStatusActive)),
 		newFakeKeyResultRepository(keyResult),
@@ -1789,8 +1788,8 @@ func TestUpdateProgressBelowCompletionDoesNotLoadLinkedTasks(t *testing.T) {
 		&fakeLifecycleEventRepository{},
 		fakeClock{now: serviceTestNow},
 		fakeCallerResolver{},
-		fakeTaskLoaderWithTasks{tasks: map[string]taskdomain.Task{
-			"task-1": {ID: "task-1", Status: taskdomain.TaskStatusActive},
+		fakeTaskLoaderWithTasks{tasks: map[string]LinkedTaskSnapshot{
+			"task-1": {ID: "task-1", Status: LinkedTaskStatus("active")},
 		}},
 		linkedTasks,
 		&fakeEventPublisher{},

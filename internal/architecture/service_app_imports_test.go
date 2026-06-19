@@ -70,16 +70,14 @@ func TestServiceAppPackagesDoNotImportUnapprovedForeignServiceDomainPackages(t *
 		name:          "service app packages must not import unapproved foreign service domain packages",
 		importerLayer: "app",
 		importedLayer: "domain",
-		// File app project access is the reference pattern for this boundary:
-		// file/app owns ProjectSnapshot and internal/app adapts project aggregates.
+		// Snapshot ports are the reference pattern for this boundary: file/app owns
+		// ProjectSnapshot, mission/app owns LinkedTaskSnapshot, and internal/app
+		// adapts foreign aggregates before they cross service boundaries.
 		allowedForeignImports: map[importAllowance]string{
 			{file: "internal/services/auth/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/user/domain"}:                "debt: auth app still accepts user domain ids while identity ports are split out",
 			{file: "internal/services/auth/app/service_test.go", importPath: "github.com/tinoosan/agen8/internal/services/user/domain"}:           "debt: auth app tests cover the current user domain id coupling",
 			{file: "internal/services/decision/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/graph/domain"}:           "debt: decision app still writes graph refs using graph domain types",
 			{file: "internal/services/decision/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/member"}:  "debt: decision app still records author ids as project member ids",
-			{file: "internal/services/mission/app/ports.go", importPath: "github.com/tinoosan/agen8/internal/services/task/domain"}:               "debt: mission app still exposes task refs through task domain ids",
-			{file: "internal/services/mission/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/task/domain"}:             "debt: mission app still exposes task refs through task domain ids",
-			{file: "internal/services/mission/app/service_test.go", importPath: "github.com/tinoosan/agen8/internal/services/task/domain"}:        "debt: mission app tests cover the current task domain coupling",
 			{file: "internal/services/task/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/member"}:      "debt: task app still uses project member ids for assignment",
 			{file: "internal/services/task/app/service.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/project"}:     "debt: task app still scopes tasks with project domain ids",
 			{file: "internal/services/task/app/service_test.go", importPath: "github.com/tinoosan/agen8/internal/services/project/domain/member"}: "debt: task app tests cover the current member id coupling",

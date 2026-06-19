@@ -12,7 +12,6 @@ import (
 	"github.com/tinoosan/agen8/internal/caller"
 	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
-	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 )
 
 type Service struct {
@@ -797,13 +796,16 @@ func (s *Service) validateLinkedTasksComplete(ctx context.Context, keyResultID k
 		return fmt.Errorf("list linked tasks: %w", err)
 	}
 	for _, taskID := range taskIDs {
-		taskID = taskdomain.TaskID(strings.TrimSpace(string(taskID)))
+		taskID = LinkedTaskID(strings.TrimSpace(string(taskID)))
 		if taskID == "" {
 			return fmt.Errorf("mission service: linked task id is required")
 		}
 		task, err := s.tasks.Get(ctx, taskID)
 		if err != nil {
 			return fmt.Errorf("load linked task %s: %w", taskID, err)
+		}
+		if task.CleanID() == "" {
+			return fmt.Errorf("mission service: linked task id is required")
 		}
 		if !task.Status.IsTerminal() {
 			return fmt.Errorf("mission service: linked task %s is not terminal", taskID)

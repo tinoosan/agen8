@@ -230,7 +230,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		missionRepos.LifecycleEvents,
 		missiondomain.SystemClock{},
 		caller.ContextResolver{},
-		taskSvc,
+		missionTaskSnapshotLoader{tasks: taskSvc},
 		missionLinkedTaskLoader{},
 		missionEventPublisher{bus: bus},
 		logger.With("service", "mission"),
@@ -649,8 +649,26 @@ func (c projectLocationChecker) HasProjectsForLocation(ctx context.Context, loca
 
 type missionLinkedTaskLoader struct{}
 
-func (missionLinkedTaskLoader) ListTaskIDsForKeyResult(context.Context, krdomain.KeyResultID) ([]taskdomain.TaskID, error) {
+func (missionLinkedTaskLoader) ListTaskIDsForKeyResult(context.Context, krdomain.KeyResultID) ([]missionapp.LinkedTaskID, error) {
 	return nil, nil
+}
+
+type missionTaskSnapshotLoader struct {
+	tasks *taskapp.Service
+}
+
+func (l missionTaskSnapshotLoader) Get(ctx context.Context, taskID missionapp.LinkedTaskID) (missionapp.LinkedTaskSnapshot, error) {
+	if l.tasks == nil {
+		return missionapp.LinkedTaskSnapshot{}, fmt.Errorf("task service is required")
+	}
+	task, err := l.tasks.Get(ctx, taskdomain.TaskID(strings.TrimSpace(string(taskID))))
+	if err != nil {
+		return missionapp.LinkedTaskSnapshot{}, err
+	}
+	return missionapp.LinkedTaskSnapshot{
+		ID:     missionapp.LinkedTaskID(task.ID),
+		Status: missionapp.LinkedTaskStatus(task.Status),
+	}, nil
 }
 
 type missionEventPublisher struct {

@@ -14,7 +14,6 @@ import (
 	krdomain "github.com/tinoosan/agen8/internal/services/mission/domain/kr"
 	missiondomain "github.com/tinoosan/agen8/internal/services/mission/domain/mission"
 	missioninfra "github.com/tinoosan/agen8/internal/services/mission/infra"
-	taskdomain "github.com/tinoosan/agen8/internal/services/task/domain"
 	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
@@ -350,16 +349,16 @@ func (rpcMissionClock) Now() time.Time { return rpcMissionTestNow }
 
 type rpcMissionTaskLoader struct{}
 
-func (rpcMissionTaskLoader) Get(_ context.Context, taskID taskdomain.TaskID) (taskdomain.Task, error) {
+func (rpcMissionTaskLoader) Get(_ context.Context, taskID missionapp.LinkedTaskID) (missionapp.LinkedTaskSnapshot, error) {
 	if taskID == "" {
-		return taskdomain.Task{}, fmt.Errorf("task id is required")
+		return missionapp.LinkedTaskSnapshot{}, fmt.Errorf("task id is required")
 	}
-	return taskdomain.Task{ID: taskID, Status: taskdomain.TaskStatusSucceeded}, nil
+	return missionapp.LinkedTaskSnapshot{ID: taskID, Status: missionapp.LinkedTaskStatusSucceeded}, nil
 }
 
 type rpcMissionLinkedTaskLoader struct{}
 
-func (rpcMissionLinkedTaskLoader) ListTaskIDsForKeyResult(context.Context, krdomain.KeyResultID) ([]taskdomain.TaskID, error) {
+func (rpcMissionLinkedTaskLoader) ListTaskIDsForKeyResult(context.Context, krdomain.KeyResultID) ([]missionapp.LinkedTaskID, error) {
 	return nil, nil
 }
 
