@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Service Ports — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot" aria-hidden="true">&nbsp;</span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / service-ports</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture · Service Ports</span>
+  <h1>Caller-owned service ports</h1>
+  <p class="lede">Agen8 service application packages stay decoupled by owning the ports they call. A service may depend on its own domain, repositories, event publishers, and local ports, but it must not import a sibling service's <code>app</code> package.</p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#rule">Port ownership rule</a></li>
+      <li><a href="#dtos">Caller-owned DTOs</a></li>
+      <li><a href="#composition">Composition root</a></li>
+      <li><a href="#exceptions">Allowed exceptions</a></li>
+      <li><a href="#examples">Agen8 examples</a></li>
+      <li><a href="#guardrail">Guardrail test</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="rule">1. Port ownership rule</h2>
+  <p>When a service application package needs behavior from another service, the calling package defines the interface it needs. That interface is a narrow port owned by the caller. The callee service does not leak its application API into the caller.</p>
+
+  <table>
+    <thead>
+      <tr><th>Package kind</th><th>Allowed imports</th><th>Forbidden imports</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Service app package, such as <code>internal/services/question/app</code></td>
+        <td>Its own domain, shared primitives, event contracts, and interfaces/DTOs declared in the same app package.</td>
+        <td>Sibling service app packages, such as <code>internal/services/decision/app</code>.</td>
+      </tr>
+      <tr>
+        <td>Service domain package</td>
+        <td>Domain-only dependencies and standard library support.</td>
+        <td>Application services, RPC adapters, infrastructure repositories, or another service's app package.</td>
+      </tr>
+      <tr>
+        <td>Composition root</td>
+        <td>Concrete services from multiple packages so it can wire adapters.</td>
+        <td>Business rules that should live inside a service app or domain package.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>The direction is always from caller need to local port. If <code>question/app</code> needs to record a decision, <code>question/app</code> declares a <code>DecisionLogger</code> port. It does not import <code>decision/app</code> or call <code>decisionapp.Service</code> directly.</p>
+
+  <h2 id="dtos">2. Caller-owned DTOs</h2>
+  <p>Data that crosses a port is owned by the caller side. The caller defines request and result DTOs that describe the data it needs, not the callee's public application structs.</p>
+
+<pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">DecisionLogger</span> <span class="tok-kw">interface</span> {
+    <span class="tok-fn">LogDecision</span>(ctx context.<span class="tok-type">Context</span>, req <span class="tok-type">LogDecisionRequest</span>) (<span class="tok-type">DecisionLogResult</span>, <span class="tok-type">error</span>)
+}
+
+<span class="tok-kw">type</span> <span class="tok-type">LogDecisionRequest</span> <span class="tok-kw">struct</span> {
+    <span class="tok-field">ProjectID</span>    <span class="tok-type">string</span>
+    <span class="tok-field">MemberID</span>     <span class="tok-type">string</span>
+    <span class="tok-field">Title</span>        <span class="tok-type">string</span>
+    <span class="tok-field">Rationale</span>    <span class="tok-type">string</span>
+    <span class="tok-field">Context</span>      <span class="tok-type">string</span>
+    <span class="tok-field">Confidence</span>   <span class="tok-type">float64</span>
+    <span class="tok-field">TaskRef</span>      <span class="tok-type">string</span>
+    <span class="tok-field">KeyResultRef</span> <span class="tok-type">string</span>
+    <span class="tok-field">MissionRef</span>   <span class="tok-type">string</span>
+}</code></pre>
+
+  <p>This keeps the caller stable when the callee's application API changes. The adapter is responsible for translating the caller-owned DTO into the callee-owned request shape.</p>
+
+  <h2 id="composition">3. Composition root</h2>
+  <p><code>internal/app</code> is the composition root. It builds repositories and services, then connects service-local ports to concrete adapters. Those adapters may import both sides because they live at the process wiring boundary, not inside a service application package.</p>
+
+  <p>Composition-root adapters should be small translators. They may convert ids, copy fields, and handle process-level wiring concerns. They should not own domain validation, persistence decisions, retries, or lifecycle rules that belong to one of the services.</p>
+
+  <h2 id="exceptions">4. Allowed exceptions</h2>
+  <p>The import rule is specifically about service app packages importing sibling service app packages. Delivery and infrastructure adapters have different jobs and therefore have narrower exceptions.</p>
+
+  <table>
+    <thead>
+      <tr><th>Boundary</th><th>Allowed</th><th>Reason</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Delivery adapters: MCP, RPC, HTTP handlers</td>
+        <td>They may import the service app package they expose and the protocol DTOs they own.</td>
+        <td>They translate external payloads into service calls. They are not another service app package.</td>
+      </tr>
+      <tr>
+        <td>Infrastructure adapters: storage, filesystem, transport, crypto</td>
+        <td>They may import the service app or domain contracts they implement, plus infrastructure dependencies needed to do the work.</td>
+        <td>They adapt external systems to local service contracts.</td>
+      </tr>
+      <tr>
+        <td>Composition root: <code>internal/app</code></td>
+        <td>It may import multiple service app packages and construct adapters that know both sides.</td>
+        <td>Process assembly is the one place that sees all concrete services.</td>
+      </tr>
+      <tr>
+        <td>Service app to service app</td>
+        <td>Not allowed.</td>
+        <td>This couples service application APIs and makes one service's orchestration depend on another service's app layer.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="examples">5. Agen8 examples</h2>
+
+  <h3>Question to decision</h3>
+  <p><code>internal/services/question/app</code> owns the <code>DecisionLogger</code> port, <code>LogDecisionRequest</code>, and <code>DecisionLogResult</code>. When an answered question is marked <code>AsDecision</code>, the question service calls that local port. It does not import <code>internal/services/decision/app</code>.</p>
+
+  <p><code>internal/app/question_decision_logger.go</code> is the concrete adapter. It imports both <code>question/app</code> and <code>decision/app</code>, maps <code>questionapp.LogDecisionRequest</code> into <code>decisionapp.LogRequest</code>, calls the decision service, and maps the result back to <code>questionapp.DecisionLogResult</code>.</p>
+
+  <h3>Location to credential</h3>
+  <p><code>internal/services/location/app</code> owns a <code>Transport</code> port whose methods work in location-owned terms: <code>Probe</code>, <code>ListDir</code>, <code>ProbeResult</code>, and <code>DirEntry</code>. The location app does not import <code>credential/app</code>.</p>
+
+  <p>The SSH transport implementation in <code>internal/services/location/infra</code> needs credentials to open remote connections, so the infrastructure adapter defines a <code>CredentialResolver</code> dependency and resolves credential material while performing transport work. <code>internal/app/application.go</code> wires the concrete credential service into that transport with <code>locationinfra.NewTransport(locationinfra.TransportConfig{Credentials: credentialSvc})</code>.</p>
+
+  <h3>Other reference patterns</h3>
+  <p><code>notificationTaskSource</code> in <code>internal/app/application.go</code> adapts task service data into notification-owned snapshots so notification code does not import task domain or app types. <code>linkTokenIssuerAdapter</code> lets the project service request link-token behavior through project-owned DTOs while the composition root translates to auth service calls.</p>
+
+  <h2 id="guardrail">6. Guardrail test</h2>
+  <p>The import boundary is enforced by <code>internal/architecture/service_app_imports_test.go</code>. The test parses every <code>internal/services/*/app</code> package and fails when one service app imports another service app. Run it directly with:</p>
+
+<pre><code>go test ./internal/architecture</code></pre>
+
+  <p>The guardrail catches the forbidden shape, but it does not judge adapter quality. Reviewers should still check that composition-root and infrastructure adapters are small translators and that caller-owned DTOs do not become copies of callee application structs.</p>
+</div>
+
+</body>
+</html>
