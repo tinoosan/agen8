@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
 import {
-  BarChart3, Network, Plus, PanelLeft, Users, Activity, ListChecks,
+  BarChart3, Network, Plus, PanelLeft, Users, Activity, ListChecks, Target, ScrollText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNavigation, dashboardLink } from '../lib/routing'
@@ -184,6 +184,28 @@ export default function Sidebar() {
                   >
                     <ListChecks size={15} className="shrink-0" />
                     <span>Tasks</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeView === 'missions'}
+                    onClick={() => setActiveView('missions')}
+                    className={cn(ROW_BASE, activeView === 'missions' ? ROW_ACTIVE : ROW_IDLE)}
+                    style={ROW_STYLE}
+                  >
+                    <Target size={15} className="shrink-0" />
+                    <span>Missions</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeView === 'decisions'}
+                    onClick={() => setActiveView('decisions')}
+                    className={cn(ROW_BASE, activeView === 'decisions' ? ROW_ACTIVE : ROW_IDLE)}
+                    style={ROW_STYLE}
+                  >
+                    <ScrollText size={15} className="shrink-0" />
+                    <span>Decisions</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

@@ -11,7 +11,6 @@ const mockUseMissions = vi.fn()
 const mockUseAuth = vi.fn()
 const mockMissionSummary = vi.fn()
 const mockDecisionFeed = vi.fn()
-const mockDashboardContextPanel = vi.fn()
 const mockUseStrategyGraph = vi.fn()
 
 // One node so the in-place node-search modal has a selectable result. The title
@@ -27,6 +26,10 @@ vi.mock('../lib/routing', () => ({
   useNavigation: () => mockUseNavigation(),
   strategyMapLink: (projectId: string, focusNodeId?: string) =>
     `/project/${encodeURIComponent(projectId)}/strategy${focusNodeId ? `?focus=${focusNodeId}` : ''}`,
+  filteredTasksLink: (projectId: string, status: string) =>
+    status && status !== 'all' ? `/project/${projectId}/tasks?status=${status}` : `/project/${projectId}/tasks`,
+  missionsPageLink: (projectId: string) => `/project/${projectId}/missions`,
+  decisionsLink: (projectId: string) => `/project/${projectId}/decisions`,
 }))
 
 vi.mock('../components/strategy/useStrategyGraph', () => ({
@@ -55,12 +58,6 @@ vi.mock('../components/dashboard/MissionSummary', () => ({
   default: (props: unknown) => {
     mockMissionSummary(props)
     return <div data-testid="mission-summary" />
-  },
-}))
-vi.mock('../components/dashboard/DashboardContextPanel', () => ({
-  default: (props: unknown) => {
-    mockDashboardContextPanel(props)
-    return <div data-testid="dashboard-context-panel" />
   },
 }))
 
@@ -102,14 +99,13 @@ describe('Dashboard page', () => {
     expect(lastCall).toMatchObject({ projectId: 'proj-1', mode: 'active' })
   })
 
-  it('renders the dashboard context drawer closed by default below the overlay breakpoint', () => {
+  it('does not render the dashboard context panel (rail has been removed)', () => {
     renderPage()
 
-    expect(mockDashboardContextPanel).toHaveBeenCalled()
-    const lastCall = mockDashboardContextPanel.mock.calls.at(-1)?.[0] as { open: boolean; overlay: boolean; panel: string }
-    expect(lastCall?.overlay).toBe(true)
-    expect(lastCall?.open).toBe(false)
-    expect(lastCall?.panel).toBe('missions')
+    // The context rail and its toggle button were removed when Missions and
+    // Decisions got their own dedicated pages. The toggle button is gone.
+    expect(screen.queryByTestId('dashboard-context-panel-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('dashboard-context-panel')).not.toBeInTheDocument()
   })
 
   it('refresh invalidates the dashboard query families that feed visible work', async () => {
@@ -177,5 +173,33 @@ describe('Dashboard page', () => {
     mockUseNavigation.mockReturnValue({ projectId: null, focusedProjectRoot: null })
     renderPage()
     expect(screen.getByText('Select a project')).toBeInTheDocument()
+  })
+
+  it('redirects legacy ?panel=missions deep link to the missions page', async () => {
+    const location = memoryLocation({ path: '/project/proj-1/dashboard?panel=missions', record: true })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <Router hook={location.hook}>
+          <Dashboard />
+        </Router>
+      </QueryClientProvider>,
+    )
+
+    expect(location.history.at(-1)).toBe('/project/proj-1/missions')
+  })
+
+  it('redirects legacy ?panel=decisions deep link to the decisions page', async () => {
+    const location = memoryLocation({ path: '/project/proj-1/dashboard?panel=decisions', record: true })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <Router hook={location.hook}>
+          <Dashboard />
+        </Router>
+      </QueryClientProvider>,
+    )
+
+    expect(location.history.at(-1)).toBe('/project/proj-1/decisions')
   })
 })

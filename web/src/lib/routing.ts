@@ -4,8 +4,8 @@ import { useStore, type DefaultProjectView } from './store'
 import type { Project } from './types'
 
 export type ActiveView = 'project' | 'dashboard' | 'decisions' | 'missions' | 'strategy' | 'members' | 'pulse' | 'tasks'
-// The dashboard context rail no longer carries tasks — they live on the Pulse
-// page now (see tasksPanelLink). Only missions and decisions remain as rail tabs.
+// DashboardPanel is kept for any lingering type references during the migration;
+// the context rail itself has been removed.
 export type DashboardPanel = 'missions' | 'decisions'
 
 /* ── Route constants ──────────────────────────────── */
@@ -57,12 +57,19 @@ export function dashboardLink(projectId: string, params?: { panel?: DashboardPan
   return qs ? `${base}?${qs}` : base
 }
 
-export function missionsPanelLink(projectId: string): string {
-  return dashboardLink(projectId, { panel: 'missions' })
+// Missions live on their own dedicated page; the "go to missions" affordances
+// resolve there instead of the former dashboard rail tab.
+export function missionsPageLink(projectId: string): string {
+  return `/project/${encodeURIComponent(projectId)}/missions`
 }
 
+export function missionsPanelLink(projectId: string): string {
+  return missionsPageLink(projectId)
+}
+
+// Decisions live on their own dedicated page.
 export function decisionsPanelLink(projectId: string): string {
-  return dashboardLink(projectId, { panel: 'decisions' })
+  return decisionsLink(projectId)
 }
 
 // Tasks live on their own dedicated page (not the dashboard rail), so the "go

@@ -1,10 +1,10 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { qk } from '../lib/queryKeys'
-import { useNavigation, strategyMapLink, filteredTasksLink, type DashboardPanel } from '../lib/routing'
+import { useNavigation, strategyMapLink, filteredTasksLink, missionsPageLink, decisionsLink } from '../lib/routing'
 import { useLocation, useSearch } from 'wouter'
 import { useMissions } from '../hooks/useMissions'
-import { RefreshCw, PanelRight, Search } from 'lucide-react'
+import { RefreshCw, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useStore } from '../lib/store'
 import { cn } from '@/lib/utils'
@@ -14,16 +14,10 @@ import TaskSummary from '../components/dashboard/TaskSummary'
 import DashboardWorkingNow from '../components/dashboard/DashboardWorkingNow'
 import NeedsAttention from '../components/dashboard/NeedsAttention'
 import GettingStartedCard from '../components/dashboard/GettingStartedCard'
-import DashboardContextPanel from '../components/dashboard/DashboardContextPanel'
 import { StrategyMapSearch } from '../components/strategy/StrategyMapSearch'
 import { useStrategyGraph } from '../components/strategy/useStrategyGraph'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
-import { writeStoredDashboardContextCollapsed, readStoredDashboardContextCollapsed } from '../lib/dashboardContextPanelStorage'
 import { useAuth } from '../hooks/useAuth'
-import { useIsBelow } from '../hooks/use-mobile'
-
-/* Below this width the context panel becomes an on-demand overlay drawer instead of an inline rail. */
-const CONTEXT_OVERLAY_BREAKPOINT = 1280
 
 /* ── Dashboard page ──────────────────────────────── */
 
@@ -34,8 +28,6 @@ export default function Dashboard() {
   const queryClient = useQueryClient()
   const searchParams = useMemo(() => new URLSearchParams(rawSearch), [rawSearch])
   const rawPanel = searchParams.get('panel')
-  const dashboardPanel: DashboardPanel =
-    rawPanel === 'decisions' ? 'decisions' : 'missions'
 
   const activeMissionsQuery = useMissions(projectId, 'active')
   const activeMissionCount = useMemo(
@@ -45,9 +37,7 @@ export default function Dashboard() {
 
   // Context-map node search, rendered in place here so it can be opened from
   // the dashboard without leaving for the map. The graph nodes feed the search
-  // list; picking a result deep-links to the map focused on that node (the only
-  // surface that renders a graph node). The open flag is shared in the store so
-  // the mobile top-bar button (in App.tsx) opens this same modal.
+  // list; picking a result deep-links to the map focused on that node.
   const { nodes: searchNodes } = useStrategyGraph(projectId, focusedProjectRoot)
   const searchOpen = useStore((s) => s.strategySearchOpen)
   const setSearchOpen = useStore((s) => s.setStrategySearchOpen)
@@ -56,9 +46,6 @@ export default function Dashboard() {
   const [focusMode, setFocusMode] = useState(() => {
     try { return localStorage.getItem('dashboard.focusMode') === 'true' } catch { return false }
   })
-  const [contextCollapsed, setContextCollapsed] = useState(readStoredDashboardContextCollapsed)
-  const isContextOverlay = useIsBelow(CONTEXT_OVERLAY_BREAKPOINT)
-  const [contextDrawerOpen, setContextDrawerOpen] = useState(false)
   const toggleFocusMode = useCallback(() => {
     setFocusMode(prev => {
       const next = !prev
@@ -66,35 +53,20 @@ export default function Dashboard() {
       return next
     })
   }, [])
-  const toggleDashboardContext = useCallback(() => {
-    setContextCollapsed(prev => {
-      const next = !prev
-      writeStoredDashboardContextCollapsed(next)
-      return next
-    })
-  }, [])
-  const handleToggleContext = useCallback(() => {
-    if (isContextOverlay) {
-      setContextDrawerOpen(prev => !prev)
-    } else {
-      toggleDashboardContext()
+
+  // Legacy ?panel= deep links — redirect to the dedicated pages so old
+  // bookmarks and notifications that targeted the dashboard rail still resolve.
+  useEffect(() => {
+    if (!projectId) return
+    if (rawPanel === 'tasks') {
+      const status = searchParams.get('status')
+      navigate(filteredTasksLink(projectId, status ?? 'all'))
+    } else if (rawPanel === 'missions') {
+      navigate(missionsPageLink(projectId))
+    } else if (rawPanel === 'decisions') {
+      navigate(decisionsLink(projectId))
     }
-  }, [isContextOverlay, toggleDashboardContext])
-
-  // Tasks moved to the Pulse page; honour old ?panel=tasks deep links by
-  // forwarding them there (carrying any status filter).
-  useEffect(() => {
-    if (rawPanel !== 'tasks' || !projectId) return
-    const status = searchParams.get('status')
-    navigate(filteredTasksLink(projectId, status ?? 'all'))
   }, [rawPanel, projectId, searchParams, navigate])
-
-  useEffect(() => {
-    if (rawPanel !== 'missions' && rawPanel !== 'decisions') return
-    setContextCollapsed(false)
-    writeStoredDashboardContextCollapsed(false)
-    setContextDrawerOpen(true)
-  }, [rawPanel])
 
   const auth = useAuth()
   const userFirstName = useMemo(() => {
@@ -129,14 +101,6 @@ export default function Dashboard() {
     }
   }, [queryClient])
 
-  const setDashboardPanel = useCallback((panel: DashboardPanel) => {
-    if (!projectId) return
-    const params = new URLSearchParams(rawSearch)
-    params.set('panel', panel)
-    const qs = params.toString()
-    navigate(`/project/${encodeURIComponent(projectId)}/dashboard${qs ? `?${qs}` : ''}`)
-  }, [navigate, projectId, rawSearch])
-
   const handleMainScroll = useCallback(() => {
     setMainScrollActive(true)
     if (mainScrollTimeoutRef.current !== null) {
@@ -161,9 +125,6 @@ export default function Dashboard() {
     if (activeMissionCount > 0) return 'active'
     return 'idle'
   }, [activeMissionCount])
-
-  const contextPanelVisible = isContextOverlay ? contextDrawerOpen : !contextCollapsed
-  const inlineContextOpen = !isContextOverlay && !contextCollapsed
 
   if (!projectId) {
     return (
@@ -204,33 +165,16 @@ export default function Dashboard() {
             <RefreshCw size={13} className={manualRefreshing ? 'animate-spin' : ''} />
             <span>Refresh</span>
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            title={contextPanelVisible ? 'Hide context panel' : 'Show context panel'}
-            aria-label={contextPanelVisible ? 'Hide context panel' : 'Show context panel'}
-            data-testid="dashboard-context-panel-toggle"
-            onClick={handleToggleContext}
-            className={cn(
-              'inline-flex w-8 h-8 rounded-[10px] transition-colors',
-              contextPanelVisible
-                ? 'text-[var(--text-1)] bg-[var(--bg-hover)]'
-                : 'text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-hover)]',
-            )}
-          >
-            <PanelRight size={16} aria-hidden />
-          </Button>
         </div>
       </div>
-      <div className={cn('dashboard-shell-body', inlineContextOpen && 'dashboard-shell-body-context-open')}>
-      <div className={cn('dashboard-main-shell min-w-0 flex-1', inlineContextOpen && 'dashboard-main-shell-context-open')}>
+      <div className="dashboard-shell-body">
+      <div className="dashboard-main-shell min-w-0 flex-1">
         <div
           className={cn('dashboard-main-scroll', mainScrollActive && 'dashboard-scroll-active')}
           onScroll={handleMainScroll}
         >
         {/* Header */}
-        <div className={cn('dashboard-hero mb-8 flex items-start justify-between gap-6', inlineContextOpen && 'dashboard-hero-context-open')}>
+        <div className="dashboard-hero mb-8 flex items-start justify-between gap-6">
           <div className="min-w-0">
             <h1 className="m-0 mt-1 text-[1.9375rem] font-semibold tracking-[-0.05em] leading-[1.05] text-[var(--text-1)]">
               Hello {userFirstName}
@@ -270,15 +214,6 @@ export default function Dashboard() {
 
         </div>
       </div>
-      <DashboardContextPanel
-        open={contextPanelVisible}
-        overlay={isContextOverlay}
-        panel={dashboardPanel}
-        projectId={projectId}
-        focusedProjectRoot={focusedProjectRoot}
-        onPanelChange={setDashboardPanel}
-        onOpenChange={setContextDrawerOpen}
-      />
       </div>
       </div>
     </div>

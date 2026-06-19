@@ -15,7 +15,7 @@ vi.mock('../hooks/useProjects', () => ({
   }),
 }))
 
-const { useNavigation, tasksPanelLink, filteredTasksLink, decisionDetailLink } = await import('./routing')
+const { useNavigation, tasksPanelLink, filteredTasksLink, decisionDetailLink, missionsPanelLink, decisionsPanelLink, missionsLink } = await import('./routing')
 
 describe('useNavigation', () => {
   it('parses projectId from URL', () => {
@@ -53,5 +53,17 @@ describe('useNavigation', () => {
 
   it('builds routed decision detail links', () => {
     expect(decisionDetailLink('proj-1', 'dec-123')).toBe('/project/proj-1/decisions/dec-123')
+  })
+
+  it('resolves the missions list to its dedicated page', () => {
+    expect(missionsPanelLink('proj-1')).toBe('/project/proj-1/missions')
+  })
+
+  it('missionsLink points to the missions page', () => {
+    expect(missionsLink('proj-1')).toBe('/project/proj-1/missions')
+  })
+
+  it('resolves the decisions list to its dedicated page', () => {
+    expect(decisionsPanelLink('proj-1')).toBe('/project/proj-1/decisions')
   })
 })

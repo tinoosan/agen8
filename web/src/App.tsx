@@ -3,7 +3,7 @@ import { Redirect, Route, Switch, useLocation } from 'wouter'
 import { Menu, Search } from 'lucide-react'
 import { useStore } from './lib/store'
 import { brandIconFor } from './lib/brandIcon'
-import { missionsPanelLink, useNavigation, type ActiveView } from './lib/routing'
+import { useNavigation, type ActiveView } from './lib/routing'
 import { useAuth } from './hooks/useAuth'
 import { useRealtimeInvalidation } from './hooks/useRealtimeSync'
 import { lazyWithRetry } from './lib/lazyWithRetry'
@@ -30,10 +30,7 @@ const Decisions = lazyWithRetry(() => import('./pages/Decisions'), 'pages/Decisi
 const Members = lazyWithRetry(() => import('./pages/Members'), 'pages/Members')
 const Pulse = lazyWithRetry(() => import('./pages/Pulse'), 'pages/Pulse')
 const Tasks = lazyWithRetry(() => import('./pages/Tasks'), 'pages/Tasks')
-
-function MissionsRouteRedirect({ params }: { params: { projectId: string } }) {
-  return <Redirect to={missionsPanelLink(params.projectId)} />
-}
+const Missions = lazyWithRetry(() => import('./pages/Missions'), 'pages/Missions')
 
 const Spinner = () => (
   <div className="flex items-center justify-center h-full">
@@ -289,17 +286,18 @@ export default function App() {
             <Suspense fallback={<Spinner />}>
               <PageErrorBoundary>
                 <Switch>
+                  {/* Detail routes must be listed before their parent list routes so
+                      they win the Switch match. */}
                   <Route path="/project/:projectId/missions/:missionId" component={MissionDetail} />
                   <Route path="/project/:projectId/tasks/:taskId" component={TaskDetail} />
                   <Route path="/project/:projectId/decisions/:decisionId" component={DecisionDetail} />
-                  <Route path="/project/:projectId/missions" component={MissionsRouteRedirect} />
-                  <Route path="/project/:projectId/strategy">{(params) => <StrategyMap projectId={params.projectId} />}</Route>
+                  {/* List pages — listed after their respective detail routes above. */}
+                  <Route path="/project/:projectId/missions" component={Missions} />
+                  <Route path="/project/:projectId/tasks" component={Tasks} />
                   <Route path="/project/:projectId/decisions" component={Decisions} />
+                  <Route path="/project/:projectId/strategy">{(params) => <StrategyMap projectId={params.projectId} />}</Route>
                   <Route path="/project/:projectId/members" component={Members} />
                   <Route path="/project/:projectId/pulse" component={Pulse} />
-                  {/* Listed after /tasks/:taskId (TaskDetail) above, so the
-                      detail route wins; this is the bare-list page. */}
-                  <Route path="/project/:projectId/tasks" component={Tasks} />
                   {/* Activity + Metrics were merged into Pulse; keep the old
                       paths working by redirecting them. */}
                   <Route path="/project/:projectId/activity">{(params) => <Redirect to={`/project/${params.projectId}/pulse`} />}</Route>

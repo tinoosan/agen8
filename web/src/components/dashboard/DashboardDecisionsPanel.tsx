@@ -10,7 +10,7 @@ import {
   ArrowDownUp,
   ChevronRight,
 } from 'lucide-react'
-import { decisionsPanelLink, decisionDetailLink } from '../../lib/routing'
+import { dashboardLink, decisionDetailLink } from '../../lib/routing'
 import ListPager from '../ListPager'
 import { usePageParam } from '../../hooks/usePageParam'
 import { useDecisionLog, useExportDecisions } from '../../hooks/useDecisions'
@@ -312,7 +312,7 @@ export default function DashboardDecisionsPanel({
         <header className="shrink-0 border-b border-[var(--border)]">
           <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
             <Button asChild variant="ghost" size="sm" className="gap-1.5">
-              <Link to={decisionsPanelLink(projectId)}>
+              <Link to={dashboardLink(projectId)}>
                 <ArrowLeft size={14} />
                 Dashboard
               </Link>

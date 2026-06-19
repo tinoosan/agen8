@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 vi.mock('../lib/routing', () => ({
-  decisionsPanelLink: (projectId: string) => `/project/${projectId}/dashboard?panel=decisions`,
+  dashboardLink: (projectId: string) => `/project/${projectId}/dashboard`,
   decisionDetailLink: (projectId: string, decisionId: string) => `/project/${projectId}/decisions/${decisionId}`,
   useNavigation: () => ({ projectId: 'proj-1', focusedProjectRoot: '/repo' }),
 }))
