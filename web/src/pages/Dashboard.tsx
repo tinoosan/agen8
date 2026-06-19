@@ -15,6 +15,7 @@ import DashboardWorkingNow from '../components/dashboard/DashboardWorkingNow'
 import NeedsAttention from '../components/dashboard/NeedsAttention'
 import GettingStartedCard from '../components/dashboard/GettingStartedCard'
 import SinceYouWereAway from '../components/dashboard/SinceYouWereAway'
+import DashboardBriefing from '../components/dashboard/DashboardBriefing'
 import RecentlyShipped from '../components/dashboard/RecentlyShipped'
 import { StrategyMapSearch } from '../components/strategy/StrategyMapSearch'
 import { useStrategyGraph } from '../components/strategy/useStrategyGraph'
@@ -175,8 +176,9 @@ export default function Dashboard() {
           className={cn('dashboard-main-scroll', mainScrollActive && 'dashboard-scroll-active')}
           onScroll={handleMainScroll}
         >
-        {/* Header */}
-        <div className="dashboard-hero mb-8 flex items-start justify-between gap-6">
+        {/* Header — greeting + at-a-glance briefing read as one unit, so the
+            hero margin is tight and the vitals line carries its own mb-8. */}
+        <div className="dashboard-hero mb-3 flex items-start justify-between gap-6">
           <div className="min-w-0">
             <h1 className="m-0 mt-1 text-[1.9375rem] font-semibold tracking-[-0.05em] leading-[1.05] text-[var(--text-1)]">
               Hello {userFirstName}
@@ -188,6 +190,8 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        <DashboardBriefing projectId={projectId} />
 
         <GettingStartedCard projectId={projectId} />
 
