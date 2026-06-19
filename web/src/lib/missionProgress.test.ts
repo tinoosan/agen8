@@ -1,6 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { keyResultProgressSummary, missionProgressColor } from './missionProgress'
-import type { KeyResultView } from './types'
+import {
+  keyResultProgressSummary,
+  missionProgressColor,
+  groupKRsByMission,
+  summarizeMissions,
+} from './missionProgress'
+import type { KeyResultView, MissionView } from './types'
+
+function makeMission(overrides: Partial<MissionView>): MissionView {
+  return {
+    id: 'mission-A',
+    projectId: 'proj-1',
+    title: 'Mission',
+    status: 'active',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  }
+}
 
 function makeKR(overrides: Partial<KeyResultView>): KeyResultView {
   return {
@@ -62,6 +79,63 @@ describe('keyResultProgressSummary', () => {
   it('treats non-finite progress as 0', () => {
     const krs = [makeKR({ id: 'a', progressPercent: Number.NaN })]
     expect(keyResultProgressSummary(krs)?.pct).toBe(0)
+  })
+})
+
+describe('groupKRsByMission', () => {
+  it('groups by missionId and dedupes by KR id (map has duplicate keys)', () => {
+    const a = makeKR({ id: 'a', missionId: 'm1' })
+    const b = makeKR({ id: 'b', missionId: 'm1' })
+    const c = makeKR({ id: 'c', missionId: 'm2' })
+    // simulate useProjectKRs: same KR present under multiple keys
+    const grouped = groupKRsByMission([a, a, b, c, c])
+    expect(grouped.get('m1')?.map((k) => k.id)).toEqual(['a', 'b'])
+    expect(grouped.get('m2')?.map((k) => k.id)).toEqual(['c'])
+  })
+})
+
+describe('summarizeMissions', () => {
+  it('counts active/completed and averages only active missions with live KRs', () => {
+    const missions = [
+      makeMission({ id: 'm1', status: 'active' }),
+      makeMission({ id: 'm2', status: 'active' }),
+      makeMission({ id: 'm3', status: 'completed' }),
+      makeMission({ id: 'm4', status: 'draft' }), // no KRs → ignored in avg
+    ]
+    const krByMission = new Map<string, KeyResultView[]>([
+      ['m1', [makeKR({ id: 'a', missionId: 'm1', progressPercent: 80 })]],
+      ['m2', [makeKR({ id: 'b', missionId: 'm2', progressPercent: 20 })]],
+    ])
+    const o = summarizeMissions(missions, krByMission)
+    expect(o.total).toBe(4)
+    expect(o.active).toBe(2)
+    expect(o.completed).toBe(1)
+    expect(o.avgActiveProgress).toBe(50) // (80 + 20) / 2
+  })
+
+  it('flags active missions with at-risk KRs as needing attention', () => {
+    const missions = [
+      makeMission({ id: 'm1', status: 'active' }),
+      makeMission({ id: 'm2', status: 'active' }),
+    ]
+    const krByMission = new Map<string, KeyResultView[]>([
+      ['m1', [makeKR({ id: 'a', missionId: 'm1', status: 'at_risk' }), makeKR({ id: 'b', missionId: 'm1', status: 'on_track' })]],
+      ['m2', [makeKR({ id: 'c', missionId: 'm2', status: 'on_track' })]],
+    ])
+    const o = summarizeMissions(missions, krByMission)
+    expect(o.atRiskKRs).toBe(1)
+    expect(o.attentionCount).toBe(1)
+  })
+
+  it('does not count at-risk KRs on non-active missions', () => {
+    const missions = [makeMission({ id: 'm1', status: 'paused' })]
+    const krByMission = new Map<string, KeyResultView[]>([
+      ['m1', [makeKR({ id: 'a', missionId: 'm1', status: 'at_risk' })]],
+    ])
+    const o = summarizeMissions(missions, krByMission)
+    expect(o.attentionCount).toBe(0)
+    expect(o.atRiskKRs).toBe(0)
+    expect(o.avgActiveProgress).toBeNull()
   })
 })
 
