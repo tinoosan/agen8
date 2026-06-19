@@ -15,6 +15,7 @@ import DashboardWorkingNow from '../components/dashboard/DashboardWorkingNow'
 import NeedsAttention from '../components/dashboard/NeedsAttention'
 import GettingStartedCard from '../components/dashboard/GettingStartedCard'
 import SinceYouWereAway from '../components/dashboard/SinceYouWereAway'
+import RecentlyShipped from '../components/dashboard/RecentlyShipped'
 import { StrategyMapSearch } from '../components/strategy/StrategyMapSearch'
 import { useStrategyGraph } from '../components/strategy/useStrategyGraph'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
@@ -201,6 +202,8 @@ export default function Dashboard() {
         <div className="mb-8">
           <DashboardWorkingNow projectId={projectId} />
         </div>
+
+        <RecentlyShipped projectId={projectId} />
 
         <div className="mt-0">
           <div className="dashboard-flow">

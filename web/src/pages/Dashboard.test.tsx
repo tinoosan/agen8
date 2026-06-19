@@ -63,6 +63,9 @@ vi.mock('../components/dashboard/MissionSummary', () => ({
 vi.mock('../components/dashboard/SinceYouWereAway', () => ({
   default: () => null,
 }))
+vi.mock('../components/dashboard/RecentlyShipped', () => ({
+  default: () => null,
+}))
 
 const { default: Dashboard } = await import('./Dashboard')
 
