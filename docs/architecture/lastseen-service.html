@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Last-seen Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / lastseen-service</span>
+  </div>
+</nav>
+
+<div class="page">
+  <span class="eyebrow">Architecture · Last-seen Service</span>
+  <h1>Last-seen Service</h1>
+  <p class="lede">
+    The last-seen service tracks each caller’s latest dashboard-open marker per project. The browser reads this value through <code>lastseen.get</code> and updates it through <code>lastseen.markSeen</code> after the user dismisses “Since you were away.”
+    The behavior is durable in SQLite and scoped by the authenticated user and project.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#purpose">Purpose and ownership</a></li>
+      <li><a href="#scope">Scope: per user + project marker</a></li>
+      <li><a href="#service">Service boundary</a></li>
+      <li><a href="#persistence">Persistence and schema</a></li>
+      <li><a href="#rpc">RPC surface</a></li>
+      <li><a href="#frontend">Frontend integration</a></li>
+      <li><a href="#invariants">Invariants</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="purpose">1. Purpose and ownership</h2>
+  <p>
+    The service exists to compute a safe “since you were away” window for the dashboard.
+    It stores one UTC timestamp per caller and project. The timestamp is a durable high-water mark: values before it are considered already acknowledged.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>The service owns</th><th>The service does not own</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>The store keyed by <code>(user_id, project_id)</code> and associated <code>seen_at</code> timestamp.</td><td>Dashboard cards, list rendering, or event stream calculations.</td></tr>
+      <tr><td>RPC methods that read/write the marker in <code>internal/services/lastseen</code>.</td><td>Authorization decisions (they are enforced by caller identity at RPC layer via <code>RequireIdentity</code>).</td></tr>
+      <tr><td>Self-migrating schema setup for the last-seen table.</td><td>Client-specific diff rules (client computes diff against fetched timestamps).</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="scope">2. Scope: per user + project marker</h2>
+  <p>
+    The marker is composite-keyed by authenticated user ID and target project ID.
+    A missing row means the client must treat the marker as blank (<code>""</code> in JSON responses), which implies “everything is new” for the diff computation.
+  </p>
+
+  <p>
+    The store accepts trimmed string IDs and rejects empty user/project IDs.
+    Invalid inputs fail fast with <code>400</code>-style invalid-parameter mapping from upstream handlers.
+  </p>
+
+  <h2 id="service">3. Service boundary</h2>
+
+  <p>
+    The application-level store is implemented in <code>internal/services/lastseen</code> and follows a minimal Store pattern (constructor + query + upsert semantics).
+    The service constructor validates that the handle is present and that the dialect is SQLite, then runs a local <code>CREATE TABLE IF NOT EXISTS</code>.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Method</th><th>Behavior</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Get(ctx, userID, projectID)</code></td><td>Returns <code>time.Time</code> for that key, or <code>ErrNotFound</code> when absent.</td></tr>
+      <tr><td><code>MarkSeen(ctx, userID, projectID, now)</code></td><td>Upserts <code>seen_at</code> to provided UTC timestamp; reusing keys updates existing records.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="persistence">4. Persistence and schema</h2>
+
+  <p>
+    The table is small and intentionally schema-local, with no separate migration versioning path.
+    It is created from the store constructor when the service boots.
+  </p>
+
+  <pre><code class="lang-sql">CREATE TABLE IF NOT EXISTS user_project_last_seen (
+    user_id    TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    seen_at    TEXT NOT NULL,
+    PRIMARY KEY (user_id, project_id)
+)</code></pre>
+
+  <p>
+    Timestamps are serialized with <code>time.RFC3339Nano</code> and normalized to UTC.
+  </p>
+
+  <h2 id="rpc">5. RPC surface</h2>
+
+  <p>
+    The RPC adapter is registered in <code>internal/rpc/lastseen.go</code> and wired during daemon construction.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Method</th><th>Request</th><th>Response</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>lastseen.get</code></td>
+        <td><code>{ projectId: string }</code></td>
+        <td><code>{ seenAt: string }</code></td>
+        <td>Reads <code>callerIdentity.UserID</code> from context and returns <code>""</code> if no row exists.</td>
+      </tr>
+      <tr>
+        <td><code>lastseen.markSeen</code></td>
+        <td><code>{ projectId: string }</code></td>
+        <td><code>{ seenAt: string }</code></td>
+        <td>Writes current UTC timestamp and returns the saved timestamp string.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="frontend">6. Frontend integration</h2>
+
+  <p>
+    Dashboard “since you were away” state uses the marker in a pure diff step:<br>
+    read previous <code>seenAt</code> first, compute diff, then call <code>lastseen.markSeen</code> when the user dismisses the card.
+  </p>
+
+  <ul>
+    <li><code>web/src/hooks/useLastSeen.ts</code> calls both methods and invalidates cache after markSeen.</li>
+    <li><code>web/src/lib/sinceYouWereAway.ts</code> treats an empty marker as no diff to avoid a first-load flood.</li>
+  </ul>
+
+  <h2 id="invariants">7. Invariants</h2>
+  <table>
+    <thead>
+      <tr><th>Invariant</th><th>Enforced by</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Marker identity is per <code>(user_id, project_id)</code>.</td><td>Primary key on <code>user_project_last_seen</code>.</td></tr>
+      <tr><td>No user can set another user’s marker.</td><td>Identity is read from request context, not from payload.</td></tr>
+      <tr><td>Missing marker returns empty seen-at value.</td><td><code>Get</code> translates <code>sql.ErrNoRows</code> to empty output.</td></tr>
+      <tr><td>Writes are idempotent.</td><td><code>INSERT ... ON CONFLICT</code> update to the same key.</td></tr>
+      <tr><td>Persisted values are UTC and RFC3339Nano.</td><td>Store normalization + parse/format helpers.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>
