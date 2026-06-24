@@ -22,7 +22,7 @@
   <p class="lede">
     This page describes the current releasable local baseline for agen8 MCP. It is a practical setup and verification checklist for the daemon, web UI, retained MCP tools, local data directory, and schema preservation policy.
   </p>
-  <p>For release-facing notes and the v0.1.0 preflight checklist, see <a href="./release-notes-v0.1.0.html">v0.1.0 Release Notes</a>.</p>
+  <p>For release-facing notes and the v0.0.1 preflight checklist, see <a href="./release-notes-v0.0.1.html">v0.0.1 Release Notes</a>.</p>
 
   <nav class="toc" aria-label="On this page">
     <div class="toc-label">On this page</div>
@@ -66,7 +66,7 @@ agen8 daemon start --data-dir /tmp/agen8-release-check --listener http --http-ad
   <h2 id="build">3. Build and version checks</h2>
   <p>The release version source is <code>pkg/buildinfo</code>. Builds set <code>Version</code>, <code>Commit</code>, and <code>BuildDate</code> with Go ldflags. Local development defaults to <code>dev</code> and <code>none</code>.</p>
 
-<pre><code class="lang-shell">make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+<pre><code class="lang-shell">make build-go VERSION=v0.0.1 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ./bin/agen8 version
 curl http://127.0.0.1:7777/healthz</code></pre>
 
@@ -128,7 +128,7 @@ npm --prefix web run test -- --run
 npm --prefix web run build
 npm --prefix web audit --audit-level=moderate
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+make build-go VERSION=v0.0.1 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ./bin/agen8 version
 make dev remote
 # Run retained MCP tool UAT from a real harness connection.</code></pre>

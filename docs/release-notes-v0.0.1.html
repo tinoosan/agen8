@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>v0.1.0 Release Notes - agen8</title>
+<title>v0.0.1 Release Notes - agen8</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,14 +11,14 @@
 <nav class="topnav">
   <div class="topnav-inner">
     <span class="brand"><span class="dot"></span>agen8 docs</span>
-    <span class="crumb"><a href="./">docs</a> / v0.1.0 release notes</span>
+    <span class="crumb"><a href="./">docs</a> / v0.0.1 release notes</span>
   </div>
 </nav>
 
 <div class="page">
 
   <span class="eyebrow">Release Notes</span>
-  <h1>v0.1.0 MCP-first baseline</h1>
+  <h1>v0.0.1 MCP-first baseline</h1>
   <p class="lede">
     This release is the first clean local baseline after the MCP-first reset. Agen8 is a durable MCP work-context layer for harnesses, with the browser UI focused on setup, project state, strategy, and readable graph context.
   </p>
@@ -50,7 +50,7 @@
   </table>
 
   <h2 id="removed">2. Removed</h2>
-  <p>The release intentionally excludes the old orchestration model. These are not active product promises in v0.1.0:</p>
+  <p>The release intentionally excludes the old orchestration model. These are not active product promises in v0.0.1:</p>
 
   <ul>
     <li>Harness supervision, launch, resume, or thread routing.</li>
@@ -64,19 +64,19 @@
 
 <pre><code class="lang-shell">make dev remote
 # or isolate a verification run
-make dev remote DATA_DIR=/tmp/agen8-v010-check</code></pre>
+make dev remote DATA_DIR=/tmp/agen8-v001-check</code></pre>
 
   <p>A harness connects to the MCP endpoint and calls <code>project.register</code> with a readable <code>display_name</code>. Agen8 records that member label so tasks and decisions stay understandable in the graph.</p>
 
   <p>Routine cleanup does not delete the active local database. Use an isolated <code>DATA_DIR</code> for repeatable setup checks, and use preserving migrations for development data until an explicit release-finalization reset is approved.</p>
 
   <h2 id="preflight">4. Preflight checklist</h2>
-  <p>Before tagging <code>v0.1.0</code>, run the checks below from a clean working copy or carefully stage only release-scoped changes.</p>
+  <p>Before tagging <code>v0.0.1</code>, run the checks below from a clean working copy or carefully stage only release-scoped changes.</p>
 
 <pre><code class="lang-shell">go test ./... -count=1
-make build-go VERSION=v0.1.0 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+make build-go VERSION=v0.0.1 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ./bin/agen8 version
-make dev remote DATA_DIR=/tmp/agen8-v010-check</code></pre>
+make dev remote DATA_DIR=/tmp/agen8-v001-check</code></pre>
 
   <p>Then verify the retained MCP tools through a real harness connection:</p>
 
