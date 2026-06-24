@@ -4,10 +4,12 @@ import (
 	"context"
 
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
+	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
 )
 
 type Service interface {
 	Log(context.Context, decisionapp.LogRequest) (decisionapp.Result, error)
+	Delete(context.Context, decisiondomain.DecisionID) error
 }
 
 type CallContext struct {
@@ -24,6 +26,7 @@ type Result struct {
 
 type rawRequest struct {
 	Action                 string   `json:"action"`
+	DecisionID             *string  `json:"decision_id"`
 	Title                  *string  `json:"title"`
 	Rationale              *string  `json:"rationale"`
 	Context                *string  `json:"context"`
@@ -37,6 +40,7 @@ type rawRequest struct {
 
 type requestInput struct {
 	Action                 string
+	DecisionID             string
 	Title                  string
 	Rationale              string
 	Context                string

@@ -9,6 +9,7 @@ import (
 	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/core/types"
 	decisionapp "github.com/tinoosan/agen8/internal/services/decision/app"
+	decisiondomain "github.com/tinoosan/agen8/internal/services/decision/domain"
 )
 
 type Handler struct{}
@@ -28,6 +29,8 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	switch input.Action {
 	case "log":
 		return h.log(ctx, call, input)
+	case "delete":
+		return h.delete(ctx, call, input)
 	default:
 		return Result{}, fmt.Errorf("decision: unsupported action %q", input.Action)
 	}
@@ -79,6 +82,35 @@ func (h Handler) log(ctx context.Context, call CallContext, input requestInput) 
 	})
 }
 
+func (h Handler) delete(ctx context.Context, call CallContext, input requestInput) (Result, error) {
+	projectID, err := requireString(call.ProjectID, "project_id")
+	if err != nil {
+		return Result{}, err
+	}
+	memberID, err := requireString(call.ActorMemberID, "member_id")
+	if err != nil {
+		return Result{}, err
+	}
+	decisionID, err := requireString(input.DecisionID, "decision_id")
+	if err != nil {
+		return Result{}, err
+	}
+	ctx = caller.ContextWithCaller(ctx, caller.Caller{
+		UserID:    strings.TrimSpace(call.UserID),
+		MemberID:  memberID,
+		ProjectID: types.ProjectID(projectID),
+	})
+	if err := call.Decisions.Delete(ctx, decisiondomain.DecisionID(decisionID)); err != nil {
+		return Result{}, err
+	}
+	return resultFromStructured(map[string]any{
+		"ok":      true,
+		"tool":    Name,
+		"action":  "delete",
+		"deleted": map[string]any{"id": decisionID},
+	})
+}
+
 func decode(args json.RawMessage) (requestInput, error) {
 	if err := validateActionFields(args); err != nil {
 		return requestInput{}, err
@@ -95,6 +127,9 @@ func decode(args json.RawMessage) (requestInput, error) {
 	}
 	if input.Action == "" {
 		return requestInput{}, fmt.Errorf("decision: action is required")
+	}
+	if raw.DecisionID != nil {
+		input.DecisionID = strings.TrimSpace(*raw.DecisionID)
 	}
 	if raw.Title != nil {
 		input.Title = strings.TrimSpace(*raw.Title)
@@ -167,6 +202,10 @@ var fieldsByAction = map[string]map[string]struct{}{
 		"task_ref",
 		"key_result_ref",
 		"mission_ref",
+	),
+	"delete": fieldSet(
+		"action",
+		"decision_id",
 	),
 }
 

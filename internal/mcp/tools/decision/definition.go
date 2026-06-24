@@ -6,7 +6,7 @@ import (
 )
 
 const Name = "decision"
-const Description = "[DECISIONS] Work-memory gateway for logging consequential choices."
+const Description = "[DECISIONS] Work-memory gateway for logging and deleting consequential choices."
 
 func (h Handler) Schema() json.RawMessage {
 	return mustSchema()
@@ -16,7 +16,8 @@ func mustSchema() json.RawMessage {
 	body, err := json.Marshal(map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"action":                  map[string]any{"type": "string", "enum": []string{"log"}},
+			"action":                  map[string]any{"type": "string", "enum": []string{"log", "delete"}},
+			"decision_id":             stringSchema("Decision id for action=delete."),
 			"title":                   stringSchema("Decision title."),
 			"rationale":               stringSchema("Explain why this decision was made."),
 			"context":                 stringSchema("Relevant context for the decision."),
