@@ -1,7 +1,10 @@
 package infra
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -273,6 +276,32 @@ func TestTransportLocalCopyAndReadFiles(t *testing.T) {
 	}
 }
 
+func TestReadWithCloseReturnsCloseError(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeReadCloser{
+		reader:   bytes.NewReader([]byte("payload")),
+		closeErr: errors.New("forced read close failure"),
+	}
+	if _, err := readWithClose(reader, 16); !errors.Is(err, reader.closeErr) {
+		t.Fatalf("expected close error, got %v", err)
+	}
+}
+
+func TestCopyWithCloseReturnsOutputCloseError(t *testing.T) {
+	t.Parallel()
+
+	in := &fakeReadCloser{
+		reader: bytes.NewReader([]byte("payload")),
+	}
+	out := &fakeWriteCloser{
+		closeErr: errors.New("forced write close failure"),
+	}
+	if err := copyWithClose(in, out); !errors.Is(err, out.closeErr) {
+		t.Fatalf("expected output close error, got %v", err)
+	}
+}
+
 func TestTransportSSHAuthMethodsResolvePasswordCredential(t *testing.T) {
 	t.Parallel()
 
@@ -384,4 +413,26 @@ func (r *recordingCredentialResolver) ResolveCredential(_ context.Context, input
 
 func fixedTestTime() time.Time {
 	return time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+}
+
+type fakeReadCloser struct {
+	reader   io.Reader
+	closeErr error
+}
+
+func (f *fakeReadCloser) Read(p []byte) (int, error) {
+	return f.reader.Read(p)
+}
+
+func (f *fakeReadCloser) Close() error {
+	return f.closeErr
+}
+
+type fakeWriteCloser struct {
+	bytes.Buffer
+	closeErr error
+}
+
+func (f *fakeWriteCloser) Close() error {
+	return f.closeErr
 }

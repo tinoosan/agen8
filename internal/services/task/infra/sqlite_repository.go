@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/agen8/internal/core/types"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
@@ -71,21 +73,13 @@ func (r *SQLiteRepository) GetTask(ctx context.Context, taskID domain.TaskID) (d
 }
 
 func (r *SQLiteRepository) ListTasks(ctx context.Context, filter domain.TaskFilter) ([]domain.Task, error) {
-	where, args, err := taskWhere(filter)
-	if err != nil {
+	if err := validateTaskFilter(filter); err != nil {
 		return nil, err
 	}
-	query := "SELECT task_json FROM tasks" + where + taskOrderBy(filter)
-	if filter.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, filter.Limit)
-	}
-	if filter.Offset > 0 {
-		query += " OFFSET ?"
-		args = append(args, filter.Offset)
-	}
-
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT task_json
+		FROM tasks
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
@@ -106,19 +100,119 @@ func (r *SQLiteRepository) ListTasks(ctx context.Context, filter domain.TaskFilt
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate tasks: %w", err)
 	}
-	return tasks, nil
+
+	filtered := make([]domain.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if taskMatchesFilter(task, filter) {
+			filtered = append(filtered, task)
+		}
+	}
+	sortTasks(filtered, filter)
+	start := 0
+	if filter.Offset > 0 {
+		start = filter.Offset
+	}
+	if start >= len(filtered) {
+		return []domain.Task{}, nil
+	}
+	end := len(filtered)
+	if filter.Limit > 0 {
+		end = start + filter.Limit
+	}
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	filtered = filtered[start:end]
+	return filtered, nil
+}
+
+func sortTasks(tasks []domain.Task, filter domain.TaskFilter) {
+	column := taskOrderColumn(filter)
+	desc := taskOrderDescending(filter)
+	sort.SliceStable(tasks, func(i, j int) bool {
+		left := tasks[i]
+		right := tasks[j]
+		switch column {
+		case "updated_at":
+			leftAt, rightAt := taskSortTime(left.UpdatedAt), taskSortTime(right.UpdatedAt)
+			if !leftAt.Equal(rightAt) {
+				if desc {
+					return leftAt.After(rightAt)
+				}
+				return leftAt.Before(rightAt)
+			}
+		case "completed_at":
+			leftAt, rightAt := taskSortTime(left.CompletedAt), taskSortTime(right.CompletedAt)
+			if !leftAt.Equal(rightAt) {
+				if desc {
+					return leftAt.After(rightAt)
+				}
+				return leftAt.Before(rightAt)
+			}
+		case "status":
+			if left.Status != right.Status {
+				if desc {
+					return left.Status > right.Status
+				}
+				return left.Status < right.Status
+			}
+		case "created_at":
+			fallthrough
+		default:
+			leftAt, rightAt := taskSortTime(left.CreatedAt), taskSortTime(right.CreatedAt)
+			if !leftAt.Equal(rightAt) {
+				if desc {
+					return leftAt.After(rightAt)
+				}
+				return leftAt.Before(rightAt)
+			}
+		}
+		return string(left.ID) < string(right.ID)
+	})
+}
+
+func taskSortTime(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return value.UTC()
+}
+
+func (r *SQLiteRepository) countTasks(ctx context.Context, filter domain.TaskFilter) (int, error) {
+	if err := validateTaskFilter(filter); err != nil {
+		return 0, err
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT task_json
+		FROM tasks
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("count tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return 0, fmt.Errorf("scan task: %w", err)
+		}
+		task, err := unmarshalTask(raw)
+		if err != nil {
+			return 0, fmt.Errorf("unmarshal task: %w", err)
+		}
+		if taskMatchesFilter(task, filter) {
+			count++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate tasks: %w", err)
+	}
+	return count, nil
 }
 
 func (r *SQLiteRepository) CountTasks(ctx context.Context, filter domain.TaskFilter) (int, error) {
-	where, args, err := taskWhere(filter)
-	if err != nil {
-		return 0, err
-	}
-	var count int
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks"+where, args...).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count tasks: %w", err)
-	}
-	return count, nil
+	return r.countTasks(ctx, filter)
 }
 
 func (r *SQLiteRepository) saveTask(ctx context.Context, task domain.Task) error {

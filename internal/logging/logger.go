@@ -17,18 +17,36 @@ func NewLogger(cfg Config) (*slog.Logger, error) {
 	if file == "" {
 		return NewTextLogger(os.Stderr, cfg)
 	}
+
 	file, err := cleanLogFilePath(file)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
-		return nil, fmt.Errorf("logging: create log directory: %w", err)
+	root, err := os.OpenRoot(".")
+	if err != nil {
+		return nil, fmt.Errorf("logging: open log root: %w", err)
 	}
-	f, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	defer root.Close()
+
+	if dir := filepath.Dir(file); dir != "." {
+		if err := root.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("logging: create log directory: %w", err)
+		}
+	}
+
+	f, err := root.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("logging: open log file: %w", err)
 	}
+	if err := f.Chmod(0o600); err != nil {
+		if closeErr := f.Close(); closeErr != nil {
+			return nil, fmt.Errorf("logging: close log file after chmod failure: %w (chmod: %v)", closeErr, err)
+		}
+		return nil, fmt.Errorf("logging: secure log file permissions: %w", err)
+	}
+
 	return NewTextLogger(io.MultiWriter(os.Stderr, f), cfg)
+
 }
 
 func cleanLogFilePath(file string) (string, error) {

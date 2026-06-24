@@ -53,22 +53,40 @@ func (r *SQLiteRepository) GetMission(ctx context.Context, missionID mission.Mis
 }
 
 func (r *SQLiteRepository) ListMissions(ctx context.Context, filter mission.MissionFilter) ([]mission.Mission, error) {
-	where, args := missionWhere(filter)
-	query := "SELECT mission_json FROM missions" + where + " ORDER BY created_at DESC, mission_id ASC"
-	if filter.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, filter.Limit)
+	if filter.Limit < 0 || filter.Offset < 0 {
+		return nil, fmt.Errorf("mission filter limit and offset must be non-negative")
 	}
-	if filter.Offset > 0 {
-		query += " OFFSET ?"
-		args = append(args, filter.Offset)
-	}
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT mission_json
+		FROM missions
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("list missions: %w", err)
 	}
 	defer rows.Close()
-	return scanMissions(rows)
+	missions, err := scanMissions(rows)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]mission.Mission, 0, len(missions))
+	for _, m := range missions {
+		if missionMatchesFilter(m, filter) {
+			filtered = append(filtered, m)
+		}
+	}
+	sortMissions(filtered, filter)
+	offset := filter.Offset
+	if offset > len(filtered) {
+		return []mission.Mission{}, nil
+	}
+	limit := len(filtered)
+	if filter.Limit > 0 {
+		limit = offset + filter.Limit
+	}
+	if limit > len(filtered) {
+		limit = len(filtered)
+	}
+	return filtered[offset:limit], nil
 }
 
 func (r *SQLiteRepository) CreateMission(ctx context.Context, mission mission.Mission) error {

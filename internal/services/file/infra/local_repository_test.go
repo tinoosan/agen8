@@ -66,6 +66,25 @@ func TestLocalRepositoryCopyRejectsNestedSymlinkInSourceTree(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestLocalRepositoryWriteFileReaderWritesAbsolutePathInIntendedTree(t *testing.T) {
+	ctx := context.Background()
+
+	root := t.TempDir()
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	target := filepath.Join(root, "nested", "stream.txt")
+	repo := NewLocalRepository()
+
+	err := repo.WriteFileReader(ctx, filedomain.Reference{Path: target}, bytes.NewBufferString("payload"))
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "payload", string(got))
+	require.NoFileExists(t, filepath.Join(cwd, "nested", "stream.txt"))
+}
+
 func TestEnsureNoSymlinkPathAllowsRegularPathsBeforeMissingSegment(t *testing.T) {
 	t.Parallel()
 

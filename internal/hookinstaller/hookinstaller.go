@@ -231,12 +231,15 @@ func writeJSONFile(path string, content map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("hooks install: encode %s: %w", path, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("hooks install: create %s: %w", filepath.Dir(path), err)
 	}
 	// 0600: the file embeds the bearer token.
 	if err := os.WriteFile(path, append(out, '\n'), 0o600); err != nil {
 		return fmt.Errorf("hooks install: write %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("hooks install: secure permissions for %s: %w", path, err)
 	}
 	return nil
 }

@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -399,6 +399,6 @@ func locationIDForInput(kind locationdomain.Kind, label string, address location
 		strings.TrimSpace(address.Host),
 		fmt.Sprintf("%d", address.Port),
 	}, "|")
-	sum := sha1.Sum([]byte(raw))
+	sum := sha256.Sum256([]byte(raw))
 	return locationdomain.ID("loc_" + hex.EncodeToString(sum[:])[:16])
 }

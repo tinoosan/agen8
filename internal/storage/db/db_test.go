@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -117,6 +119,29 @@ func TestDialects(t *testing.T) {
 	}
 	if got := postgres.JSONType(); got != "JSONB" {
 		t.Fatalf("postgres json type = %q", got)
+	}
+}
+
+func TestOpenSQLiteSecuresDatabaseFileMode(t *testing.T) {
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "agen8.db")
+	if err := os.WriteFile(dbPath, []byte{}, 0o644); err != nil {
+		t.Fatalf("seed sqlite file: %v", err)
+	}
+	if err := os.Chmod(dbPath, 0o644); err != nil {
+		t.Fatalf("seed chmod: %v", err)
+	}
+	if _, err := Open(context.Background(), Config{
+		DataDir: dataDir,
+	}); err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat db: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("sqlite file perm=%#o want 0600", info.Mode().Perm())
 	}
 }
 

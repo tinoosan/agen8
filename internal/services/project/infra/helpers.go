@@ -112,6 +112,13 @@ func projectWhere(filter project.Filter) (string, []any, error) {
 	return " WHERE " + strings.Join(clauses, " AND "), args, nil
 }
 
+func projectMatchesFilter(record project.Record, filter project.Filter) bool {
+	if filter.Status != "" && record.Status != project.Status(strings.TrimSpace(string(filter.Status))) {
+		return false
+	}
+	return true
+}
+
 func scanProject(scanner interface{ Scan(dest ...any) error }) (project.Record, error) {
 	var record project.Record
 	var createdAt, updatedAt, customization string

@@ -193,6 +193,71 @@ func TestInstallCodexWritesUserLevelHooks(t *testing.T) {
 	}
 }
 
+func TestInstallSecuresExistingHookFileMode(t *testing.T) {
+	t.Run("claude", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".claude", "settings.local.json")
+		// Seed a valid hooks file first, then force the mode to a permissive value.
+		if _, err := Install(Options{
+			Harness:    HarnessClaude,
+			BaseURL:    "http://127.0.0.1:7777",
+			Token:      "ak_seed",
+			ProjectDir: dir,
+		}); err != nil {
+			t.Fatalf("seed install: %v", err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Install(Options{
+			Harness:    HarnessClaude,
+			BaseURL:    "http://127.0.0.1:7777",
+			Token:      "ak_test",
+			ProjectDir: dir,
+		}); err != nil {
+			t.Fatalf("reinstall: %v", err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("perm = %v, want 0600", info.Mode().Perm())
+		}
+	})
+
+	t.Run("codex", func(t *testing.T) {
+		home := t.TempDir()
+		path := filepath.Join(home, ".codex", "hooks.json")
+		if _, err := Install(Options{
+			Harness: HarnessCodex,
+			BaseURL: "http://127.0.0.1:7777",
+			Token:   "ak_seed",
+			HomeDir: home,
+		}); err != nil {
+			t.Fatalf("seed install: %v", err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Install(Options{
+			Harness: HarnessCodex,
+			BaseURL: "http://127.0.0.1:7777",
+			Token:   "ak_test",
+			HomeDir: home,
+		}); err != nil {
+			t.Fatalf("reinstall: %v", err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("perm = %v, want 0600", info.Mode().Perm())
+		}
+	})
+}
+
 func TestInstallValidation(t *testing.T) {
 	if _, err := Install(Options{Harness: HarnessClaude, Token: "t"}); err == nil {
 		t.Fatal("expected error for missing url")

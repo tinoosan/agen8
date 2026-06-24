@@ -141,7 +141,7 @@ func (t Transport) CreateDir(ctx context.Context, location locationdomain.Locati
 		if err != nil {
 			return err
 		}
-		return os.MkdirAll(path, 0o755)
+		return os.MkdirAll(path, 0o700)
 	case locationdomain.KindSSH:
 		return t.createSSHDir(ctx, location, path)
 	default:
@@ -156,10 +156,17 @@ func (t Transport) CreateFile(ctx context.Context, location locationdomain.Locat
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		root, rootPath, err := localRootForPath(path)
+		if err != nil {
 			return err
 		}
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		defer func() {
+			_ = root.Close()
+		}()
+		if err := root.MkdirAll(filepath.ToSlash(filepath.Dir(rootPath)), 0o700); err != nil {
+			return err
+		}
+		file, err := root.OpenFile(rootPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			return err
 		}
@@ -182,7 +189,7 @@ func (t Transport) MoveFile(ctx context.Context, location locationdomain.Locatio
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 			return err
 		}
 		return os.Rename(source, destination)
@@ -238,10 +245,10 @@ func (t Transport) WriteFile(ctx context.Context, location locationdomain.Locati
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err
 		}
-		return os.WriteFile(path, contents, 0o644)
+		return os.WriteFile(path, contents, 0o600)
 	case locationdomain.KindSSH:
 		return t.writeSSHFile(ctx, location, path, contents)
 	default:
@@ -380,8 +387,7 @@ func (t Transport) readSSHFile(ctx context.Context, location locationdomain.Loca
 	if err != nil {
 		return filedomain.Content{}, err
 	}
-	defer file.Close()
-	raw, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	raw, err := readWithClose(file, maxBytes)
 	if err != nil {
 		return filedomain.Content{}, err
 	}
@@ -582,16 +588,22 @@ func readLocalFile(path string, maxBytes int64) (filedomain.Content, error) {
 	if maxBytes <= 0 {
 		return filedomain.Content{}, fmt.Errorf("maxBytes is required")
 	}
-	info, err := os.Stat(path)
+	root, rootPath, err := localRootForPath(path)
 	if err != nil {
 		return filedomain.Content{}, err
 	}
-	file, err := os.Open(path)
+	defer func() {
+		_ = root.Close()
+	}()
+	info, err := root.Stat(rootPath)
 	if err != nil {
 		return filedomain.Content{}, err
 	}
-	defer file.Close()
-	raw, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	file, err := root.Open(rootPath)
+	if err != nil {
+		return filedomain.Content{}, err
+	}
+	raw, err := readWithClose(file, maxBytes)
 	if err != nil {
 		return filedomain.Content{}, err
 	}
@@ -600,6 +612,18 @@ func readLocalFile(path string, maxBytes int64) (filedomain.Content, error) {
 		raw = raw[:maxBytes]
 	}
 	return filedomain.Content{Bytes: raw, Truncated: truncated, FileSize: info.Size()}, nil
+}
+
+func readWithClose(reader io.ReadCloser, maxBytes int64) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
+	if err != nil {
+		_ = reader.Close()
+		return nil, err
+	}
+	if err := reader.Close(); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func copyLocalPath(src string, dst string, info os.FileInfo) error {
@@ -622,7 +646,7 @@ func copyLocalPath(src string, dst string, info os.FileInfo) error {
 			}
 			target := filepath.Join(dst, rel)
 			if entry.IsDir() {
-				return os.MkdirAll(target, 0o755)
+				return os.MkdirAll(target, 0o700)
 			}
 			entryInfo, err := entry.Info()
 			if err != nil {
@@ -638,23 +662,63 @@ func copyLocalPath(src string, dst string, info os.FileInfo) error {
 }
 
 func copyLocalFile(src string, dst string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
-	in, err := os.Open(src)
+	srcRoot, rootSrcPath, err := localRootForPath(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm())
+	defer func() {
+		_ = srcRoot.Close()
+	}()
+	outRoot, rootDstPath, err := localRootForPath(dst)
 	if err != nil {
+		_ = srcRoot.Close()
+		return err
+	}
+	defer func() {
+		_ = outRoot.Close()
+	}()
+	in, err := srcRoot.Open(rootSrcPath)
+	if err != nil {
+		return err
+	}
+	out, err := outRoot.OpenFile(rootDstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm()&0o600)
+	if err != nil {
+		_ = in.Close()
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
+		_ = in.Close()
+		_ = out.Close()
+		return err
+	}
+	if err := in.Close(); err != nil {
 		_ = out.Close()
 		return err
 	}
 	return out.Close()
+}
+
+func localRootForPath(path string) (*os.Root, string, error) {
+	cleanPath := filepath.Clean(path)
+	rootPath := filepath.VolumeName(cleanPath)
+	if rootPath == "" {
+		rootPath = string(filepath.Separator)
+	} else {
+		rootPath = filepath.Clean(rootPath + string(filepath.Separator))
+	}
+	relativePath, err := filepath.Rel(rootPath, cleanPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve local root path %s: %w", path, err)
+	}
+	relativePath = filepath.ToSlash(relativePath)
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("open local root %s: %w", rootPath, err)
+	}
+	return root, relativePath, nil
 }
 
 func copySFTPPath(client *sftp.Client, src string, dst string, info os.FileInfo) error {
@@ -696,16 +760,26 @@ func copySFTPFile(client *sftp.Client, src string, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
 	out, err := client.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY)
 	if err != nil {
+		_ = in.Close()
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
+	return copyWithClose(in, out)
+}
+
+func copyWithClose(in io.ReadCloser, out io.WriteCloser) error {
+	_, copyErr := io.Copy(out, in)
+	copyErrClose := out.Close()
+	if copyErr != nil {
+		_ = in.Close()
+		return copyErr
 	}
-	return out.Close()
+	if copyErrClose != nil {
+		_ = in.Close()
+		return copyErrClose
+	}
+	return in.Close()
 }
 
 func (t Transport) dialSSH(ctx context.Context, location locationdomain.Location) (*ssh.Client, error) {
@@ -807,6 +881,22 @@ func sshAgentAuth() ([]ssh.AuthMethod, error) {
 	if socket == "" {
 		return nil, fmt.Errorf("SSH_AUTH_SOCK is required for ssh agent auth")
 	}
+	socket = filepath.Clean(socket)
+	if !filepath.IsAbs(socket) {
+		return nil, fmt.Errorf("SSH_AUTH_SOCK must be an absolute path")
+	}
+	info, err := os.Stat(socket)
+	if err != nil {
+		return nil, fmt.Errorf("stat SSH_AUTH_SOCK %s: %w", socket, err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return nil, fmt.Errorf("SSH_AUTH_SOCK %s is not a socket", socket)
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return nil, fmt.Errorf("SSH_AUTH_SOCK %s has unsafe permissions", socket)
+	}
+	// #nosec G704 -- socket path is validated for absolute path, existence,
+	// socket type, and owner-only permissions before dialing.
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
 		return nil, fmt.Errorf("connect ssh agent: %w", err)
@@ -1149,18 +1239,18 @@ func (t Transport) openSFTPPath(ctx context.Context, location locationdomain.Loc
 	}
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, nil, "", fmt.Errorf("open ssh file repository: %w", err)
 	}
 	cleanPath, err := resolveSSHPath(ctx, client, path)
 	if err != nil {
-		sftpClient.Close()
-		client.Close()
+		_ = sftpClient.Close()
+		_ = client.Close()
 		return nil, nil, "", err
 	}
 	closeFn := func() {
-		sftpClient.Close()
-		client.Close()
+		_ = sftpClient.Close()
+		_ = client.Close()
 	}
 	return sftpClient, closeFn, cleanPath, nil
 }

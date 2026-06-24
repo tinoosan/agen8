@@ -135,7 +135,7 @@ func ensureDirWritable(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("data dir is empty")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create data dir %q: %w", dir, err)
 	}
 	info, err := os.Stat(dir)
@@ -144,6 +144,9 @@ func ensureDirWritable(dir string) error {
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("data dir %q is not a directory", dir)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("harden data dir %q permissions: %w", dir, err)
 	}
 
 	f, err := os.CreateTemp(dir, ".agen8_write_test_*")

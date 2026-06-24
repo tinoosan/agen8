@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -56,5 +57,26 @@ func TestDefaultDataDirForWindowsUsesUserConfigDir(t *testing.T) {
 	want := filepath.Join(`C:\Users\santino\AppData\Roaming`, "agen8")
 	if dir != want {
 		t.Fatalf("dir = %q, want %q", dir, want)
+	}
+}
+
+func TestResolveDataDirHardenedExistingDirMode(t *testing.T) {
+	base := t.TempDir()
+	existing := filepath.Join(base, "insecure")
+	if err := os.Mkdir(existing, 0o755); err != nil {
+		t.Fatalf("seed dir: %v", err)
+	}
+	if err := os.Chmod(existing, 0o755); err != nil {
+		t.Fatalf("seed chmod: %v", err)
+	}
+	if _, err := ResolveDataDir(existing, true); err != nil {
+		t.Fatalf("ResolveDataDir: %v", err)
+	}
+	info, err := os.Stat(existing)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("data dir perm=%#o want 0700", info.Mode().Perm())
 	}
 }

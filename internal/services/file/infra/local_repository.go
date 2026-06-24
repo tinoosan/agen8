@@ -2,6 +2,8 @@ package infra
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -25,7 +27,14 @@ func (LocalRepository) Stat(_ context.Context, ref filedomain.Reference) (filedo
 	if err := ensureNoSymlinkPath(ref.Path); err != nil {
 		return filedomain.Info{}, err
 	}
-	info, err := os.Stat(ref.Path)
+	root, rootPath, err := localRootForPath(ref.Path)
+	if err != nil {
+		return filedomain.Info{}, err
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	info, err := root.Stat(filepath.ToSlash(rootPath))
 	if err != nil {
 		return filedomain.Info{}, err
 	}
@@ -36,7 +45,21 @@ func (LocalRepository) ListDir(_ context.Context, ref filedomain.Reference) ([]f
 	if err := ensureNoSymlinkPath(ref.Path); err != nil {
 		return nil, err
 	}
-	items, err := os.ReadDir(ref.Path)
+	root, rootPath, err := localRootForPath(ref.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	d, err := root.Open(filepath.ToSlash(rootPath))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = d.Close()
+	}()
+	items, err := d.ReadDir(-1)
 	if err != nil {
 		return nil, err
 	}
@@ -64,11 +87,18 @@ func (LocalRepository) Read(_ context.Context, ref filedomain.Reference, maxByte
 	if err := ensureNoSymlinkPath(ref.Path); err != nil {
 		return filedomain.Content{}, err
 	}
-	info, err := os.Stat(ref.Path)
+	root, rootPath, err := localRootForPath(ref.Path)
 	if err != nil {
 		return filedomain.Content{}, err
 	}
-	file, err := os.Open(ref.Path)
+	defer func() {
+		_ = root.Close()
+	}()
+	info, err := root.Stat(filepath.ToSlash(rootPath))
+	if err != nil {
+		return filedomain.Content{}, err
+	}
+	file, err := root.Open(filepath.ToSlash(rootPath))
 	if err != nil {
 		return filedomain.Content{}, err
 	}
@@ -92,17 +122,31 @@ func (LocalRepository) CreateDir(_ context.Context, ref filedomain.Reference) er
 	if err := ensureNoSymlinkPath(ref.Path); err != nil {
 		return err
 	}
-	return os.MkdirAll(ref.Path, 0o755)
+	root, rootPath, err := localRootForPath(ref.Path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	return root.MkdirAll(filepath.ToSlash(rootPath), 0o700)
 }
 
 func (LocalRepository) CreateFile(_ context.Context, ref filedomain.Reference) error {
 	if err := ensureNoSymlinkPath(ref.Path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(ref.Path), 0o755); err != nil {
+	root, rootPath, err := localRootForPath(ref.Path)
+	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(ref.Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	defer func() {
+		_ = root.Close()
+	}()
+	if err := root.MkdirAll(filepath.ToSlash(filepath.Dir(rootPath)), 0o700); err != nil {
+		return err
+	}
+	file, err := root.OpenFile(filepath.ToSlash(rootPath), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
@@ -116,7 +160,14 @@ func (LocalRepository) Move(_ context.Context, source filedomain.Reference, dest
 	if err := ensureNoSymlinkPath(destination.Path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(destination.Path), 0o755); err != nil {
+	root, rootPath, err := localRootForPath(destination.Path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	if err := root.MkdirAll(filepath.ToSlash(filepath.Dir(rootPath)), 0o700); err != nil {
 		return err
 	}
 	return os.Rename(source.Path, destination.Path)
@@ -129,7 +180,14 @@ func (LocalRepository) Copy(_ context.Context, source filedomain.Reference, dest
 	if err := ensureNoSymlinkPath(destination.Path); err != nil {
 		return err
 	}
-	info, err := os.Stat(source.Path)
+	root, rootPath, err := localRootForPath(source.Path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	info, err := root.Stat(filepath.ToSlash(rootPath))
 	if err != nil {
 		return err
 	}
@@ -147,28 +205,50 @@ func (LocalRepository) WriteFile(_ context.Context, ref filedomain.Reference, co
 	if err := ensureNoSymlinkPath(ref.Path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(ref.Path), 0o755); err != nil {
+	root, rootPath, err := localRootForPath(ref.Path)
+	if err != nil {
 		return err
 	}
-	return os.WriteFile(ref.Path, contents, 0o644)
+	defer func() {
+		_ = root.Close()
+	}()
+	if err := root.MkdirAll(filepath.ToSlash(filepath.Dir(rootPath)), 0o700); err != nil {
+		return err
+	}
+	out, err := root.OpenFile(filepath.ToSlash(rootPath), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = out.Close()
+	}()
+	_, err = out.Write(contents)
+	return err
 }
 
 func (LocalRepository) WriteFileReader(_ context.Context, ref filedomain.Reference, contents io.Reader) error {
 	if err := ensureNoSymlinkPath(ref.Path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(ref.Path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(ref.Path), "."+filepath.Base(ref.Path)+".tmp-*")
+	root, rootPath, err := localRootForPath(ref.Path)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
+	defer func() {
+		_ = root.Close()
+	}()
+	if err := root.MkdirAll(filepath.ToSlash(filepath.Dir(rootPath)), 0o700); err != nil {
+		return err
+	}
+	rootPath = filepath.ToSlash(rootPath)
+	tmp, tmpPath, err := createRootTemp(root, filepath.Dir(rootPath), "."+filepath.Base(rootPath)+".tmp-")
+	if err != nil {
+		return err
+	}
 	cleanup := true
 	defer func() {
 		if cleanup {
-			_ = os.Remove(tmpPath)
+			_ = root.Remove(tmpPath)
 		}
 	}()
 	if _, err := io.Copy(tmp, contents); err != nil {
@@ -178,11 +258,37 @@ func (LocalRepository) WriteFileReader(_ context.Context, ref filedomain.Referen
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, ref.Path); err != nil {
+	if err := root.Rename(tmpPath, rootPath); err != nil {
 		return err
 	}
 	cleanup = false
 	return nil
+}
+
+func createRootTemp(root *os.Root, dir string, prefix string) (*os.File, string, error) {
+	for range 100 {
+		suffix, err := randomHex(8)
+		if err != nil {
+			return nil, "", err
+		}
+		name := filepath.ToSlash(filepath.Join(dir, prefix+suffix))
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			return file, name, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, "", err
+		}
+	}
+	return nil, "", fmt.Errorf("create temp file in %s: too many collisions", dir)
+}
+
+func randomHex(bytesLen int) (string, error) {
+	var raw = make([]byte, bytesLen)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
 }
 
 func infoFromOS(info os.FileInfo) filedomain.Info {
@@ -214,7 +320,7 @@ func copyPath(src string, dst string, info os.FileInfo) error {
 			}
 			target := filepath.Join(dst, rel)
 			if entry.IsDir() {
-				return os.MkdirAll(target, 0o755)
+				return os.MkdirAll(target, 0o700)
 			}
 			entryInfo, err := entry.Info()
 			if err != nil {
@@ -230,26 +336,66 @@ func copyFile(src string, dst string, mode os.FileMode) error {
 	if err := ensureNoSymlinkPath(dst); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
 	if err := ensureNoSymlinkPath(src); err != nil {
 		return err
 	}
-	in, err := os.Open(src)
+	srcRoot, rootSrcPath, err := localRootForPath(src)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = srcRoot.Close()
+	}()
+	dstRoot, rootDstPath, err := localRootForPath(dst)
+	if err != nil {
+		_ = srcRoot.Close()
+		return err
+	}
+	defer func() {
+		_ = dstRoot.Close()
+	}()
+	if err := dstRoot.MkdirAll(filepath.ToSlash(filepath.Dir(rootDstPath)), 0o700); err != nil {
+		return err
+	}
+	in, err := srcRoot.Open(filepath.ToSlash(rootSrcPath))
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm())
+	out, err := dstRoot.OpenFile(filepath.ToSlash(rootDstPath), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm()&0o600)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	defer func() {
 		_ = out.Close()
+	}()
+	if _, err := io.Copy(out, in); err != nil {
 		return err
 	}
-	return out.Close()
+	return nil
+}
+
+func localRootForPath(path string) (*os.Root, string, error) {
+	cleanPath := filepath.Clean(path)
+	rootPath := filepath.VolumeName(cleanPath)
+	if rootPath == "" {
+		rootPath = string(filepath.Separator)
+	} else {
+		rootPath = filepath.Clean(rootPath + string(filepath.Separator))
+	}
+	relativePath, err := filepath.Rel(rootPath, cleanPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve local root path %s: %w", path, err)
+	}
+	relativePath = filepath.ToSlash(relativePath)
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("open local root %s: %w", rootPath, err)
+	}
+	return root, relativePath, nil
 }
 
 func ensureNoSymlinkPath(path string) error {

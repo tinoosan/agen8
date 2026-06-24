@@ -133,6 +133,16 @@ func Open(ctx context.Context, cfg Config) (*Handle, error) {
 	if driver == "" {
 		driver = DriverSQLite
 	}
+	dbPath := ""
+	if driver == DriverSQLite {
+		dbPath = SQLitePath(cfg.DataDir)
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
+			return nil, fmt.Errorf("sqlite: create data dir: %w", err)
+		}
+		if err := ensureSQLiteFileSecure(dbPath); err != nil {
+			return nil, fmt.Errorf("sqlite: secure db file: %w", err)
+		}
+	}
 	key, sqlDriver, dsn, dialect, pool, err := resolve(cfg, driver)
 	if err != nil {
 		return nil, err
@@ -144,11 +154,6 @@ func Open(ctx context.Context, cfg Config) (*Handle, error) {
 	handle := handles[key]
 	openedNow := false
 	if handle == nil {
-		if driver == DriverSQLite {
-			if err := os.MkdirAll(filepath.Dir(SQLitePath(cfg.DataDir)), 0755); err != nil {
-				return nil, fmt.Errorf("sqlite: create data dir: %w", err)
-			}
-		}
 		opened, err := openSQL(sqlDriver, dsn)
 		if err != nil {
 			return nil, fmt.Errorf("%s: open db: %w", driver, err)
@@ -171,6 +176,23 @@ func Open(ctx context.Context, cfg Config) (*Handle, error) {
 		migrated[migrationKey] = true
 	}
 	return handle, nil
+}
+
+func ensureSQLiteFileSecure(path string) error {
+	if path == "" {
+		return fmt.Errorf("sqlite: db path is required")
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	if closeErr := file.Close(); closeErr != nil {
+		return fmt.Errorf("close %s: %w", path, closeErr)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("chmod %s: %w", path, err)
+	}
+	return nil
 }
 
 func normalizeMigrationKey(key string) string {
