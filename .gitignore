@@ -39,6 +39,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Local design drafts
+designs/
+
 # Environment
 .env*
 **/.env*
