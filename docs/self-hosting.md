@@ -82,6 +82,13 @@ Compose uses the same model:
 AGEN8_PUBLIC_URL=https://agen8.example.com docker compose up --build -d
 ```
 
+Published release images are pushed to GitHub Container Registry when a `v*`
+release tag is created:
+
+```sh
+docker pull ghcr.io/tinoosan/agen8:v0.0.1
+```
+
 Check health:
 
 ```sh
@@ -95,7 +102,9 @@ The sample manifest is at `deploy/kubernetes/agen8.yaml`.
 
 Before applying it:
 
-1. Replace `ghcr.io/tinoosan/agen8:latest` with the image you publish.
+1. Choose the image tag to deploy. The sample uses
+   `ghcr.io/tinoosan/agen8:v0.0.1`; release tags also publish `latest` and
+   semver aliases.
 2. Replace every `agen8.example.com` value with your real hostname.
 3. Replace `replace-with-a-long-random-setup-token` with a generated token.
 4. Adjust the ingress class and cert-manager issuer for your cluster.

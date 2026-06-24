@@ -104,6 +104,12 @@ Or use Compose:
 docker compose up --build
 ```
 
+Published release images are available from GitHub Container Registry:
+
+```sh
+docker pull ghcr.io/tinoosan/agen8:v0.0.1
+```
+
 Set `AGEN8_PUBLIC_URL` to the URL users will put in their harness MCP config.
 For hosted Docker or Kubernetes deployments, keep
 `AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true`; the daemon can receive remote hook
@@ -138,8 +144,8 @@ mkdir -p ./.agen8-docker
 docker run --rm -p 7777:7777 -v "$PWD/.agen8-docker:/data" agen8:local
 ```
 
-For Kubernetes and remote self-hosting, see
-[docs/self-hosting.html](docs/self-hosting.html).
+For Kubernetes and remote self-hosting, including the sample manifest that uses
+the versioned release image, see [docs/self-hosting.html](docs/self-hosting.html).
 
 ### 4. Create your account
 
