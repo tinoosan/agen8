@@ -21,6 +21,7 @@ const (
 	EnvHTTPAddr   = "AGEN8_HTTP_ADDR"
 	EnvDevWebURL  = "AGEN8_DEV_WEB_URL"
 	EnvPublicURL  = "AGEN8_PUBLIC_URL"
+	// #nosec G101 -- this is the setup token environment variable name, not a token value.
 	EnvSetupToken = "AGEN8_SETUP_TOKEN"
 
 	EnvDisableLocalHookProvisioning = "AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING"

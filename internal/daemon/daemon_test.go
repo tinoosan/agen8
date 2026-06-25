@@ -695,6 +695,30 @@ func TestWebHandlerFailsForUnsafeDevWebURL(t *testing.T) {
 	}
 }
 
+func TestWebHandlerRejectsDNSDriftToNonLoopback(t *testing.T) {
+	t.Setenv(EnvDevWebURL, "http://localhost:8080")
+	oldLookup := lookupLoopbackHostIPs
+	lookupLoopbackHostIPs = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("198.51.100.10")}, nil
+	}
+	t.Cleanup(func() {
+		lookupLoopbackHostIPs = oldLookup
+	})
+
+	d, err := New(Config{AppConfig: config.Config{DataDir: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = d.webHandler()
+	if err == nil {
+		t.Fatal("webHandler should fail when loopback hostname resolves to non-loopback IP")
+	}
+	if !strings.Contains(err.Error(), "non-loopback") {
+		t.Fatalf("unexpected error=%v", err)
+	}
+}
+
 func TestWebHandlerBuildsProxyForLocalDevWebURL(t *testing.T) {
 	t.Setenv(EnvDevWebURL, "http://127.0.0.1:8080")
 

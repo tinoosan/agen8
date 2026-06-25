@@ -269,3 +269,56 @@ func TestInstallValidation(t *testing.T) {
 		t.Fatal("expected error for unknown harness")
 	}
 }
+
+func TestInstallRejectsSymlinkedHookConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "outside.json")
+	if err := os.WriteFile(target, []byte(`{"hooks":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(link, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkedPath := filepath.Join(link, "settings.local.json")
+	if err := os.Remove(linkedPath); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, linkedPath); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Install(Options{
+		Harness:    HarnessClaude,
+		BaseURL:    "http://127.0.0.1:7777",
+		Token:      "ak_test",
+		ProjectDir: dir,
+	})
+	if err == nil {
+		t.Fatal("expected install to reject symlinked config file")
+	}
+}
+
+func TestInstallRejectsSymlinkedHookConfigParentDir(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, ".codex-target")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	codexDir := filepath.Join(home, ".codex")
+	if err := os.Symlink(target, codexDir); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Install(Options{
+		Harness: HarnessCodex,
+		BaseURL: "http://127.0.0.1:7777",
+		Token:   "ak_test",
+		HomeDir: home,
+	})
+	if err == nil {
+		t.Fatal("expected install to reject symlinked parent directory")
+	}
+}

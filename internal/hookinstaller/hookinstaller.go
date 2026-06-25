@@ -11,7 +11,9 @@ package hookinstaller
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,9 +149,12 @@ func installClaude(opts Options, baseURL string) (Result, error) {
 		projectDir = wd
 	}
 	path := filepath.Join(projectDir, ".claude", "settings.local.json")
+	if err := validateHookConfigPath(path); err != nil {
+		return Result{}, fmt.Errorf("hooks install: validate %s: %w", path, err)
+	}
 
 	settings := map[string]any{}
-	if raw, err := os.ReadFile(path); err == nil {
+	if raw, err := readHookConfig(path); err == nil {
 		if err := json.Unmarshal(raw, &settings); err != nil {
 			return Result{}, fmt.Errorf("hooks install: %s exists but is not valid JSON: %w", path, err)
 		}
@@ -179,9 +184,12 @@ func installCodex(opts Options, baseURL string) (Result, error) {
 		homeDir = home
 	}
 	path := filepath.Join(homeDir, ".codex", "hooks.json")
+	if err := validateHookConfigPath(path); err != nil {
+		return Result{}, fmt.Errorf("hooks install: validate %s: %w", path, err)
+	}
 
 	config := map[string]any{}
-	if raw, err := os.ReadFile(path); err == nil {
+	if raw, err := readHookConfig(path); err == nil {
 		if err := json.Unmarshal(raw, &config); err != nil {
 			return Result{}, fmt.Errorf("hooks install: %s exists but is not valid JSON: %w", path, err)
 		}
@@ -224,6 +232,62 @@ func mergeHookEvents(container map[string]any, specs []hookSpec, harness, baseUR
 		hooks[spec.Event] = cleanedGroups[spec.Event]
 	}
 	container["hooks"] = hooks
+}
+
+func validateHookConfigPath(path string) error {
+	cleanPath := filepath.Clean(filepath.FromSlash(strings.TrimSpace(path)))
+	if cleanPath == "" || cleanPath == "." {
+		return fmt.Errorf("path is required")
+	}
+	if strings.Contains(cleanPath, "\x00") {
+		return fmt.Errorf("path contains invalid characters")
+	}
+
+	for _, segment := range strings.Split(filepath.ToSlash(cleanPath), "/") {
+		if segment == ".." {
+			return fmt.Errorf("path traversal is not allowed")
+		}
+	}
+
+	isAbs := filepath.IsAbs(cleanPath)
+	parts := strings.Split(cleanPath, string(filepath.Separator))
+	current := ""
+	if isAbs {
+		current = string(filepath.Separator)
+	}
+	for idx, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		if current == string(filepath.Separator) {
+			current = filepath.Join(current, part)
+		} else if current == "" {
+			current = part
+		} else {
+			current = filepath.Join(current, part)
+		}
+
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		if isAbs && idx == 1 {
+			// Keep first absolute path components flexible for host-level mounts.
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("path contains symlink component: %s", current)
+		}
+		if idx < len(parts)-1 && !info.IsDir() {
+			return fmt.Errorf("path component is not a directory: %s", current)
+		}
+	}
+
+	return nil
 }
 
 func writeJSONFile(path string, content map[string]any) error {
@@ -276,4 +340,20 @@ func groupHasAgen8Hook(group map[string]any) bool {
 		}
 	}
 	return false
+}
+
+func readHookConfig(path string) ([]byte, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+
+	file, err := root.Open(filepath.Base(path))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	return io.ReadAll(file)
 }

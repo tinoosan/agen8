@@ -171,7 +171,7 @@ func (d *Daemon) serveHTTP(ctx context.Context, ln net.Listener) error {
 	}
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
@@ -209,6 +209,9 @@ func (d *Daemon) webHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s is invalid: %w", EnvDevWebURL, err)
 	}
+	// #nosec G704 -- target was produced by parseLoopbackDevWebURL, which enforces
+	// absolute http(s) URL, disallows userinfo/unsafe host encoding, and requires
+	// loopback-only host/IP targets; transport dial-time checks re-validate each host.
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = &http.Transport{
 		DialContext: loopbackAwareDialContext(),
