@@ -116,8 +116,8 @@ func setupMCPConfig(mcpURL string) (string, error) {
 	config := map[string]any{
 		"mcpServers": map[string]any{
 			"agen8": map[string]any{
-				"type":                 "http",
-				"url":                  mcpURL,
+				"type": "http",
+				"url":  mcpURL,
 				// #nosec G101 -- this is the client-side environment variable name, not a bearer token value.
 				"bearer_token_env_var": "AGEN8_MCP_TOKEN",
 			},

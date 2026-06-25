@@ -16,11 +16,11 @@ import (
 const (
 	ListenerHTTP = "http"
 
-	EnvListener   = "AGEN8_DAEMON_LISTENER"
-	EnvEndpoint   = "AGEN8_RPC_ENDPOINT"
-	EnvHTTPAddr   = "AGEN8_HTTP_ADDR"
-	EnvDevWebURL  = "AGEN8_DEV_WEB_URL"
-	EnvPublicURL  = "AGEN8_PUBLIC_URL"
+	EnvListener  = "AGEN8_DAEMON_LISTENER"
+	EnvEndpoint  = "AGEN8_RPC_ENDPOINT"
+	EnvHTTPAddr  = "AGEN8_HTTP_ADDR"
+	EnvDevWebURL = "AGEN8_DEV_WEB_URL"
+	EnvPublicURL = "AGEN8_PUBLIC_URL"
 	// #nosec G101 -- this is the setup token environment variable name, not a token value.
 	EnvSetupToken = "AGEN8_SETUP_TOKEN"
 
