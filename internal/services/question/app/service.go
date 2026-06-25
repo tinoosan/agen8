@@ -153,6 +153,9 @@ func (s *Service) Answer(ctx context.Context, req AnswerRequest) (Result, error)
 		return Result{}, err
 	}
 	if answered.AsDecision {
+		// AsDecision is the only cross-service path from question/app; all
+		// mapping and persistence coupling is delegated to the injected
+		// DecisionLogger port to preserve service-app separation.
 		if s.decisions == nil {
 			return Result{}, errors.New("question service: decision logger is required for asDecision answer")
 		}

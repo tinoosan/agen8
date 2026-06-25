@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Question Service — agen8 Architecture</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand"><span class="dot"></span>agen8 docs</span>
+    <span class="crumb"><a href="../">docs</a> / <a href="./">architecture</a> / question-service</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <span class="eyebrow">Architecture · Question Service</span>
+  <h1>Question Service</h1>
+  <p class="lede">
+    The question service owns durable question state and answer lifecycle. It can
+    persist a question as a decision when <code>AsDecision</code> is set, using a
+    caller-owned port so it does not import the decision service application API.
+  </p>
+
+  <nav class="toc" aria-label="On this page">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#asdecision">Decision logging seam</a></li>
+      <li><a href="#composition-root">Composition-root wiring</a></li>
+      <li><a href="#coupling">Cross-file coupling path</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="architecture">1. Architecture</h2>
+  <p>
+    <code>internal/services/question/app</code> provides the question orchestration
+    boundary: it validates inputs, loads and persists question state, emits
+    question lifecycle events, and owns the <code>DecisionLogger</code> port used only
+    when a question is answered as a decision.
+  </p>
+
+  <pre><code class="lang-go">type Service struct {
+  questions domain.Repository
+  clock     domain.Clock
+  events    EventPublisher
+  decisions DecisionLogger
+}
+
+type DecisionLogger interface {
+  LogDecision(ctx context.Context, req LogDecisionRequest) (DecisionLogResult, error)
+}
+</code></pre>
+
+  <h2 id="asdecision">2. Decision logging seam</h2>
+  <p>
+    The seam is triggered after answer validation when <code>answered.AsDecision</code>
+    is true in <code>question/app</code>. The service calls the local port only after
+    building a decision request payload from the current question state.
+  </p>
+
+  <pre><code class="lang-go">if answered.AsDecision {
+  decision, err := s.decisions.LogDecision(ctx, LogDecisionRequest{
+    ProjectID:    answered.ProjectID,
+    MemberID:     answered.Answer.AnsweredByMemberID,
+    Title:        decisionTitle(answered.Text),
+    Rationale:    answerSummary(answered),
+    Context:      fmt.Sprintf("Answer recorded for question %s.", answered.ID),
+    Confidence:   1,
+    TaskRef:      answered.TaskRef,
+    KeyResultRef: answered.KeyResultRef,
+    MissionRef:   answered.MissionRef,
+  })
+  ...
+}</code></pre>
+
+  <p>
+    The mapping contract is intentionally caller-owned. The question service keeps
+    its own request/response DTOs and does not couple itself to decision service
+    application types.
+  </p>
+
+  <h2 id="composition-root">3. Composition-root adapter</h2>
+  <p>
+    The concrete adapter is <code>internal/app/question_decision_logger.go</code>.
+    It translates <code>questionapp.LogDecisionRequest</code> into
+    <code>decisionapp.LogRequest</code>, calls the decision service, and returns
+    a <code>questionapp.DecisionLogResult</code>.
+  </p>
+
+  <pre><code class="lang-go">type decisionLogService interface {
+  Log(ctx context.Context, req decisionapp.LogRequest) (decisionapp.Result, error)
+}
+</code></pre>
+
+  <p>
+    This file is the cross-service seam: it is allowed to import both services
+    because it lives in <code>internal/app</code>.
+  </p>
+
+  <h2 id="coupling">4. End-to-end coupling path</h2>
+  <ol>
+    <li><code>internal/services/question/app/service.go</code> calls <code>s.decisions.LogDecision</code> when a question is answered as a decision.</li>
+    <li><code>internal/app/application.go</code> injects <code>newQuestionDecisionLogger(decisionSvc)</code> into the question service config.</li>
+    <li><code>internal/app/question_decision_logger.go</code> maps request/response types and forwards to the decision service.</li>
+    <li>Decision persistence returns in <code>decisionapp.Result</code> and the decision ID is attached to the answered question and question event.</li>
+  </ol>
+
+</div>
+
+</body>
+</html>

@@ -19,6 +19,8 @@ func newQuestionDecisionLogger(decisions *decisionapp.Service) questionDecisionL
 	return questionDecisionLogger{decisions: decisions}
 }
 
+// questionDecisionLogger translates caller-owned question DTOs into the decision
+// service request shape before persistence.
 func (l questionDecisionLogger) LogDecision(ctx context.Context, req questionapp.LogDecisionRequest) (questionapp.DecisionLogResult, error) {
 	decision, err := l.decisions.Log(ctx, decisionapp.LogRequest{
 		ProjectID:    req.ProjectID,
