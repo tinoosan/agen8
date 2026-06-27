@@ -23,6 +23,7 @@ import (
 	"github.com/tinoosan/agen8/internal/mcp"
 	"github.com/tinoosan/agen8/internal/rpc"
 	"github.com/tinoosan/agen8/internal/services/attention"
+	projectrpc "github.com/tinoosan/agen8/internal/services/project/rpc"
 	"github.com/tinoosan/agen8/internal/web"
 	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
@@ -75,6 +76,10 @@ func New(cfg Config) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build attention service: %w", err)
 	}
+	var projectProvisioner *projectHooksProvisioner
+	if !cfg.DisableLocalHookProvisioning {
+		projectProvisioner = newProjectHooksProvisionerWithBaseURL(application.AuthSvc, cfg.externalBaseURL(), logger.With("service", "hooks-provision"))
+	}
 	reg := rpc.NewRegistry()
 	for _, register := range []func() error{
 		func() error { return rpc.RegisterAuth(reg, application.AuthSvc) },
@@ -88,11 +93,23 @@ func New(cfg Config) (*Daemon, error) {
 		func() error { return rpc.RegisterMission(reg, application.MissionSvc) },
 		func() error {
 			var postCreate rpc.PostProjectCreate
-			if !cfg.DisableLocalHookProvisioning {
-				provisioner := newProjectHooksProvisionerWithBaseURL(application.AuthSvc, cfg.externalBaseURL(), logger.With("service", "hooks-provision"))
-				postCreate = provisioner.ProvisionHooks
+			var configureClaudeMCP rpc.ConfigureProjectClaudeMCP
+			if projectProvisioner != nil {
+				postCreate = projectProvisioner.ProvisionHooks
+				configureClaudeMCP = func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
+					result, err := projectProvisioner.ProvisionClaudeMCP(ctx, userID, projectTitle, root)
+					if err != nil {
+						return projectrpc.ProjectClaudeMCPConfigureResult{}, err
+					}
+					return projectrpc.ProjectClaudeMCPConfigureResult{
+						Installed:  result.Installed,
+						Path:       result.Path,
+						ServerName: result.ServerName,
+						URL:        result.URL,
+					}, nil
+				}
 			}
-			return rpc.RegisterProject(reg, application.ProjectSvc, postCreate)
+			return rpc.RegisterProject(reg, application.ProjectSvc, postCreate, configureClaudeMCP)
 		},
 		func() error { return rpc.RegisterFile(reg, application.FileSvc) },
 		func() error { return rpc.RegisterLocation(reg, application.LocationSvc) },
@@ -121,17 +138,18 @@ func New(cfg Config) (*Daemon, error) {
 		mcpTokens: tokenStore,
 		mcp:       mcpServer,
 		mcpResolver: newMCPSessionResolver(mcpSessionResolverConfig{
-			tokenStore:      tokenStore,
-			auth:            application.AuthSvc,
-			users:           application.UserSvc,
-			projects:        application.ProjectSvc,
-			decisions:       application.DecisionSvc,
-			graph:           application.GraphSvc,
-			credentials:     application.CredentialSvc,
-			tasks:           application.TaskSvc,
-			files:           application.FileSvc,
-			missions:        application.MissionSvc,
-			externalBaseURL: cfg.externalBaseURL(),
+			tokenStore:         tokenStore,
+			auth:               application.AuthSvc,
+			users:              application.UserSvc,
+			projects:           application.ProjectSvc,
+			decisions:          application.DecisionSvc,
+			graph:              application.GraphSvc,
+			credentials:        application.CredentialSvc,
+			tasks:              application.TaskSvc,
+			files:              application.FileSvc,
+			missions:           application.MissionSvc,
+			projectProvisioner: projectProvisioner,
+			externalBaseURL:    cfg.externalBaseURL(),
 		}),
 		events:    newEventsHub(application.EventBus, logger.With("service", "events")),
 		attention: attentionSvc,

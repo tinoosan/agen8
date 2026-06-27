@@ -15,9 +15,9 @@ import (
 )
 
 const Name = "project"
-const Description = "[COORDINATION] Project gateway for workspace registration and member roster CRUD. Call action=register first when the MCP session is not yet bound to a project/member."
+const Description = "[COORDINATION] Project gateway for workspace registration, Claude MCP setup, and member roster CRUD. Call action=register first when the MCP session is not yet bound to a project/member."
 
-var allActions = []string{"register", "member_create", "member_get", "member_list", "member_update", "member_remove"}
+var allActions = []string{"register", "configure_claude_mcp", "member_create", "member_get", "member_list", "member_update", "member_remove"}
 
 func BootstrapActionAllowed(action string) bool {
 	return strings.TrimSpace(strings.ToLower(action)) == "register"
@@ -36,6 +36,23 @@ type MemberRegistrar interface {
 
 type ContextRegistrar interface {
 	RegisterMCPContext(ctx context.Context, req RegisterContextRequest) (RegisterContextResult, error)
+}
+
+type ClaudeMCPConfigurator interface {
+	ConfigureClaudeMCP(ctx context.Context, req ConfigureClaudeMCPRequest) (ConfigureClaudeMCPResult, error)
+}
+
+type ConfigureClaudeMCPRequest struct {
+	UserID    string
+	ProjectID string
+}
+
+type ConfigureClaudeMCPResult struct {
+	ProjectID  string
+	Installed  bool
+	Path       string
+	ServerName string
+	URL        string
 }
 
 type RegisterContextRequest struct {
@@ -78,6 +95,7 @@ type CallContext struct {
 	Members          MemberService
 	Registrar        MemberRegistrar
 	ContextRegistrar ContextRegistrar
+	ClaudeMCP        ClaudeMCPConfigurator
 	MCPToken         string
 	UserID           string
 	HarnessKind      string
@@ -121,12 +139,14 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		return Result{}, err
 	}
 	projectID := strings.TrimSpace(actor.ProjectID)
-	if input.Action == "member_create" || input.Action == "member_update" || input.Action == "member_remove" {
+	if input.Action == "configure_claude_mcp" || input.Action == "member_create" || input.Action == "member_update" || input.Action == "member_remove" {
 		if err := requireCoordinatorActor(actor, input.Action); err != nil {
 			return Result{}, err
 		}
 	}
 	switch input.Action {
+	case "configure_claude_mcp":
+		return h.configureClaudeMCP(ctx, call, projectID, actor.UserID)
 	case "member_list":
 		return h.memberList(ctx, call, projectID)
 	case "member_get":
@@ -140,6 +160,38 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 	default:
 		return Result{}, fmt.Errorf("project: unsupported action %q", input.Action)
 	}
+}
+
+func (h Handler) configureClaudeMCP(ctx context.Context, call CallContext, projectID, userID string) (Result, error) {
+	if call.ClaudeMCP == nil {
+		return Result{}, fmt.Errorf("project: claude mcp configurator is not configured")
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return Result{}, fmt.Errorf("project: session project id is required for action=configure_claude_mcp")
+	}
+	result, err := call.ClaudeMCP.ConfigureClaudeMCP(ctx, ConfigureClaudeMCPRequest{
+		UserID:    strings.TrimSpace(userID),
+		ProjectID: projectID,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("project: configure claude mcp: %w", err)
+	}
+	structured := map[string]any{
+		"ok":         true,
+		"tool":       Name,
+		"action":     "configure_claude_mcp",
+		"projectId":  strings.TrimSpace(result.ProjectID),
+		"installed":  result.Installed,
+		"path":       strings.TrimSpace(result.Path),
+		"serverName": strings.TrimSpace(result.ServerName),
+		"url":        strings.TrimSpace(result.URL),
+	}
+	text, err := encodeText(structured)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Text: text, Structured: structured}, nil
 }
 
 func (h Handler) resolveActor(ctx context.Context, call CallContext) (member.Record, context.Context, error) {
@@ -495,12 +547,13 @@ func validateActionFields(args json.RawMessage) error {
 }
 
 var fieldsByAction = map[string]map[string]struct{}{
-	"register":      fieldSet("action", "project_id", "project_root", "location_id", "display_name", "session_id", "thread_id", "native_session_ref"),
-	"member_create": fieldSet("action", "display_name"),
-	"member_get":    fieldSet("action", "member_id"),
-	"member_list":   fieldSet("action"),
-	"member_update": fieldSet("action", "member_id", "display_name"),
-	"member_remove": fieldSet("action", "member_id"),
+	"register":             fieldSet("action", "project_id", "project_root", "location_id", "display_name", "session_id", "thread_id", "native_session_ref"),
+	"configure_claude_mcp": fieldSet("action"),
+	"member_create":        fieldSet("action", "display_name"),
+	"member_get":           fieldSet("action", "member_id"),
+	"member_list":          fieldSet("action"),
+	"member_update":        fieldSet("action", "member_id", "display_name"),
+	"member_remove":        fieldSet("action", "member_id"),
 }
 
 func fieldSet(fields ...string) map[string]struct{} {

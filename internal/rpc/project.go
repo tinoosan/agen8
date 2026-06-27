@@ -11,13 +11,14 @@ import (
 )
 
 const (
-	MethodProjectGet     = "project.get"
-	MethodProjectCreate  = "project.create"
-	MethodProjectSave    = "project.save"
-	MethodProjectUpdate  = "project.update"
-	MethodProjectArchive = "project.archive"
-	MethodProjectDelete  = "project.delete"
-	MethodProjectList    = "project.list"
+	MethodProjectGet                = "project.get"
+	MethodProjectCreate             = "project.create"
+	MethodProjectClaudeMCPConfigure = "project.claudeMCP.configure"
+	MethodProjectSave               = "project.save"
+	MethodProjectUpdate             = "project.update"
+	MethodProjectArchive            = "project.archive"
+	MethodProjectDelete             = "project.delete"
+	MethodProjectList               = "project.list"
 
 	MethodProjectLinkTokenCreate = "project.linkToken.create"
 	MethodProjectLinkTokenList   = "project.linkToken.list"
@@ -51,7 +52,10 @@ func withProjectCaller[Params any, Result any](fn func(context.Context, Params) 
 // dependencies. Returns whether hooks were installed; must never error.
 type PostProjectCreate func(ctx context.Context, userID, projectTitle, root string) bool
 
-func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate PostProjectCreate) error {
+// ConfigureProjectClaudeMCP provisions/repairs a project's Claude MCP config.
+type ConfigureProjectClaudeMCP func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error)
+
+func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate PostProjectCreate, configureClaudeMCP ConfigureProjectClaudeMCP) error {
 	if projectSvc == nil {
 		return fmt.Errorf("project service is required")
 	}
@@ -73,6 +77,27 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 				installed := postCreate(ctx, identity.UserID, res.Project.Title, res.Project.Root)
 				res.HooksInstalled = &installed
 				return res, nil
+			}))
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodProjectClaudeMCPConfigure, false, withProjectCaller(func(ctx context.Context, p projectrpc.ProjectClaudeMCPConfigureParams) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
+				if configureClaudeMCP == nil {
+					return projectrpc.ProjectClaudeMCPConfigureResult{}, fmt.Errorf("claude mcp provisioner is not configured")
+				}
+				loaded, err := handler.ProjectGet(ctx, projectrpc.ProjectGetParams{ProjectID: p.ProjectID})
+				if err != nil {
+					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
+				}
+				identity, err := RequireIdentity(ctx)
+				if err != nil {
+					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
+				}
+				result, err := configureClaudeMCP(ctx, identity.UserID, loaded.Project.Title, loaded.Project.Root)
+				if err != nil {
+					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
+				}
+				result.ProjectID = loaded.Project.ID
+				return result, nil
 			}))
 		},
 		func() error {

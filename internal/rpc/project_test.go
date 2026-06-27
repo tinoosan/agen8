@@ -18,7 +18,7 @@ import (
 func TestRegisterProjectDispatchCreateAndList(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc, nil); err != nil {
+	if err := RegisterProject(reg, svc, nil, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -73,10 +73,78 @@ func TestRegisterProjectDispatchCreateAndList(t *testing.T) {
 	}
 }
 
+func TestRegisterProjectConfigureClaudeMCP(t *testing.T) {
+	svc := newRPCProjectService(t)
+	reg := NewRegistry()
+	var gotUserID, gotTitle, gotRoot string
+	configure := func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
+		gotUserID, gotTitle, gotRoot = userID, projectTitle, root
+		return projectrpc.ProjectClaudeMCPConfigureResult{
+			Installed:  true,
+			Path:       filepath.Join(root, ".claude", "settings.local.json"),
+			ServerName: "agen8",
+			URL:        "http://127.0.0.1:7777/mcp",
+		}, nil
+	}
+	if err := RegisterProject(reg, svc, nil, configure); err != nil {
+		t.Fatalf("RegisterProject returned error: %v", err)
+	}
+	server, err := NewServer(reg)
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	ctx := ContextWithIdentity(context.Background(), Identity{UserID: "user-1"})
+
+	raw, err := server.Handle(ctx, []byte(`{
+		"jsonrpc": "2.0",
+		"id": "1",
+		"method": "project.create",
+		"params": {
+			"root": "/tmp/project-1",
+			"title": "Project One"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("Handle project.create returned error: %v", err)
+	}
+	resp := decodeRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("project.create response error=%+v", resp.Error)
+	}
+	var created projectrpc.ProjectCreateResult
+	if err := json.Unmarshal(resp.Result, &created); err != nil {
+		t.Fatalf("unmarshal project.create result: %v", err)
+	}
+
+	raw, err = server.Handle(ctx, []byte(fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": "2",
+		"method": "project.claudeMCP.configure",
+		"params": { "projectId": %q }
+	}`, created.Project.ID)))
+	if err != nil {
+		t.Fatalf("Handle project.claudeMCP.configure returned error: %v", err)
+	}
+	resp = decodeRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("project.claudeMCP.configure response error=%+v", resp.Error)
+	}
+	var configured projectrpc.ProjectClaudeMCPConfigureResult
+	if err := json.Unmarshal(resp.Result, &configured); err != nil {
+		t.Fatalf("unmarshal configure result: %v", err)
+	}
+	if gotUserID != "user-1" || gotTitle != "Project One" || gotRoot != "/tmp/project-1" {
+		t.Fatalf("callback got user=%q title=%q root=%q", gotUserID, gotTitle, gotRoot)
+	}
+	if configured.ProjectID != created.Project.ID || !configured.Installed || configured.ServerName != "agen8" {
+		t.Fatalf("configured=%+v", configured)
+	}
+}
+
 func TestRegisterProjectMapsInvalidParams(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc, nil); err != nil {
+	if err := RegisterProject(reg, svc, nil, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -103,7 +171,7 @@ func TestRegisterProjectMapsInvalidParams(t *testing.T) {
 func TestRegisterProjectArchiveThenDelete(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc, nil); err != nil {
+	if err := RegisterProject(reg, svc, nil, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -212,7 +280,7 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 	}
 
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc, nil); err != nil {
+	if err := RegisterProject(reg, svc, nil, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -315,7 +383,7 @@ func TestRegisterProjectMemberRPCWorksAfterMCPRehome(t *testing.T) {
 func TestRegisterProjectDispatchLinkTokenCreate(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc, nil); err != nil {
+	if err := RegisterProject(reg, svc, nil, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)
@@ -373,7 +441,7 @@ func TestRegisterProjectDispatchLinkTokenCreate(t *testing.T) {
 func TestRegisterProjectLinkTokenCreateRequiresIdentity(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()
-	if err := RegisterProject(reg, svc, nil); err != nil {
+	if err := RegisterProject(reg, svc, nil, nil); err != nil {
 		t.Fatalf("RegisterProject returned error: %v", err)
 	}
 	server, err := NewServer(reg)

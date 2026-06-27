@@ -34,6 +34,7 @@ type Session struct {
 	ContextRegistrar   projecttool.ContextRegistrar
 	MemberDirectory    projecttool.MemberService
 	MemberRegistrar    projecttool.MemberRegistrar
+	ClaudeMCP          projecttool.ClaudeMCPConfigurator
 	TaskMembers        tasktool.MemberDirectory
 	DecisionService    decisiontool.Service
 	GraphService       graphtool.Service
@@ -637,6 +638,7 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 			Members:          session.MemberDirectory,
 			Registrar:        session.MemberRegistrar,
 			ContextRegistrar: session.ContextRegistrar,
+			ClaudeMCP:        session.ClaudeMCP,
 			MCPToken:         strings.TrimSpace(session.Token),
 			UserID:           strings.TrimSpace(session.UserID),
 			HarnessKind:      strings.TrimSpace(session.HarnessKind),

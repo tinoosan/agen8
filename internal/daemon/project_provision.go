@@ -27,6 +27,13 @@ type projectHooksProvisioner struct {
 	logger  *slog.Logger
 }
 
+type projectClaudeMCPProvisionResult struct {
+	Installed  bool
+	Path       string
+	ServerName string
+	URL        string
+}
+
 func newProjectHooksProvisionerWithBaseURL(auth *authapp.Service, baseURL string, logger *slog.Logger) *projectHooksProvisioner {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
@@ -84,6 +91,51 @@ func (p *projectHooksProvisioner) ProvisionHooks(ctx context.Context, userID, pr
 		ok = false
 	}
 	return ok
+}
+
+// ProvisionClaudeMCP mints a fresh project-scoped key and upserts Claude Code's
+// project-local Agen8 MCP server entry. Unlike project creation hooks, this is
+// caller-visible: repair failures are returned so the caller can act.
+func (p *projectHooksProvisioner) ProvisionClaudeMCP(ctx context.Context, userID, projectTitle, root string) (projectClaudeMCPProvisionResult, error) {
+	if p == nil || p.auth == nil {
+		return projectClaudeMCPProvisionResult{}, fmt.Errorf("claude mcp provisioner is not configured")
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return projectClaudeMCPProvisionResult{}, fmt.Errorf("project root is required")
+	}
+	uid, err := userdomain.NewID(userID)
+	if err != nil {
+		p.logger.Warn("claude mcp provision: invalid user id", "error", err)
+		return projectClaudeMCPProvisionResult{}, err
+	}
+	name := strings.TrimSpace(projectTitle)
+	if name == "" {
+		name = root
+	}
+	key, err := p.auth.CreateAPIKey(ctx, authapp.CreateAPIKeyParams{
+		UserID: uid,
+		Name:   "claude mcp: " + name,
+	})
+	if err != nil {
+		p.logger.Warn("claude mcp provision: mint api key", "error", err)
+		return projectClaudeMCPProvisionResult{}, err
+	}
+	result, err := hookinstaller.InstallClaudeMCP(hookinstaller.MCPOptions{
+		BaseURL:    p.baseURL,
+		Token:      key.Token,
+		ProjectDir: root,
+	})
+	if err != nil {
+		p.logger.Warn("claude mcp provision: install", "root", root, "error", err)
+		return projectClaudeMCPProvisionResult{}, err
+	}
+	return projectClaudeMCPProvisionResult{
+		Installed:  true,
+		Path:       result.Path,
+		ServerName: result.ServerName,
+		URL:        result.URL,
+	}, nil
 }
 
 // daemonBaseURL turns the daemon's listen address into the origin hooks should

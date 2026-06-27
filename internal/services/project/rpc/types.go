@@ -66,6 +66,18 @@ type ProjectCreateResult struct {
 	HooksInstalled *bool `json:"hooksInstalled,omitempty"`
 }
 
+type ProjectClaudeMCPConfigureParams struct {
+	ProjectID string `json:"projectId"`
+}
+
+type ProjectClaudeMCPConfigureResult struct {
+	ProjectID  string `json:"projectId"`
+	Installed  bool   `json:"installed"`
+	Path       string `json:"path,omitempty"`
+	ServerName string `json:"serverName,omitempty"`
+	URL        string `json:"url,omitempty"`
+}
+
 type ProjectSaveParams struct {
 	ProjectID  string `json:"projectId"`
 	LocationID string `json:"locationId,omitempty"`

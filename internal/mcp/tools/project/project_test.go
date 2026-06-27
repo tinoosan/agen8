@@ -89,6 +89,23 @@ func (s stubContextRegistrar) RegisterMCPContext(ctx context.Context, req Regist
 	}, nil
 }
 
+type stubClaudeMCPConfigurator struct {
+	configureFn func(context.Context, ConfigureClaudeMCPRequest) (ConfigureClaudeMCPResult, error)
+}
+
+func (s stubClaudeMCPConfigurator) ConfigureClaudeMCP(ctx context.Context, req ConfigureClaudeMCPRequest) (ConfigureClaudeMCPResult, error) {
+	if s.configureFn != nil {
+		return s.configureFn(ctx, req)
+	}
+	return ConfigureClaudeMCPResult{
+		ProjectID:  req.ProjectID,
+		Installed:  true,
+		Path:       "/tmp/project/.claude/settings.local.json",
+		ServerName: "agen8",
+		URL:        "http://127.0.0.1:7777/mcp",
+	}, nil
+}
+
 func TestDecodeRejectsMissingAction(t *testing.T) {
 	_, err := decode(json.RawMessage(`{"action":""}`))
 	if err == nil || !strings.Contains(err.Error(), "action is required") {
@@ -120,6 +137,60 @@ func TestDecodeRejectsFieldForWrongAction(t *testing.T) {
 func TestDecodeCreateMemberRequiresDisplayName(t *testing.T) {
 	_, err := decode(json.RawMessage(`{"action":"member_create"}`))
 	if err == nil || !strings.Contains(err.Error(), "display_name is required") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestConfigureClaudeMCPUsesSessionProject(t *testing.T) {
+	handler := NewHandler()
+	var gotReq ConfigureClaudeMCPRequest
+	result, err := handler.Handle(context.Background(), CallContext{
+		Members: stubMemberDirectory{
+			getFn: func(ctx context.Context, id member.ID) (member.Record, error) {
+				return member.Record{
+					ID:             id,
+					UserID:         "user-1",
+					ProjectID:      "project-1",
+					MemberType:     member.TypeCoordinator,
+					LifecycleState: member.LifecycleActive,
+				}, nil
+			},
+		},
+		ClaudeMCP: stubClaudeMCPConfigurator{
+			configureFn: func(ctx context.Context, req ConfigureClaudeMCPRequest) (ConfigureClaudeMCPResult, error) {
+				gotReq = req
+				return ConfigureClaudeMCPResult{
+					ProjectID:  req.ProjectID,
+					Installed:  true,
+					Path:       "/tmp/project/.claude/settings.local.json",
+					ServerName: "agen8",
+					URL:        "http://127.0.0.1:7777/mcp",
+				}, nil
+			},
+		},
+		UserID:        "user-1",
+		ProjectID:     "project-1",
+		ActorMemberID: "member-1",
+	}, json.RawMessage(`{"action":"configure_claude_mcp"}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if gotReq.UserID != "user-1" || gotReq.ProjectID != "project-1" {
+		t.Fatalf("request = %+v", gotReq)
+	}
+	structured := result.Structured.(map[string]any)
+	if structured["action"] != "configure_claude_mcp" || structured["installed"] != true || structured["serverName"] != "agen8" {
+		t.Fatalf("structured = %+v", structured)
+	}
+}
+
+func TestConfigureClaudeMCPRequiresActor(t *testing.T) {
+	_, err := NewHandler().Handle(context.Background(), CallContext{
+		Members:   stubMemberDirectory{},
+		ClaudeMCP: stubClaudeMCPConfigurator{},
+		ProjectID: "project-1",
+	}, json.RawMessage(`{"action":"configure_claude_mcp"}`))
+	if err == nil || !strings.Contains(err.Error(), "actor member id is required") {
 		t.Fatalf("unexpected err=%v", err)
 	}
 }

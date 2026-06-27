@@ -153,6 +153,104 @@ func TestInstallClaudeIsIdempotentAndPreservesUserHooks(t *testing.T) {
 	}
 }
 
+func TestInstallClaudeMCPMergesServerAndPreservesSettings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude", "settings.local.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{
+		"permissions": {"allow": ["Bash(go test:*)"]},
+		"hooks": {
+			"Stop": [{"hooks": [{"type": "command", "command": "say done"}]}]
+		},
+		"mcpServers": {
+			"other": {"type": "http", "url": "https://example.com/mcp"},
+			"agen8": {"type": "http", "url": "http://old/mcp", "headers": {"Authorization": "Bearer old"}}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := InstallClaudeMCP(MCPOptions{
+		BaseURL:    "http://127.0.0.1:7777/",
+		Token:      "ak_new",
+		ProjectDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("InstallClaudeMCP: %v", err)
+	}
+	if result.Path != path || result.ServerName != "agen8" || result.URL != "http://127.0.0.1:7777/mcp" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+
+	config := readJSON(t, path)
+	if _, ok := config["permissions"]; !ok {
+		t.Fatal("unrelated settings were dropped")
+	}
+	if len(eventGroups(t, config, "Stop")) != 1 {
+		t.Fatal("hooks were not preserved")
+	}
+	servers := config["mcpServers"].(map[string]any)
+	if _, ok := servers["other"]; !ok {
+		t.Fatal("unrelated MCP server was dropped")
+	}
+	agen8 := servers["agen8"].(map[string]any)
+	if agen8["type"] != "http" || agen8["url"] != "http://127.0.0.1:7777/mcp" {
+		t.Fatalf("unexpected agen8 server: %+v", agen8)
+	}
+	headers := agen8["headers"].(map[string]any)
+	if headers["Authorization"] != "Bearer ak_new" {
+		t.Fatalf("Authorization header = %v", headers["Authorization"])
+	}
+
+	if _, err := InstallClaudeMCP(MCPOptions{BaseURL: "http://127.0.0.1:7777", Token: "ak_newer", ProjectDir: dir}); err != nil {
+		t.Fatalf("second InstallClaudeMCP: %v", err)
+	}
+	config = readJSON(t, path)
+	servers = config["mcpServers"].(map[string]any)
+	if len(servers) != 2 {
+		t.Fatalf("mcpServers len = %d, want 2", len(servers))
+	}
+	headers = servers["agen8"].(map[string]any)["headers"].(map[string]any)
+	if headers["Authorization"] != "Bearer ak_newer" {
+		t.Fatalf("token not rotated: %v", headers["Authorization"])
+	}
+}
+
+func TestInstallClaudeMCPRejectsNonLocalRoot(t *testing.T) {
+	_, err := InstallClaudeMCP(MCPOptions{
+		BaseURL:    "http://127.0.0.1:7777",
+		Token:      "ak_test",
+		ProjectDir: "relative/path",
+	})
+	if err == nil || !strings.Contains(err.Error(), "absolute local path") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestInstallClaudeMCPReportsUnwritableRoot(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(claudeDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(claudeDir, 0o700)
+
+	_, err := InstallClaudeMCP(MCPOptions{
+		BaseURL:    "http://127.0.0.1:7777",
+		Token:      "ak_test",
+		ProjectDir: dir,
+	})
+	if err == nil || !strings.Contains(err.Error(), "write") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
 func TestInstallCodexWritesUserLevelHooks(t *testing.T) {
 	home := t.TempDir()
 	result, err := Install(Options{

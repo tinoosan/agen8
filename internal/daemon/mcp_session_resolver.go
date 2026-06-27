@@ -23,46 +23,49 @@ import (
 )
 
 type mcpSessionResolverConfig struct {
-	tokenStore      *mcp.TokenStore
-	auth            *authapp.Service
-	users           *userapp.Service
-	projects        *projectapp.Service
-	decisions       *decisionapp.Service
-	graph           *graphapp.Service
-	credentials     *credentialapp.Service
-	tasks           *taskapp.Service
-	files           *fileapp.Service
-	missions        *missionapp.Service
-	externalBaseURL string
+	tokenStore         *mcp.TokenStore
+	auth               *authapp.Service
+	users              *userapp.Service
+	projects           *projectapp.Service
+	decisions          *decisionapp.Service
+	graph              *graphapp.Service
+	credentials        *credentialapp.Service
+	tasks              *taskapp.Service
+	files              *fileapp.Service
+	missions           *missionapp.Service
+	projectProvisioner *projectHooksProvisioner
+	externalBaseURL    string
 }
 
 type mcpSessionResolver struct {
-	tokenStore      *mcp.TokenStore
-	auth            *authapp.Service
-	users           *userapp.Service
-	projects        *projectapp.Service
-	decisions       *decisionapp.Service
-	graph           *graphapp.Service
-	credentials     *credentialapp.Service
-	tasks           *taskapp.Service
-	files           *fileapp.Service
-	missions        *missionapp.Service
-	externalBaseURL string
+	tokenStore         *mcp.TokenStore
+	auth               *authapp.Service
+	users              *userapp.Service
+	projects           *projectapp.Service
+	decisions          *decisionapp.Service
+	graph              *graphapp.Service
+	credentials        *credentialapp.Service
+	tasks              *taskapp.Service
+	files              *fileapp.Service
+	missions           *missionapp.Service
+	projectProvisioner *projectHooksProvisioner
+	externalBaseURL    string
 }
 
 func newMCPSessionResolver(cfg mcpSessionResolverConfig) *mcpSessionResolver {
 	return &mcpSessionResolver{
-		tokenStore:      cfg.tokenStore,
-		auth:            cfg.auth,
-		users:           cfg.users,
-		projects:        cfg.projects,
-		decisions:       cfg.decisions,
-		graph:           cfg.graph,
-		credentials:     cfg.credentials,
-		tasks:           cfg.tasks,
-		files:           cfg.files,
-		missions:        cfg.missions,
-		externalBaseURL: cfg.externalBaseURL,
+		tokenStore:         cfg.tokenStore,
+		auth:               cfg.auth,
+		users:              cfg.users,
+		projects:           cfg.projects,
+		decisions:          cfg.decisions,
+		graph:              cfg.graph,
+		credentials:        cfg.credentials,
+		tasks:              cfg.tasks,
+		files:              cfg.files,
+		missions:           cfg.missions,
+		projectProvisioner: cfg.projectProvisioner,
+		externalBaseURL:    cfg.externalBaseURL,
 	}
 }
 
@@ -145,6 +148,7 @@ func (r *mcpSessionResolver) baseSession(token, userID, harnessKind string) mcp.
 		},
 		MemberDirectory: r.projects,
 		MemberRegistrar: r.projects,
+		ClaudeMCP:       projectClaudeMCPConfigurator{projects: r.projects, provisioner: r.projectProvisioner},
 		TaskMembers:     r.projects,
 		DecisionService: r.decisions,
 		GraphService:    r.graph,
@@ -157,6 +161,39 @@ func (r *mcpSessionResolver) baseSession(token, userID, harnessKind string) mcp.
 		MissionKRs:      r.missions,
 		MissionProgress: r.missions,
 	}
+}
+
+type projectClaudeMCPConfigurator struct {
+	projects    *projectapp.Service
+	provisioner *projectHooksProvisioner
+}
+
+func (c projectClaudeMCPConfigurator) ConfigureClaudeMCP(ctx context.Context, req projecttool.ConfigureClaudeMCPRequest) (projecttool.ConfigureClaudeMCPResult, error) {
+	if c.projects == nil {
+		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("project service is not configured")
+	}
+	if c.provisioner == nil {
+		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("claude mcp provisioner is not configured")
+	}
+	projectID := strings.TrimSpace(req.ProjectID)
+	if projectID == "" {
+		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("project id is required")
+	}
+	project, err := c.projects.GetProject(ctx, types.ProjectID(projectID))
+	if err != nil {
+		return projecttool.ConfigureClaudeMCPResult{}, err
+	}
+	result, err := c.provisioner.ProvisionClaudeMCP(ctx, strings.TrimSpace(req.UserID), project.Title(), c.projects.ResolveRoot(ctx, project))
+	if err != nil {
+		return projecttool.ConfigureClaudeMCPResult{}, err
+	}
+	return projecttool.ConfigureClaudeMCPResult{
+		ProjectID:  projectID,
+		Installed:  result.Installed,
+		Path:       result.Path,
+		ServerName: result.ServerName,
+		URL:        result.URL,
+	}, nil
 }
 
 func sessionRefs(header http.Header, body []byte) (string, string) {
