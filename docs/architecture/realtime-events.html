@@ -138,8 +138,8 @@
       <tr><td>In-process bus (publish / subscribe / typed events)</td><td>Live</td><td><code>internal/eventbus/bus.go</code>, <code>events.go</code></td></tr>
       <tr><td>Mission / KR publishers onto the bus</td><td>Live</td><td><code>internal/services/mission/app</code>, app-level publishers</td></tr>
       <tr><td>Browser <code>EventSource('/events')</code> client, dispatch, reconnect</td><td>Live</td><td><code>web/src/lib/rpc.ts</code></td></tr>
-      <tr><td>A real consumer (board refetch on <code>event.append</code>)</td><td>Live</td><td><code>web/src/hooks/useProjectTasks.ts</code> (<code>useProjectTasksSSE</code>)</td></tr>
-      <tr><td>Pin consumer (live cross-device pin sync)</td><td>Live</td><td><code>web/src/hooks/usePins.ts</code> — invalidates on <code>pin.*</code>, 60s poll backstop</td></tr>
+      <tr><td>Central React Query invalidation consumer</td><td>Live</td><td><code>web/src/hooks/useRealtimeSync.ts</code> (<code>useRealtimeInvalidation</code>)</td></tr>
+      <tr><td>Pin cache freshness</td><td>Live</td><td><code>web/src/hooks/useRealtimeSync.ts</code> invalidates <code>qk.pinsAll</code> on <code>pin.*</code>; <code>web/src/hooks/usePins.ts</code> keeps a 60s poll backstop</td></tr>
       <tr><td><code>GET /events</code> subscribes to the bus and pushes frames</td><td>Live</td><td><code>internal/daemon/daemon.go</code> (<code>handleEvents</code>)</td></tr>
       <tr><td>Per-project fan-out hub (one subscription &rarr; N clients)</td><td>Live</td><td><code>internal/daemon/events_hub.go</code></td></tr>
       <tr><td>Stream authentication for <code>EventSource</code></td><td>Live</td><td><code>internal/daemon/daemon.go</code> + cookie write path in <code>web/src/lib/rpc.ts</code></td></tr>
@@ -159,9 +159,9 @@
   "event": { "type": "pin.added", "projectId": "...", "nodeRef": "..." }
 }</code></pre>
 
-  <p>The house convention is a <em>single</em> notification method, not one method per domain. The live task consumer subscribes to <code>event.append</code> and then filters on the event's <code>type</code> prefix:</p>
+  <p>The house convention is a <em>single</em> notification method, not one method per domain. The live React Query invalidation consumer subscribes to <code>event.append</code> and then filters on the event's <code>type</code> prefix:</p>
 
-<pre><code class="lang-ts"><span class="tok-comment">// useProjectTasks.ts — the established pattern</span>
+<pre><code class="lang-ts"><span class="tok-comment">// useRealtimeSync.ts — central invalidation pattern</span>
 onNotification(<span class="tok-string">'event.append'</span>, (notif) =&gt; {
   <span class="tok-kw">const</span> type = (notif?.event <span class="tok-kw">as</span> any)?.type ?? <span class="tok-string">''</span>
   <span class="tok-kw">if</span> (type.startsWith(<span class="tok-string">'task.'</span>)) {
@@ -318,8 +318,8 @@ web/
   src/lib/
     rpc.ts                 # EventSource client, onNotification dispatch, 2s reconnect; mirrors the session token into a cookie for /events auth (live)
   src/hooks/
-    useProjectTasks.ts     # useProjectTasksSSE — reference consumer (live)
-    usePins.ts             # subscribes to event.append, invalidates on pin.* events; 60s poll backstop (live)</pre></div>
+    useRealtimeSync.ts     # useRealtimeInvalidation — central event.append -> query invalidation consumer (live)
+    usePins.ts             # server-backed pin hook with 60s poll backstop (live)</pre></div>
 
   <h2 id="invariants">10. Invariants</h2>
 

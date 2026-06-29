@@ -103,7 +103,7 @@ err = repo.<span class="tok-fn">UpdateTask</span>(ctx, next)                    
 
   <p>The JSON-RPC task handler is a thin CRUD adapter over the task service. It translates request DTOs into typed service calls, validates transport payloads such as UUID strings, and returns <code>TaskView</code>. Repository access stays inside the service boundary, and agent lifecycle actions stay on the MCP task tool.</p>
 
-  <p>The RPC registry binds <code>task.create</code>, <code>task.get</code>, <code>task.list</code>, and <code>task.update</code> through <code>internal/app/rpchandlers/task.go</code>. The registry receives the process-owned <code>*taskapp.Service</code> from the application composition root; it does not construct a task service and it does not receive a repository.</p>
+  <p>The RPC registry binds <code>task.create</code>, <code>task.get</code>, <code>task.list</code>, and <code>task.update</code> through <code>internal/rpc/task.go</code>. The registry receives the process-owned <code>*taskapp.Service</code> from the application composition root; it does not construct a task service and it does not receive a repository.</p>
 
 <pre><code class="lang-go"><span class="tok-kw">type</span> <span class="tok-type">Handler</span> <span class="tok-kw">struct</span> {
     <span class="tok-field">svc</span> *<span class="tok-pkg">taskapp</span>.<span class="tok-type">Service</span>
