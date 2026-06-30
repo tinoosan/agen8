@@ -27,7 +27,7 @@ Fast path for a local install:
 
 ```sh
 make build
-./bin/agen8
+./bin/agen8 daemon start
 ```
 
 Open the setup URL printed by the daemon, create the first account, save the
@@ -57,12 +57,13 @@ the binary at `./bin/agen8`. (Check the version any time with
 ### 3. Run
 
 ```sh
-./bin/agen8
+./bin/agen8 daemon start
 ```
 
-That starts the daemon (equivalent to `./bin/agen8 daemon start`). By
-default it listens on `127.0.0.1:7777` and stores its data in `~/.agen8`.
-Override either if you need to:
+That starts the daemon. Bare `./bin/agen8` prints command help instead of
+running a daemon, so startup is always explicit. By default it listens on
+`127.0.0.1:7777` and stores its data in `~/.agen8`. Override either if you
+need to:
 
 ```sh
 ./bin/agen8 daemon start --http-addr 127.0.0.1:8080 --data-dir /path/to/data
