@@ -27,7 +27,7 @@
       <li><a href="#cache-semantics">Cache semantics</a></li>
       <li><a href="#mission-list-surface">Mission list surface behavior</a></li>
       <li><a href="#palette-search">Search ranking behavior</a></li>
-      <li><a href="#strategy-map-search">Strategy Map mobile search behavior</a></li>
+      <li><a href="#strategy-map-search">Node search behavior</a></li>
       <li><a href="#strategy-map-interaction">Strategy Map interaction model</a></li>
       <li><a href="#mission-lifecycle">Mission lifecycle and delete semantics</a></li>
       <li><a href="#backend-impact">Backend impact</a></li>
@@ -79,19 +79,22 @@
     <li><a href="../../internal/services/graph/app/search.go">internal/services/graph/app/search.go</a></li>
   </ul>
 
-  <h2 id="strategy-map-search">5. Strategy Map search behavior (desktop + mobile)</h2>
-  <p>Context-map search has two entry points that must stay aligned:</p>
+  <h2 id="strategy-map-search">5. Node search behavior (desktop + mobile)</h2>
+  <p>Node search uses the existing <code>StrategyMapSearch</code> dialog over the strategy graph's tasks, missions, KRs, and decisions. It now has local mounts on the dashboard and context map, plus a global wrapper for the rest of the app.</p>
   <ul>
-    <li><strong>Keyboard</strong>: <code>/</code> focuses/open the node-search dialog inside <code>StrategyMapSearch</code>.</li>
-    <li><strong>Mobile top bar</strong>: tapping the app top-bar search icon while <code>activeView === 'strategy'</code> opens the same strategy-map node-search dialog via global store state.</li>
-    <li>For non-map and non-dashboard views, the top-bar search icon is intentionally hidden and does not open any alternate search surface.</li>
+    <li><strong>Local keyboard</strong>: on the context map, <code>/</code> opens the node-search dialog inside <code>StrategyMapSearch</code>.</li>
+    <li><strong>Global keyboard</strong>: <code>Cmd/Ctrl+K</code>, <code>Cmd/Ctrl+/</code>, and bare <code>/</code> outside text fields open the shared node-search dialog from pages without their own local mount.</li>
+    <li><strong>Mobile top bar</strong>: tapping the app top-bar search icon while <code>activeView === 'strategy'</code> or <code>activeView === 'dashboard'</code> opens the same node-search dialog via global store state.</li>
+    <li>For other views, the top-bar search icon is intentionally hidden, but keyboard search still works through <code>GlobalNodeSearch</code> and deep-links the selected node to the context map.</li>
     <li>Open state is stored in <code>strategySearchOpen</code> so it can be controlled from components outside the page tree.</li>
+    <li>The dashboard and map pages keep their local dialog instances; <code>GlobalNodeSearch</code> stands down there to avoid double dialogs on the shared flag.</li>
     <li>The map page does not force-reset this flag on unmount; the shared modal close path clears it on actual close so stale-open state is avoided without disrupting StrictMode mount/unmount cycles.</li>
   </ul>
-  <p>This avoids the keyboard-driven touch-gap introduced by mobile devices that cannot rely on <code>/</code> reliably.</p>
+  <p>This keeps the search affordance global without reintroducing a separate command palette: all routes use the same node-search component and the selected node opens on the context map.</p>
   <p>Implementation references:</p>
   <ul>
-    <li><a href="../../web/src/App.tsx">web/src/App.tsx</a> (mobile top-bar branching)</li>
+    <li><a href="../../web/src/App.tsx">web/src/App.tsx</a> (mobile top-bar branching and global wrapper mount)</li>
+    <li><a href="../../web/src/components/GlobalNodeSearch.tsx">web/src/components/GlobalNodeSearch.tsx</a> (global shortcuts and non-local dialog mount)</li>
     <li><a href="../../web/src/pages/StrategyMap.tsx">web/src/pages/StrategyMap.tsx</a> (store-owned open flag)</li>
     <li><a href="../../web/src/components/strategy/StrategyMapSearch.tsx">web/src/components/strategy/StrategyMapSearch.tsx</a> (search modal behavior)</li>
   </ul>
