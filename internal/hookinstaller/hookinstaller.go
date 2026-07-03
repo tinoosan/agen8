@@ -1,7 +1,8 @@
 // Package hookinstaller provisions the harness attention hooks: the curl
 // one-liners that tell agen8 when an agent is waiting on the human (see
-// internal/services/attention). One explicit `agen8 hooks install` run per
-// machine/harness — never installed silently.
+// internal/services/attention). Explicit `agen8 hooks install` runs are used
+// for repair, hosted, and client-machine setup; local project creation can call
+// the same installer best-effort.
 //
 // The installed hook is deliberately a bare curl pipe: the daemon normalizes
 // the harness's raw payload server-side (POST /hooks/attention?harness=&kind=),

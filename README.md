@@ -201,7 +201,9 @@ Install the workflow skill into your harness so it knows how to use Agen8:
 
 Re-run the same command any time to refresh the installed skill.
 
-Attention hooks are installed separately from the skill:
+Attention hooks are installed separately from the skill. Local project creation
+can best-effort install them, but hosted daemons, client-machine setup, repairs,
+and token rotation should still use the explicit installer:
 
 ```sh
 agen8 hooks install --harness codex --url https://agen8.example.com --token ak_...
