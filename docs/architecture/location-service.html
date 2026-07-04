@@ -125,6 +125,8 @@
 
   <p>Local path inputs are validated before every filesystem operation. Path strings must be absolute after normalization, must not contain null bytes, and may use <code>~</code> to resolve to the daemon home directory only. Relative inputs and traversal-looking segments (such as <code>..</code>) are rejected so local operations remain bounded and predictable.</p>
 
+  <p>Local mutating operations also execute through rooted filesystem handles instead of re-opening raw string paths after validation. Directory creation, writes, copies, and moves create destination parents inside the resolved root; local moves are rejected when source and destination resolve to different filesystem roots. This keeps validation and execution attached to the same path boundary.</p>
+
   <table>
     <thead><tr><th>Operation</th><th>Purpose</th><th>Boundary</th></tr></thead>
     <tbody>

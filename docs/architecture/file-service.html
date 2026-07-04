@@ -54,6 +54,8 @@
 
   <p>The app service depends on <code>file.Repository</code>. The repository is composed from <code>file.Reader</code> and <code>file.Writer</code> so read-only surfaces can be tested independently from mutating operations. Repository methods receive a location-aware file reference. The production repository loads the project location and routes local projects through the local filesystem and SSH projects through the location transport's SFTP implementation.</p>
 
+  <p>For local projects, file writer operations use rooted filesystem handles after virtual-path resolution. The local transport creates parent directories and writes, copies, or moves files relative to the resolved root rather than trusting a second raw-path lookup; cross-root local moves are rejected.</p>
+
   <h2 id="paths">2. Virtual paths</h2>
   <p>Clients never send raw storage paths for selected files. They send <code>projectId</code> plus a virtual path. The virtual root <code>/project</code> maps to the project root on the project's location. The virtual root <code>/workspace</code> maps to the project workspace directory on that same location. The Files rail starts at <code>/project</code> so routine browsing stays rooted in the repository, while viewers and context surfaces can still request any valid virtual file path directly.</p>
 
