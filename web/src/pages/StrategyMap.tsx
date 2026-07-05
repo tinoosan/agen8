@@ -55,8 +55,9 @@ function StrategyMapInner({ projectId, projectRoot, nodes, edges, isLoading, sho
   const [helpOpen, setHelpOpen] = useState(false)
   // Search-open lives in the global store so search can be opened from outside
   // this page — the mobile top-bar button and the dashboard search icon both
-  // set the flag (and the dashboard routes here) so arriving on the map lands
-  // with the same node-search panel the "/" shortcut opens. The modal Radix
+  // set the flag, while the dashboard keeps its own local StrategyMapSearch
+  // mount. Arriving on the map with the flag set opens the same node-search
+  // panel the "/" shortcut opens. The modal Radix
   // dialog clears the flag itself on close (Escape / outside-click / select),
   // so there is no stale-open to guard against. We deliberately do NOT reset
   // the flag on unmount: that cleanup fires during StrictMode's dev

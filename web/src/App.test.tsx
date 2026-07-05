@@ -166,7 +166,8 @@ describe('App', () => {
 
   it('does not show the mobile search button off the context map', async () => {
     // The only search worth a touch entry point is the context-map node
-    // search; off the map there's no global search, so the button is hidden.
+    // search. Other pages keep keyboard search through GlobalNodeSearch, but
+    // the mobile top bar hides its touch button when no local dialog is mounted.
     renderWithRouter('/')
 
     expect(await screen.findByText('Project Page')).toBeInTheDocument()
