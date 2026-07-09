@@ -47,7 +47,7 @@
     <td><code>configure_claude_mcp</code></td>
     <td>Mint a fresh project-scoped MCP token and upsert Claude Code's project-local <code>mcpServers.agen8</code> entry for the bound project.</td>
     <td><code>ProjectSvc.GetMember</code>, <code>ClaudeMCP.ConfigureClaudeMCP</code>.</td>
-    <td>Installed flag, settings path, server name, MCP URL, and token environment variable.</td>
+    <td>Installed flag, settings path, server name, and MCP URL.</td>
   </tr>
   <tr>
     <td><code>member_list</code></td>
@@ -200,7 +200,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
   <tr><td><code>location_id</code></td><td><code>register</code></td><td>Optional. Defaults to the local location when a project root creates a project.</td></tr>
   <tr><td><code>session_id</code></td><td><code>register</code></td><td>Optional stable native harness session id. Explicit arguments take precedence over MCP metadata.</td></tr>
   <tr><td><code>thread_id</code></td><td><code>register</code></td><td>Optional stable native harness thread id. Explicit arguments take precedence over MCP metadata and session id.</td></tr>
-  <tr><td><code>root</code>, <code>server_name</code>, <code>base_url</code>, <code>token_env</code></td><td><code>configure_claude_mcp</code></td><td>Optional overrides. Defaults target the current project root, <code>agen8</code> server name, daemon MCP URL, and bearer-token environment behavior.</td></tr>
+  <tr><td>No additional fields</td><td><code>configure_claude_mcp</code></td><td>The action uses the bound MCP session project and the current project root. The installer writes Claude Code's project-local <code>mcpServers.agen8</code> entry with an embedded Authorization header.</td></tr>
   <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
   <tr><td><code>display_name</code></td><td><code>member_create</code>, <code>register</code></td><td>Required for <code>member_create</code>. Optional for <code>register</code> (fallback display label is generated if omitted).</td></tr>
   <tr><td><code>display_name</code></td><td><code>member_update</code></td><td>Required target member display label.</td></tr>
@@ -237,7 +237,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <table>
   <tr><th>Test</th><th>Assertion</th></tr>
-  <tr><td><code>configure_claude_mcp</code> success</td><td>Requires a project-bound session, calls the Claude MCP configurator, and returns the installed path, server name, URL, and token environment metadata.</td></tr>
+  <tr><td><code>configure_claude_mcp</code> success</td><td>Requires a project-bound session, calls the Claude MCP configurator, and returns the installed path, server name, and URL.</td></tr>
   <tr><td><code>member_list</code> success</td><td>Resolves the actor member, calls the roster read path, and returns member labels and stable channel ids.</td></tr>
   <tr><td><code>member_create</code> success</td><td>Executes through the MCP server session, stamps caller identity, calls the registrar, and returns the created member payload.</td></tr>
   <tr><td><code>member_get</code>, <code>member_update</code>, <code>member_remove</code> success</td><td>Call the same production session path and delegate to the project service roster methods.</td></tr>
