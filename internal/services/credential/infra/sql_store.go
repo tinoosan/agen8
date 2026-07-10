@@ -31,7 +31,7 @@ func (s *sqlStore) Get(ctx context.Context, id credentialdomain.ID) (credentiald
 		return credentialdomain.Record{}, fmt.Errorf("credential id is required")
 	}
 	row := s.db.QueryRowContext(ctx, s.rebind(`
-		SELECT credential_id, kind, label, status, fields_json, created_at, updated_at
+		SELECT credential_id, user_id, project_id, kind, label, status, fields_json, created_at, updated_at
 		FROM credentials
 		WHERE credential_id = ?
 	`), id)
@@ -51,7 +51,7 @@ func (s *sqlStore) List(ctx context.Context, filter credentialdomain.Filter) ([]
 		return nil, err
 	}
 	query := `
-		SELECT credential_id, kind, label, status, fields_json, created_at, updated_at
+		SELECT credential_id, user_id, project_id, kind, label, status, fields_json, created_at, updated_at
 		FROM credentials` + where + `
 		ORDER BY label ASC, credential_id ASC`
 	if filter.Limit > 0 {
@@ -80,8 +80,8 @@ func (s *sqlStore) Save(ctx context.Context, record credentialdomain.Record) (cr
 		return credentialdomain.Record{}, err
 	}
 	_, err = s.db.ExecContext(ctx, s.rebind(`
-		INSERT INTO credentials (credential_id, kind, label, status, fields_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO credentials (credential_id, user_id, project_id, kind, label, status, fields_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (credential_id) DO UPDATE SET
 			kind = excluded.kind,
 			label = excluded.label,
@@ -89,7 +89,9 @@ func (s *sqlStore) Save(ctx context.Context, record credentialdomain.Record) (cr
 			fields_json = excluded.fields_json,
 			created_at = excluded.created_at,
 			updated_at = excluded.updated_at
-	`), record.ID, record.Kind, record.Label, record.Status, fieldsJSON, formatTime(record.CreatedAt), formatTime(record.UpdatedAt))
+		WHERE credentials.user_id = excluded.user_id
+		  AND credentials.project_id = excluded.project_id
+	`), record.ID, record.UserID, record.ProjectID, record.Kind, record.Label, record.Status, fieldsJSON, formatTime(record.CreatedAt), formatTime(record.UpdatedAt))
 	if err != nil {
 		return credentialdomain.Record{}, fmt.Errorf("save credential %s: %w", record.ID, err)
 	}

@@ -11,22 +11,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/agen8/internal/caller"
 	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
 
 type Service struct {
 	repository credentialdomain.Repository
 	clock      credentialdomain.Clock
+	caller     caller.Resolver
 }
 
 type Config struct {
 	Repository credentialdomain.Repository
 	Clock      credentialdomain.Clock
+	Caller     caller.Resolver
 }
 
 func NewService(config Config) (*Service, error) {
 	if config.Repository == nil {
 		return nil, fmt.Errorf("credential repository is required")
+	}
+	if config.Caller == nil {
+		return nil, fmt.Errorf("credential caller resolver is required")
 	}
 	clock := config.Clock
 	if clock == nil {
@@ -35,6 +41,7 @@ func NewService(config Config) (*Service, error) {
 	return &Service{
 		repository: config.Repository,
 		clock:      clock,
+		caller:     config.Caller,
 	}, nil
 }
 
@@ -62,6 +69,11 @@ func (s *Service) ListCredentials(ctx context.Context, filter credentialdomain.F
 	if s == nil {
 		return nil, fmt.Errorf("credential service is nil")
 	}
+	scope, err := s.scope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filter.Scope = scope
 	records, err := s.repository.List(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -85,7 +97,11 @@ func (s *Service) GetCredential(ctx context.Context, id credentialdomain.ID) (cr
 	if id == "" {
 		return credentialdomain.Credential{}, fmt.Errorf("credential id is required")
 	}
-	record, err := s.repository.Get(ctx, id)
+	scope, err := s.scope(ctx)
+	if err != nil {
+		return credentialdomain.Credential{}, err
+	}
+	record, err := s.getOwned(ctx, scope, id)
 	if err != nil {
 		return credentialdomain.Credential{}, err
 	}
@@ -95,6 +111,10 @@ func (s *Service) GetCredential(ctx context.Context, id credentialdomain.ID) (cr
 func (s *Service) CreateCredential(ctx context.Context, input CreateCredentialInput) (credentialdomain.Credential, error) {
 	if s == nil {
 		return credentialdomain.Credential{}, fmt.Errorf("credential service is nil")
+	}
+	scope, err := s.scope(ctx)
+	if err != nil {
+		return credentialdomain.Credential{}, err
 	}
 	kind := credentialdomain.Kind(strings.TrimSpace(string(input.Kind)))
 	storageKind := cleanStorageKind(input.StorageKind, kind)
@@ -106,6 +126,8 @@ func (s *Service) CreateCredential(ctx context.Context, input CreateCredentialIn
 	now := s.now()
 	record := credentialdomain.Record{
 		ID:        newCredentialID(),
+		UserID:    scope.UserID,
+		ProjectID: scope.ProjectID,
 		Kind:      kind,
 		Label:     strings.TrimSpace(input.Label),
 		Status:    credentialdomain.StatusActive,
@@ -148,7 +170,11 @@ func (s *Service) UpdateCredential(ctx context.Context, input UpdateCredentialIn
 	if id == "" {
 		return credentialdomain.Credential{}, fmt.Errorf("credential id is required")
 	}
-	current, err := s.repository.Get(ctx, id)
+	scope, err := s.scope(ctx)
+	if err != nil {
+		return credentialdomain.Credential{}, err
+	}
+	current, err := s.getOwned(ctx, scope, id)
 	if err != nil {
 		return credentialdomain.Credential{}, err
 	}
@@ -199,6 +225,13 @@ func (s *Service) DeleteCredential(ctx context.Context, id credentialdomain.ID) 
 	if id == "" {
 		return fmt.Errorf("credential id is required")
 	}
+	scope, err := s.scope(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := s.getOwned(ctx, scope, id); err != nil {
+		return err
+	}
 	if err := s.repository.DeleteMaterial(ctx, id); err != nil && !errors.Is(err, credentialdomain.ErrNotFound) {
 		return err
 	}
@@ -217,7 +250,11 @@ func (s *Service) ResolveCredential(ctx context.Context, input ResolveCredential
 	if purpose == "" {
 		return credentialdomain.ResolvedCredential{}, fmt.Errorf("credential purpose is required")
 	}
-	record, err := s.repository.Get(ctx, id)
+	scope, err := s.scope(ctx)
+	if err != nil {
+		return credentialdomain.ResolvedCredential{}, err
+	}
+	record, err := s.getOwned(ctx, scope, id)
 	if err != nil {
 		return credentialdomain.ResolvedCredential{}, err
 	}
@@ -244,6 +281,36 @@ func (s *Service) ResolveCredential(ctx context.Context, input ResolveCredential
 		Purpose: purpose,
 		Values:  values,
 	}, nil
+}
+
+func (s *Service) getOwned(ctx context.Context, scope credentialdomain.Scope, id credentialdomain.ID) (credentialdomain.Record, error) {
+	record, err := s.repository.Get(ctx, id)
+	if err != nil {
+		return credentialdomain.Record{}, err
+	}
+	if strings.TrimSpace(record.UserID) != strings.TrimSpace(scope.UserID) {
+		return credentialdomain.Record{}, credentialdomain.ErrNotFound
+	}
+	recordProjectID := strings.TrimSpace(record.ProjectID)
+	if recordProjectID != "" && recordProjectID != strings.TrimSpace(scope.ProjectID) {
+		return credentialdomain.Record{}, credentialdomain.ErrNotFound
+	}
+	return record, nil
+}
+
+func (s *Service) scope(ctx context.Context) (credentialdomain.Scope, error) {
+	if s == nil || s.caller == nil {
+		return credentialdomain.Scope{}, fmt.Errorf("credential caller resolver is required")
+	}
+	resolved, err := s.caller.ResolveCaller(ctx)
+	if err != nil {
+		return credentialdomain.Scope{}, fmt.Errorf("resolve credential caller: %w", err)
+	}
+	resolved = resolved.Normalize()
+	if resolved.UserID == "" {
+		return credentialdomain.Scope{}, fmt.Errorf("credential caller user id is required")
+	}
+	return credentialdomain.Scope{UserID: resolved.UserID, ProjectID: string(resolved.ProjectID)}, nil
 }
 
 func (s *Service) now() time.Time {

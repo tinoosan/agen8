@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
 	httptool "github.com/tinoosan/agen8/internal/mcp/tools/http"
 	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
 	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
@@ -14,12 +16,18 @@ import (
 
 type httpCredentialResolver struct {
 	credentials *credentialapp.Service
+	userID      string
+	projectID   string
 }
 
 func (r httpCredentialResolver) ResolveHTTP(ctx context.Context, host string) (httptool.HTTPCredential, bool, error) {
 	if r.credentials == nil {
 		return httptool.HTTPCredential{}, false, nil
 	}
+	ctx = caller.ContextWithCaller(ctx, caller.Caller{
+		UserID:    strings.TrimSpace(r.userID),
+		ProjectID: types.ProjectID(strings.TrimSpace(r.projectID)),
+	})
 	host = normalizeCredentialHost(host)
 	if host == "" {
 		return httptool.HTTPCredential{}, false, nil

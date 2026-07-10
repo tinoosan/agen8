@@ -40,11 +40,12 @@ type FileStore interface {
 }
 
 type CallContext struct {
-	Tasks         Service
-	Members       MemberDirectory
-	Files         FileStore
-	ProjectID     string
-	ActorMemberID string
+	Tasks           Service
+	Members         MemberDirectory
+	Files           FileStore
+	ProjectID       string
+	AttachmentRoots []string
+	ActorMemberID   string
 }
 
 type Result struct {

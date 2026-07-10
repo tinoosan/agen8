@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/core/types"
 	"github.com/tinoosan/agen8/internal/mcp"
 	projecttool "github.com/tinoosan/agen8/internal/mcp/tools/project"
@@ -83,6 +84,12 @@ func (r *mcpSessionResolver) Resolve(ctx context.Context, token string, header h
 		}
 		session.HarnessKind = mcp.HarnessFromJSONRPCBody(body, nativeRef)
 	}
+	if session.ProjectID != "" {
+		session, err = r.sessionWithProjectRoot(ctx, session)
+		if err != nil {
+			return mcp.Session{}, err
+		}
+	}
 	if sessionID == "" && threadID == "" {
 		return session, nil
 	}
@@ -104,7 +111,8 @@ func (r *mcpSessionResolver) Resolve(ctx context.Context, token string, header h
 		}
 		return mcp.Session{}, err
 	}
-	return sessionWithMember(session, rosterMember), nil
+	session = sessionWithMember(session, rosterMember)
+	return r.sessionWithProjectRoot(ctx, session)
 }
 
 func (r *mcpSessionResolver) resolveToken(ctx context.Context, token string) (mcp.Session, error) {
@@ -154,6 +162,7 @@ func (r *mcpSessionResolver) baseSession(token, userID, harnessKind string) mcp.
 		GraphService:    r.graph,
 		CredentialResolver: httpCredentialResolver{
 			credentials: r.credentials,
+			userID:      strings.TrimSpace(userID),
 		},
 		TaskService:     r.tasks,
 		TaskFiles:       r.files,
@@ -216,6 +225,32 @@ func sessionWithMember(session mcp.Session, rosterMember member.Record) mcp.Sess
 	session.ChannelID = types.ChannelID(strings.TrimSpace(rosterMember.ChannelID))
 	session.HarnessKind = strings.TrimSpace(rosterMember.HarnessKind)
 	return session
+}
+
+func (r *mcpSessionResolver) sessionWithProjectRoot(ctx context.Context, session mcp.Session) (mcp.Session, error) {
+	projectID := types.ProjectID(strings.TrimSpace(session.ProjectID))
+	if projectID == "" || r.projects == nil {
+		return session, nil
+	}
+	projectCtx := caller.ContextWithCaller(ctx, caller.Caller{
+		UserID:    strings.TrimSpace(session.UserID),
+		MemberID:  strings.TrimSpace(session.MemberID),
+		ProjectID: projectID,
+	})
+	project, err := r.projects.GetProject(projectCtx, projectID)
+	if err != nil {
+		return mcp.Session{}, fmt.Errorf("resolve project root: %w", err)
+	}
+	if owner := strings.TrimSpace(project.UserID()); owner == "" || owner != strings.TrimSpace(session.UserID) {
+		return mcp.Session{}, fmt.Errorf("resolve project root: project access denied")
+	}
+	session.ProjectRoot = strings.TrimSpace(r.projects.ResolveRoot(projectCtx, project))
+	session.CredentialResolver = httpCredentialResolver{
+		credentials: r.credentials,
+		userID:      strings.TrimSpace(session.UserID),
+		projectID:   strings.TrimSpace(session.ProjectID),
+	}
+	return session, nil
 }
 
 type projectMCPContextRegistrar struct {

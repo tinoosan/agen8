@@ -45,6 +45,7 @@ type Session struct {
 	MissionKRs         missiontool.KeyResultService
 	MissionProgress    missiontool.ProgressService
 	ProjectID          string
+	ProjectRoot        string
 }
 
 type SessionRequestContext struct {
@@ -673,11 +674,12 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 		}, nil
 	case tasktool.Name:
 		result, err := tasktool.NewHandler().Handle(ctx, tasktool.CallContext{
-			Tasks:         session.TaskService,
-			Members:       session.TaskMembers,
-			Files:         session.TaskFiles,
-			ProjectID:     strings.TrimSpace(session.ProjectID),
-			ActorMemberID: strings.TrimSpace(session.MemberID),
+			Tasks:           session.TaskService,
+			Members:         session.TaskMembers,
+			Files:           session.TaskFiles,
+			ProjectID:       strings.TrimSpace(session.ProjectID),
+			AttachmentRoots: []string{strings.TrimSpace(session.ProjectRoot)},
+			ActorMemberID:   strings.TrimSpace(session.MemberID),
 		}, arguments)
 		if err != nil {
 			return mcpToolCallErrorResult(err.Error()), nil

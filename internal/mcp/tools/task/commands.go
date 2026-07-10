@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const maxListLimit = 50
+
 func decode(args json.RawMessage) (requestInput, error) {
 	if err := validateActionFields(args); err != nil {
 		return requestInput{}, err
@@ -27,6 +29,9 @@ func decode(args json.RawMessage) (requestInput, error) {
 	}
 	if limit < 0 {
 		return requestInput{}, fmt.Errorf("task: limit must be non-negative")
+	}
+	if limit > maxListLimit {
+		return requestInput{}, fmt.Errorf("task: limit must be at most %d", maxListLimit)
 	}
 	offset := ptrInt(raw.Offset)
 	if offset < 0 {

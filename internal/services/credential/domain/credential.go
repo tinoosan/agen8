@@ -61,6 +61,8 @@ type FieldRef struct {
 
 type Credential struct {
 	id        ID
+	userID    string
+	projectID string
 	kind      Kind
 	label     string
 	status    Status
@@ -71,6 +73,8 @@ type Credential struct {
 
 type NewInput struct {
 	ID        ID
+	UserID    string
+	ProjectID string
 	Kind      Kind
 	Label     string
 	Status    Status
@@ -83,6 +87,10 @@ func New(input NewInput) (Credential, error) {
 	id := ID(strings.TrimSpace(string(input.ID)))
 	if id == "" {
 		return Credential{}, fmt.Errorf("credential id is required")
+	}
+	userID := strings.TrimSpace(input.UserID)
+	if userID == "" {
+		return Credential{}, fmt.Errorf("credential user id is required")
 	}
 	if !validKind(input.Kind) {
 		return Credential{}, fmt.Errorf("unsupported credential kind %q", input.Kind)
@@ -108,6 +116,8 @@ func New(input NewInput) (Credential, error) {
 	}
 	return Credential{
 		id:        id,
+		userID:    userID,
+		projectID: strings.TrimSpace(input.ProjectID),
 		kind:      input.Kind,
 		label:     strings.TrimSpace(input.Label),
 		status:    status,
@@ -122,6 +132,8 @@ func Wrap(record Record) (Credential, error) {
 }
 
 func (c Credential) ID() ID               { return c.id }
+func (c Credential) UserID() string       { return c.userID }
+func (c Credential) ProjectID() string    { return c.projectID }
 func (c Credential) Kind() Kind           { return c.kind }
 func (c Credential) Label() string        { return c.label }
 func (c Credential) Status() Status       { return c.status }
@@ -132,6 +144,8 @@ func (c Credential) UpdatedAt() time.Time { return c.updatedAt }
 func (c Credential) Record() Record {
 	return Record{
 		ID:        c.id,
+		UserID:    c.userID,
+		ProjectID: c.projectID,
 		Kind:      c.kind,
 		Label:     c.label,
 		Status:    c.status,

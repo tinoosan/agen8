@@ -79,8 +79,10 @@ func credentialWhere(filter credentialdomain.Filter) (string, []any, error) {
 	if filter.Limit < 0 || filter.Offset < 0 {
 		return "", nil, fmt.Errorf("credential limit and offset must be non-negative")
 	}
-	var clauses []string
-	var args []any
+	clauses, args, err := credentialScopeClauses("", filter.Scope)
+	if err != nil {
+		return "", nil, err
+	}
 	if filter.Kind != "" {
 		clauses = append(clauses, "kind = ?")
 		args = append(args, strings.TrimSpace(string(filter.Kind)))
@@ -89,16 +91,34 @@ func credentialWhere(filter credentialdomain.Filter) (string, []any, error) {
 		clauses = append(clauses, "status = ?")
 		args = append(args, strings.TrimSpace(string(filter.Status)))
 	}
-	if len(clauses) == 0 {
-		return "", args, nil
-	}
 	return " WHERE " + strings.Join(clauses, " AND "), args, nil
+}
+
+func credentialScopeClauses(alias string, scope credentialdomain.Scope) ([]string, []any, error) {
+	userID := strings.TrimSpace(scope.UserID)
+	if userID == "" {
+		return nil, nil, fmt.Errorf("credential scope user id is required")
+	}
+	prefix := ""
+	if strings.TrimSpace(alias) != "" {
+		prefix = strings.TrimSpace(alias) + "."
+	}
+	clauses := []string{prefix + "user_id = ?"}
+	args := []any{userID}
+	projectID := strings.TrimSpace(scope.ProjectID)
+	if projectID == "" {
+		clauses = append(clauses, prefix+"project_id = ''")
+	} else {
+		clauses = append(clauses, "("+prefix+"project_id = '' OR "+prefix+"project_id = ?)")
+		args = append(args, projectID)
+	}
+	return clauses, args, nil
 }
 
 func scanCredential(scanner interface{ Scan(dest ...any) error }) (credentialdomain.Record, error) {
 	var record credentialdomain.Record
 	var fieldsJSON, createdAt, updatedAt string
-	if err := scanner.Scan(&record.ID, &record.Kind, &record.Label, &record.Status, &fieldsJSON, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&record.ID, &record.UserID, &record.ProjectID, &record.Kind, &record.Label, &record.Status, &fieldsJSON, &createdAt, &updatedAt); err != nil {
 		return credentialdomain.Record{}, err
 	}
 	fields, err := unmarshalFields(fieldsJSON)

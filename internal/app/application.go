@@ -120,7 +120,10 @@ func NewApplication(cfg Config) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build credential repository: %w", err)
 	}
-	credentialSvc, err := credentialapp.NewService(credentialapp.Config{Repository: credentialRepo})
+	credentialSvc, err := credentialapp.NewService(credentialapp.Config{
+		Repository: credentialRepo,
+		Caller:     caller.ContextResolver{},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("build credential service: %w", err)
 	}

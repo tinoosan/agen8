@@ -21,7 +21,10 @@ var migrationsFS embed.FS
 // currentSchemaVersion is the current MCP-first schema baseline. Incompatible
 // local databases must be migrated or explicitly archived by the operator;
 // startup refuses to silently replace active user data.
-const currentSchemaVersion = 5
+const (
+	currentSchemaVersion           = 6
+	minimumMigratableSchemaVersion = 5
+)
 
 // loadMigrationSQL reads all .sql files from the embedded migrations directory,
 // sorts them by filename, and returns a slice of SQL strings ready to execute.
@@ -133,27 +136,22 @@ func migratePostgres(ctx context.Context, db *sql.DB) error {
 		version INTEGER PRIMARY KEY,
 		applied_at TEXT NOT NULL
 	);`); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("postgres: schema_version: %w", err)
+		return rollbackWithError(tx, fmt.Errorf("postgres: schema_version: %w", err))
 	}
 	version, err := currentSchema(tx)
 	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("postgres: %w", err)
+		return rollbackWithError(tx, fmt.Errorf("postgres: %w", err))
 	}
 	if version > 0 && version != currentSchemaVersion {
-		tx.Rollback()
-		return fmt.Errorf("postgres: incompatible schema version %d; this build requires schema version %d; apply a preserving migration or use an explicitly isolated database", version, currentSchemaVersion)
+		return rollbackWithError(tx, fmt.Errorf("postgres: incompatible schema version %d; this build requires schema version %d; apply a preserving migration or use an explicitly isolated database", version, currentSchemaVersion))
 	}
 	if version == 0 {
 		stmt, err := loadPostgresSchemaSQL()
 		if err != nil {
-			tx.Rollback()
-			return err
+			return rollbackWithError(tx, err)
 		}
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("postgres: migrate schema: %w", err)
+			return rollbackWithError(tx, fmt.Errorf("postgres: migrate schema: %w", err))
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO schema_version (version, applied_at) VALUES ($1, $2)
@@ -161,8 +159,7 @@ func migratePostgres(ctx context.Context, db *sql.DB) error {
 			currentSchemaVersion,
 			time.Now().UTC().Format(time.RFC3339Nano),
 		); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("postgres: record schema version: %w", err)
+			return rollbackWithError(tx, fmt.Errorf("postgres: record schema version: %w", err))
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -208,28 +205,23 @@ func migrateSQLite(db *sql.DB) error {
 		version INTEGER PRIMARY KEY,
 		applied_at TEXT NOT NULL
 	);`); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("sqlite: schema_version: %w", err)
+		return rollbackWithError(tx, fmt.Errorf("sqlite: schema_version: %w", err))
 	}
 	version, err := currentSchema(tx)
 	if err != nil {
-		tx.Rollback()
-		return err
+		return rollbackWithError(tx, err)
 	}
-	if version > 0 && version != currentSchemaVersion {
-		tx.Rollback()
-		return fmt.Errorf("sqlite: incompatible schema version %d; this build requires schema version %d. Apply a preserving migration, or run with an explicitly isolated AGEN8_DATA_DIR / --data-dir for clean checks; startup will not replace the active database automatically", version, currentSchemaVersion)
+	if version > currentSchemaVersion || (version > 0 && version < minimumMigratableSchemaVersion) {
+		return rollbackWithError(tx, fmt.Errorf("sqlite: incompatible schema version %d; this build supports preserving migrations from version %d through %d", version, minimumMigratableSchemaVersion, currentSchemaVersion))
 	}
 	if version == 0 {
 		stmts, err := loadMigrationSQL()
 		if err != nil {
-			tx.Rollback()
-			return fmt.Errorf("sqlite: load migrations: %w", err)
+			return rollbackWithError(tx, fmt.Errorf("sqlite: load migrations: %w", err))
 		}
 		for _, stmt := range stmts {
 			if _, err := tx.Exec(stmt); err != nil {
-				tx.Rollback()
-				return fmt.Errorf("sqlite: migrate: %w", err)
+				return rollbackWithError(tx, fmt.Errorf("sqlite: migrate: %w", err))
 			}
 		}
 		if _, err := tx.Exec(
@@ -237,18 +229,27 @@ func migrateSQLite(db *sql.DB) error {
 			currentSchemaVersion,
 			time.Now().UTC().Format(time.RFC3339Nano),
 		); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("sqlite: record schema version: %w", err)
+			return rollbackWithError(tx, fmt.Errorf("sqlite: record schema version: %w", err))
+		}
+	}
+	if err := migrateCredentialOwnership(tx); err != nil {
+		return rollbackWithError(tx, err)
+	}
+	if version > 0 && version < currentSchemaVersion {
+		if _, err := tx.Exec(
+			`INSERT INTO schema_version (version, applied_at) VALUES (?, ?)`,
+			currentSchemaVersion,
+			time.Now().UTC().Format(time.RFC3339Nano),
+		); err != nil {
+			return rollbackWithError(tx, fmt.Errorf("sqlite: record migrated schema version: %w", err))
 		}
 	}
 
 	if err := repairDecisionMemberNameColumn(tx); err != nil {
-		tx.Rollback()
-		return err
+		return rollbackWithError(tx, err)
 	}
 	if err := validateHardCutoverSchema(tx); err != nil {
-		tx.Rollback()
-		return err
+		return rollbackWithError(tx, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("sqlite: commit migration: %w", err)
@@ -272,6 +273,7 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 		{name: "runs", columns: []string{"space_id", "run_id", "run_json"}, forbid: []string{"session_id"}},
 		{name: "history", columns: []string{"space_id"}, forbid: []string{"session_id"}},
 		{name: "spaces", columns: []string{"space_id", "user_id", "project_id"}, forbid: []string{"session_id", "run_id", "plan_mode"}},
+		{name: "credentials", columns: []string{"credential_id", "user_id", "project_id"}},
 		{name: "user_profiles", columns: []string{"user_id", "profile_json"}, forbid: nil},
 		{name: "project_spaces", columns: []string{"user_id", "space_id"}, forbid: []string{"primary_session_id"}},
 		{name: "project_registry", columns: []string{"user_id", "project_root", "project_id"}, forbid: nil},
@@ -305,12 +307,13 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 			var dflt sql.NullString
 			var pk int
 			if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-				rows.Close()
-				return fmt.Errorf("sqlite: validate schema: scan table info %s: %w", tbl.name, err)
+				return closeRowsWithError(rows, fmt.Errorf("sqlite: validate schema: scan table info %s: %w", tbl.name, err))
 			}
 			cols[strings.TrimSpace(name)] = struct{}{}
 		}
-		rows.Close()
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("sqlite: validate schema: close table info %s: %w", tbl.name, err)
+		}
 
 		for _, want := range tbl.columns {
 			if _, ok := cols[want]; !ok {
@@ -345,6 +348,77 @@ func validateHardCutoverSchema(tx *sql.Tx) error {
 	return nil
 }
 
+func migrateCredentialOwnership(tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("sqlite: migrate credential ownership: transaction is nil")
+	}
+	rows, err := tx.Query(`PRAGMA table_info(credentials)`)
+	if err != nil {
+		return fmt.Errorf("sqlite: inspect credential ownership: %w", err)
+	}
+	columns := map[string]struct{}{}
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return closeRowsWithError(rows, fmt.Errorf("sqlite: scan credential ownership schema: %w", err))
+		}
+		columns[strings.TrimSpace(name)] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return closeRowsWithError(rows, fmt.Errorf("sqlite: iterate credential ownership schema: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("sqlite: close credential ownership schema: %w", err)
+	}
+	if _, ok := columns["user_id"]; !ok {
+		if _, err := tx.Exec(`ALTER TABLE credentials ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("sqlite: add credential user ownership: %w", err)
+		}
+	}
+	if _, ok := columns["project_id"]; !ok {
+		if _, err := tx.Exec(`ALTER TABLE credentials ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("sqlite: add credential project ownership: %w", err)
+		}
+	}
+
+	var unowned int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM credentials WHERE TRIM(user_id) = ''`).Scan(&unowned); err != nil {
+		return fmt.Errorf("sqlite: count unowned credentials: %w", err)
+	}
+	if unowned > 0 {
+		ownerRows, err := tx.Query(`SELECT user_id FROM users ORDER BY created_at ASC, user_id ASC LIMIT 2`)
+		if err != nil {
+			return fmt.Errorf("sqlite: resolve legacy credential owner: %w", err)
+		}
+		var owners []string
+		for ownerRows.Next() {
+			var owner string
+			if err := ownerRows.Scan(&owner); err != nil {
+				return closeRowsWithError(ownerRows, fmt.Errorf("sqlite: scan legacy credential owner: %w", err))
+			}
+			owners = append(owners, strings.TrimSpace(owner))
+		}
+		if err := ownerRows.Err(); err != nil {
+			return closeRowsWithError(ownerRows, fmt.Errorf("sqlite: iterate legacy credential owners: %w", err))
+		}
+		if err := ownerRows.Close(); err != nil {
+			return fmt.Errorf("sqlite: close legacy credential owners: %w", err)
+		}
+		if len(owners) != 1 || owners[0] == "" {
+			return fmt.Errorf("sqlite: cannot safely assign %d legacy credentials across %d users; export or remove ambiguous credentials before upgrading", unowned, len(owners))
+		}
+		if _, err := tx.Exec(`UPDATE credentials SET user_id = ? WHERE TRIM(user_id) = ''`, owners[0]); err != nil {
+			return fmt.Errorf("sqlite: assign legacy credential owner: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_credentials_user_project ON credentials(user_id, project_id)`); err != nil {
+		return fmt.Errorf("sqlite: index credential ownership: %w", err)
+	}
+	return nil
+}
+
 func hardCutoverSchemaError(format string, args ...any) error {
 	detail := fmt.Sprintf(format, args...)
 	return fmt.Errorf("sqlite: incompatible schema: %s. Apply a preserving migration, or run with an explicitly isolated AGEN8_DATA_DIR / --data-dir for clean checks; startup will not replace the active database automatically", detail)
@@ -370,18 +444,18 @@ func repairDecisionMemberNameColumn(tx *sql.Tx) error {
 		var dflt sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			rows.Close()
-			return fmt.Errorf("sqlite: repair decisions member_name: scan table info: %w", err)
+			return closeRowsWithError(rows, fmt.Errorf("sqlite: repair decisions member_name: scan table info: %w", err))
 		}
 		if strings.TrimSpace(name) == "member_name" {
 			hasMemberName = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("sqlite: repair decisions member_name: iterate table info: %w", err)
+		return closeRowsWithError(rows, fmt.Errorf("sqlite: repair decisions member_name: iterate table info: %w", err))
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("sqlite: repair decisions member_name: close table info: %w", err)
+	}
 	if !hasMemberName {
 		if _, err := tx.Exec(`ALTER TABLE decisions ADD COLUMN member_name TEXT DEFAULT ''`); err != nil {
 			return fmt.Errorf("sqlite: repair decisions member_name: add column: %w", err)
@@ -400,6 +474,26 @@ func repairDecisionMemberNameColumn(tx *sql.Tx) error {
 		return fmt.Errorf("sqlite: repair decisions member_name: backfill from members: %w", err)
 	}
 	return nil
+}
+
+func rollbackWithError(tx *sql.Tx, err error) error {
+	if tx == nil {
+		return err
+	}
+	if rollbackErr := tx.Rollback(); rollbackErr != nil {
+		return fmt.Errorf("%w; rollback failed: %v", err, rollbackErr)
+	}
+	return err
+}
+
+func closeRowsWithError(rows *sql.Rows, err error) error {
+	if rows == nil {
+		return err
+	}
+	if closeErr := rows.Close(); closeErr != nil {
+		return fmt.Errorf("%w; close rows: %v", err, closeErr)
+	}
+	return err
 }
 
 func currentSchema(tx *sql.Tx) (int, error) {

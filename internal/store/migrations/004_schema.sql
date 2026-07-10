@@ -428,6 +428,8 @@ CREATE INDEX IF NOT EXISTS idx_integration_credentials_user_project
 --------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS credentials (
     credential_id TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    project_id    TEXT NOT NULL DEFAULT '',
     kind          TEXT NOT NULL,
     label         TEXT NOT NULL,
     status        TEXT NOT NULL,
@@ -440,6 +442,8 @@ CREATE INDEX IF NOT EXISTS idx_credentials_kind
     ON credentials(kind);
 CREATE INDEX IF NOT EXISTS idx_credentials_status
     ON credentials(status);
+CREATE INDEX IF NOT EXISTS idx_credentials_user_project
+    ON credentials(user_id, project_id);
 
 CREATE TABLE IF NOT EXISTS credential_material (
     credential_id TEXT PRIMARY KEY,

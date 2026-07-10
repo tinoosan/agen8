@@ -1,10 +1,12 @@
 package store
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8/internal/config"
+	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
 func TestSpaceIndexesCreated(t *testing.T) {
@@ -184,6 +186,76 @@ func TestDecisionMemberNameRepairBackfillsFromMemberRecord(t *testing.T) {
 	if got != "Codex backend engineer" {
 		t.Fatalf("member_name=%q want %q", got, "Codex backend engineer")
 	}
+}
+
+func TestCredentialOwnershipMigrationAssignsSingleExistingUser(t *testing.T) {
+	db := legacyCredentialDatabase(t, []string{"user-a"})
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := migrateCredentialOwnership(tx); err != nil {
+		t.Fatalf("migrateCredentialOwnership: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var userID, projectID string
+	if err := db.QueryRow(`SELECT user_id, project_id FROM credentials WHERE credential_id = 'cred-legacy'`).Scan(&userID, &projectID); err != nil {
+		t.Fatalf("read migrated credential: %v", err)
+	}
+	if userID != "user-a" || projectID != "" {
+		t.Fatalf("ownership=(%q,%q) want (user-a, empty)", userID, projectID)
+	}
+}
+
+func TestCredentialOwnershipMigrationRejectsAmbiguousUsers(t *testing.T) {
+	db := legacyCredentialDatabase(t, []string{"user-a", "user-b"})
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	err = migrateCredentialOwnership(tx)
+	if err == nil {
+		t.Fatal("expected ambiguous ownership migration to fail")
+	}
+	if !strings.Contains(err.Error(), "cannot safely assign") {
+		t.Fatalf("error=%q", err)
+	}
+	if rollbackErr := tx.Rollback(); rollbackErr != nil {
+		t.Fatalf("rollback: %v", rollbackErr)
+	}
+}
+
+func legacyCredentialDatabase(t *testing.T, userIDs []string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", storagedb.SQLiteDSN(storagedb.SQLitePath(t.TempDir())))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE users (user_id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
+		CREATE TABLE credentials (
+			credential_id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			label TEXT NOT NULL,
+			status TEXT NOT NULL,
+			fields_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		INSERT INTO credentials VALUES ('cred-legacy', 'api_key', 'Legacy', 'active', '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+	`); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	for _, userID := range userIDs {
+		if _, err := db.Exec(`INSERT INTO users (user_id, created_at) VALUES (?, ?)`, userID, "2026-01-01T00:00:00Z"); err != nil {
+			t.Fatalf("insert user %s: %v", userID, err)
+		}
+	}
+	return db
 }
 
 func TestGetDBPostgresRequiresReachableDatabase(t *testing.T) {
