@@ -151,7 +151,6 @@ func New(cfg Config) (*Daemon, error) {
 			files:              application.FileSvc,
 			missions:           application.MissionSvc,
 			projectProvisioner: projectProvisioner,
-			externalBaseURL:    cfg.externalBaseURL(),
 		}),
 		events:       newEventsHub(application.EventBus, logger.With("service", "events")),
 		attention:    attentionSvc,
@@ -373,6 +372,15 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 		d.handleSetupStatusRPC(w, r, body)
 		return
 	}
+	usesSessionCookie := strings.TrimSpace(r.Header.Get("Authorization")) == "" && requestHasSessionCookie(r)
+	if usesSessionCookie && !checkSameOriginRequest(r) {
+		http.Error(w, "cross-origin request blocked", http.StatusForbidden)
+		return
+	}
+	if method == rpc.MethodAuthLogout && strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+		d.handleCookieLogoutRPC(w, r, body)
+		return
+	}
 	loginKey := ""
 	if method == rpc.MethodAuthLogin {
 		loginKey = loginAttemptKey(body)
@@ -383,18 +391,30 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ctx := r.Context()
-	if methodRequiresHTTPIdentity(method, r.Header.Get("Authorization")) {
-		identity, err := d.httpIdentity(r.Context(), r.Header.Get("Authorization"))
+	if methodRequiresHTTPIdentity(method, r.Header.Get("Authorization"), requestHasSessionCookie(r)) {
+		identity, err := d.httpIdentityFromRequest(r.Context(), r)
 		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+			if usesSessionCookie {
+				d.clearSessionCookie(w, r)
+				if method == rpc.MethodAuthStatus {
+					identity = rpc.Identity{}
+				} else {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+			} else {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
-		ctx = rpc.ContextWithIdentity(ctx, identity)
-		ctx = caller.ContextWithCaller(ctx, caller.Caller{
-			UserID:   identity.UserID,
-			MemberID: identity.MemberID,
-			Role:     identity.Role,
-		})
+		if strings.TrimSpace(identity.UserID) != "" {
+			ctx = rpc.ContextWithIdentity(ctx, identity)
+			ctx = caller.ContextWithCaller(ctx, caller.Caller{
+				UserID:   identity.UserID,
+				MemberID: identity.MemberID,
+				Role:     identity.Role,
+			})
+		}
 	}
 	resp, err := d.rpc.Handle(ctx, body)
 	if err != nil {
@@ -403,7 +423,14 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	if method == rpc.MethodAuthLogin {
 		if rpcResponseSucceeded(resp) {
+			sanitized, token, expiresAt, sanitizedOK := sanitizeLoginResponse(resp)
+			if !sanitizedOK {
+				http.Error(w, "handle login response", http.StatusInternalServerError)
+				return
+			}
 			d.loginLimiter.Reset(loginKey)
+			d.setSessionCookie(w, r, token, expiresAt)
+			resp = sanitized
 		} else {
 			d.loginLimiter.RecordFailure(loginKey)
 		}
@@ -600,13 +627,13 @@ func rpcMethod(body []byte) string {
 	return strings.TrimSpace(env.Method)
 }
 
-func methodRequiresHTTPIdentity(method string, authorization string) bool {
+func methodRequiresHTTPIdentity(method string, authorization string, hasSessionCookie bool) bool {
 	method = strings.TrimSpace(method)
 	switch method {
 	case rpc.MethodAuthLogin:
 		return false
 	case rpc.MethodAuthStatus:
-		return strings.TrimSpace(authorization) != ""
+		return strings.TrimSpace(authorization) != "" || hasSessionCookie
 	default:
 		return true
 	}

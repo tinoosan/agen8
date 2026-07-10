@@ -35,7 +35,6 @@ type mcpSessionResolverConfig struct {
 	files              *fileapp.Service
 	missions           *missionapp.Service
 	projectProvisioner *projectHooksProvisioner
-	externalBaseURL    string
 }
 
 type mcpSessionResolver struct {
@@ -50,7 +49,6 @@ type mcpSessionResolver struct {
 	files              *fileapp.Service
 	missions           *missionapp.Service
 	projectProvisioner *projectHooksProvisioner
-	externalBaseURL    string
 }
 
 func newMCPSessionResolver(cfg mcpSessionResolverConfig) *mcpSessionResolver {
@@ -66,7 +64,6 @@ func newMCPSessionResolver(cfg mcpSessionResolverConfig) *mcpSessionResolver {
 		files:              cfg.files,
 		missions:           cfg.missions,
 		projectProvisioner: cfg.projectProvisioner,
-		externalBaseURL:    cfg.externalBaseURL,
 	}
 }
 
@@ -152,7 +149,6 @@ func (r *mcpSessionResolver) baseSession(token, userID, harnessKind string) mcp.
 			projects: r.projects,
 			users:    r.users,
 			auth:     r.auth,
-			baseURL:  r.externalBaseURL,
 		},
 		MemberDirectory: r.projects,
 		MemberRegistrar: r.projects,
@@ -257,7 +253,6 @@ type projectMCPContextRegistrar struct {
 	projects *projectapp.Service
 	users    *userapp.Service
 	auth     *authapp.Service
-	baseURL  string
 }
 
 func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req projecttool.RegisterContextRequest) (projecttool.RegisterContextResult, error) {
@@ -284,7 +279,6 @@ func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req 
 	if err != nil {
 		return projecttool.RegisterContextResult{}, err
 	}
-	mcpURL := strings.TrimRight(r.baseURL, "/") + "/mcp?token=" + result.Token
 	return projecttool.RegisterContextResult{
 		ProjectID:         result.ProjectID,
 		ProjectRoot:       result.ProjectRoot,
@@ -296,8 +290,6 @@ func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req 
 		SessionID:         result.SessionID,
 		ThreadID:          result.ThreadID,
 		NativeSessionRef:  result.NativeSessionRef,
-		Token:             result.Token,
-		URL:               mcpURL,
 		MCPServers:        result.MCPServers,
 		AlreadyRegistered: result.AlreadyRegistered,
 	}, nil

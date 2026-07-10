@@ -85,8 +85,6 @@ type RegisterContextResult struct {
 	SessionID         string
 	ThreadID          string
 	NativeSessionRef  string
-	Token             string
-	URL               string
 	MCPServers        []string
 	AlreadyRegistered bool
 }
@@ -277,8 +275,6 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 		"displayName": strings.TrimSpace(result.DisplayName),
 		"memberType":  strings.TrimSpace(result.MemberType),
 		"channelId":   strings.TrimSpace(result.ChannelID),
-		"token":       strings.TrimSpace(result.Token),
-		"url":         strings.TrimSpace(result.URL),
 		"mcpServers":  append([]string(nil), result.MCPServers...),
 		"guidance":    registerGuidance(result),
 	}

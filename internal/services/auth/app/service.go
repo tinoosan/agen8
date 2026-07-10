@@ -23,7 +23,7 @@ const (
 	sessionTokenSize   = 32
 	apiKeyTokenSize    = 32
 	linkTokenTokenSize = 32
-	defaultSessionTTL  = 7 * 24 * time.Hour
+	defaultSessionTTL  = 24 * time.Hour
 )
 
 type UserLoader interface {

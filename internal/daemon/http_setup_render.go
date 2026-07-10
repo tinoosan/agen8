@@ -10,7 +10,7 @@ func setupPageHTML(token string) string {
 	return strings.ReplaceAll(setupPageTemplate, "{{TOKEN}}", html.EscapeString(token))
 }
 
-func setupCompleteHTML(sessionToken string, apiKey string, mcp setupMCPResult) string {
+func setupCompleteHTML(apiKey string, mcp setupMCPResult) string {
 	return fmt.Sprintf(`<!doctype html>
 <html lang="en">
 <head>
@@ -65,7 +65,6 @@ func setupCompleteHTML(sessionToken string, apiKey string, mcp setupMCPResult) s
     </section>
     <a href="/">Open agen8</a>
   </main>
-  <script>localStorage.setItem("agen8.sessionToken", %q);</script>
 </body>
 </html>`,
 		html.EscapeString(apiKey),
@@ -76,7 +75,6 @@ func setupCompleteHTML(sessionToken string, apiKey string, mcp setupMCPResult) s
 		html.EscapeString(mcp.ClaudeCommand),
 		html.EscapeString(mcp.CodexSkillCommand),
 		html.EscapeString(mcp.ClaudeSkillCommand),
-		sessionToken,
 	)
 }
 
@@ -439,9 +437,6 @@ const setupPageTemplate = `<!doctype html>
             var apiKey = body && body.apiKey ? body.apiKey.secret : '';
             var mcp = body && body.mcp ? body.mcp : {};
             if (!apiKey) throw new Error('Setup did not return an API key');
-            if (body.session && body.session.token) {
-              localStorage.setItem('agen8.sessionToken', body.session.token);
-            }
             setText('api-key', apiKey);
             setText('mcp-url', mcp.url);
             setText('mcp-compatibility-url', mcp.compatibilityUrl);

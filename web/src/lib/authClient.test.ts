@@ -18,15 +18,15 @@ describe('authClient', () => {
     localStorage.clear()
   })
 
-  it('returns setup URL when unauthenticated setup is open', async () => {
+  it('reports setup availability without receiving a setup token URL', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(rpcResponse({ authenticated: false }))
-      .mockResolvedValueOnce(rpcResponse({ setupOpen: true, setupUrl: '/setup?token=test' }))
+      .mockResolvedValueOnce(rpcResponse({ setupOpen: true }))
 
     await expect(getAuthStatus()).resolves.toMatchObject({
       authenticated: false,
       setupOpen: true,
-      setupUrl: '/setup?token=test',
+      setupUrl: undefined,
     })
 
     const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))

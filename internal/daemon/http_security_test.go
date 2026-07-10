@@ -130,6 +130,53 @@ func TestLoginThrottlingResetsAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestBrowserSessionUsesHttpOnlyCookieThroughLogout(t *testing.T) {
+	handler := newSecurityTestHandler(t)
+	setupSessionForEventsTest(t, handler)
+
+	login := callRPCForSecurityTest(handler, "auth.login", loginParams("password123"), "")
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", login.Code, login.Body.String())
+	}
+	if strings.Contains(login.Body.String(), `"token"`) {
+		t.Fatalf("login response disclosed token: %s", login.Body.String())
+	}
+	sessionToken := sessionTokenFromRecorder(t, login)
+
+	status := callCookieRPCForSecurityTest(handler, "auth.status", `{}`, sessionToken, true)
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"authenticated":true`) {
+		t.Fatalf("cookie auth.status=%d body=%s", status.Code, status.Body.String())
+	}
+
+	logout := callCookieRPCForSecurityTest(handler, "auth.logout", `{}`, sessionToken, true)
+	if logout.Code != http.StatusOK || !strings.Contains(logout.Body.String(), `"revoked":true`) {
+		t.Fatalf("logout status=%d body=%s", logout.Code, logout.Body.String())
+	}
+	cleared := false
+	for _, cookie := range logout.Result().Cookies() {
+		if cookie.Name == sessionCookieName && cookie.MaxAge < 0 && cookie.HttpOnly {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatal("logout did not clear the HttpOnly session cookie")
+	}
+
+	revoked := callCookieRPCForSecurityTest(handler, "auth.status", `{}`, sessionToken, true)
+	if revoked.Code != http.StatusOK || !strings.Contains(revoked.Body.String(), `"authenticated":false`) {
+		t.Fatalf("revoked cookie status=%d body=%s", revoked.Code, revoked.Body.String())
+	}
+}
+
+func TestCookieAuthenticatedRPCRejectsMissingSameOriginEvidence(t *testing.T) {
+	handler := newSecurityTestHandler(t)
+	sessionToken := setupSessionForEventsTest(t, handler)
+	recorder := callCookieRPCForSecurityTest(handler, "project.list", `{}`, sessionToken, false)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want %d body=%s", recorder.Code, http.StatusForbidden, recorder.Body.String())
+	}
+}
+
 func newSecurityTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	daemon, err := New(Config{
@@ -153,6 +200,19 @@ func callRPCForSecurityTest(handler http.Handler, method, params, authorization 
 	if authorization != "" {
 		request.Header.Set("Authorization", authorization)
 	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func callCookieRPCForSecurityTest(handler http.Handler, method, params, sessionToken string, sameOrigin bool) *httptest.ResponseRecorder {
+	body := `{"jsonrpc":"2.0","id":"1","method":` + strconv.Quote(method) + `,"params":` + params + `}`
+	request := httptest.NewRequest(http.MethodPost, "http://example.com/rpc", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	if sameOrigin {
+		request.Header.Set("Origin", "http://example.com")
+	}
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken, Path: "/"})
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder

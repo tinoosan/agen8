@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- used only for stable legacy-compatible identifiers, not cryptography.
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -49,8 +49,6 @@ type RegisterMCPContextResult struct {
 	SessionID         string
 	ThreadID          string
 	NativeSessionRef  string
-	Token             string
-	URL               string
 	MCPServers        []string
 	AlreadyRegistered bool
 }
@@ -128,10 +126,7 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	projectID = loadedProject.ID()
 	projectRoot := strings.TrimSpace(loadedProject.Root())
 	locationID = loadedProject.LocationID()
-	workspaceRoot := requestedRoot
-	if workspaceRoot == "" {
-		workspaceRoot = projectRoot
-	}
+	workspaceRoot := trustedWorkspaceRoot(requestedRoot, projectRoot, locationID)
 	// Record the folder as a Workspace of this project — metadata, never identity.
 	// This happens in every resolution path (bound, explicit, fallback): cwd tells
 	// us where a workspace is, not which project it is.
@@ -201,8 +196,6 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		SessionID:         strings.TrimSpace(input.SessionID),
 		ThreadID:          strings.TrimSpace(input.ThreadID),
 		NativeSessionRef:  nativeRef,
-		Token:             token,
-		URL:               "",
 		MCPServers:        []string{"agen8"},
 		AlreadyRegistered: reusedExisting,
 	}, nil
@@ -244,7 +237,7 @@ func canonicalGitWorktreeRoot(root string, locationID types.LocationID) (string,
 
 func gitOutput(root string, args ...string) (string, bool) {
 	cmdArgs := append([]string{"-C", root}, args...)
-	out, err := exec.Command("git", cmdArgs...).Output()
+	out, err := exec.Command("git", cmdArgs...).Output() // #nosec G204 -- fixed binary with argv-only arguments; no shell interpolation.
 	if err != nil {
 		return "", false
 	}
@@ -422,6 +415,35 @@ func nativeRefForResolve(input ResolveMCPContextInput) string {
 	return strings.TrimSpace(input.SessionID)
 }
 
+func trustedWorkspaceRoot(requestedRoot, projectRoot string, locationID types.LocationID) string {
+	requestedRoot = strings.TrimSpace(requestedRoot)
+	projectRoot = strings.TrimSpace(projectRoot)
+	if requestedRoot == "" || projectRoot == "" {
+		return projectRoot
+	}
+	if workspaceRootMatchesProjectRoot(requestedRoot, projectRoot, locationID) {
+		return requestedRoot
+	}
+	return projectRoot
+}
+
+func workspaceRootMatchesProjectRoot(requestedRoot, projectRoot string, locationID types.LocationID) bool {
+	if strings.TrimSpace(string(locationID)) != "" && locationID != "local" {
+		return strings.TrimSpace(requestedRoot) == strings.TrimSpace(projectRoot)
+	}
+	requestedClean := filepath.Clean(strings.TrimSpace(requestedRoot))
+	projectClean := filepath.Clean(strings.TrimSpace(projectRoot))
+	if requestedClean == projectClean {
+		return true
+	}
+	requestedCommon, requestedOK := gitOutput(requestedClean, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	projectCommon, projectOK := gitOutput(projectClean, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if !requestedOK || !projectOK {
+		return false
+	}
+	return filepath.Clean(requestedCommon) == filepath.Clean(projectCommon)
+}
+
 func userIDForMCPToken(token string, explicitUserID string) string {
 	if userID := strings.TrimSpace(explicitUserID); userID != "" {
 		return userID
@@ -430,6 +452,7 @@ func userIDForMCPToken(token string, explicitUserID string) string {
 }
 
 func deterministicMemberID(projectID types.ProjectID, harnessKind, nativeRef string) member.ID {
+	// #nosec G401 -- durable compatibility identifier; not used for cryptographic security.
 	sum := sha1.Sum([]byte(string(projectID) + "\x00" + strings.TrimSpace(harnessKind) + "\x00" + strings.TrimSpace(nativeRef)))
 	return member.ID("member-" + hex.EncodeToString(sum[:])[:16])
 }

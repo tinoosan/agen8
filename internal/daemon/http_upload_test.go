@@ -25,7 +25,8 @@ func TestHandleFileUploadAcceptsFiveMegabytesAndKeepsRPCCap(t *testing.T) {
 		"path":      "/project/.agen8/attachments/task-1/five.bin",
 	}, bytes.Repeat([]byte{0x5a}, 5<<20), "five.bin")
 	req := httptest.NewRequest(http.MethodPost, "/uploads/files", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+sessionToken)
+	req.Header.Set("Origin", "http://example.com")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken, Path: "/"})
 	req.Header.Set("Content-Type", contentType)
 	rec := httptest.NewRecorder()
 

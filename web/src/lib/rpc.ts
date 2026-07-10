@@ -30,9 +30,9 @@ let eventSource: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 // Reconnect backoff state. EventSource gives onerror no HTTP status, so a
 // fetch probe classifies the failure: transient errors retry on an
-// exponential schedule; 401/403 halts retries until the token changes.
+// exponential schedule; 401/403 halts retries until login succeeds.
 let reconnectAttempts = 0
-let authBlockedToken: string | null = null
+let authBlocked = false
 let probeInFlight = false
 // ---- Connection state (UI surface) --------------------------------------
 // The reconnect machinery below already knows whether we're connected,
@@ -82,64 +82,33 @@ const RECONNECT_BASE_DELAY_MS = 1000
 // 10s cap: with auth failures halting separately, a transient retry every 10s
 // is harmless — and it bounds how long the banner can lag a recovered daemon.
 const RECONNECT_MAX_DELAY_MS = 10_000
-export const AUTH_TOKEN_STORAGE_KEY = 'agen8.sessionToken'
-const AUTH_TOKEN_COOKIE_NAME = 'agen8.sessionToken'
+export const LEGACY_AUTH_TOKEN_STORAGE_KEY = 'agen8.sessionToken'
 
-export function getStoredSessionToken(): string {
-  if (typeof window === 'undefined') return ''
-  try {
-    const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)?.trim() ?? ''
-    if (token) writeSessionCookie(token)
-    return token
-  } catch {
-    return ''
-  }
-}
-
-export function setStoredSessionToken(token: string) {
+export function clearLegacySessionToken() {
   if (typeof window === 'undefined') return
-  const trimmed = token.trim()
   try {
-    if (trimmed) {
-      window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, trimmed)
-      writeSessionCookie(trimmed)
-      resumeEventSourceAfterAuthChange(trimmed)
-      return
-    }
-    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
-    clearSessionCookie()
+    window.localStorage.removeItem(LEGACY_AUTH_TOKEN_STORAGE_KEY)
   } catch {
-    // Blocked storage means the browser cannot persist the session token.
+    // Storage can be unavailable in private browsing; the server cookie remains authoritative.
   }
 }
 
-// A fresh token invalidates an auth block: if /events was halted on 401/403
-// under a different token, reconnect now that credentials changed.
-function resumeEventSourceAfterAuthChange(token: string) {
-  if (authBlockedToken === null || authBlockedToken === token) return
-  authBlockedToken = null
+clearLegacySessionToken()
+
+export function resumeSessionAfterAuthentication() {
+  if (!authBlocked) return
+  authBlocked = false
   reconnectAttempts = 0
   if (handlers.size > 0) ensureEventSource()
 }
 
-export function clearStoredSessionToken() {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
-    clearSessionCookie()
-  } catch {
-    // Ignore blocked storage while removing the legacy bearer-token cache.
+export function suspendSessionAfterLogout() {
+  authBlocked = true
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
   }
-}
-
-function writeSessionCookie(token: string) {
-  if (typeof document === 'undefined') return
-  document.cookie = `${AUTH_TOKEN_COOKIE_NAME}=${encodeURIComponent(token)}; path=/; SameSite=Lax`
-}
-
-function clearSessionCookie() {
-  if (typeof document === 'undefined') return
-  document.cookie = `${AUTH_TOKEN_COOKIE_NAME}=; path=/; max-age=0; SameSite=Lax`
+  setConnectionState('auth_blocked')
 }
 
 // ---- Request / Response ------------------------------------------------
@@ -147,14 +116,10 @@ function clearSessionCookie() {
 export async function rpcCall<T = unknown>(method: string, params: unknown = {}): Promise<T> {
   const id = String(++requestSeq)
   const body: RpcRequest = { jsonrpc: '2.0', id, method, params }
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = getStoredSessionToken()
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
   const res = await fetch('/rpc', {
     method: 'POST',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
     body: JSON.stringify(body),
   })
   if (!res.ok) {
@@ -176,14 +141,9 @@ export async function uploadFile(params: { projectId: string; path: string; file
   } else {
     form.set('file', params.file)
   }
-  const headers: Record<string, string> = {}
-  const token = getStoredSessionToken()
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
   const res = await fetch('/uploads/files', {
     method: 'POST',
-    headers,
+    credentials: 'same-origin',
     body: form,
   })
   if (!res.ok) {
@@ -238,10 +198,10 @@ function dispatch(notification: RpcNotification) {
 function ensureEventSource() {
   if (eventSource && eventSource.readyState !== EventSource.CLOSED) return
   // A pending backoff timer or in-flight probe owns the next attempt; a halted
-  // auth block waits for a token change. Re-subscribing must not bypass either —
+  // auth block waits for a successful login. Re-subscribing must not bypass either —
   // that immediate-reconnect path is what turned a persistent 403 into a storm.
   if (reconnectTimer || probeInFlight) return
-  if (authBlockedToken !== null && authBlockedToken === getStoredSessionToken()) return
+  if (authBlocked) return
   connect()
 }
 
@@ -255,7 +215,7 @@ function connect() {
 
   es.onopen = () => {
     reconnectAttempts = 0
-    authBlockedToken = null
+    authBlocked = false
     setConnectionState('connected')
   }
 
@@ -278,7 +238,7 @@ function connect() {
 
 // Classifies the failure and schedules (or halts) the next attempt.
 // EventSource hides the response status, so probe /events with an aborted
-// fetch: 401/403 halts retries until the token changes; anything else retries
+// fetch: 401/403 halts retries until the browser authenticates again; anything else retries
 // on an exponential schedule capped at RECONNECT_MAX_DELAY_MS.
 async function scheduleReconnect() {
   if (probeInFlight) return
@@ -288,6 +248,7 @@ async function scheduleReconnect() {
     const controller = new AbortController()
     const res = await fetch('/events', {
       headers: { Accept: 'text/event-stream' },
+      credentials: 'same-origin',
       signal: controller.signal,
     })
     // Headers are enough to classify; abort before the stream body streams.
@@ -300,7 +261,7 @@ async function scheduleReconnect() {
   }
 
   if (authFailure) {
-    authBlockedToken = getStoredSessionToken()
+    authBlocked = true
     setConnectionState('auth_blocked')
     return
   }

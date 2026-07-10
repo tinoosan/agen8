@@ -1,4 +1,4 @@
-import { clearStoredSessionToken, getStoredSessionToken, rpcCall, setStoredSessionToken } from './rpc'
+import { clearLegacySessionToken, resumeSessionAfterAuthentication, rpcCall, suspendSessionAfterLogout } from './rpc'
 import type { AuthAPIKey, AuthStatus, AuthUser } from './types'
 import type { UserPreferences } from './store'
 
@@ -9,7 +9,6 @@ export interface LoginInput {
 
 export interface AuthResult {
   user: AuthUser
-  token?: string
 }
 
 export interface UpdateProfileInput {
@@ -42,7 +41,6 @@ interface UserStatusResult {
 interface LoginResult {
   userId: string
   role: string
-  token: string
   expiresAt: string
 }
 
@@ -73,17 +71,7 @@ interface ListAPIKeysRPCResult {
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {
-  let auth: AuthStatusResult
-  try {
-    auth = await rpcCall<AuthStatusResult>('auth.status', {})
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('HTTP 401')) {
-      clearStoredSessionToken()
-      auth = await rpcCall<AuthStatusResult>('auth.status', {})
-    } else {
-      throw err
-    }
-  }
+  const auth = await rpcCall<AuthStatusResult>('auth.status', {})
   if (!auth.authenticated) {
     const setup = await getSetupStatus()
     return {
@@ -123,9 +111,9 @@ async function getSetupStatus(): Promise<UserStatusResult> {
 
 export async function login(input: LoginInput): Promise<AuthResult> {
   const result = await rpcCall<LoginResult>('auth.login', input)
-  setStoredSessionToken(result.token)
+  clearLegacySessionToken()
+  resumeSessionAfterAuthentication()
   return {
-    token: result.token,
     user: {
       id: result.userId,
       email: input.email,
@@ -137,13 +125,11 @@ export async function login(input: LoginInput): Promise<AuthResult> {
 }
 
 export async function logout(): Promise<void> {
-  const token = getStoredSessionToken()
   try {
-    if (token) {
-      await rpcCall('auth.logout', { token })
-    }
+    await rpcCall('auth.logout', {})
   } finally {
-    clearStoredSessionToken()
+    clearLegacySessionToken()
+    suspendSessionAfterLogout()
   }
 }
 

@@ -75,6 +75,17 @@ func (h httpSetupHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, createErr.clientMessage, createErr.status)
 		return
 	}
+	// Setup exposes the MCP API key once, while the web session remains confined
+	// to a server-managed cookie.
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    created.sessionToken,
+		Path:     "/",
+		Expires:  created.sessionExpiresAt.UTC(),
+		HttpOnly: true,
+		Secure:   requestUsesHTTPS(r) || strings.HasPrefix(strings.ToLower(strings.TrimSpace(h.publicURL)), "https://"),
+		SameSite: http.SameSiteStrictMode,
+	})
 	mcpArtifacts, err := h.setupMCPArtifacts(r, created.apiKeySecret)
 	if err != nil {
 		http.Error(w, "create setup mcp artifacts", http.StatusInternalServerError)
@@ -82,13 +93,13 @@ func (h httpSetupHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if !setupWantsJSON(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, setupCompleteHTML(created.sessionToken, created.apiKeySecret, mcpArtifacts))
+		_, _ = io.WriteString(w, setupCompleteHTML(created.apiKeySecret, mcpArtifacts))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"user":    created.user,
-		"session": map[string]any{"token": created.sessionToken, "expiresAt": created.sessionExpiresAt},
+		"session": map[string]any{"expiresAt": created.sessionExpiresAt},
 		"apiKey":  map[string]any{"id": created.apiKey.ID.String(), "name": created.apiKey.Name, "prefix": created.apiKey.Prefix, "secret": created.apiKeySecret},
 		"mcp":     mcpArtifacts,
 	})

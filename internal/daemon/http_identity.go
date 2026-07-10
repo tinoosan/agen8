@@ -32,6 +32,13 @@ func (d *Daemon) httpIdentityFromSessionCookie(ctx context.Context, r *http.Requ
 	return d.httpIdentityResolver().ResolveSessionCookie(ctx, r)
 }
 
+func (d *Daemon) httpIdentityFromRequest(ctx context.Context, r *http.Request) (rpc.Identity, error) {
+	if authorization := strings.TrimSpace(r.Header.Get("Authorization")); authorization != "" {
+		return d.httpIdentity(ctx, authorization)
+	}
+	return d.httpIdentityFromSessionCookie(ctx, r)
+}
+
 func (d *Daemon) attentionHookUserID(r *http.Request) string {
 	if r == nil {
 		return ""

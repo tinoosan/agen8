@@ -617,6 +617,56 @@ func TestRegisterMCPContextBoundProjectOverridesCallerAssertedProjectID(t *testi
 	}
 }
 
+func TestRegisterMCPContextBoundProjectDoesNotTrustUnrelatedWorkspaceRoot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	rootA := filepath.Join(t.TempDir(), "repo-a")
+	rootB := filepath.Join(t.TempDir(), "repo-b")
+
+	bound, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:       "ak_test_token",
+		UserID:      "user-1",
+		ProjectRoot: rootA,
+		HarnessKind: "codex",
+		SessionID:   "session-a",
+	})
+	if err != nil {
+		t.Fatalf("register bound project: %v", err)
+	}
+	result, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token:          "ak_test_token",
+		UserID:         "user-1",
+		BoundProjectID: bound.ProjectID,
+		ProjectRoot:    rootB,
+		HarnessKind:    "codex",
+		SessionID:      "session-b",
+	})
+	if err != nil {
+		t.Fatalf("register with unrelated workspace root: %v", err)
+	}
+	if result.ProjectID != bound.ProjectID {
+		t.Fatalf("project=%q want bound %q", result.ProjectID, bound.ProjectID)
+	}
+
+	proj, err := service.GetProject(caller.ContextWithCaller(ctx, caller.Caller{UserID: "user-1"}), types.ProjectID(bound.ProjectID))
+	if err != nil {
+		t.Fatalf("get bound project: %v", err)
+	}
+	if got := service.ResolveRoot(ctx, proj); got != rootA {
+		t.Fatalf("ResolveRoot=%q want original root %q; unrelated registration root %q must not become effective", got, rootA, rootB)
+	}
+	workspaces, err := service.ListWorkspaces(ctx, workspace.Filter{ProjectID: bound.ProjectID})
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
+	}
+	for _, ws := range workspaces {
+		if ws.Root == rootB {
+			t.Fatalf("unrelated workspace root %q was recorded for bound project", rootB)
+		}
+	}
+}
+
 func TestRegisterMCPContextPathHashFallbackForUnmarkedFolder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

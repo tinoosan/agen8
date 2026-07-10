@@ -128,7 +128,7 @@ describe('rpc SSE reconnect policy', () => {
     expect(FakeEventSource.instances).toHaveLength(2)
   })
 
-  it('halts retries entirely on 403 until the token changes', async () => {
+  it('halts retries entirely on 403 until authentication succeeds', async () => {
     mockEventsProbe(403)
     const rpc = await importRpc()
     rpc.onNotification('event.test', () => {})
@@ -141,24 +141,24 @@ describe('rpc SSE reconnect policy', () => {
     await vi.advanceTimersByTimeAsync(120_000)
     expect(FakeEventSource.instances).toHaveLength(1)
 
-    // A new token lifts the block immediately.
-    rpc.setStoredSessionToken('fresh-token')
+    // A successful login lifts the block immediately.
+    rpc.resumeSessionAfterAuthentication()
     expect(FakeEventSource.instances).toHaveLength(2)
   })
 
-  it('stays halted when the stored token has not changed', async () => {
+  it('ignores duplicate authentication notifications after resuming', async () => {
     mockEventsProbe(403)
     const rpc = await importRpc()
-    rpc.setStoredSessionToken('stale-token')
     rpc.onNotification('event.test', () => {})
     const after = FakeEventSource.instances.length
     FakeEventSource.instances[after - 1].emitError()
     await flushProbe()
 
-    // Re-setting the SAME token must not lift the block.
-    rpc.setStoredSessionToken('stale-token')
+    rpc.resumeSessionAfterAuthentication()
+    const afterResume = FakeEventSource.instances.length
+    rpc.resumeSessionAfterAuthentication()
     await vi.advanceTimersByTimeAsync(120_000)
-    expect(FakeEventSource.instances).toHaveLength(after)
+    expect(FakeEventSource.instances).toHaveLength(afterResume)
   })
 })
 

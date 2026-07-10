@@ -195,11 +195,13 @@ func TestSetupPageIncludesMCPSetupResultShell(t *testing.T) {
 		`id="mcp-config"`,
 		`id="codex-command"`,
 		`id="claude-command"`,
-		`agen8.sessionToken`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("setup page missing %q", want)
 		}
+	}
+	if strings.Contains(body, sessionCookieName) || strings.Contains(body, "localStorage") {
+		t.Fatal("setup page must not expose or persist the browser session")
 	}
 }
 
@@ -530,11 +532,13 @@ func TestHandleSetupFormRevealsMCPArtifacts(t *testing.T) {
 		"claude mcp add --transport http --scope user agen8",
 		"--header",
 		"agen8 skill install --harness codex",
-		"agen8.sessionToken",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("setup form response missing %q", want)
 		}
+	}
+	if strings.Contains(body, sessionCookieName) || strings.Contains(body, "localStorage") {
+		t.Fatal("setup completion must not expose or persist the browser session")
 	}
 }
 
@@ -1063,20 +1067,9 @@ func TestProjectLinkTokenCanRegisterBoundMCPContext(t *testing.T) {
 	if setupRec.Code != http.StatusOK {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
-	var setupResult struct {
-		Session struct {
-			Token string `json:"token"`
-		} `json:"session"`
-	}
-	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
-		t.Fatalf("decode setup response: %v", err)
-	}
-	if setupResult.Session.Token == "" {
-		t.Fatal("setup response missing session token")
-	}
-
-	projectID := createProjectForLinkTokenTest(t, handler, setupResult.Session.Token, projectRoot)
-	linkToken := createProjectLinkTokenForTest(t, handler, setupResult.Session.Token, projectID)
+	sessionToken := sessionTokenFromRecorder(t, setupRec)
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, projectRoot)
+	linkToken := createProjectLinkTokenForTest(t, handler, sessionToken, projectID)
 
 	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
 	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(linkToken), bytes.NewReader(initializeBody))
@@ -1135,7 +1128,6 @@ func TestProjectLinkTokenCanRegisterBoundMCPContext(t *testing.T) {
 	var registered struct {
 		ProjectID string `json:"projectId"`
 		MemberID  string `json:"memberId"`
-		Token     string `json:"token"`
 	}
 	if err := json.Unmarshal([]byte(registerResp.Result.Content[0].Text), &registered); err != nil {
 		t.Fatalf("decode register content %q: %v", registerResp.Result.Content[0].Text, err)
@@ -1146,8 +1138,8 @@ func TestProjectLinkTokenCanRegisterBoundMCPContext(t *testing.T) {
 	if registered.MemberID == "" {
 		t.Fatalf("registered response missing member id: %+v", registered)
 	}
-	if registered.Token != linkToken {
-		t.Fatalf("registered token changed unexpectedly")
+	if strings.Contains(registerResp.Result.Content[0].Text, linkToken) || strings.Contains(registerResp.Result.Content[0].Text, `"token"`) {
+		t.Fatal("project.register response disclosed its bearer token")
 	}
 }
 
@@ -1203,9 +1195,6 @@ func setupSessionAndAPIKeyForTest(t *testing.T, handler http.Handler) (sessionTo
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
 	var setupResult struct {
-		Session struct {
-			Token string `json:"token"`
-		} `json:"session"`
 		APIKey struct {
 			Secret string `json:"secret"`
 		} `json:"apiKey"`
@@ -1213,13 +1202,31 @@ func setupSessionAndAPIKeyForTest(t *testing.T, handler http.Handler) (sessionTo
 	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
 		t.Fatalf("decode setup response: %v", err)
 	}
-	if setupResult.Session.Token == "" {
-		t.Fatal("setup response missing session token")
-	}
 	if setupResult.APIKey.Secret == "" {
 		t.Fatal("setup response missing api key")
 	}
-	return setupResult.Session.Token, setupResult.APIKey.Secret
+	return sessionTokenFromRecorder(t, setupRec), setupResult.APIKey.Secret
+}
+
+func sessionTokenFromRecorder(t *testing.T, recorder *httptest.ResponseRecorder) string {
+	t.Helper()
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name != sessionCookieName {
+			continue
+		}
+		if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+			t.Fatalf("session cookie attributes=%+v", cookie)
+		}
+		if strings.TrimSpace(cookie.Value) == "" {
+			t.Fatal("session cookie value is empty")
+		}
+		if strings.Contains(recorder.Body.String(), cookie.Value) {
+			t.Fatal("response body disclosed the session cookie value")
+		}
+		return cookie.Value
+	}
+	t.Fatal("response missing HttpOnly session cookie")
+	return ""
 }
 
 type eventsTestClient struct {
@@ -1362,20 +1369,9 @@ func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
 	if setupRec.Code != http.StatusOK {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
-	var setupResult struct {
-		Session struct {
-			Token string `json:"token"`
-		} `json:"session"`
-	}
-	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
-		t.Fatalf("decode setup response: %v", err)
-	}
-	if setupResult.Session.Token == "" {
-		t.Fatal("setup response missing session token")
-	}
-
-	projectID := createProjectForLinkTokenTest(t, handler, setupResult.Session.Token, projectRoot)
-	linkToken := createProjectLinkTokenForTest(t, handler, setupResult.Session.Token, projectID)
+	sessionToken := sessionTokenFromRecorder(t, setupRec)
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, projectRoot)
+	linkToken := createProjectLinkTokenForTest(t, handler, sessionToken, projectID)
 
 	// One initialize is enough for the stateless streamable handler to accept the
 	// subsequent tool calls over this token.
@@ -1643,9 +1639,6 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
 	var setupResult struct {
-		Session struct {
-			Token string `json:"token"`
-		} `json:"session"`
 		APIKey struct {
 			Secret string `json:"secret"`
 		} `json:"apiKey"`
@@ -1653,10 +1646,10 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
 		t.Fatalf("decode setup response: %v", err)
 	}
-	sessionToken := setupResult.Session.Token
+	sessionToken := sessionTokenFromRecorder(t, setupRec)
 	adminAPIKey := setupResult.APIKey.Secret
-	if sessionToken == "" || adminAPIKey == "" {
-		t.Fatalf("setup response missing tokens: session=%q apiKey=%q", sessionToken, adminAPIKey)
+	if adminAPIKey == "" {
+		t.Fatal("setup response missing api key")
 	}
 
 	// The admin user id lets us mint extra keys directly through the auth service.

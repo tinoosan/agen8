@@ -24,7 +24,12 @@ const (
 var errAttachmentUploadFileTooLarge = errors.New("attachment upload file is too large")
 
 func (d *Daemon) handleFileUpload(w http.ResponseWriter, r *http.Request) {
-	identity, err := d.httpIdentity(r.Context(), r.Header.Get("Authorization"))
+	usesSessionCookie := strings.TrimSpace(r.Header.Get("Authorization")) == "" && requestHasSessionCookie(r)
+	if usesSessionCookie && !checkSameOriginRequest(r) {
+		http.Error(w, "cross-origin request blocked", http.StatusForbidden)
+		return
+	}
+	identity, err := d.httpIdentityFromRequest(r.Context(), r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
