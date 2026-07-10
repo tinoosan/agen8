@@ -73,6 +73,53 @@ func TestRegisterProjectDispatchCreateAndList(t *testing.T) {
 	}
 }
 
+func TestRegisterProjectReturnsBestEffortSetupMetadata(t *testing.T) {
+	svc := newRPCProjectService(t)
+	reg := NewRegistry()
+	postCreate := func(_ context.Context, userID, title, locationID, root string) projectrpc.ProjectSetupResult {
+		if userID != "user-1" || title != "Project One" || locationID != "local" || root != "/tmp/project-1" {
+			t.Fatalf("post-create args=(%q,%q,%q,%q)", userID, title, locationID, root)
+		}
+		return projectrpc.ProjectSetupResult{
+			Attempted:      true,
+			HooksInstalled: true,
+			Warnings:       []string{"Claude MCP could not be configured on the daemon machine."},
+		}
+	}
+	if err := RegisterProject(reg, svc, postCreate, nil); err != nil {
+		t.Fatalf("RegisterProject: %v", err)
+	}
+	server, err := NewServer(reg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	ctx := ContextWithIdentity(context.Background(), Identity{UserID: "user-1"})
+	raw, err := server.Handle(ctx, []byte(`{
+		"jsonrpc":"2.0","id":"1","method":"project.create",
+		"params":{"locationId":"local","root":"/tmp/project-1","title":"Project One"}
+	}`))
+	if err != nil {
+		t.Fatalf("project.create: %v", err)
+	}
+	resp := decodeRPCResponse(t, raw)
+	if resp.Error != nil {
+		t.Fatalf("project.create response error=%+v", resp.Error)
+	}
+	var created projectrpc.ProjectCreateResult
+	if err := json.Unmarshal(resp.Result, &created); err != nil {
+		t.Fatalf("decode project.create: %v", err)
+	}
+	if created.Project.ID == "" {
+		t.Fatal("project was not created")
+	}
+	if created.Setup == nil || !created.Setup.Attempted || !created.Setup.HooksInstalled || created.Setup.ClaudeMCPConfigured {
+		t.Fatalf("setup=%+v", created.Setup)
+	}
+	if len(created.Setup.Warnings) != 1 {
+		t.Fatalf("setup warnings=%v", created.Setup.Warnings)
+	}
+}
+
 func TestRegisterProjectConfigureClaudeMCP(t *testing.T) {
 	svc := newRPCProjectService(t)
 	reg := NewRegistry()

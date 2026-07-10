@@ -54,6 +54,9 @@ describe('Project page', () => {
     vi.clearAllMocks()
     mockUseProjects.mockReturnValue({
       isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
       data: [
         { id: 'alpha', root: '/repo/alpha', title: 'alpha', status: 'open', createdAt: '2026-03-01T00:00:00Z' },
         { id: 'beta', root: '/repo/beta', title: 'beta', status: 'open', createdAt: '2026-03-02T00:00:00Z' },
@@ -96,6 +99,44 @@ describe('Project page', () => {
 
     expect(screen.getByText('alpha')).toBeInTheDocument()
     expect(screen.getByText('beta')).toBeInTheDocument()
+  })
+
+  it('renders a retryable error instead of a false empty state', async () => {
+    const user = userEvent.setup()
+    const refetch = vi.fn()
+    mockUseProjects.mockReturnValue({
+      isLoading: false,
+      isError: true,
+      error: new Error('project list unavailable'),
+      refetch,
+      data: undefined,
+    })
+
+    renderProjectPage()
+
+    expect(screen.getByText('Projects could not be loaded')).toBeInTheDocument()
+    expect(screen.queryByText('Create your first project')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+
+  it('repairs Claude MCP configuration for an existing project', async () => {
+    const user = userEvent.setup()
+    mockRpcCall.mockImplementation((method: string) => {
+      if (method === 'project.claudeMCP.configure') {
+        return Promise.resolve({ projectId: 'alpha', installed: true, serverName: 'agen8' })
+      }
+      return Promise.resolve({})
+    })
+
+    renderProjectPage()
+
+    const actions = screen.getAllByRole('button', { name: /project actions/i })
+    await user.click(actions[0])
+    await user.click(screen.getByRole('menuitem', { name: /configure claude mcp/i }))
+    await waitFor(() => {
+      expect(mockRpcCall).toHaveBeenCalledWith('project.claudeMCP.configure', { projectId: 'alpha' })
+    })
   })
 
   it('uses the ready local location by default when creating the first project', async () => {

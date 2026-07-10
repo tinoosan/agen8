@@ -97,7 +97,19 @@ func New(cfg Config) (*Daemon, error) {
 			var postCreate rpc.PostProjectCreate
 			var configureClaudeMCP rpc.ConfigureProjectClaudeMCP
 			if projectProvisioner != nil {
-				postCreate = projectProvisioner.ProvisionHooks
+				postCreate = func(ctx context.Context, userID, projectTitle, locationID, root string) projectrpc.ProjectSetupResult {
+					if strings.TrimSpace(locationID) != "local" {
+						return projectrpc.ProjectSetupResult{Warnings: []string{"Automatic harness setup is available only for local projects."}}
+					}
+					result := projectProvisioner.ProvisionProject(ctx, userID, projectTitle, root)
+					return projectrpc.ProjectSetupResult{
+						Attempted:           true,
+						HooksInstalled:      result.HooksInstalled,
+						ClaudeMCPConfigured: result.ClaudeMCP.Installed,
+						ClaudeMCPPath:       result.ClaudeMCP.Path,
+						Warnings:            result.Warnings,
+					}
+				}
 				configureClaudeMCP = func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
 					result, err := projectProvisioner.ProvisionClaudeMCP(ctx, userID, projectTitle, root)
 					if err != nil {

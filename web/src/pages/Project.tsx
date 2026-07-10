@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
 import { useProjects } from '../hooks/useProjects'
+import { rpcCall } from '../lib/rpc'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
 import { qk } from '../lib/queryKeys'
 import { projectDisplayName } from '@/lib/projectHelpers'
 import { Plus, Search } from 'lucide-react'
-import type { Project } from '../lib/types'
+import type { Project, ProjectClaudeMCPConfigureResult, ProjectCreateResult } from '../lib/types'
 import LinkFolderDialog from '../components/projects/LinkFolderDialog'
 import EditProjectDialog from '../components/projects/EditProjectDialog'
 import CreateProjectDialog from '../components/projects/CreateProjectDialog'
@@ -62,6 +63,7 @@ export default function ProjectPage() {
   const projectsQuery = useProjects({ includeArchived: true })
   const allProjects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
   const isLoading = projectsQuery.isLoading
+  const isError = projectsQuery.isError
   const queryClient = useQueryClient()
   const [, navigate] = useLocation()
   const [createOpen, setCreateOpen] = useState(() =>
@@ -94,11 +96,26 @@ export default function ProjectPage() {
     }
   }, [])
 
-  const handleCreateSuccess = (project: Project) => {
+  const handleCreateSuccess = ({ project, setup }: ProjectCreateResult) => {
     queryClient.invalidateQueries({ queryKey: qk.projectsAll })
     toast.success(`Project "${projectDisplayName(project)}" created`)
+    if (setup?.claudeMcpConfigured && setup.hooksInstalled) {
+      toast.success('Claude MCP and attention hooks configured')
+    } else if (setup && (setup.attempted || (setup.warnings?.length ?? 0) > 0)) {
+      toast.warning(setup.warnings?.join(' ') || 'Some local harness setup could not be completed')
+    }
     if (project.id) {
       navigate(`/project/${encodeURIComponent(project.id)}`)
+    }
+  }
+
+  const configureClaudeMCP = async (project: Project) => {
+    try {
+      const result = await rpcCall<ProjectClaudeMCPConfigureResult>('project.claudeMCP.configure', { projectId: project.id })
+      if (!result.installed) throw new Error('Claude MCP configuration was not installed')
+      toast.success(`Claude MCP configured for "${projectDisplayName(project)}"`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to configure Claude MCP')
     }
   }
 
@@ -143,8 +160,20 @@ export default function ProjectPage() {
           </div>
         )}
 
+        {!isLoading && isError && (
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+            <div className="font-semibold text-[0.9375rem] text-[var(--text-1)]">Projects could not be loaded</div>
+            <div className="max-w-[360px] text-[0.8125rem] text-[var(--text-3)]">
+              {projectsQuery.error instanceof Error ? projectsQuery.error.message : 'The project service did not respond.'}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => projectsQuery.refetch()}>
+              Try again
+            </Button>
+          </div>
+        )}
+
         {/* Empty state */}
-        {!isLoading && allProjects.length === 0 && (
+        {!isLoading && !isError && allProjects.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 gap-5 text-center sm:py-20">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--bg-elevated)]">
               <img
@@ -175,7 +204,7 @@ export default function ProjectPage() {
         )}
 
         {/* Project table */}
-        {!isLoading && allProjects.length > 0 && (
+        {!isLoading && !isError && allProjects.length > 0 && (
           <>
             {/* Filter bar: search + status chips */}
             <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -230,6 +259,7 @@ export default function ProjectPage() {
                       onRemove={(action) => setRemoveTarget({ project, action })}
                       onLink={() => setLinkTarget(project)}
                       onEdit={() => setEditTarget(project)}
+                      onConfigureClaudeMCP={() => { void configureClaudeMCP(project) }}
                     />
                   ))}
                 </TableBody>

@@ -77,6 +77,8 @@ func (h httpSetupHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	// Setup exposes the MCP API key once, while the web session remains confined
 	// to a server-managed cookie.
+	// #nosec G124 -- Secure is enabled for direct/proxied TLS and HTTPS PublicURL;
+	// loopback HTTP development must remain usable.
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    created.sessionToken,

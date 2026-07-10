@@ -47,10 +47,9 @@ func withProjectCaller[Params any, Result any](fn func(context.Context, Params) 
 	}
 }
 
-// PostProjectCreate runs after a successful project.create — the daemon wires
-// hook auto-provisioning here so the project service stays free of auth/hook
-// dependencies. Returns whether hooks were installed; must never error.
-type PostProjectCreate func(ctx context.Context, userID, projectTitle, root string) bool
+// PostProjectCreate runs after a successful project.create. Setup is
+// best-effort and its result never rolls back the durable project.
+type PostProjectCreate func(ctx context.Context, userID, projectTitle, locationID, root string) projectrpc.ProjectSetupResult
 
 // ConfigureProjectClaudeMCP provisions/repairs a project's Claude MCP config.
 type ConfigureProjectClaudeMCP func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error)
@@ -74,8 +73,8 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 				if idErr != nil {
 					return res, nil
 				}
-				installed := postCreate(ctx, identity.UserID, res.Project.Title, res.Project.Root)
-				res.HooksInstalled = &installed
+				setup := postCreate(ctx, identity.UserID, res.Project.Title, res.Project.LocationID, res.Project.Root)
+				res.Setup = &setup
 				return res, nil
 			}))
 		},

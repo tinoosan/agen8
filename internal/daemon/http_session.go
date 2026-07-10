@@ -15,6 +15,8 @@ func (d *Daemon) setSessionCookie(w http.ResponseWriter, r *http.Request, token 
 	if token == "" {
 		return
 	}
+	// #nosec G124 -- secureSessionCookie enforces Secure for direct/proxied TLS
+	// and HTTPS PublicURL while allowing loopback HTTP development.
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
@@ -27,6 +29,8 @@ func (d *Daemon) setSessionCookie(w http.ResponseWriter, r *http.Request, token 
 }
 
 func (d *Daemon) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	// #nosec G124 -- deletion must use the same conditional Secure policy as
+	// the session cookie it expires.
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Path:     "/",

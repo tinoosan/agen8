@@ -27,6 +27,27 @@ export interface Project {
   updatedAt?: string;
 }
 
+export interface ProjectSetupResult {
+  attempted: boolean;
+  hooksInstalled: boolean;
+  claudeMcpConfigured: boolean;
+  claudeMcpPath?: string;
+  warnings?: string[];
+}
+
+export interface ProjectCreateResult {
+  project: Project;
+  setup?: ProjectSetupResult;
+}
+
+export interface ProjectClaudeMCPConfigureResult {
+  projectId: string;
+  installed: boolean;
+  path?: string;
+  serverName?: string;
+  url?: string;
+}
+
 export interface LocationAddress {
   host?: string;
   port?: number;
