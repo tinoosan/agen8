@@ -1,7 +1,9 @@
 package hookinstaller
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,69 +155,71 @@ func TestInstallClaudeIsIdempotentAndPreservesUserHooks(t *testing.T) {
 	}
 }
 
-func TestInstallClaudeMCPMergesServerAndPreservesSettings(t *testing.T) {
+func TestInstallClaudeMCPUsesPrivateLocalScopeAndReplacesOnlyAgen8(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".claude", "settings.local.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	existing := `{
-		"permissions": {"allow": ["Bash(go test:*)"]},
-		"hooks": {
-			"Stop": [{"hooks": [{"type": "command", "command": "say done"}]}]
-		},
-		"mcpServers": {
-			"other": {"type": "http", "url": "https://example.com/mcp"},
-			"agen8": {"type": "http", "url": "http://old/mcp", "headers": {"Authorization": "Bearer old"}}
+	var calls [][]string
+	run := func(_ context.Context, gotDir string, args ...string) ([]byte, error) {
+		if gotDir != dir {
+			t.Fatalf("project dir=%q want %q", gotDir, dir)
 		}
-	}`
-	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
-		t.Fatal(err)
+		calls = append(calls, append([]string(nil), args...))
+		if len(args) > 1 && args[1] == "remove" {
+			return []byte("No project-local MCP server found with name: agen8"), errors.New("exit status 1")
+		}
+		return nil, nil
 	}
 
 	result, err := InstallClaudeMCP(MCPOptions{
 		BaseURL:    "http://127.0.0.1:7777/",
 		Token:      "ak_new",
 		ProjectDir: dir,
+		runCommand: run,
 	})
 	if err != nil {
 		t.Fatalf("InstallClaudeMCP: %v", err)
 	}
-	if result.Path != path || result.ServerName != "agen8" || result.URL != "http://127.0.0.1:7777/mcp" {
+	if !strings.HasSuffix(result.Path, ".claude.json") || result.ServerName != "agen8" || result.URL != "http://127.0.0.1:7777/mcp" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-
-	config := readJSON(t, path)
-	if _, ok := config["permissions"]; !ok {
-		t.Fatal("unrelated settings were dropped")
+	if len(calls) != 2 {
+		t.Fatalf("command calls=%d want 2", len(calls))
 	}
-	if len(eventGroups(t, config, "Stop")) != 1 {
-		t.Fatal("hooks were not preserved")
+	if got := strings.Join(calls[0], " "); got != "mcp remove --scope local agen8" {
+		t.Fatalf("remove args=%q", got)
 	}
-	servers := config["mcpServers"].(map[string]any)
-	if _, ok := servers["other"]; !ok {
-		t.Fatal("unrelated MCP server was dropped")
+	if got := strings.Join(calls[1][:5], " "); got != "mcp add-json --scope local agen8" {
+		t.Fatalf("add args=%q", got)
 	}
-	agen8 := servers["agen8"].(map[string]any)
-	if agen8["type"] != "http" || agen8["url"] != "http://127.0.0.1:7777/mcp" {
-		t.Fatalf("unexpected agen8 server: %+v", agen8)
+	var server map[string]any
+	if err := json.Unmarshal([]byte(calls[1][5]), &server); err != nil {
+		t.Fatalf("parse server JSON: %v", err)
 	}
-	headers := agen8["headers"].(map[string]any)
+	if server["type"] != "http" || server["url"] != "http://127.0.0.1:7777/mcp" {
+		t.Fatalf("server=%+v", server)
+	}
+	headers := server["headers"].(map[string]any)
 	if headers["Authorization"] != "Bearer ak_new" {
 		t.Fatalf("Authorization header = %v", headers["Authorization"])
 	}
+}
 
-	if _, err := InstallClaudeMCP(MCPOptions{BaseURL: "http://127.0.0.1:7777", Token: "ak_newer", ProjectDir: dir}); err != nil {
-		t.Fatalf("second InstallClaudeMCP: %v", err)
+func TestInstallClaudeMCPIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	var calls [][]string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string(nil), args...))
+		return nil, nil
 	}
-	config = readJSON(t, path)
-	servers = config["mcpServers"].(map[string]any)
-	if len(servers) != 2 {
-		t.Fatalf("mcpServers len = %d, want 2", len(servers))
+	for _, token := range []string{"ak_first", "ak_rotated"} {
+		if _, err := InstallClaudeMCP(MCPOptions{BaseURL: "http://127.0.0.1:7777", Token: token, ProjectDir: dir, runCommand: run}); err != nil {
+			t.Fatalf("InstallClaudeMCP(%s): %v", token, err)
+		}
 	}
-	headers = servers["agen8"].(map[string]any)["headers"].(map[string]any)
-	if headers["Authorization"] != "Bearer ak_newer" {
-		t.Fatalf("token not rotated: %v", headers["Authorization"])
+	if len(calls) != 4 || calls[0][1] != "remove" || calls[1][1] != "add-json" || calls[2][1] != "remove" || calls[3][1] != "add-json" {
+		t.Fatalf("unexpected command sequence: %+v", calls)
+	}
+	if strings.Contains(calls[1][5], "ak_rotated") || !strings.Contains(calls[3][5], "ak_rotated") {
+		t.Fatalf("token was not rotated across idempotent install")
 	}
 }
 
@@ -230,24 +234,24 @@ func TestInstallClaudeMCPRejectsNonLocalRoot(t *testing.T) {
 	}
 }
 
-func TestInstallClaudeMCPReportsUnwritableRoot(t *testing.T) {
+func TestInstallClaudeMCPReportsCLIErrorWithoutEchoingToken(t *testing.T) {
 	dir := t.TempDir()
-	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(claudeDir, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(claudeDir, 0o700)
-
 	_, err := InstallClaudeMCP(MCPOptions{
 		BaseURL:    "http://127.0.0.1:7777",
-		Token:      "ak_test",
+		Token:      "ak_must_not_leak",
 		ProjectDir: dir,
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if args[1] == "remove" {
+				return nil, nil
+			}
+			return []byte("invalid config containing ak_must_not_leak"), errors.New("exit status 1")
+		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "write") {
+	if err == nil || !strings.Contains(err.Error(), "add server") {
 		t.Fatalf("unexpected err=%v", err)
+	}
+	if strings.Contains(err.Error(), "ak_must_not_leak") {
+		t.Fatalf("error leaked token: %v", err)
 	}
 }
 

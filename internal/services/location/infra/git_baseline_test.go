@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -84,5 +85,22 @@ func TestGitBaselineCommandIsFixedAndQuoted(t *testing.T) {
 	// resolve to exactly 5 shell words: git, -C, <dir>, show, <rev>.
 	if got != 5 {
 		t.Fatalf("command split into %d shell words, want 5 (git -C <dir> show <rev>): %q", got, command)
+	}
+}
+
+func TestBoundedOutputCapsRemoteCommandOutput(t *testing.T) {
+	output := newBoundedOutput(5)
+
+	if n, err := output.Write([]byte("abc")); err != nil || n != 3 {
+		t.Fatalf("first write = (%d, %v), want (3, nil)", n, err)
+	}
+	if n, err := output.Write([]byte("def")); err != nil || n != 3 {
+		t.Fatalf("overflow write = (%d, %v), want (3, nil)", n, err)
+	}
+	if got := string(output.Bytes()); got != "abcde" {
+		t.Fatalf("bounded output = %q, want abcde", got)
+	}
+	if !errors.Is(output.Err(), errSSHCommandOutputTooLarge) {
+		t.Fatalf("expected output-too-large error, got %v", output.Err())
 	}
 }

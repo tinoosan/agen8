@@ -61,9 +61,19 @@ type ProjectCreateParams struct {
 
 type ProjectCreateResult struct {
 	Project ProjectView `json:"project"`
-	// HooksInstalled reports whether the daemon auto-provisioned the attention
-	// hooks for the new project (nil when no provisioner is wired).
-	HooksInstalled *bool `json:"hooksInstalled,omitempty"`
+	// Setup reports best-effort local harness provisioning. Project creation is
+	// durable even when one of these client-side integrations cannot be installed.
+	Setup *ProjectSetupResult `json:"setup,omitempty"`
+}
+
+type ProjectSetupResult struct {
+	Attempted            bool     `json:"attempted"`
+	HooksInstalled       bool     `json:"hooksInstalled"`
+	ClaudeMCPConfigured  bool     `json:"claudeMcpConfigured"`
+	ClaudeMCPPath        string   `json:"claudeMcpPath,omitempty"`
+	RequiresClientAction bool     `json:"requiresClientAction,omitempty"`
+	ClientSetupCommand   string   `json:"clientSetupCommand,omitempty"`
+	Warnings             []string `json:"warnings,omitempty"`
 }
 
 type ProjectClaudeMCPConfigureParams struct {
@@ -71,11 +81,13 @@ type ProjectClaudeMCPConfigureParams struct {
 }
 
 type ProjectClaudeMCPConfigureResult struct {
-	ProjectID  string `json:"projectId"`
-	Installed  bool   `json:"installed"`
-	Path       string `json:"path,omitempty"`
-	ServerName string `json:"serverName,omitempty"`
-	URL        string `json:"url,omitempty"`
+	ProjectID            string `json:"projectId"`
+	Installed            bool   `json:"installed"`
+	Path                 string `json:"path,omitempty"`
+	ServerName           string `json:"serverName,omitempty"`
+	URL                  string `json:"url,omitempty"`
+	RequiresClientAction bool   `json:"requiresClientAction,omitempty"`
+	ClientSetupCommand   string `json:"clientSetupCommand,omitempty"`
 }
 
 type ProjectSaveParams struct {
@@ -100,6 +112,15 @@ type ProjectUpdateParams struct {
 }
 
 type ProjectUpdateResult struct {
+	Project ProjectView `json:"project"`
+}
+
+type ProjectRelocateParams struct {
+	ProjectID string `json:"projectId"`
+	Root      string `json:"root"`
+}
+
+type ProjectRelocateResult struct {
 	Project ProjectView `json:"project"`
 }
 

@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/tinoosan/agen8/internal/caller"
+	"github.com/tinoosan/agen8/internal/core/types"
 	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
 
@@ -197,15 +200,28 @@ func TestResolveRejectsDisabledCredential(t *testing.T) {
 }
 
 func newTestService(t *testing.T, repo credentialdomain.Repository) *Service {
+	return newTestServiceForCaller(t, repo, caller.Caller{UserID: "user-a"})
+}
+
+func newTestServiceForCaller(t *testing.T, repo credentialdomain.Repository, identity caller.Caller) *Service {
 	t.Helper()
 	service, err := NewService(Config{
 		Repository: repo,
 		Clock:      fixedClock{now: time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)},
+		Caller:     staticCallerResolver{identity: identity},
 	})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
 	return service
+}
+
+type staticCallerResolver struct {
+	identity caller.Caller
+}
+
+func (r staticCallerResolver) ResolveCaller(context.Context) (caller.Caller, error) {
+	return r.identity, nil
 }
 
 type fixedClock struct {
@@ -239,6 +255,12 @@ func (r *memoryRepository) Get(_ context.Context, id credentialdomain.ID) (crede
 func (r *memoryRepository) List(_ context.Context, filter credentialdomain.Filter) ([]credentialdomain.Record, error) {
 	var out []credentialdomain.Record
 	for _, record := range r.records {
+		if record.UserID != filter.Scope.UserID {
+			continue
+		}
+		if record.ProjectID != "" && record.ProjectID != filter.Scope.ProjectID {
+			continue
+		}
 		if filter.Kind != "" && record.Kind != filter.Kind {
 			continue
 		}
@@ -285,3 +307,31 @@ func (r *memoryRepository) DeleteMaterial(_ context.Context, id credentialdomain
 }
 
 var _ credentialdomain.Repository = (*memoryRepository)(nil)
+
+func TestCredentialAccessCannotCrossUserOrProjectScope(t *testing.T) {
+	repository := newMemoryRepository()
+	userA := newTestServiceForCaller(t, repository, caller.Caller{UserID: "user-a", ProjectID: types.ProjectID("project-a")})
+	created, err := userA.CreateCredential(context.Background(), CreateCredentialInput{
+		Kind:    credentialdomain.KindAPIKey,
+		Label:   "private",
+		Secrets: map[string]string{"value": "secret"},
+	})
+	if err != nil {
+		t.Fatalf("CreateCredential: %v", err)
+	}
+
+	for name, service := range map[string]*Service{
+		"other user":    newTestServiceForCaller(t, repository, caller.Caller{UserID: "user-b", ProjectID: types.ProjectID("project-a")}),
+		"other project": newTestServiceForCaller(t, repository, caller.Caller{UserID: "user-a", ProjectID: types.ProjectID("project-b")}),
+		"account scope": newTestServiceForCaller(t, repository, caller.Caller{UserID: "user-a"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := service.GetCredential(context.Background(), created.ID()); !errors.Is(err, credentialdomain.ErrNotFound) {
+				t.Fatalf("GetCredential err=%v want ErrNotFound", err)
+			}
+			if err := service.DeleteCredential(context.Background(), created.ID()); !errors.Is(err, credentialdomain.ErrNotFound) {
+				t.Fatalf("DeleteCredential err=%v want ErrNotFound", err)
+			}
+		})
+	}
+}

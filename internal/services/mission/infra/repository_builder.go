@@ -20,20 +20,12 @@ func NewRepositories(handle *storagedb.Handle) (RepositorySet, error) {
 	if handle == nil {
 		return RepositorySet{}, fmt.Errorf("mission repositories: db handle is required")
 	}
-	switch handle.Driver() {
-	case storagedb.DriverSQLite:
-		repo, err := NewSQLiteRepository(handle)
-		if err != nil {
-			return RepositorySet{}, err
-		}
-		return RepositorySet{Missions: repo, KeyResults: repo, ProgressEntries: repo, LifecycleEvents: repo}, nil
-	case storagedb.DriverPostgres:
-		repo, err := NewPostgresRepository(handle)
-		if err != nil {
-			return RepositorySet{}, err
-		}
-		return RepositorySet{Missions: repo, KeyResults: repo, ProgressEntries: repo, LifecycleEvents: repo}, nil
-	default:
-		return RepositorySet{}, fmt.Errorf("mission repositories: unsupported storage driver %q", handle.Driver())
+	if handle.Driver() != storagedb.DriverSQLite {
+		return RepositorySet{}, fmt.Errorf("mission repositories require SQLite storage")
 	}
+	repo, err := NewSQLiteRepository(handle)
+	if err != nil {
+		return RepositorySet{}, err
+	}
+	return RepositorySet{Missions: repo, KeyResults: repo, ProgressEntries: repo, LifecycleEvents: repo}, nil
 }

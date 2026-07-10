@@ -9,7 +9,7 @@ coordination. Keep cluster hostnames and setup tokens out of git.
 Set these locally before deploying:
 
 ```sh
-export AGEN8_IMAGE="ghcr.io/tinoosan/agen8:v0.0.2"
+export AGEN8_IMAGE="ghcr.io/tinoosan/agen8:<release-tag>"
 export AGEN8_HOST="agen8.example.com"
 export AGEN8_PUBLIC_URL="https://${AGEN8_HOST}"
 export AGEN8_SETUP_TOKEN="$(openssl rand -hex 32)"
@@ -34,13 +34,16 @@ Render the sample manifest with the homelab host and release image:
 ```sh
 tmp_manifest="$(mktemp)"
 sed \
-  -e "s#ghcr.io/tinoosan/agen8:v0.0.1#${AGEN8_IMAGE}#g" \
+  -e "s#ghcr.io/tinoosan/agen8:replace-with-release-tag#${AGEN8_IMAGE}#g" \
   -e "s#https://agen8.example.com#${AGEN8_PUBLIC_URL}#g" \
   -e "s#agen8.example.com#${AGEN8_HOST}#g" \
   deploy/kubernetes/agen8.yaml > "${tmp_manifest}"
 kubectl apply -f "${tmp_manifest}"
 rm -f "${tmp_manifest}"
 ```
+
+The reusable manifest intentionally contains no `Secret` object. Applying it
+cannot replace the random token created above.
 
 The sample manifest keeps one replica with a `Recreate` strategy because the
 default SQLite storage is single-writer. Do not scale this deployment above one
@@ -52,6 +55,7 @@ replica unless storage changes.
 kubectl -n agen8 rollout status deployment/agen8
 kubectl -n agen8 get pods,svc,ingress,pvc
 curl -fsS "${AGEN8_PUBLIC_URL}/healthz"
+curl -fsS "${AGEN8_PUBLIC_URL}/readyz"
 ```
 
 Open the setup URL once:

@@ -54,6 +54,8 @@
 
   <p>The app service depends on <code>file.Repository</code>. The repository is composed from <code>file.Reader</code> and <code>file.Writer</code> so read-only surfaces can be tested independently from mutating operations. Repository methods receive a location-aware file reference. The production repository loads the project location and routes local projects through the local filesystem and SSH projects through the location transport's SFTP implementation.</p>
 
+  <p>For local projects, file writer operations stay behind the virtual-path resolver before storage is touched. Writes and streamed uploads use rooted filesystem handles for the final open; copies use rooted source and destination handles for file data; moves are checked by the service to stay within the same virtual root and the local repository rejects symlinked path components before renaming. Cross-root file moves are rejected.</p>
+
   <h2 id="paths">2. Virtual paths</h2>
   <p>Clients never send raw storage paths for selected files. They send <code>projectId</code> plus a virtual path. The virtual root <code>/project</code> maps to the project root on the project's location. The virtual root <code>/workspace</code> maps to the project workspace directory on that same location. The Files rail starts at <code>/project</code> so routine browsing stays rooted in the repository, while viewers and context surfaces can still request any valid virtual file path directly.</p>
 
@@ -115,6 +117,7 @@
       <tr><td>Virtual paths cannot escape their root.</td><td>Path normalization rejects traversal outside <code>/project</code> or <code>/workspace</code>.</td></tr>
       <tr><td>Missing required fields fail before filesystem access.</td><td>RPC handlers validate inputs and return invalid params.</td></tr>
       <tr><td>Preview size is bounded.</td><td><code>files.get</code> reads up to the requested byte cap and marks truncated previews.</td></tr>
+      <tr><td>Uploads are bounded.</td><td><code>files.upload</code> and streamed HTTP uploads reject payloads over 25 MiB before writing through the file repository.</td></tr>
     </tbody>
   </table>
 </div>

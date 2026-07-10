@@ -690,6 +690,12 @@ func callContextWithFiles(svc *stubService, files *stubFileStore, actorMemberID 
 	return call
 }
 
+func callContextWithFilesAndRoot(svc *stubService, files *stubFileStore, actorMemberID, root string) CallContext {
+	call := callContextWithFiles(svc, files, actorMemberID)
+	call.AttachmentRoots = []string{root}
+	return call
+}
+
 func TestHandleAttachUploadsAndAppendsArtifact(t *testing.T) {
 	svc := &stubService{}
 	files := &stubFileStore{}
@@ -768,7 +774,7 @@ func TestHandleAttachByFilePathReadsBytesAndDefaultsFileName(t *testing.T) {
 	svc := &stubService{}
 	files := &stubFileStore{}
 	payload, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_path": path})
-	res, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), payload)
+	res, err := NewHandler().Handle(context.Background(), callContextWithFilesAndRoot(svc, files, "coord-1", dir), payload)
 	if err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -803,7 +809,7 @@ func TestHandleAttachByFilePathAllowsFiveMegabytes(t *testing.T) {
 	svc := &stubService{}
 	files := &stubFileStore{}
 	payload, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_path": path})
-	if _, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), payload); err != nil {
+	if _, err := NewHandler().Handle(context.Background(), callContextWithFilesAndRoot(svc, files, "coord-1", dir), payload); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
 	if len(files.uploads) != 1 {
@@ -830,7 +836,7 @@ func TestHandleAttachByFilePathExplicitFileNameWins(t *testing.T) {
 	svc := &stubService{}
 	files := &stubFileStore{}
 	payload, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_path": path, "file_name": "verification.png"})
-	if _, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), payload); err != nil {
+	if _, err := NewHandler().Handle(context.Background(), callContextWithFilesAndRoot(svc, files, "coord-1", dir), payload); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
 	if len(files.uploads) != 1 || files.uploads[0].Path != "/project/.agen8/attachments/task-1/verification.png" {
@@ -849,6 +855,22 @@ func TestHandleAttachByFilePathGuards(t *testing.T) {
 		t.Fatalf("truncate big fixture: %v", err)
 	}
 	_ = f.Close()
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	link := filepath.Join(dir, "linked.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink fixture: %v", err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatalf("write outside fixture: %v", err)
+	}
+	escapeLink := filepath.Join(dir, "escape")
+	if err := os.Symlink(filepath.Dir(outside), escapeLink); err != nil {
+		t.Fatalf("create parent symlink fixture: %v", err)
+	}
 
 	cases := []struct {
 		name    string
@@ -859,12 +881,15 @@ func TestHandleAttachByFilePathGuards(t *testing.T) {
 		{"missing file", filepath.Join(dir, "nope.png"), "file_path"},
 		{"directory", dir, "regular file"},
 		{"over size cap", big, "attachment limit"},
+		{"symlink", link, "must not be a symlink"},
+		{"outside approved root", outside, "approved project root"},
+		{"parent symlink escape", filepath.Join(escapeLink, filepath.Base(outside)), "file_path"},
 	}
 	for _, tc := range cases {
 		svc := &stubService{}
 		files := &stubFileStore{}
 		payload, _ := json.Marshal(map[string]any{"action": "attach", "task_id": "task-1", "file_path": tc.path})
-		_, err := NewHandler().Handle(context.Background(), callContextWithFiles(svc, files, "coord-1"), payload)
+		_, err := NewHandler().Handle(context.Background(), callContextWithFilesAndRoot(svc, files, "coord-1", dir), payload)
 		if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 			t.Fatalf("%s: expected error containing %q, got %v", tc.name, tc.wantErr, err)
 		}
@@ -956,6 +981,23 @@ func TestDecodeRejectsNullField(t *testing.T) {
 	_, err := decode(json.RawMessage(`{"action":"list","status":null}`))
 	if err == nil || !strings.Contains(err.Error(), `field "status" must be omitted instead of null`) {
 		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeRejectsListLimitAboveSchemaMaximum(t *testing.T) {
+	_, err := decode(json.RawMessage(`{"action":"list","limit":51}`))
+	if err == nil || !strings.Contains(err.Error(), "limit must be at most 50") {
+		t.Fatalf("unexpected err=%v", err)
+	}
+}
+
+func TestDecodeAcceptsListLimitAtSchemaMaximum(t *testing.T) {
+	input, err := decode(json.RawMessage(`{"action":"list","limit":50}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if input.Limit != 50 {
+		t.Fatalf("limit=%d want 50", input.Limit)
 	}
 }
 

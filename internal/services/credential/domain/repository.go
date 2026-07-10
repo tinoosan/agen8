@@ -6,14 +6,22 @@ import (
 )
 
 type Filter struct {
+	Scope  Scope
 	Kind   Kind
 	Status Status
 	Limit  int
 	Offset int
 }
 
+type Scope struct {
+	UserID    string
+	ProjectID string
+}
+
 type Record struct {
 	ID        ID
+	UserID    string
+	ProjectID string
 	Kind      Kind
 	Label     string
 	Status    Status

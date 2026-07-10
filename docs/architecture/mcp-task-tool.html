@@ -112,6 +112,7 @@
   <tr><td><code>review</code> approve</td><td><code>ApproveReview</code></td><td>none</td></tr>
   <tr><td><code>review</code> retry</td><td><code>RetryReview</code></td><td>service publishes <code>retry_requested</code></td></tr>
   <tr><td><code>review</code> fail</td><td><code>FailReview</code></td><td>none</td></tr>
+  <tr><td><code>attach</code></td><td><code>Get</code> + file upload + <code>AttachArtifact</code></td><td>uploads external evidence, then appends the generated <code>file:</code> artifact reference</td></tr>
 </table>
 
 <h2>5. Schema</h2>
@@ -130,9 +131,14 @@
   <tr><td><code>reason</code></td><td>block, cancel, review retry, review fail</td></tr>
   <tr><td><code>note</code></td><td>unblock, review</td></tr>
   <tr><td><code>decision</code>, <code>criteria</code></td><td>review</td></tr>
+  <tr><td><code>file_name</code>, <code>content</code>, <code>content_b64</code>, <code>file_path</code></td><td>attach</td></tr>
 </table>
 
 <p><code>metadata</code> is an optional object with string values. Agents use it for lightweight correlation labels, not arbitrary nested payloads.</p>
+
+<p><code>list</code> defaults to 20 tasks. <code>limit</code> and <code>offset</code> must be non-negative, and <code>limit</code> is capped at 50 before any service or repository call.</p>
+
+<p><code>attach</code> is for evidence that does not already live in the project tree, such as screenshots or generated binary reports. It requires exactly one of <code>content</code>, <code>content_b64</code>, or <code>file_path</code>. When <code>file_path</code> is used, the path must be absolute, regular, non-symlinked, and within the attachment size limit; the daemon reads and copies the source bytes into <code>.agen8/attachments/&lt;task-id&gt;/</code>. The source file is not moved. If <code>file_name</code> is omitted for a file path upload, the stored attachment name defaults to the source base name. Files that already exist in the project tree should be referenced directly during <code>submit</code> as <code>file:&lt;project-path&gt;</code> artifacts instead of being copied through <code>attach</code>.</p>
 
 <h2>6. Result shape</h2>
 

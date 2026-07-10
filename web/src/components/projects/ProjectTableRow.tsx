@@ -10,7 +10,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Archive, Link as LinkIcon, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Archive, FolderCog, Link as LinkIcon, MoreHorizontal, Pencil, Trash2, Wrench } from 'lucide-react'
 import type { Project } from '../../lib/types'
 import type { ProjectRemoveAction } from './RemoveProjectDialog'
 import { ProjectAvatar } from './ProjectAvatar'
@@ -24,11 +24,15 @@ export default function ProjectTableRow({
   onRemove,
   onLink,
   onEdit,
+  onRelocate,
+  onConfigureClaudeMCP,
 }: {
   project: Project
   onRemove: (action: ProjectRemoveAction) => void
   onLink: () => void
   onEdit: () => void
+  onRelocate: () => void
+  onConfigureClaudeMCP: () => void
 }) {
   const [, navigate] = useLocation()
   const active = project.status === 'open'
@@ -113,9 +117,17 @@ export default function ProjectTableRow({
                   <Pencil size={12} className="mr-2" />
                   Edit project
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onRelocate}>
+                  <FolderCog size={12} className="mr-2" />
+                  Change project folder
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={onLink}>
                   <LinkIcon size={12} className="mr-2" />
                   Link this folder
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onConfigureClaudeMCP}>
+                  <Wrench size={12} className="mr-2" />
+                  Configure Claude MCP
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

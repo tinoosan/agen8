@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import type { Project } from '../../lib/types'
+import type { ProjectCreateResult } from '../../lib/types'
 
 /* ── Create-project wizard ────────────────────────────────────
    3-step flow: pick an execution location, browse to a directory,
@@ -76,7 +76,7 @@ export default function CreateProjectDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess: (project: Project) => void
+  onSuccess: (result: ProjectCreateResult) => void
 }) {
   const locationsQuery = useLocations()
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data])
@@ -107,12 +107,12 @@ export default function CreateProjectDialog({
     setBusy(true)
     setError(null)
     try {
-      const result = await rpcCall<{ project: Project }>('project.create', {
+      const result = await rpcCall<ProjectCreateResult>('project.create', {
         locationId: selectedLocation.id,
         root: selectedPath,
         title: name.trim() || undefined,
       })
-      onSuccess(result.project)
+      onSuccess(result)
       onOpenChange(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project')

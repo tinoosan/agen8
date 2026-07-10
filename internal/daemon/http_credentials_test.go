@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinoosan/agen8/internal/caller"
 	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
 	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
@@ -37,7 +38,7 @@ func TestHTTPCredentialResolverAggregatesAlpacaHeaders(t *testing.T) {
 		t.Fatalf("CreateCredential secret key: %v", err)
 	}
 
-	record, found, err := (httpCredentialResolver{credentials: service}).ResolveHTTP(ctx, "paper-api.alpaca.markets:443")
+	record, found, err := (httpCredentialResolver{credentials: service, userID: "user-a"}).ResolveHTTP(ctx, "paper-api.alpaca.markets:443")
 	if err != nil {
 		t.Fatalf("ResolveHTTP: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestHTTPCredentialResolverReturnsFalseWhenNoHostMatches(t *testing.T) {
 		t.Fatalf("CreateCredential: %v", err)
 	}
 
-	_, found, err := (httpCredentialResolver{credentials: service}).ResolveHTTP(ctx, "paper-api.alpaca.markets")
+	_, found, err := (httpCredentialResolver{credentials: service, userID: "user-a"}).ResolveHTTP(ctx, "paper-api.alpaca.markets")
 	if err != nil {
 		t.Fatalf("ResolveHTTP: %v", err)
 	}
@@ -76,16 +77,61 @@ func TestHTTPCredentialResolverReturnsFalseWhenNoHostMatches(t *testing.T) {
 	}
 }
 
+func TestHTTPCredentialResolverCannotInjectAnotherUsersSecret(t *testing.T) {
+	repository := newHTTPResolverMemoryRepository()
+	serviceA := newHTTPResolverCredentialServiceWithRepository(t, repository, "user-a")
+	serviceB := newHTTPResolverCredentialServiceWithRepository(t, repository, "user-b")
+	for _, fixture := range []struct {
+		service *credentialapp.Service
+		label   string
+		value   string
+	}{
+		{service: serviceA, label: "A", value: "token-a"},
+		{service: serviceB, label: "B", value: "token-b"},
+	} {
+		if _, err := fixture.service.CreateCredential(context.Background(), credentialapp.CreateCredentialInput{
+			Kind:  credentialdomain.KindAPIKey,
+			Label: fixture.label,
+			Secrets: map[string]string{
+				"host":      "api.example.com",
+				"injection": "bearer",
+				"value":     fixture.value,
+			},
+		}); err != nil {
+			t.Fatalf("CreateCredential(%s): %v", fixture.label, err)
+		}
+	}
+
+	resolved, found, err := (httpCredentialResolver{credentials: serviceA, userID: "user-a"}).ResolveHTTP(context.Background(), "api.example.com")
+	if err != nil {
+		t.Fatalf("ResolveHTTP: %v", err)
+	}
+	if !found || resolved.Values["value"] != "token-a" {
+		t.Fatalf("resolved=%+v found=%v want only user-a secret", resolved, found)
+	}
+}
+
 func newHTTPResolverCredentialService(t *testing.T) *credentialapp.Service {
+	return newHTTPResolverCredentialServiceWithRepository(t, newHTTPResolverMemoryRepository(), "user-a")
+}
+
+func newHTTPResolverCredentialServiceWithRepository(t *testing.T, repository credentialdomain.Repository, userID string) *credentialapp.Service {
 	t.Helper()
 	service, err := credentialapp.NewService(credentialapp.Config{
-		Repository: newHTTPResolverMemoryRepository(),
+		Repository: repository,
 		Clock:      httpResolverClock{now: time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)},
+		Caller:     httpResolverCaller{userID: userID},
 	})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
 	return service
+}
+
+type httpResolverCaller struct{ userID string }
+
+func (c httpResolverCaller) ResolveCaller(context.Context) (caller.Caller, error) {
+	return caller.Caller{UserID: c.userID}, nil
 }
 
 type httpResolverClock struct {
@@ -119,6 +165,9 @@ func (r *httpResolverMemoryRepository) Get(_ context.Context, id credentialdomai
 func (r *httpResolverMemoryRepository) List(_ context.Context, filter credentialdomain.Filter) ([]credentialdomain.Record, error) {
 	out := make([]credentialdomain.Record, 0, len(r.records))
 	for _, record := range r.records {
+		if record.UserID != filter.Scope.UserID || record.ProjectID != "" {
+			continue
+		}
 		if filter.Kind != "" && record.Kind != filter.Kind {
 			continue
 		}

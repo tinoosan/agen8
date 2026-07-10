@@ -86,6 +86,36 @@ func TestServiceListDirRequiresReadyLocation(t *testing.T) {
 	}
 }
 
+func TestServiceListLocationsBoundsLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newLocationRepoSpy()
+	repo.records["local"] = locationdomain.Record{
+		ID:        "local",
+		Kind:      locationdomain.KindLocal,
+		Label:     "This machine",
+		Status:    locationdomain.StatusOnline,
+		Ready:     true,
+		CreatedAt: fixedLocationTime,
+		UpdatedAt: fixedLocationTime,
+	}
+	svc := newServiceForTest(t, repo, &transportSpy{}, projectCheckerSpy{})
+
+	if _, err := svc.ListLocations(ctx, locationdomain.Filter{}); err != nil {
+		t.Fatalf("ListLocations default: %v", err)
+	}
+	if repo.lastFilter.Limit != maxLocationListLimit {
+		t.Fatalf("default limit = %d, want %d", repo.lastFilter.Limit, maxLocationListLimit)
+	}
+
+	if _, err := svc.ListLocations(ctx, locationdomain.Filter{Limit: maxLocationListLimit + 1}); err != nil {
+		t.Fatalf("ListLocations over max: %v", err)
+	}
+	if repo.lastFilter.Limit != maxLocationListLimit {
+		t.Fatalf("capped limit = %d, want %d", repo.lastFilter.Limit, maxLocationListLimit)
+	}
+}
+
 func TestServiceCreateSSHStoresCredentialRef(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -163,9 +193,10 @@ func (fixedClock) Now() time.Time {
 }
 
 type locationRepoSpy struct {
-	records map[locationdomain.ID]locationdomain.Record
-	saved   []locationdomain.Record
-	deleted locationdomain.ID
+	records    map[locationdomain.ID]locationdomain.Record
+	saved      []locationdomain.Record
+	deleted    locationdomain.ID
+	lastFilter locationdomain.Filter
 }
 
 func newLocationRepoSpy() *locationRepoSpy {
@@ -181,6 +212,7 @@ func (r *locationRepoSpy) Get(_ context.Context, id locationdomain.ID) (location
 }
 
 func (r *locationRepoSpy) List(_ context.Context, filter locationdomain.Filter) ([]locationdomain.Record, error) {
+	r.lastFilter = filter
 	var out []locationdomain.Record
 	for _, record := range r.records {
 		if filter.Kind != "" && record.Kind != filter.Kind {

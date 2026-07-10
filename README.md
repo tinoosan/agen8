@@ -27,7 +27,7 @@ Fast path for a local install:
 
 ```sh
 make build
-./bin/agen8
+./bin/agen8 daemon start
 ```
 
 Open the setup URL printed by the daemon, create the first account, save the
@@ -57,12 +57,13 @@ the binary at `./bin/agen8`. (Check the version any time with
 ### 3. Run
 
 ```sh
-./bin/agen8
+./bin/agen8 daemon start
 ```
 
-That starts the daemon (equivalent to `./bin/agen8 daemon start`). By
-default it listens on `127.0.0.1:7777` and stores its data in `~/.agen8`.
-Override either if you need to:
+That starts the daemon. Bare `./bin/agen8` prints command help instead of
+running a daemon, so startup is always explicit. By default it listens on
+`127.0.0.1:7777` and stores its data in `~/.agen8`. Override either if you
+need to:
 
 ```sh
 ./bin/agen8 daemon start --http-addr 127.0.0.1:8080 --data-dir /path/to/data
@@ -107,7 +108,7 @@ docker compose up --build
 Published release images are available from GitHub Container Registry:
 
 ```sh
-docker pull ghcr.io/tinoosan/agen8:v0.0.1
+docker pull ghcr.io/tinoosan/agen8:<release-tag>
 ```
 
 Set `AGEN8_PUBLIC_URL` to the URL users will put in their harness MCP config.
@@ -158,11 +159,30 @@ harness will use to talk to Agen8. Copy it somewhere safe.
 
 ### 5. Connect a harness
 
-Add an MCP server entry to your harness pointing at the daemon, using the API
-key from the previous step as a bearer token. `.mcp.example.json` at the repo
-root is a ready-to-copy template. Copy it to `.mcp.json`, then set
-`AGEN8_MCP_TOKEN` to your key before starting the MCP client. Keep the real
-`.mcp.json` local — it is gitignored because it is machine-specific.
+For Claude Code, run one command from the local project directory. It installs
+the Agen8 skills, project attention hooks, and a local-scope MCP connection:
+
+```sh
+agen8 client setup --harness claude \
+  --url http://127.0.0.1:7777 \
+  --token ak_...
+```
+
+The Projects page generates this command automatically for both new and
+existing projects. Re-running it repairs or refreshes the client setup. Project
+display-name changes do not require reconnecting Claude. Run it from the local
+project directory or pass `--project-dir /path/to/local/project`.
+
+If a project folder itself moves or is renamed, use **Project actions > Change
+project folder**. Agen8 validates the replacement directory and keeps the same
+project ID, history, members, missions, and tasks. It never moves files on disk.
+Afterward, run **Configure Claude MCP** for that project to generate a fresh
+project-bound client command when using a hosted daemon.
+
+For Codex or another MCP client, add a server entry pointing at the daemon and
+use the API key as a bearer token. `.mcp.example.json` at the repo root is a
+ready-to-copy template. Keep the real `.mcp.json` local because it is
+machine-specific and gitignored.
 
 Minimal local setup:
 
@@ -188,26 +208,26 @@ the public default.
 For a hosted daemon, replace `http://127.0.0.1:7777` with your public HTTPS
 origin, for example `https://agen8.example.com`.
 
-### 6. Install the Agen8 workflow skill
+### 6. Install skills and repair hooks
 
-Install the workflow skill into your harness so it knows how to use Agen8:
+The Claude client setup command already installs its workflow skills and hooks.
+For Codex, install the workflow skill explicitly:
 
 ```sh
 ./bin/agen8 skill install --harness codex
-# or, for Claude Code:
-./bin/agen8 skill install --harness claude-cli
 ```
 
 Re-run the same command any time to refresh the installed skill.
 
-Attention hooks are installed separately from the skill:
+The lower-level hook installers remain available when only attention reporting
+needs repair:
 
 ```sh
 agen8 hooks install --harness codex --url https://agen8.example.com --token ak_...
 agen8 hooks install --harness claude --url https://agen8.example.com --token ak_... --project-dir /path/to/local/project
 ```
 
-Use the hosted daemon URL for `--url`. These commands write local harness
+Use the daemon origin, without `/mcp`, for `--url`. These commands write local harness
 configuration files and must run on the machine where the harness runs, not
 inside a Kubernetes pod.
 
@@ -278,22 +298,20 @@ Common development commands:
 make build-go          # Go-only rebuild
 make test-go           # Go test suite
 make test-web          # web vitest suite
-make lint              # go vet + web lint
+make lint              # vet, staticcheck, revive, and zero-warning web lint
 make fmt-check         # gofmt guard
+make audit             # Go and npm vulnerability/security scans
+make ci                # complete local release gate
 make docs              # serve static docs on the LAN
 ```
 
 ## Contributing
 
-Before opening a pull request, run the local checks:
+Before opening a pull request, install the pinned tools named in the Test
+workflow, then run the complete local gate:
 
 ```sh
-go test ./... -count=1
-npm --prefix web run lint
-npm --prefix web run test -- --run
-npm --prefix web run build
-npm --prefix web audit --audit-level=moderate
-go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+make ci
 ```
 
 Do not commit local runtime data, API keys, setup tokens, generated binaries, or

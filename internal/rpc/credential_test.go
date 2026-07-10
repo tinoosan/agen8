@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinoosan/agen8/internal/caller"
 	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
 	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
@@ -104,11 +105,18 @@ func newRPCCredentialService(t *testing.T) *credentialapp.Service {
 	svc, err := credentialapp.NewService(credentialapp.Config{
 		Repository: newRPCCredentialRepo(),
 		Clock:      rpcCredentialClock{now: time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)},
+		Caller:     rpcCredentialCaller{userID: "user-a"},
 	})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
 	return svc
+}
+
+type rpcCredentialCaller struct{ userID string }
+
+func (c rpcCredentialCaller) ResolveCaller(context.Context) (caller.Caller, error) {
+	return caller.Caller{UserID: c.userID}, nil
 }
 
 type rpcCredentialClock struct {
@@ -142,6 +150,9 @@ func (r *rpcCredentialRepo) Get(_ context.Context, id credentialdomain.ID) (cred
 func (r *rpcCredentialRepo) List(_ context.Context, filter credentialdomain.Filter) ([]credentialdomain.Record, error) {
 	var out []credentialdomain.Record
 	for _, record := range r.records {
+		if record.UserID != filter.Scope.UserID || record.ProjectID != "" {
+			continue
+		}
 		if filter.Kind != "" && record.Kind != filter.Kind {
 			continue
 		}

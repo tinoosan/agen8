@@ -110,9 +110,8 @@ func (l rpcFileProjectLoader) GetProject(_ context.Context, projectID types.Proj
 
 func (l rpcFileProjectLoader) ListProjects(context.Context, fileapp.ProjectFilter) ([]fileapp.ProjectSnapshot, error) {
 	return []fileapp.ProjectSnapshot{{
-		ID:           types.ProjectID("project-test"),
-		LocationID:   "local",
-		Root:         l.root,
-		ResolvedRoot: l.root,
+		ID:         types.ProjectID("project-test"),
+		LocationID: "local",
+		Root:       l.root,
 	}}, nil
 }

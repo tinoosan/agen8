@@ -27,7 +27,7 @@
       <li><a href="#cache-semantics">Cache semantics</a></li>
       <li><a href="#mission-list-surface">Mission list surface behavior</a></li>
       <li><a href="#palette-search">Search ranking behavior</a></li>
-      <li><a href="#strategy-map-search">Strategy Map mobile search behavior</a></li>
+      <li><a href="#strategy-map-search">Node search behavior</a></li>
       <li><a href="#strategy-map-interaction">Strategy Map interaction model</a></li>
       <li><a href="#mission-lifecycle">Mission lifecycle and delete semantics</a></li>
       <li><a href="#backend-impact">Backend impact</a></li>
@@ -48,51 +48,55 @@
     <li>Pin add/remove is <strong>optimistic</strong>: the cache updates before RPC response.</li>
     <li>On RPC failure, optimistic changes are rolled back to previous cached state.</li>
     <li>On settle, cache invalidation runs via <code>qk.pinsAll</code> to force a fresh server read for all pin consumers.</li>
-    <li>The hook refreshes periodically (<code>refetchInterval: 30_000</code>) as an additional eventual-consistency backstop.</li>
+    <li>Live <code>pin.*</code> SSE invalidation is the primary freshness path. The hook also refreshes periodically (<code>refetchInterval: 60_000</code>) as a disconnect backstop.</li>
   </ul>
   <p>Implementation references:</p>
   <ul>
-    <li><a href="../web/src/hooks/usePins.ts">web/src/hooks/usePins.ts</a></li>
-    <li><a href="../web/src/lib/queryKeys.ts">web/src/lib/queryKeys.ts</a> (pin keys)</li>
+    <li><a href="../../web/src/hooks/usePins.ts">web/src/hooks/usePins.ts</a></li>
+    <li><a href="../../web/src/lib/queryKeys.ts">web/src/lib/queryKeys.ts</a> (pin keys)</li>
   </ul>
 
   <h2 id="mission-list-surface">3. Mission list surfaces</h2>
-  <p>Mission list components render pin state consistently through <code>usePins()</code> and prioritize pinned rows:</p>
+  <p>Mission list components render pin state consistently through <code>usePins()</code> and prioritize pinned rows where the list is user-sortable:</p>
   <ul>
-    <li><a href="../web/src/components/dashboard/DashboardMissionsPanel.tsx">DashboardMissionsPanel</a> sorts visible missions with pinned IDs before unpinned rows.</li>
-    <li>Pin toggles in the panel preserve existing filtering/search behavior and only alter ordering by priority.</li>
-    <li>Pin affordance remains mission-centric here; new pinnable node types flow through the same hook contract.</li>
+    <li><a href="../../web/src/pages/Missions.tsx">web/src/pages/Missions.tsx</a> sorts visible missions pinned-first, then by status priority, then by KR progress.</li>
+    <li>Pin toggles in the Missions page preserve existing filtering/search behavior and only alter ordering by priority.</li>
+    <li><a href="../../web/src/components/dashboard/MissionSummary.tsx">MissionSummary</a> renders the dashboard mission digest from mission status and recency; it does not own mission pin ordering.</li>
+    <li>Mission and decision pin affordances use the same hook contract, so future pinnable node types flow through <code>togglePin(nodeRef, nodeType)</code>.</li>
   </ul>
 
   <h2 id="palette-search">4. Search ranking behavior</h2>
-  <p>Search ranking uses non-invasive pin boosting:</p>
+  <p>Graph search ranking uses server-side pin promotion:</p>
   <ul>
-    <li><code>pinned keyword</code> is injected into command keywords for pinned mission rows only.</li>
-    <li><code>pinnedBoostFilter</code> adds a small score bump without changing match eligibility.</li>
-    <li>Unmatched items remain hidden; pin status does not force-display nonmatching rows.</li>
-    <li>Pinned missions are visually marked with the pin glyph.</li>
+    <li><code>graph.search</code> loads the project's pinned refs and ranks pinned matching nodes before unpinned matching nodes while still ordering within each group by relevance and recency.</li>
+    <li>On browse paths with no query, pinned summaries are promoted stably without changing the existing relative order inside pinned and unpinned groups.</li>
+    <li>Pin status does not resurrect a node that the search did not match.</li>
+    <li>The frontend search dialogs consume the graph results rather than injecting separate pin keywords.</li>
   </ul>
   <p>Implementation reference:</p>
   <ul>
-    <li><a href="../docs/architecture/pin-service.html">Pin service ranking contract</a></li>
-    <li><a href="../internal/services/graph/app/search.go">internal/services/graph/app/search.go</a></li>
+    <li><a href="./pin-service.html">Pin service ranking contract</a></li>
+    <li><a href="../../internal/services/graph/app/search.go">internal/services/graph/app/search.go</a></li>
   </ul>
 
-  <h2 id="strategy-map-search">5. Strategy Map search behavior (desktop + mobile)</h2>
-  <p>Context-map search has two entry points that must stay aligned:</p>
+  <h2 id="strategy-map-search">5. Node search behavior (desktop + mobile)</h2>
+  <p>Node search uses the existing <code>StrategyMapSearch</code> dialog over the strategy graph's tasks, missions, KRs, and decisions. It now has local mounts on the dashboard and context map, plus a global wrapper for the rest of the app.</p>
   <ul>
-    <li><strong>Keyboard</strong>: <code>/</code> focuses/open the node-search dialog inside <code>StrategyMapSearch</code>.</li>
-    <li><strong>Mobile top bar</strong>: tapping the app top-bar search icon while <code>activeView === 'strategy'</code> opens the same strategy-map node-search dialog via global store state.</li>
-    <li>For non-map and non-dashboard views, the top-bar search icon is intentionally hidden and does not open any alternate search surface.</li>
+    <li><strong>Local keyboard</strong>: on the context map, <code>/</code> opens the node-search dialog inside <code>StrategyMapSearch</code>.</li>
+    <li><strong>Global keyboard</strong>: <code>Cmd/Ctrl+K</code>, <code>Cmd/Ctrl+/</code>, and bare <code>/</code> outside text fields open the shared node-search dialog from pages without their own local mount.</li>
+    <li><strong>Mobile top bar</strong>: tapping the app top-bar search icon while <code>activeView === 'strategy'</code> or <code>activeView === 'dashboard'</code> opens the same node-search dialog via global store state.</li>
+    <li>For other views, the top-bar search icon is intentionally hidden, but keyboard search still works through <code>GlobalNodeSearch</code> and deep-links the selected node to the context map.</li>
     <li>Open state is stored in <code>strategySearchOpen</code> so it can be controlled from components outside the page tree.</li>
+    <li>The dashboard and map pages keep their local dialog instances; <code>GlobalNodeSearch</code> stands down there to avoid double dialogs on the shared flag.</li>
     <li>The map page does not force-reset this flag on unmount; the shared modal close path clears it on actual close so stale-open state is avoided without disrupting StrictMode mount/unmount cycles.</li>
   </ul>
-  <p>This avoids the keyboard-driven touch-gap introduced by mobile devices that cannot rely on <code>/</code> reliably.</p>
+  <p>This keeps the search affordance global without reintroducing a separate command palette: all routes use the same node-search component and the selected node opens on the context map.</p>
   <p>Implementation references:</p>
   <ul>
-    <li><a href="../web/src/App.tsx">web/src/App.tsx</a> (mobile top-bar branching)</li>
-    <li><a href="../web/src/pages/StrategyMap.tsx">web/src/pages/StrategyMap.tsx</a> (store-owned open flag)</li>
-    <li><a href="../web/src/components/strategy/StrategyMapSearch.tsx">web/src/components/strategy/StrategyMapSearch.tsx</a> (search modal behavior)</li>
+    <li><a href="../../web/src/App.tsx">web/src/App.tsx</a> (mobile top-bar branching and global wrapper mount)</li>
+    <li><a href="../../web/src/components/GlobalNodeSearch.tsx">web/src/components/GlobalNodeSearch.tsx</a> (global shortcuts and non-local dialog mount)</li>
+    <li><a href="../../web/src/pages/StrategyMap.tsx">web/src/pages/StrategyMap.tsx</a> (store-owned open flag)</li>
+    <li><a href="../../web/src/components/strategy/StrategyMapSearch.tsx">web/src/components/strategy/StrategyMapSearch.tsx</a> (search modal behavior)</li>
   </ul>
 
   <h2 id="strategy-map-interaction">6. Strategy Map interaction model</h2>
@@ -104,24 +108,16 @@
     <li>The map keeps focus and detail panel lifecycles separate: <code>Escape</code> dismisses one layer per press in this order: active lens/filter, open panel, then focus cursor.</li>
   </ul>
 
-  <p><strong>Trace path</strong> is a per-node lens that walks the graph outward from a single anchor, revealing the neighbourhood one ring at a time instead of lighting the whole connected component at once (the old "select a mission &rarr; everything explodes" behaviour). Its model:</p>
-  <ul>
-    <li><strong>Anchored on the focus cursor, not the panel.</strong> Trace keys off the focus cursor (<code>effectiveFocusNodeId</code>), so it is reachable on the <strong>first touch</strong> with the detail panel closed. The <strong>Trace Path</strong> button appears as soon as a node is focused, and the <code>T</code> shortcut toggles it under the same condition.</li>
-    <li><strong>Follow the cursor.</strong> Because the lens re-derives from the cursor, tapping another node <strong>re-roots</strong> the trace to it and re-reveals that node's rings. The trace tracks wherever you tap rather than staying pinned to where it started.</li>
-    <li><strong>Alternating structural &harr; context rings.</strong> Each stepper press is one reveal phase, and phases alternate. Odd steps grow the <em>structural</em> skeleton (mission&rarr;KR&rarr;task lineage) by one hop; even steps layer in <em>context</em> links (decisions and other reasoning edges) off everything shown so far. The structural frontier advances <strong>only</strong> on structural edges, so context-added nodes never pull their own lineage back into the skeleton &mdash; "structural ring 2" stays exactly two structural hops from the anchor. Both adjacencies are undirected, so lineage grows symmetrically (ancestors and descendants).</li>
-    <li><strong>Depth bounds.</strong> The radius runs from <code>TRACE_MIN_DEPTH</code> (1 &mdash; a bare anchor with nothing around it is useless, so entering trace seeds the first structural ring) to <code>TRACE_MAX_DEPTH</code> (6 &mdash; three structural rings interleaved with three context passes). <code>[</code>/<code>]</code> and the on-canvas <code>&minus;</code>/<code>+</code> stepper change the radius one phase at a time.</li>
-    <li><strong>Edge-weighting safety rule.</strong> Within the revealed set, only <strong>structural</strong> edges render as <em>direct</em> (bold path with a flow animation); context links stay <em>ambient</em> (highlighted via opacity only). This is deliberate: a "direct" context link spawns a label portal plus an infinite dash animation, and lighting many at once kills the browser render process (the Safari "a problem repeatedly occurred" crash). Keeping context ambient is what makes trace safe on a high-degree node.</li>
-    <li><strong>Auto-clear follows the cursor too.</strong> Trace clears (and the depth resets) when the focus cursor clears &mdash; e.g. a pane click or the final <code>Escape</code> &mdash; not when the detail panel closes. Closing the panel while a node stays focused keeps the trace alive.</li>
-  </ul>
+  <p>The current map lens model is deliberately smaller than the archived trace design: set-highlight filters and focus-neighborhood selection are live, while Trace Path controls and trace depth constants are not present in the current source. The durable trace design is preserved in <a href="./strategy-map-lenses.html#trace">Strategy Map Lenses</a> as a historical baseline for a future reintroduction, not as current UI behavior.</p>
 
   <p>Implementation references:</p>
   <ul>
-    <li><a href="../web/src/pages/StrategyMap.tsx">web/src/pages/StrategyMap.tsx</a> (state boundaries)</li>
-    <li><a href="../web/src/components/strategy/useStrategyMapNodeHandlers.ts">web/src/components/strategy/useStrategyMapNodeHandlers.ts</a> (traversal + explicit panel-open gesture)</li>
-    <li><a href="../web/src/components/strategy/useStrategyMapKeyboardNav.ts">web/src/components/strategy/useStrategyMapKeyboardNav.ts</a> (focus, focus cursor and progressive dismiss)</li>
-    <li><a href="../web/src/components/strategy/useStrategyMapLenses.ts">web/src/components/strategy/useStrategyMapLenses.ts</a> (focus neighborhood rendering; trace lens anchored on <code>effectiveFocusNodeId</code>)</li>
-    <li><a href="../web/src/components/strategy/strategyMapFilters.ts">web/src/components/strategy/strategyMapFilters.ts</a> (<code>computeTraceFilter</code> alternating structural&harr;context BFS; <code>TRACE_MIN_DEPTH</code> / <code>TRACE_MAX_DEPTH</code>; structural-only direct edges)</li>
-    <li><a href="../web/src/components/strategy/StrategyMapHelp.tsx">web/src/components/strategy/StrategyMapHelp.tsx</a> (keyboard model and staged Esc copy)</li>
+    <li><a href="../../web/src/pages/StrategyMap.tsx">web/src/pages/StrategyMap.tsx</a> (state boundaries)</li>
+    <li><a href="../../web/src/components/strategy/useStrategyMapNodeHandlers.ts">web/src/components/strategy/useStrategyMapNodeHandlers.ts</a> (traversal + explicit panel-open gesture)</li>
+    <li><a href="../../web/src/components/strategy/useStrategyMapKeyboardNav.ts">web/src/components/strategy/useStrategyMapKeyboardNav.ts</a> (focus, focus cursor and progressive dismiss)</li>
+    <li><a href="../../web/src/components/strategy/useStrategyMapLenses.ts">web/src/components/strategy/useStrategyMapLenses.ts</a> (set-highlight and focus-neighborhood rendering)</li>
+    <li><a href="../../web/src/components/strategy/strategyMapFilters.ts">web/src/components/strategy/strategyMapFilters.ts</a> (set-highlight filters and structural parent inclusion)</li>
+    <li><a href="../../web/src/components/strategy/StrategyMapHelp.tsx">web/src/components/strategy/StrategyMapHelp.tsx</a> (keyboard model and staged Esc copy)</li>
   </ul>
 
   <h2 id="mission-lifecycle">7. Mission lifecycle and delete semantics</h2>
@@ -134,9 +130,9 @@
   </ul>
   <p>Implementation references:</p>
   <ul>
-    <li><a href="../web/src/components/mission/MissionLifecycleActions.tsx">web/src/components/mission/MissionLifecycleActions.tsx</a></li>
-    <li><a href="../web/src/pages/MissionDetail.tsx">web/src/pages/MissionDetail.tsx</a> (dual-path delete + hard purge)</li>
-    <li><a href="../web/src/hooks/useMissions.ts">web/src/hooks/useMissions.ts</a> (<code>useDeleteMission</code> vs <code>useHardDeleteMission</code>)</li>
+    <li><a href="../../web/src/components/mission/MissionLifecycleActions.tsx">web/src/components/mission/MissionLifecycleActions.tsx</a></li>
+    <li><a href="../../web/src/pages/MissionDetail.tsx">web/src/pages/MissionDetail.tsx</a> (dual-path delete + hard purge)</li>
+    <li><a href="../../web/src/hooks/useMissions.ts">web/src/hooks/useMissions.ts</a> (<code>useDeleteMission</code> vs <code>useHardDeleteMission</code>)</li>
   </ul>
 
   <h2 id="backend-impact">8. Backend impact</h2>
@@ -147,8 +143,8 @@
   </ul>
   <p>Related implementation references:</p>
   <ul>
-    <li><a href="../internal/services/pin/rpc/handler.go">internal/services/pin/rpc/handler.go</a></li>
-    <li><a href="../internal/services/graph/app/search.go">internal/services/graph/app/search.go</a></li>
+    <li><a href="../../internal/services/pin/rpc/handler.go">internal/services/pin/rpc/handler.go</a></li>
+    <li><a href="../../internal/services/graph/app/search.go">internal/services/graph/app/search.go</a></li>
   </ul>
 </div>
 </body>

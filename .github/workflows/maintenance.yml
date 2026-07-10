@@ -27,7 +27,7 @@ jobs:
         run: go build -o bin/agen8 ./cmd/agen8
 
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
 
       - name: Run scoped security scan
         run: gosec ./internal/daemon ./internal/hookinstaller
@@ -44,12 +44,21 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Audit workspace tooling dependencies
+        working-directory: .
+        run: npm audit --package-lock-only --audit-level=low
 
       - name: Install web dependencies
         run: npm ci
+
+      - name: Audit web dependencies
+        run: npm audit --audit-level=low
 
       - name: Run web lint
         run: npm run lint
@@ -59,3 +68,6 @@ jobs:
 
       - name: Build web app
         run: npm run build
+
+      - name: Reject production source maps
+        run: test -z "$(find ../internal/web/dist -type f -name '*.map' -print -quit)"

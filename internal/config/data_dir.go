@@ -12,12 +12,6 @@ const (
 	// EnvDataDir overrides the agen8 data directory.
 	EnvDataDir = "AGEN8_DATA_DIR"
 
-	// EnvDBDriver selects the SQL storage driver. Empty means sqlite.
-	EnvDBDriver = "AGEN8_DB_DRIVER"
-
-	// EnvDatabaseURL contains the Postgres connection string for hosted mode.
-	EnvDatabaseURL = "AGEN8_DATABASE_URL"
-
 	// EnvXDGStateHome is the XDG base directory for state data.
 	// If set, agen8 defaults to "$XDG_STATE_HOME/agen8".
 	EnvXDGStateHome = "XDG_STATE_HOME"
@@ -145,6 +139,7 @@ func ensureDirWritable(dir string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("data dir %q is not a directory", dir)
 	}
+	// #nosec G302 -- this is a directory; 0700 is the least-privilege mode.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("harden data dir %q permissions: %w", dir, err)
 	}
@@ -156,12 +151,15 @@ func ensureDirWritable(dir string) error {
 	name := f.Name()
 	_, writeErr := f.Write([]byte("ok"))
 	closeErr := f.Close()
-	os.Remove(name)
+	removeErr := os.Remove(name)
 	if writeErr != nil {
 		return fmt.Errorf("data dir %q is not writable: %w", dir, writeErr)
 	}
 	if closeErr != nil {
 		return fmt.Errorf("data dir %q is not writable: %w", dir, closeErr)
+	}
+	if removeErr != nil {
+		return fmt.Errorf("data dir %q cannot remove temporary files: %w", dir, removeErr)
 	}
 	return nil
 }

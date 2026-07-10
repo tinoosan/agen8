@@ -46,7 +46,7 @@ describe('Decisions page', () => {
             projectId: 'proj-1',
             source: 'agent',
             sourceIdentity: 'cto',
-            title: 'Use PostgreSQL',
+            title: 'Use SQLite',
             rationale: 'Operationally simpler',
             confidence: 0.8,
             createdAt: '2026-03-31T10:00:00Z',
@@ -83,7 +83,7 @@ describe('Decisions page', () => {
   it('renders decision rows', () => {
     renderPage()
 
-    expect(screen.getByText('Use PostgreSQL')).toBeInTheDocument()
+    expect(screen.getByText('Use SQLite')).toBeInTheDocument()
     expect(screen.getByText('80%')).toBeInTheDocument()
   })
 

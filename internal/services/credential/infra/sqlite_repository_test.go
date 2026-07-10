@@ -19,6 +19,7 @@ func TestSQLiteRepositorySavesListsGetsAndDeletesCredential(t *testing.T) {
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
 	record := credentialdomain.Record{
 		ID:     "cred_alpha",
+		UserID: "user-a",
 		Kind:   credentialdomain.KindAPIKey,
 		Label:  "Alpha Vantage",
 		Status: credentialdomain.StatusActive,
@@ -46,7 +47,7 @@ func TestSQLiteRepositorySavesListsGetsAndDeletesCredential(t *testing.T) {
 		t.Fatalf("got=%+v", got)
 	}
 
-	listed, err := repo.List(ctx, credentialdomain.Filter{Kind: credentialdomain.KindAPIKey})
+	listed, err := repo.List(ctx, credentialdomain.Filter{Scope: credentialdomain.Scope{UserID: "user-a"}, Kind: credentialdomain.KindAPIKey})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -119,6 +120,31 @@ func TestSQLiteRepositoryStoresSSHAgentMaterialWithoutPayload(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryListRequiresAndAppliesOwnerScope(t *testing.T) {
+	ctx := context.Background()
+	repository := newTestRepository(t)
+	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
+	for _, record := range []credentialdomain.Record{
+		{ID: "cred-a", UserID: "user-a", Kind: credentialdomain.KindAPIKey, Label: "A", Status: credentialdomain.StatusActive, Fields: []credentialdomain.FieldRef{{Name: "value", Kind: credentialdomain.FieldSecret}}, CreatedAt: now, UpdatedAt: now},
+		{ID: "cred-b", UserID: "user-b", Kind: credentialdomain.KindAPIKey, Label: "B", Status: credentialdomain.StatusActive, Fields: []credentialdomain.FieldRef{{Name: "value", Kind: credentialdomain.FieldSecret}}, CreatedAt: now, UpdatedAt: now},
+	} {
+		if _, err := repository.Save(ctx, record); err != nil {
+			t.Fatalf("Save(%s): %v", record.ID, err)
+		}
+	}
+
+	listed, err := repository.List(ctx, credentialdomain.Filter{Scope: credentialdomain.Scope{UserID: "user-a"}})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "cred-a" {
+		t.Fatalf("listed=%+v want only user-a credential", listed)
+	}
+	if _, err := repository.List(ctx, credentialdomain.Filter{}); err == nil {
+		t.Fatal("expected list without owner scope to fail")
+	}
+}
+
 func newTestRepository(t *testing.T) credentialdomain.Repository {
 	t.Helper()
 	return newTestRepositoryWithDataDir(t, t.TempDir())
@@ -141,6 +167,7 @@ func saveTestCredential(t *testing.T, ctx context.Context, repo credentialdomain
 	t.Helper()
 	_, err := repo.Save(ctx, credentialdomain.Record{
 		ID:        id,
+		UserID:    "user-a",
 		Kind:      kind,
 		Label:     string(id),
 		Status:    credentialdomain.StatusActive,

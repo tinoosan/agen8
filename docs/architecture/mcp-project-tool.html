@@ -27,7 +27,7 @@
 
 <h2>Purpose</h2>
 
-<p><code>project</code> is an MCP tool, not a service API. It exposes one product-facing coordination contract to member harnesses and maps each action to typed application service calls. The handler owns request decoding, role-aware tool policy, cross-service orchestration, and deterministic result shaping.</p>
+<p><code>project</code> is an MCP tool, not a service API. It exposes one product-facing coordination contract to member harnesses and maps each action to typed application service calls. The handler owns request decoding, role-aware tool policy, cross-service orchestration, Claude Code MCP repair, and deterministic result shaping.</p>
 
 <div class="callout">
 <strong>Boundary.</strong> Project tool behavior lives in <code>internal/mcp/tools/project</code>. The tool exposes project records and the member roster through composite actions. Work coordination happens through the retained mission, task, decision, graph, and HTTP tools. The project service owns project records, lifecycle, and the member roster subdomain. No service accepts raw <code>project(...)</code> tool JSON, and no service package defines a project-tool-specific service or port.
@@ -42,6 +42,12 @@
     <td>Resolve or create the local project, bind the MCP caller to an Agen8 member, and register the session token for this user-owned daemon.</td>
     <td><code>ProjectSvc</code>.</td>
     <td>Project id, project root, location id, member id, member type, channel id, MCP token, and MCP URL.</td>
+  </tr>
+  <tr>
+    <td><code>configure_claude_mcp</code></td>
+    <td>On a local daemon, mint a fresh token and use Claude Code's config manager to replace its private local-scope <code>mcpServers.agen8</code> entry. Hosted daemons reject this MCP action because returning the credential through an agent transcript would expose it; users generate the one-time client command from the Projects page instead.</td>
+    <td><code>ProjectSvc.GetMember</code>, <code>ClaudeMCP.ConfigureClaudeMCP</code>.</td>
+    <td>Installed flag, settings path, server name, and MCP URL.</td>
   </tr>
   <tr>
     <td><code>member_list</code></td>
@@ -188,12 +194,13 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <table>
   <tr><th>Field</th><th>Used by</th><th>Rule</th></tr>
-  <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>register</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update</code>, <code>member_remove</code>.</td></tr>
+  <tr><td><code>action</code></td><td>all actions</td><td>Required. One of <code>register</code>, <code>configure_claude_mcp</code>, <code>member_create</code>, <code>member_get</code>, <code>member_list</code>, <code>member_update</code>, <code>member_remove</code>.</td></tr>
   <tr><td><code>project_root</code></td><td><code>register</code></td><td>Optional when <code>project_id</code> is supplied. Creates or reuses a local project for the canonical working directory. Do not use a temporary worktree path as the only project identity.</td></tr>
   <tr><td><code>project_id</code></td><td><code>register</code></td><td>Optional when <code>project_root</code> is supplied. Reuses an existing project and is the preferred input for workers editing from a git worktree.</td></tr>
   <tr><td><code>location_id</code></td><td><code>register</code></td><td>Optional. Defaults to the local location when a project root creates a project.</td></tr>
   <tr><td><code>session_id</code></td><td><code>register</code></td><td>Optional stable native harness session id. Explicit arguments take precedence over MCP metadata.</td></tr>
   <tr><td><code>thread_id</code></td><td><code>register</code></td><td>Optional stable native harness thread id. Explicit arguments take precedence over MCP metadata and session id.</td></tr>
+  <tr><td>No additional fields</td><td><code>configure_claude_mcp</code></td><td>For a local daemon, the action uses the bound MCP session project and current root. The installer invokes <code>claude mcp</code> with local scope, keeping the Authorization header in the user's <code>~/.claude.json</code> rather than a repository file. Hosted setup is initiated from the Projects page.</td></tr>
   <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
   <tr><td><code>display_name</code></td><td><code>member_create</code>, <code>register</code></td><td>Required for <code>member_create</code>. Optional for <code>register</code> (fallback display label is generated if omitted).</td></tr>
   <tr><td><code>display_name</code></td><td><code>member_update</code></td><td>Required target member display label.</td></tr>
@@ -203,7 +210,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
   <table>
     <tr><th>Caller</th><th>Visible actions</th><th>Reason</th></tr>
-  <tr><td>Active project member</td><td><code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update</code>, <code>member_remove</code></td><td>Members are equal project participants in the public baseline. Display names identify who did what in the graph.</td></tr>
+  <tr><td>Active project member</td><td><code>configure_claude_mcp</code>, <code>member_get</code>, <code>member_list</code>, <code>member_create</code>, <code>member_update</code>, <code>member_remove</code></td><td>Members are equal project participants in the public baseline. Display names identify who did what in the graph.</td></tr>
 </table>
 
 <p><code>memberType</code> can still appear in responses for compatibility, but authorization is based on active same-project membership. The handler rejects missing or removed actor members before it calls <code>ProjectSvc</code>.</p>
@@ -222,7 +229,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <div class="tree">internal/mcp/tools/project/
   project.go          # schema, action routing, service orchestration, result formatting
-  project_test.go     # member CRUD success and boundary error paths
+  project_test.go     # Claude MCP repair, member CRUD success, and boundary error paths
   service_assertions_test.go # compile-time checks for service-shaped interfaces
 </div>
 
@@ -230,6 +237,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
 
 <table>
   <tr><th>Test</th><th>Assertion</th></tr>
+  <tr><td><code>configure_claude_mcp</code> success</td><td>Requires a project-bound session, calls the Claude MCP configurator, and returns the installed path, server name, and URL.</td></tr>
   <tr><td><code>member_list</code> success</td><td>Resolves the actor member, calls the roster read path, and returns member labels and stable channel ids.</td></tr>
   <tr><td><code>member_create</code> success</td><td>Executes through the MCP server session, stamps caller identity, calls the registrar, and returns the created member payload.</td></tr>
   <tr><td><code>member_get</code>, <code>member_update</code>, <code>member_remove</code> success</td><td>Call the same production session path and delegate to the project service roster methods.</td></tr>

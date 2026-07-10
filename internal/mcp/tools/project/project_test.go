@@ -83,8 +83,6 @@ func (s stubContextRegistrar) RegisterMCPContext(ctx context.Context, req Regist
 		DisplayName: req.DisplayName,
 		MemberType:  member.TypeWorker,
 		ChannelID:   "channel:project-1:member:member-session",
-		Token:       req.Token,
-		URL:         "http://127.0.0.1:7777/mcp?token=" + req.Token,
 		MCPServers:  []string{"agen8"},
 	}, nil
 }
@@ -170,12 +168,13 @@ func TestConfigureClaudeMCPUsesSessionProject(t *testing.T) {
 		},
 		UserID:        "user-1",
 		ProjectID:     "project-1",
+		ProjectRoot:   "/workspace/project-1",
 		ActorMemberID: "member-1",
 	}, json.RawMessage(`{"action":"configure_claude_mcp"}`))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if gotReq.UserID != "user-1" || gotReq.ProjectID != "project-1" {
+	if gotReq.UserID != "user-1" || gotReq.ProjectID != "project-1" || gotReq.ProjectRoot != "/workspace/project-1" {
 		t.Fatalf("request = %+v", gotReq)
 	}
 	structured := result.Structured.(map[string]any)
@@ -271,8 +270,6 @@ func TestHandleRegisterPassesDisplayNameAndReturnsGuidance(t *testing.T) {
 					DisplayName: req.DisplayName,
 					MemberType:  member.TypeCoordinator,
 					ChannelID:   "channel:project-1:member:member-session",
-					Token:       req.Token,
-					URL:         "http://127.0.0.1:7777/mcp?token=" + req.Token,
 					MCPServers:  []string{"agen8"},
 				}, nil
 			},
@@ -286,6 +283,12 @@ func TestHandleRegisterPassesDisplayNameAndReturnsGuidance(t *testing.T) {
 	structured := result.Structured.(map[string]any)
 	if structured["displayName"] != "backend engineer" {
 		t.Fatalf("displayName=%v want backend engineer", structured["displayName"])
+	}
+	if _, exists := structured["token"]; exists {
+		t.Fatal("project.register must not echo the MCP bearer token")
+	}
+	if _, exists := structured["url"]; exists {
+		t.Fatal("project.register must not return a token-bearing URL")
 	}
 	guidance, _ := structured["guidance"].(string)
 	if !strings.Contains(guidance, "registered") || !strings.Contains(guidance, "Agen8 derives") {
@@ -306,8 +309,6 @@ func TestHandleRegisterReturnsAlreadyRegisteredGuidance(t *testing.T) {
 					DisplayName:       "Atlas (Backend Engineer)",
 					MemberType:        member.TypeCoordinator,
 					ChannelID:         "channel:project-1:member:member-session",
-					Token:             req.Token,
-					URL:               "http://127.0.0.1:7777/mcp?token=" + req.Token,
 					MCPServers:        []string{"agen8"},
 					AlreadyRegistered: true,
 				}, nil

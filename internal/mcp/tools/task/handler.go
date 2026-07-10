@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -255,7 +256,7 @@ func (h Handler) Handle(ctx context.Context, call CallContext, args json.RawMess
 		// through the model. file_name then defaults to the path's base name.
 		contentB64 := input.ContentB64
 		if input.FilePath != "" {
-			data, base, ferr := readAttachmentFile(input.FilePath)
+			data, base, ferr := readAttachmentFile(input.FilePath, call.AttachmentRoots)
 			if ferr != nil {
 				return Result{}, ferr
 			}
@@ -331,11 +332,33 @@ const maxAttachmentFileBytes = 25 << 20 // 25 MiB
 // readAttachmentFile reads an attachment source from the daemon host's
 // filesystem so the bytes never round-trip through the model. The source is
 // copied, never moved — the caller's file is left untouched.
-func readAttachmentFile(path string) (data []byte, baseName string, err error) {
+func readAttachmentFile(path string, allowedRoots []string) (data []byte, baseName string, err error) {
 	if !filepath.IsAbs(path) {
 		return nil, "", fmt.Errorf("task: file_path must be an absolute path, got %q", path)
 	}
-	info, err := os.Stat(path)
+	rootPath, relativePath, err := attachmentSourceRoot(path, allowedRoots)
+	if err != nil {
+		return nil, "", err
+	}
+	name := filepath.Base(relativePath)
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("task: file_path: %w", err)
+	}
+	defer root.Close()
+	linkInfo, err := root.Lstat(relativePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("task: file_path: %w", err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, "", fmt.Errorf("task: file_path must not be a symlink")
+	}
+	file, err := root.Open(relativePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("task: file_path: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return nil, "", fmt.Errorf("task: file_path: %w", err)
 	}
@@ -345,11 +368,31 @@ func readAttachmentFile(path string) (data []byte, baseName string, err error) {
 	if info.Size() > maxAttachmentFileBytes {
 		return nil, "", fmt.Errorf("task: file_path: %q is %d bytes, over the %d byte attachment limit", path, info.Size(), maxAttachmentFileBytes)
 	}
-	data, err = os.ReadFile(path)
+	data, err = io.ReadAll(file)
 	if err != nil {
 		return nil, "", fmt.Errorf("task: file_path: %w", err)
 	}
-	return data, filepath.Base(path), nil
+	return data, name, nil
+}
+
+func attachmentSourceRoot(path string, allowedRoots []string) (root string, relative string, err error) {
+	path = filepath.Clean(path)
+	for _, candidate := range allowedRoots {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		candidate, err = filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		relative, err = filepath.Rel(filepath.Clean(candidate), path)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return filepath.Clean(candidate), relative, nil
+	}
+	return "", "", fmt.Errorf("task: file_path must be within an approved project root")
 }
 
 type actor struct {

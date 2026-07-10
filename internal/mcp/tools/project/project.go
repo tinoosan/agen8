@@ -43,8 +43,9 @@ type ClaudeMCPConfigurator interface {
 }
 
 type ConfigureClaudeMCPRequest struct {
-	UserID    string
-	ProjectID string
+	UserID      string
+	ProjectID   string
+	ProjectRoot string
 }
 
 type ConfigureClaudeMCPResult struct {
@@ -85,8 +86,6 @@ type RegisterContextResult struct {
 	SessionID         string
 	ThreadID          string
 	NativeSessionRef  string
-	Token             string
-	URL               string
 	MCPServers        []string
 	AlreadyRegistered bool
 }
@@ -100,6 +99,7 @@ type CallContext struct {
 	UserID           string
 	HarnessKind      string
 	ProjectID        string
+	ProjectRoot      string
 	ActorMemberID    string
 	SessionID        string
 	ThreadID         string
@@ -171,8 +171,9 @@ func (h Handler) configureClaudeMCP(ctx context.Context, call CallContext, proje
 		return Result{}, fmt.Errorf("project: session project id is required for action=configure_claude_mcp")
 	}
 	result, err := call.ClaudeMCP.ConfigureClaudeMCP(ctx, ConfigureClaudeMCPRequest{
-		UserID:    strings.TrimSpace(userID),
-		ProjectID: projectID,
+		UserID:      strings.TrimSpace(userID),
+		ProjectID:   projectID,
+		ProjectRoot: strings.TrimSpace(call.ProjectRoot),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("project: configure claude mcp: %w", err)
@@ -277,8 +278,6 @@ func (h Handler) registerContext(ctx context.Context, call CallContext, input re
 		"displayName": strings.TrimSpace(result.DisplayName),
 		"memberType":  strings.TrimSpace(result.MemberType),
 		"channelId":   strings.TrimSpace(result.ChannelID),
-		"token":       strings.TrimSpace(result.Token),
-		"url":         strings.TrimSpace(result.URL),
 		"mcpServers":  append([]string(nil), result.MCPServers...),
 		"guidance":    registerGuidance(result),
 	}

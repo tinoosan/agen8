@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinoosan/agen8/internal/caller"
 	credentialapp "github.com/tinoosan/agen8/internal/services/credential/app"
 	credentialdomain "github.com/tinoosan/agen8/internal/services/credential/domain"
 )
@@ -62,6 +63,7 @@ func newTestHandler(t *testing.T) *Handler {
 	service, err := credentialapp.NewService(credentialapp.Config{
 		Repository: newMemoryRepository(),
 		Clock:      fixedClock{now: time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)},
+		Caller:     staticCaller{userID: "user-a"},
 	})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -71,6 +73,12 @@ func newTestHandler(t *testing.T) *Handler {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	return handler
+}
+
+type staticCaller struct{ userID string }
+
+func (s staticCaller) ResolveCaller(context.Context) (caller.Caller, error) {
+	return caller.Caller{UserID: s.userID}, nil
 }
 
 type fixedClock struct {
@@ -104,6 +112,9 @@ func (r *memoryRepository) Get(_ context.Context, id credentialdomain.ID) (crede
 func (r *memoryRepository) List(_ context.Context, filter credentialdomain.Filter) ([]credentialdomain.Record, error) {
 	var out []credentialdomain.Record
 	for _, record := range r.records {
+		if record.UserID != filter.Scope.UserID || record.ProjectID != "" {
+			continue
+		}
 		if filter.Kind != "" && record.Kind != filter.Kind {
 			continue
 		}

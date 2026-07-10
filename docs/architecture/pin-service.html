@@ -86,7 +86,7 @@
     </div>
     <div class="layer repo">
       <div class="label">Repository</div>
-      <div class="role">A dialect-neutral SQL store embedded by the SQLite and Postgres repositories. Self-migrates the <code>pins</code> table at construction.</div>
+      <div class="role">A SQLite repository self-migrates the <code>pins</code> table at construction.</div>
     </div>
   </div>
 
@@ -143,7 +143,7 @@
 
   <h2 id="persistence">5. Persistence and schema</h2>
 
-  <p>The store is dialect-neutral: a single <code>sqlStore</code> holds all SQL, and the SQLite and Postgres repositories embed it. The only dialect-specific concern is placeholder rebinding. The driver is selected at construction by <code>NewRepository</code>.</p>
+  <p>A single <code>sqlStore</code> owns the SQLite queries. <code>NewRepository</code> verifies that the shared storage handle is SQLite before constructing it.</p>
 
   <p>Pins use the <strong>self-migrating vertical</strong> pattern (the same one the location service uses). At construction the store runs <code>CREATE TABLE IF NOT EXISTS</code> rather than going through the version-gated baseline snapshot. Adding pins is therefore additive and safe — it never forces a schema-version bump, so existing databases keep starting without a migration step.</p>
 

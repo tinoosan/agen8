@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRoute, useLocation } from 'wouter'
 import { toast } from 'sonner'
 import {
@@ -41,7 +41,6 @@ import { CancelTaskDialog } from '../components/task/CancelTaskDialog'
 import { AcceptanceCriteriaList } from '../components/task/AcceptanceCriteriaList'
 import { LatestReviewSection } from '../components/task/LatestReviewSection'
 import { TaskArtifactsSection } from '../components/task/TaskArtifactsSection'
-import { ArtifactViewerPanel } from '../components/task/ArtifactViewerPanel'
 import CopyIdChip from '../components/CopyIdChip'
 import { ResizeHandle } from '../components/detail/ResizeHandle'
 import { useIsBelow } from '../hooks/use-mobile'
@@ -51,6 +50,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import { lazyWithRetry } from '../lib/lazyWithRetry'
+import type { ArtifactViewerPanelProps } from '../components/task/ArtifactViewerPanel'
 import {
   Select,
   SelectContent,
@@ -61,6 +62,22 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 
 const TERMINAL_STATUSES = ['succeeded', 'failed', 'canceled']
+
+const ArtifactViewerPanel = lazyWithRetry<ArtifactViewerPanelProps>(
+  () => import('../components/task/ArtifactViewerPanel').then((module) => ({ default: module.ArtifactViewerPanel })),
+  'components/task/ArtifactViewerPanel',
+)
+
+function ArtifactViewerLoading({ layout }: { layout: 'sheet' | 'inline' }) {
+  const layoutClass = layout === 'sheet'
+    ? 'fixed inset-y-0 right-0 z-50 w-screen border-l border-[var(--border)] bg-[var(--bg-surface)] sm:w-[min(720px,90vw)]'
+    : 'h-full w-full border-l border-[var(--border)] bg-[var(--bg-surface)]'
+  return (
+    <div className={`flex items-center justify-center ${layoutClass}`} role="status" aria-label="Loading artifact viewer">
+      <span className="spinner spinner-md" />
+    </div>
+  )
+}
 
 /* ── Inline-edit acceptance-criteria rows ── */
 
@@ -712,13 +729,15 @@ export default function TaskDetail() {
     </div>
 
     {openArtifactVPath && viewerAsSheet && (
-      <ArtifactViewerPanel
-        key={openArtifactVPath}
-        projectId={projectId}
-        vpath={openArtifactVPath}
-        onClose={closeArtifactViewer}
-        layout="sheet"
-      />
+      <Suspense fallback={<ArtifactViewerLoading layout="sheet" />}>
+        <ArtifactViewerPanel
+          key={openArtifactVPath}
+          projectId={projectId}
+          vpath={openArtifactVPath}
+          onClose={closeArtifactViewer}
+          layout="sheet"
+        />
+      </Suspense>
     )}
     {renderedArtifactVPath && !viewerAsSheet && (
       <>
@@ -742,13 +761,15 @@ export default function TaskDetail() {
           }}
           aria-hidden={!inlineViewerVisible}
         >
-          <ArtifactViewerPanel
-            key={renderedArtifactVPath}
-            projectId={projectId}
-            vpath={renderedArtifactVPath}
-            onClose={closeArtifactViewer}
-            layout="inline"
-          />
+          <Suspense fallback={<ArtifactViewerLoading layout="inline" />}>
+            <ArtifactViewerPanel
+              key={renderedArtifactVPath}
+              projectId={projectId}
+              vpath={renderedArtifactVPath}
+              onClose={closeArtifactViewer}
+              layout="inline"
+            />
+          </Suspense>
         </div>
       </>
     )}

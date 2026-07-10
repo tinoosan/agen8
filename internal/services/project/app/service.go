@@ -2,8 +2,9 @@ package app
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- used only for stable legacy-compatible identifiers, not cryptography.
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -168,6 +169,14 @@ type UpdateProjectInput struct {
 	Customization *project.Customization
 }
 
+type RelocateProjectInput struct {
+	ProjectID types.ProjectID
+	Root      string
+	Validate  func(context.Context, string, string) error
+}
+
+var ErrInvalidProjectRoot = errors.New("invalid project root")
+
 // UpdateProject edits the user-editable fields of an owned project. Unlike
 // SaveProject (an upsert that re-owns the caller and clobbers createdAt /
 // customization), this is a load-modify-save that requires the caller to
@@ -193,6 +202,43 @@ func (s *Service) UpdateProject(ctx context.Context, input UpdateProjectInput) (
 		Customization: input.Customization,
 	}, s.now())
 	saved, err := s.projects.Save(ctx, updated.Record())
+	if err != nil {
+		return project.Project{}, err
+	}
+	return project.Wrap(saved)
+}
+
+// RelocateProject changes the canonical root of an owned project without
+// changing its identity. Existing workspace bindings remain valid because they
+// represent explicit linked checkouts; unbound sessions resolve to the new root.
+func (s *Service) RelocateProject(ctx context.Context, input RelocateProjectInput) (project.Project, error) {
+	if s == nil {
+		return project.Project{}, fmt.Errorf("project service is nil")
+	}
+	c, err := s.resolveCaller(ctx)
+	if err != nil {
+		return project.Project{}, err
+	}
+	current, err := s.GetProject(ctx, input.ProjectID)
+	if err != nil {
+		return project.Project{}, err
+	}
+	if err := requireOwnedProject(c, current); err != nil {
+		return project.Project{}, err
+	}
+	if input.Validate != nil {
+		if err := input.Validate(ctx, string(current.LocationID()), strings.TrimSpace(input.Root)); err != nil {
+			return project.Project{}, fmt.Errorf("%w: %v", ErrInvalidProjectRoot, err)
+		}
+	}
+	relocated, err := current.Relocate(input.Root, s.now())
+	if err != nil {
+		return project.Project{}, err
+	}
+	if relocated.Root() == current.Root() {
+		return current, nil
+	}
+	saved, err := s.projects.Save(ctx, relocated.Record())
 	if err != nil {
 		return project.Project{}, err
 	}
@@ -236,66 +282,56 @@ func (s *Service) ListProjects(ctx context.Context, filter project.Filter) ([]pr
 	return out, nil
 }
 
-// ResolveRoot returns the effective filesystem root for a project.
-//
-// A project's stored root is only a seed: the live location is whichever
-// workspace the project was most recently seen connecting from. So we prefer
-// the root of the most-recently-seen active workspace (constrained to the
-// project's own location, since a root is only interpretable within its
-// location), and fall back to the stored project.root when no such workspace
-// exists.
-//
-// This is deliberately read-only: we never write the resolved root back onto
-// the project record. Persisting on resolve would make two machines fight over
-// the stored root, each overwriting the other on connect. Keeping the seed
-// immutable lets every workspace own its own path without that flip-flop.
-func (s *Service) ResolveRoot(ctx context.Context, p project.Project) string {
+// ActiveWorkspaceRoots returns every root that can identify this project for
+// directory-based hook attribution. Operational file access must use either
+// the stable project root or an explicit member workspace binding; this set is
+// only for matching an observed cwd to its owning project.
+func (s *Service) ActiveWorkspaceRoots(ctx context.Context, p project.Project) ([]string, error) {
 	stored := strings.TrimSpace(p.Root())
-	if s == nil || s.workspaces == nil {
-		return stored
+	roots := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	add := func(root string) {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			return
+		}
+		if _, exists := seen[root]; exists {
+			return
+		}
+		seen[root] = struct{}{}
+		roots = append(roots, root)
 	}
-	projectID := strings.TrimSpace(string(p.ID()))
-	if projectID == "" {
-		return stored
+	add(stored)
+	if s == nil || s.workspaces == nil {
+		return roots, nil
 	}
 	records, err := s.workspaces.List(ctx, workspace.Filter{
-		ProjectID:      projectID,
+		ProjectID:      strings.TrimSpace(string(p.ID())),
 		LifecycleState: workspace.LifecycleActive,
 	})
-	if err != nil || len(records) == 0 {
-		return stored
+	if err != nil {
+		return nil, fmt.Errorf("list active project workspaces: %w", err)
 	}
-	projectLoc := normalizeLocationID(string(p.LocationID()))
-	bestRoot := ""
-	var bestSeen time.Time
-	for _, r := range records {
-		root := strings.TrimSpace(r.Root)
-		if root == "" {
+	projectLocation := normalizeLocationID(string(p.LocationID()))
+	projectUser := normalizeWorkspaceUser(p.UserID())
+	for _, record := range records {
+		if normalizeLocationID(record.LocationID) != projectLocation {
 			continue
 		}
-		if normalizeLocationID(r.LocationID) != projectLoc {
+		if normalizeWorkspaceUser(record.UserID) != projectUser {
 			continue
 		}
-		seen := workspaceLastSeen(r)
-		if bestRoot == "" || seen.After(bestSeen) {
-			bestRoot = root
-			bestSeen = seen
-		}
+		add(record.Root)
 	}
-	if bestRoot == "" {
-		return stored
-	}
-	return bestRoot
+	return roots, nil
 }
 
-// workspaceLastSeen reports when a workspace was last seen connecting, falling
-// back to UpdatedAt for records that predate last-seen tracking so they still
-// sort sensibly against newer rows.
-func workspaceLastSeen(r workspace.Record) time.Time {
-	if r.LastSeenAt != nil {
-		return *r.LastSeenAt
+func normalizeWorkspaceUser(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "local"
 	}
-	return r.UpdatedAt
+	return id
 }
 
 // normalizeLocationID folds the empty location and the explicit "local"
@@ -428,6 +464,7 @@ func ProjectIDForLocationRoot(locationID types.LocationID, root string) types.Pr
 	if slug == "" {
 		slug = "project"
 	}
+	// #nosec G401 -- durable compatibility identifier; not used for cryptographic security.
 	sum := sha1.Sum([]byte(string(locationID) + "\x00" + cleaned))
 	return types.ProjectID(fmt.Sprintf("%s-%s", slug, hex.EncodeToString(sum[:])[:8]))
 }

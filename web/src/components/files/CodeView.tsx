@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { Decoration, EditorView, highlightSpecialChars, keymap, lineNumbers } from '@codemirror/view'
 import { EditorState, type Extension } from '@codemirror/state'
@@ -6,7 +6,7 @@ import { defaultKeymap, historyKeymap } from '@codemirror/commands'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
-import { codeViewLanguageExtensions } from './codeViewLanguages'
+import { loadCodeViewLanguageExtensions } from './codeViewLanguages'
 
 interface CodeViewProps {
   content: string
@@ -19,6 +19,8 @@ interface CodeViewProps {
    */
   wrap?: boolean
 }
+
+const EMPTY_LANGUAGE_EXTENSIONS: Extension[] = []
 
 function searchHighlighter(query?: string): Extension {
   const needle = query?.trim()
@@ -158,6 +160,29 @@ const agen8HighlightStyle = HighlightStyle.define([
 ])
 
 export default function CodeView({ content, filePath, search: searchQuery, wrap = true }: CodeViewProps) {
+  const [loadedLanguage, setLoadedLanguage] = useState<{ filePath?: string; extensions: Extension[] }>({
+    filePath,
+    extensions: [],
+  })
+  const languageExtensions = loadedLanguage.filePath === filePath
+    ? loadedLanguage.extensions
+    : EMPTY_LANGUAGE_EXTENSIONS
+
+  useEffect(() => {
+    let current = true
+    void loadCodeViewLanguageExtensions(filePath)
+      .then((extensions) => {
+        if (current) setLoadedLanguage({ filePath, extensions })
+      })
+      .catch(() => {
+        // The preview remains useful as plain text if a grammar chunk fails.
+        if (current) setLoadedLanguage({ filePath, extensions: [] })
+      })
+    return () => {
+      current = false
+    }
+  }, [filePath])
+
   const extensions = useMemo<Extension[]>(
     () => [
       lineNumbers(),
@@ -171,9 +196,9 @@ export default function CodeView({ content, filePath, search: searchQuery, wrap 
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       agen8EditorTheme,
       searchHighlighter(searchQuery),
-      ...codeViewLanguageExtensions(filePath),
+      ...languageExtensions,
     ],
-    [filePath, searchQuery, wrap],
+    [languageExtensions, searchQuery, wrap],
   )
 
   return (

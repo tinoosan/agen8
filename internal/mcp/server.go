@@ -45,6 +45,7 @@ type Session struct {
 	MissionKRs         missiontool.KeyResultService
 	MissionProgress    missiontool.ProgressService
 	ProjectID          string
+	ProjectRoot        string
 }
 
 type SessionRequestContext struct {
@@ -188,7 +189,7 @@ func (s *Server) RunListener(ctx context.Context, listener net.Listener, wg *syn
 			defer wg.Done()
 		}
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Debug("mcp server shutdown error", "error", err)
@@ -643,6 +644,7 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 			UserID:           strings.TrimSpace(session.UserID),
 			HarnessKind:      strings.TrimSpace(session.HarnessKind),
 			ProjectID:        strings.TrimSpace(session.ProjectID),
+			ProjectRoot:      strings.TrimSpace(session.ProjectRoot),
 			ActorMemberID:    strings.TrimSpace(session.MemberID),
 			SessionID:        sessionID,
 			ThreadID:         threadID,
@@ -673,11 +675,12 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 		}, nil
 	case tasktool.Name:
 		result, err := tasktool.NewHandler().Handle(ctx, tasktool.CallContext{
-			Tasks:         session.TaskService,
-			Members:       session.TaskMembers,
-			Files:         session.TaskFiles,
-			ProjectID:     strings.TrimSpace(session.ProjectID),
-			ActorMemberID: strings.TrimSpace(session.MemberID),
+			Tasks:           session.TaskService,
+			Members:         session.TaskMembers,
+			Files:           session.TaskFiles,
+			ProjectID:       strings.TrimSpace(session.ProjectID),
+			AttachmentRoots: []string{strings.TrimSpace(session.ProjectRoot)},
+			ActorMemberID:   strings.TrimSpace(session.MemberID),
 		}, arguments)
 		if err != nil {
 			return mcpToolCallErrorResult(err.Error()), nil

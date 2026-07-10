@@ -153,23 +153,28 @@ describe('NeedsAttention', () => {
 
   it('caps rows per group and reveals the rest behind a "+N more" toggle', () => {
     const many = Array.from({ length: 7 }, (_, i) =>
-      notif({ id: `s${i}`, trigger: 'task.stale_queued', metadata: { taskTitle: `Task ${i}` } }),
+      notif({
+        id: `s${i}`,
+        trigger: 'task.stale_queued',
+        createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+        metadata: { taskTitle: `Task ${i}` },
+      }),
     )
     mockList.mockReturnValue(ok({ notifications: many, unreadCount: 7 }))
     renderCard()
 
     expect(screen.getByText('7 alerts')).toBeInTheDocument()
     // Only the first four rows render; the rest are collapsed.
-    expect(screen.getByText('Task 0')).toBeInTheDocument()
+    expect(screen.getByText('Task 6')).toBeInTheDocument()
     expect(screen.getByText('Task 3')).toBeInTheDocument()
-    expect(screen.queryByText('Task 4')).not.toBeInTheDocument()
+    expect(screen.queryByText('Task 2')).not.toBeInTheDocument()
 
     // The overflow affordance expands the group, then collapses it again.
     fireEvent.click(screen.getByText('+3 more'))
-    expect(screen.getByText('Task 4')).toBeInTheDocument()
-    expect(screen.getByText('Task 6')).toBeInTheDocument()
+    expect(screen.getByText('Task 2')).toBeInTheDocument()
+    expect(screen.getByText('Task 0')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Show less'))
-    expect(screen.queryByText('Task 4')).not.toBeInTheDocument()
+    expect(screen.queryByText('Task 2')).not.toBeInTheDocument()
   })
 
   it('marks read and deep-links when a linked alert is clicked', () => {

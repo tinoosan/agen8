@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,6 +24,8 @@ import (
 	"github.com/tinoosan/agen8/internal/rpc"
 	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
 	auth "github.com/tinoosan/agen8/internal/services/auth/domain"
+	projectrpc "github.com/tinoosan/agen8/internal/services/project/rpc"
+	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
 
@@ -195,11 +199,13 @@ func TestSetupPageIncludesMCPSetupResultShell(t *testing.T) {
 		`id="mcp-config"`,
 		`id="codex-command"`,
 		`id="claude-command"`,
-		`agen8.sessionToken`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("setup page missing %q", want)
 		}
+	}
+	if strings.Contains(body, sessionCookieName) || strings.Contains(body, "localStorage") {
+		t.Fatal("setup page must not expose or persist the browser session")
 	}
 }
 
@@ -258,8 +264,9 @@ func TestHandleSetupJSONIncludesMCPArtifacts(t *testing.T) {
 		`"bearer_token_env_var": "AGEN8_MCP_TOKEN"`,
 		"codex mcp add agen8 --url",
 		"--bearer-token-env-var AGEN8_MCP_TOKEN",
-		"claude mcp add --transport http --scope user agen8",
-		"--header",
+		"agen8 client setup --harness claude",
+		"--url 'http://127.0.0.1:7777'",
+		"--token",
 		"agen8 skill install --harness codex",
 		"agen8 skill install --harness claude-cli",
 	} {
@@ -316,10 +323,13 @@ func TestHandleSetupJSONUsesPublicURLWhenConfigured(t *testing.T) {
 	if result.MCP.URL != "https://agen8.example.com/mcp" {
 		t.Fatalf("mcp url=%q want public URL", result.MCP.URL)
 	}
-	for _, got := range []string{result.MCP.CompatibilityURL, result.MCP.CodexCommand, result.MCP.ClaudeCommand} {
+	for _, got := range []string{result.MCP.CompatibilityURL, result.MCP.CodexCommand} {
 		if !strings.Contains(got, "https://agen8.example.com/mcp") {
 			t.Fatalf("setup artifact did not use public URL: %s", got)
 		}
+	}
+	if !strings.Contains(result.MCP.ClaudeCommand, "--url 'https://agen8.example.com'") {
+		t.Fatalf("Claude setup command did not use public URL: %s", result.MCP.ClaudeCommand)
 	}
 }
 
@@ -375,6 +385,128 @@ func TestDaemonConfigRejectsInvalidPublicURL(t *testing.T) {
 	}
 }
 
+func TestHostedProjectSetupReturnsOneTimeClientCommand(t *testing.T) {
+	dataDir := t.TempDir()
+	d, err := New(Config{
+		AppConfig:                    config.Config{DataDir: dataDir},
+		DisableLocalHookProvisioning: true,
+		PublicURL:                    "https://agen8.example.com",
+		SetupToken:                   "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+	sessionToken, _ := setupSessionAndAPIKeyForTest(t, handler)
+	projectRoot := t.TempDir()
+
+	createBody := []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0","id":1,"method":"project.create",
+		"params":{"root":%q,"title":"Hosted Project"}
+	}`, projectRoot))
+	createReq := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+sessionToken)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("project.create status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var createResponse struct {
+		Error  *rpc.Error                     `json:"error"`
+		Result projectrpc.ProjectCreateResult `json:"result"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createResponse); err != nil {
+		t.Fatalf("decode project.create: %v", err)
+	}
+	if createResponse.Error != nil {
+		t.Fatalf("project.create error=%+v", createResponse.Error)
+	}
+	setup := createResponse.Result.Setup
+	if setup == nil || setup.Attempted || !setup.RequiresClientAction {
+		t.Fatalf("hosted setup=%+v", setup)
+	}
+	setupToken := assertHostedClientSetupCommand(t, setup.ClientSetupCommand)
+	setupBinding, err := d.app.AuthSvc.ValidateLinkToken(context.Background(), setupToken)
+	if err != nil || setupBinding.ProjectID != createResponse.Result.Project.ID {
+		t.Fatalf("hosted create token binding project=%q err=%v", setupBinding.ProjectID, err)
+	}
+
+	configureBody := []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0","id":2,"method":"project.claudeMCP.configure",
+		"params":{"projectId":%q}
+	}`, createResponse.Result.Project.ID))
+	configureReq := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(configureBody))
+	configureReq.Header.Set("Content-Type", "application/json")
+	configureReq.Header.Set("Authorization", "Bearer "+sessionToken)
+	configureRec := httptest.NewRecorder()
+	handler.ServeHTTP(configureRec, configureReq)
+	if configureRec.Code != http.StatusOK {
+		t.Fatalf("project.configure status=%d body=%s", configureRec.Code, configureRec.Body.String())
+	}
+	var configureResponse struct {
+		Error  *rpc.Error                                 `json:"error"`
+		Result projectrpc.ProjectClaudeMCPConfigureResult `json:"result"`
+	}
+	if err := json.Unmarshal(configureRec.Body.Bytes(), &configureResponse); err != nil {
+		t.Fatalf("decode project.configure: %v", err)
+	}
+	if configureResponse.Error != nil {
+		t.Fatalf("project.configure error=%+v", configureResponse.Error)
+	}
+	if configureResponse.Result.Installed || !configureResponse.Result.RequiresClientAction {
+		t.Fatalf("hosted configure=%+v", configureResponse.Result)
+	}
+	configureToken := assertHostedClientSetupCommand(t, configureResponse.Result.ClientSetupCommand)
+	configureBinding, err := d.app.AuthSvc.ValidateLinkToken(context.Background(), configureToken)
+	if err != nil || configureBinding.ProjectID != createResponse.Result.Project.ID {
+		t.Fatalf("hosted configure token binding project=%q err=%v", configureBinding.ProjectID, err)
+	}
+
+	db, err := implstore.GetDB(config.Config{DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("open project store: %v", err)
+	}
+	var leaked int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM project_registry
+		WHERE metadata_json LIKE '%ak_%' OR metadata_json LIKE '%wlt_%'
+		   OR COALESCE(name, '') LIKE '%ak_%' OR COALESCE(name, '') LIKE '%wlt_%'
+	`).Scan(&leaked); err != nil {
+		t.Fatalf("scan project credential leakage: %v", err)
+	}
+	if leaked != 0 {
+		t.Fatalf("raw setup credential persisted in %d project records", leaked)
+	}
+}
+
+func assertHostedClientSetupCommand(t *testing.T, command string) string {
+	t.Helper()
+	for _, want := range []string{
+		"agen8 client setup --harness claude",
+		"--url 'https://agen8.example.com'",
+		"--token 'wlt_",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("client setup command missing %q", want)
+		}
+	}
+	const marker = "--token '"
+	start := strings.Index(command, marker)
+	if start < 0 {
+		t.Fatal("client setup command is missing token marker")
+	}
+	start += len(marker)
+	end := strings.Index(command[start:], "'")
+	if end < 0 {
+		t.Fatal("client setup command has an unterminated token")
+	}
+	return command[start : start+end]
+}
+
 func TestAttentionHookAcceptsRemoteStyleRawPayload(t *testing.T) {
 	projectRoot := t.TempDir()
 	d, err := New(Config{
@@ -414,7 +546,7 @@ func TestAttentionHookAcceptsRemoteStyleRawPayload(t *testing.T) {
 	}
 }
 
-func TestSetupStatusRPCReturnsSetupURLWhileOpen(t *testing.T) {
+func TestSetupStatusRPCDoesNotDiscloseSetupToken(t *testing.T) {
 	d, err := New(Config{
 		AppConfig:  config.Config{DataDir: t.TempDir()},
 		SetupToken: "test setup token",
@@ -452,8 +584,8 @@ func TestSetupStatusRPCReturnsSetupURLWhileOpen(t *testing.T) {
 	if !result.SetupOpen {
 		t.Fatal("setup should be open")
 	}
-	if result.SetupURL != "/setup?token=test+setup+token" {
-		t.Fatalf("setupUrl=%q", result.SetupURL)
+	if result.SetupURL != "" {
+		t.Fatalf("setupUrl=%q want empty", result.SetupURL)
 	}
 }
 
@@ -527,14 +659,17 @@ func TestHandleSetupFormRevealsMCPArtifacts(t *testing.T) {
 		".mcp.json",
 		"codex mcp add agen8 --url",
 		"--bearer-token-env-var AGEN8_MCP_TOKEN",
-		"claude mcp add --transport http --scope user agen8",
-		"--header",
+		"agen8 client setup --harness claude",
+		"--url &#39;http://127.0.0.1:7777&#39;",
+		"--token",
 		"agen8 skill install --harness codex",
-		"agen8.sessionToken",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("setup form response missing %q", want)
 		}
+	}
+	if strings.Contains(body, sessionCookieName) || strings.Contains(body, "localStorage") {
+		t.Fatal("setup completion must not expose or persist the browser session")
 	}
 }
 
@@ -770,6 +905,29 @@ func TestHealthzIncludesBuildInfo(t *testing.T) {
 	}
 	if !body.OK || body.Version != "v0.1.0" || body.Commit != "abc1234" || body.BuildDate != "2026-06-05T19:30:00Z" {
 		t.Fatalf("healthz body=%+v", body)
+	}
+}
+
+func TestReadyzReflectsStorageAvailability(t *testing.T) {
+	d, err := New(Config{AppConfig: config.Config{DataDir: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	d.handleReadyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ready status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	d.ready = func(context.Context) error { return errors.New("storage unavailable") }
+	rec = httptest.NewRecorder()
+	d.handleReadyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unready status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "storage unavailable") {
+		t.Fatalf("readiness response leaked internal error: %s", rec.Body.String())
 	}
 }
 
@@ -1063,20 +1221,9 @@ func TestProjectLinkTokenCanRegisterBoundMCPContext(t *testing.T) {
 	if setupRec.Code != http.StatusOK {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
-	var setupResult struct {
-		Session struct {
-			Token string `json:"token"`
-		} `json:"session"`
-	}
-	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
-		t.Fatalf("decode setup response: %v", err)
-	}
-	if setupResult.Session.Token == "" {
-		t.Fatal("setup response missing session token")
-	}
-
-	projectID := createProjectForLinkTokenTest(t, handler, setupResult.Session.Token, projectRoot)
-	linkToken := createProjectLinkTokenForTest(t, handler, setupResult.Session.Token, projectID)
+	sessionToken := sessionTokenFromRecorder(t, setupRec)
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, projectRoot)
+	linkToken := createProjectLinkTokenForTest(t, handler, sessionToken, projectID)
 
 	initializeBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}`)
 	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+url.QueryEscape(linkToken), bytes.NewReader(initializeBody))
@@ -1135,7 +1282,6 @@ func TestProjectLinkTokenCanRegisterBoundMCPContext(t *testing.T) {
 	var registered struct {
 		ProjectID string `json:"projectId"`
 		MemberID  string `json:"memberId"`
-		Token     string `json:"token"`
 	}
 	if err := json.Unmarshal([]byte(registerResp.Result.Content[0].Text), &registered); err != nil {
 		t.Fatalf("decode register content %q: %v", registerResp.Result.Content[0].Text, err)
@@ -1146,8 +1292,8 @@ func TestProjectLinkTokenCanRegisterBoundMCPContext(t *testing.T) {
 	if registered.MemberID == "" {
 		t.Fatalf("registered response missing member id: %+v", registered)
 	}
-	if registered.Token != linkToken {
-		t.Fatalf("registered token changed unexpectedly")
+	if strings.Contains(registerResp.Result.Content[0].Text, linkToken) || strings.Contains(registerResp.Result.Content[0].Text, `"token"`) {
+		t.Fatal("project.register response disclosed its bearer token")
 	}
 }
 
@@ -1203,9 +1349,6 @@ func setupSessionAndAPIKeyForTest(t *testing.T, handler http.Handler) (sessionTo
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
 	var setupResult struct {
-		Session struct {
-			Token string `json:"token"`
-		} `json:"session"`
 		APIKey struct {
 			Secret string `json:"secret"`
 		} `json:"apiKey"`
@@ -1213,13 +1356,31 @@ func setupSessionAndAPIKeyForTest(t *testing.T, handler http.Handler) (sessionTo
 	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
 		t.Fatalf("decode setup response: %v", err)
 	}
-	if setupResult.Session.Token == "" {
-		t.Fatal("setup response missing session token")
-	}
 	if setupResult.APIKey.Secret == "" {
 		t.Fatal("setup response missing api key")
 	}
-	return setupResult.Session.Token, setupResult.APIKey.Secret
+	return sessionTokenFromRecorder(t, setupRec), setupResult.APIKey.Secret
+}
+
+func sessionTokenFromRecorder(t *testing.T, recorder *httptest.ResponseRecorder) string {
+	t.Helper()
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name != sessionCookieName {
+			continue
+		}
+		if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+			t.Fatalf("session cookie attributes=%+v", cookie)
+		}
+		if strings.TrimSpace(cookie.Value) == "" {
+			t.Fatal("session cookie value is empty")
+		}
+		if strings.Contains(recorder.Body.String(), cookie.Value) {
+			t.Fatal("response body disclosed the session cookie value")
+		}
+		return cookie.Value
+	}
+	t.Fatal("response missing HttpOnly session cookie")
+	return ""
 }
 
 type eventsTestClient struct {
@@ -1339,8 +1500,14 @@ func createProjectLinkTokenForTest(t *testing.T, handler http.Handler, sessionTo
 func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
 	dataDir := t.TempDir()
 	projectRoot := t.TempDir()
-	rootA := t.TempDir()
-	rootB := t.TempDir()
+	rootA := filepath.Join(t.TempDir(), "worktree-a")
+	rootB := filepath.Join(t.TempDir(), "worktree-b")
+	runGitForDaemonTest(t, projectRoot, "init")
+	runGitForDaemonTest(t, projectRoot, "config", "user.email", "test@example.com")
+	runGitForDaemonTest(t, projectRoot, "config", "user.name", "Test User")
+	runGitForDaemonTest(t, projectRoot, "commit", "--allow-empty", "-m", "initial")
+	runGitForDaemonTest(t, projectRoot, "worktree", "add", "-b", "session-a", rootA)
+	runGitForDaemonTest(t, projectRoot, "worktree", "add", "-b", "session-b", rootB)
 	d, err := New(Config{
 		AppConfig:  config.Config{DataDir: dataDir},
 		SetupToken: "test-setup-token",
@@ -1362,20 +1529,9 @@ func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
 	if setupRec.Code != http.StatusOK {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
-	var setupResult struct {
-		Session struct {
-			Token string `json:"token"`
-		} `json:"session"`
-	}
-	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
-		t.Fatalf("decode setup response: %v", err)
-	}
-	if setupResult.Session.Token == "" {
-		t.Fatal("setup response missing session token")
-	}
-
-	projectID := createProjectForLinkTokenTest(t, handler, setupResult.Session.Token, projectRoot)
-	linkToken := createProjectLinkTokenForTest(t, handler, setupResult.Session.Token, projectID)
+	sessionToken := sessionTokenFromRecorder(t, setupRec)
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, projectRoot)
+	linkToken := createProjectLinkTokenForTest(t, handler, sessionToken, projectID)
 
 	// One initialize is enough for the stateless streamable handler to accept the
 	// subsequent tool calls over this token.
@@ -1407,12 +1563,18 @@ func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
 	if gotA.MemberID != memberA {
 		t.Fatalf("session A resolved to member %q want %q", gotA.MemberID, memberA)
 	}
+	if gotA.ProjectRoot != rootA {
+		t.Fatalf("session A root=%q want %q", gotA.ProjectRoot, rootA)
+	}
 	gotB, err := d.resolveMCPSession(ctx, linkToken, http.Header{}, claimBodyForSession("claude-sess-B"))
 	if err != nil {
 		t.Fatalf("resolve session B: %v", err)
 	}
 	if gotB.MemberID != memberB {
 		t.Fatalf("session B resolved to member %q want %q", gotB.MemberID, memberB)
+	}
+	if gotB.ProjectRoot != rootB {
+		t.Fatalf("session B root=%q want %q", gotB.ProjectRoot, rootB)
 	}
 
 	// Body-over-header precedence (the resolveMCPSession flip): a stale transport
@@ -1427,6 +1589,14 @@ func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
 	}
 	if gotMixed.MemberID != memberA {
 		t.Fatalf("in-band session A lost to stale header: resolved %q want %q", gotMixed.MemberID, memberA)
+	}
+}
+
+func runGitForDaemonTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}
 }
 
@@ -1643,9 +1813,6 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
 	}
 	var setupResult struct {
-		Session struct {
-			Token string `json:"token"`
-		} `json:"session"`
 		APIKey struct {
 			Secret string `json:"secret"`
 		} `json:"apiKey"`
@@ -1653,10 +1820,10 @@ func TestResolveMCPSessionTokenClasses(t *testing.T) {
 	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResult); err != nil {
 		t.Fatalf("decode setup response: %v", err)
 	}
-	sessionToken := setupResult.Session.Token
+	sessionToken := sessionTokenFromRecorder(t, setupRec)
 	adminAPIKey := setupResult.APIKey.Secret
-	if sessionToken == "" || adminAPIKey == "" {
-		t.Fatalf("setup response missing tokens: session=%q apiKey=%q", sessionToken, adminAPIKey)
+	if adminAPIKey == "" {
+		t.Fatal("setup response missing api key")
 	}
 
 	// The admin user id lets us mint extra keys directly through the auth service.

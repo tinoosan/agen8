@@ -69,16 +69,20 @@ func localDataKey(dataDir string) ([]byte, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("credential key dir: %w", err)
 	}
+	if err := validateCredentialKeyDir(dir); err != nil {
+		return nil, err
+	}
+	// #nosec G302 -- this is a directory; owner execute permission is required
+	// to traverse it, and group/other permissions remain fully denied.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("credential key dir permissions: %w", err)
 	}
-	path := filepath.Join(dir, keyFileName)
-	key, err := os.ReadFile(path)
+	key, err := readLocalDataKey(dir)
 	if err == nil {
 		if len(key) != keySize {
 			return nil, fmt.Errorf("credential data key has invalid length")
 		}
-		if err := os.Chmod(path, 0o600); err != nil {
+		if err := chmodLocalDataKey(dir); err != nil {
 			return nil, fmt.Errorf("credential key file permissions: %w", err)
 		}
 		return key, nil
@@ -90,7 +94,7 @@ func localDataKey(dataDir string) ([]byte, error) {
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
 		return nil, fmt.Errorf("credential data key generate: %w", err)
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := createLocalDataKey(dir)
 	if err != nil {
 		return nil, fmt.Errorf("credential key file create: %w", err)
 	}
@@ -99,4 +103,64 @@ func localDataKey(dataDir string) ([]byte, error) {
 		return nil, fmt.Errorf("credential key file write: %w", err)
 	}
 	return key, nil
+}
+
+func validateCredentialKeyDir(dir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("credential key dir stat: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("credential key dir must not be a symlink")
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("credential key dir is not a directory")
+	}
+	return nil
+}
+
+func readLocalDataKey(dir string) ([]byte, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	linkInfo, err := root.Lstat(keyFileName)
+	if err != nil {
+		return nil, err
+	}
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("credential key file must not be a symlink")
+	}
+	file, err := root.Open(keyFileName)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("credential key file must be regular")
+	}
+	return io.ReadAll(file)
+}
+
+func createLocalDataKey(dir string) (*os.File, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return root.OpenFile(keyFileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+}
+
+func chmodLocalDataKey(dir string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.Chmod(keyFileName, 0o600)
 }

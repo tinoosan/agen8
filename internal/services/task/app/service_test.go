@@ -137,6 +137,77 @@ func TestCreateAllowsProjectUserOwnerFromTaskOwnedProjectSnapshot(t *testing.T) 
 	}
 }
 
+func TestCreateResolvesKeyResultBeforePersistingExactlyOnce(t *testing.T) {
+	repo := &fakeTaskRepository{}
+	missions := &countingKeyResultMissionReader{missionID: "mission-1"}
+	svc := newBoundaryService(repo, caller.Caller{MemberID: "coord-1"})
+	svc.missions = missions
+
+	created, err := svc.Create(context.Background(), CreateTaskParams{
+		ProjectID:          "space-1",
+		AssignedTo:         "worker-1",
+		Title:              "Linked task",
+		Description:        "Resolve linkage before persistence",
+		AcceptanceCriteria: []string{"done"},
+		KeyResultRef:       "kr-1",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if missions.calls != 1 {
+		t.Fatalf("mission lookups=%d want 1", missions.calls)
+	}
+	if got := created.Metadata["missionRef"]; got != "mission-1" {
+		t.Fatalf("missionRef=%v want mission-1", got)
+	}
+	if len(repo.tasks) != 1 {
+		t.Fatalf("persisted tasks=%d want 1", len(repo.tasks))
+	}
+}
+
+func TestCreateRejectsInvalidKeyResultBeforePersisting(t *testing.T) {
+	repo := &fakeTaskRepository{}
+	svc := newBoundaryService(repo, caller.Caller{MemberID: "coord-1"})
+	svc.missions = fakeKeyResultMissionReader{err: errors.New("mission lookup unavailable")}
+
+	_, err := svc.Create(context.Background(), CreateTaskParams{
+		ProjectID:          "space-1",
+		AssignedTo:         "worker-1",
+		Title:              "Invalid linked task",
+		Description:        "Must not survive failed validation",
+		AcceptanceCriteria: []string{"done"},
+		KeyResultRef:       "kr-missing",
+	})
+	if err == nil {
+		t.Fatal("expected linkage error")
+	}
+	if len(repo.tasks) != 0 {
+		t.Fatalf("persisted tasks=%d want 0", len(repo.tasks))
+	}
+}
+
+func TestCreateRejectsMismatchedMissionBeforePersisting(t *testing.T) {
+	repo := &fakeTaskRepository{}
+	svc := newBoundaryService(repo, caller.Caller{MemberID: "coord-1"})
+	svc.missions = fakeKeyResultMissionReader{missions: map[string]string{"kr-1": "mission-1"}}
+
+	_, err := svc.Create(context.Background(), CreateTaskParams{
+		ProjectID:          "space-1",
+		AssignedTo:         "worker-1",
+		Title:              "Mismatched linked task",
+		Description:        "Must not survive contradictory linkage",
+		AcceptanceCriteria: []string{"done"},
+		KeyResultRef:       "kr-1",
+		MissionRef:         "mission-2",
+	})
+	if err == nil {
+		t.Fatal("expected mission mismatch error")
+	}
+	if len(repo.tasks) != 0 {
+		t.Fatalf("persisted tasks=%d want 0", len(repo.tasks))
+	}
+}
+
 func TestAssignUsesTaskOwnedMemberSnapshotForAssigneeLabel(t *testing.T) {
 	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
 		"task-1": {ID: "task-1", ProjectID: "space-1", AssignedTo: "coord-1", Status: taskdomain.TaskStatusActive},
@@ -292,6 +363,16 @@ func (r *fakeTaskRepository) UpdateTask(_ context.Context, task taskdomain.Task)
 type fakeKeyResultMissionReader struct {
 	missions map[string]string
 	err      error
+}
+
+type countingKeyResultMissionReader struct {
+	missionID string
+	calls     int
+}
+
+func (m *countingKeyResultMissionReader) KeyResultMission(context.Context, string) (string, error) {
+	m.calls++
+	return m.missionID, nil
 }
 
 func (m fakeKeyResultMissionReader) KeyResultMission(_ context.Context, keyResultID string) (string, error) {

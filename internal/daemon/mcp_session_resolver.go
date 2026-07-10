@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tinoosan/agen8/internal/caller"
 	"github.com/tinoosan/agen8/internal/core/types"
 	"github.com/tinoosan/agen8/internal/mcp"
 	projecttool "github.com/tinoosan/agen8/internal/mcp/tools/project"
@@ -34,7 +35,6 @@ type mcpSessionResolverConfig struct {
 	files              *fileapp.Service
 	missions           *missionapp.Service
 	projectProvisioner *projectHooksProvisioner
-	externalBaseURL    string
 }
 
 type mcpSessionResolver struct {
@@ -49,7 +49,6 @@ type mcpSessionResolver struct {
 	files              *fileapp.Service
 	missions           *missionapp.Service
 	projectProvisioner *projectHooksProvisioner
-	externalBaseURL    string
 }
 
 func newMCPSessionResolver(cfg mcpSessionResolverConfig) *mcpSessionResolver {
@@ -65,7 +64,6 @@ func newMCPSessionResolver(cfg mcpSessionResolverConfig) *mcpSessionResolver {
 		files:              cfg.files,
 		missions:           cfg.missions,
 		projectProvisioner: cfg.projectProvisioner,
-		externalBaseURL:    cfg.externalBaseURL,
 	}
 }
 
@@ -82,6 +80,12 @@ func (r *mcpSessionResolver) Resolve(ctx context.Context, token string, header h
 			nativeRef = threadID
 		}
 		session.HarnessKind = mcp.HarnessFromJSONRPCBody(body, nativeRef)
+	}
+	if session.ProjectID != "" {
+		session, err = r.sessionWithProjectRoot(ctx, session)
+		if err != nil {
+			return mcp.Session{}, err
+		}
 	}
 	if sessionID == "" && threadID == "" {
 		return session, nil
@@ -104,7 +108,8 @@ func (r *mcpSessionResolver) Resolve(ctx context.Context, token string, header h
 		}
 		return mcp.Session{}, err
 	}
-	return sessionWithMember(session, rosterMember), nil
+	session = sessionWithMember(session, rosterMember)
+	return r.sessionWithMemberProjectRoot(ctx, session, rosterMember)
 }
 
 func (r *mcpSessionResolver) resolveToken(ctx context.Context, token string) (mcp.Session, error) {
@@ -144,7 +149,6 @@ func (r *mcpSessionResolver) baseSession(token, userID, harnessKind string) mcp.
 			projects: r.projects,
 			users:    r.users,
 			auth:     r.auth,
-			baseURL:  r.externalBaseURL,
 		},
 		MemberDirectory: r.projects,
 		MemberRegistrar: r.projects,
@@ -154,6 +158,7 @@ func (r *mcpSessionResolver) baseSession(token, userID, harnessKind string) mcp.
 		GraphService:    r.graph,
 		CredentialResolver: httpCredentialResolver{
 			credentials: r.credentials,
+			userID:      strings.TrimSpace(userID),
 		},
 		TaskService:     r.tasks,
 		TaskFiles:       r.files,
@@ -175,6 +180,9 @@ func (c projectClaudeMCPConfigurator) ConfigureClaudeMCP(ctx context.Context, re
 	if c.provisioner == nil {
 		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("claude mcp provisioner is not configured")
 	}
+	if !c.provisioner.localInstallation {
+		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("hosted Claude setup must be completed from the Agen8 Projects page")
+	}
 	projectID := strings.TrimSpace(req.ProjectID)
 	if projectID == "" {
 		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("project id is required")
@@ -183,7 +191,11 @@ func (c projectClaudeMCPConfigurator) ConfigureClaudeMCP(ctx context.Context, re
 	if err != nil {
 		return projecttool.ConfigureClaudeMCPResult{}, err
 	}
-	result, err := c.provisioner.ProvisionClaudeMCP(ctx, strings.TrimSpace(req.UserID), project.Title(), c.projects.ResolveRoot(ctx, project))
+	root := strings.TrimSpace(req.ProjectRoot)
+	if root == "" {
+		root = project.Root()
+	}
+	result, err := c.provisioner.ProvisionClaudeMCP(ctx, strings.TrimSpace(req.UserID), string(project.ID()), project.Title(), root)
 	if err != nil {
 		return projecttool.ConfigureClaudeMCPResult{}, err
 	}
@@ -218,11 +230,56 @@ func sessionWithMember(session mcp.Session, rosterMember member.Record) mcp.Sess
 	return session
 }
 
+func (r *mcpSessionResolver) sessionWithProjectRoot(ctx context.Context, session mcp.Session) (mcp.Session, error) {
+	return r.sessionWithMemberProjectRoot(ctx, session, member.Record{})
+}
+
+func (r *mcpSessionResolver) sessionWithMemberProjectRoot(ctx context.Context, session mcp.Session, rosterMember member.Record) (mcp.Session, error) {
+	projectID := types.ProjectID(strings.TrimSpace(session.ProjectID))
+	if projectID == "" || r.projects == nil {
+		return session, nil
+	}
+	projectCtx := caller.ContextWithCaller(ctx, caller.Caller{
+		UserID:    strings.TrimSpace(session.UserID),
+		MemberID:  strings.TrimSpace(session.MemberID),
+		ProjectID: projectID,
+	})
+	project, err := r.projects.GetProject(projectCtx, projectID)
+	if err != nil {
+		return mcp.Session{}, fmt.Errorf("resolve project root: %w", err)
+	}
+	if owner := strings.TrimSpace(project.UserID()); owner == "" || owner != strings.TrimSpace(session.UserID) {
+		return mcp.Session{}, fmt.Errorf("resolve project root: project access denied")
+	}
+	workspaceID := strings.TrimSpace(rosterMember.WorkspaceID)
+	if workspaceID == "" {
+		// Legacy registrations predate explicit workspace binding. Keep their
+		// established behavior until the next project.register backfills it.
+		session.ProjectRoot = strings.TrimSpace(project.Root())
+	} else {
+		session.ProjectRoot, err = r.projects.ResolveBoundWorkspaceRoot(
+			projectCtx,
+			string(project.ID()),
+			strings.TrimSpace(session.UserID),
+			string(project.LocationID()),
+			workspaceID,
+		)
+		if err != nil {
+			return mcp.Session{}, fmt.Errorf("resolve bound workspace root: %w", err)
+		}
+	}
+	session.CredentialResolver = httpCredentialResolver{
+		credentials: r.credentials,
+		userID:      strings.TrimSpace(session.UserID),
+		projectID:   strings.TrimSpace(session.ProjectID),
+	}
+	return session, nil
+}
+
 type projectMCPContextRegistrar struct {
 	projects *projectapp.Service
 	users    *userapp.Service
 	auth     *authapp.Service
-	baseURL  string
 }
 
 func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req projecttool.RegisterContextRequest) (projecttool.RegisterContextResult, error) {
@@ -249,7 +306,6 @@ func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req 
 	if err != nil {
 		return projecttool.RegisterContextResult{}, err
 	}
-	mcpURL := strings.TrimRight(r.baseURL, "/") + "/mcp?token=" + result.Token
 	return projecttool.RegisterContextResult{
 		ProjectID:         result.ProjectID,
 		ProjectRoot:       result.ProjectRoot,
@@ -261,8 +317,6 @@ func (r projectMCPContextRegistrar) RegisterMCPContext(ctx context.Context, req 
 		SessionID:         result.SessionID,
 		ThreadID:          result.ThreadID,
 		NativeSessionRef:  result.NativeSessionRef,
-		Token:             result.Token,
-		URL:               mcpURL,
 		MCPServers:        result.MCPServers,
 		AlreadyRegistered: result.AlreadyRegistered,
 	}, nil

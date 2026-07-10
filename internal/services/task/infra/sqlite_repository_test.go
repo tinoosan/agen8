@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,134 @@ func TestSQLiteRepositoryListAndCountFilters(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryOrdersAndPaginatesBeforeDecoding(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	tasks := []domain.Task{
+		infraTask("task-a", "project-1", domain.TaskStatusActive),
+		infraTask("task-b", "project-1", domain.TaskStatusActive),
+		infraTask("task-c", "project-1", domain.TaskStatusPending),
+		infraTask("task-d", "project-2", domain.TaskStatusActive),
+	}
+	for i := range tasks {
+		updatedAt := infraTestNow.Add(time.Duration(i) * time.Nanosecond)
+		tasks[i].UpdatedAt = &updatedAt
+		if tasks[i].ID == "task-a" {
+			tasks[i].UpdatedAt = nil
+		}
+		if err := repo.CreateTask(context.Background(), tasks[i]); err != nil {
+			t.Fatalf("CreateTask(%s): %v", tasks[i].ID, err)
+		}
+	}
+
+	filter := domain.TaskFilter{
+		ProjectID: types.ProjectID("project-1"),
+		Status:    []domain.TaskStatus{domain.TaskStatusActive},
+		SortBy:    "updated_at",
+		SortDesc:  true,
+		Limit:     1,
+		Offset:    1,
+	}
+	listed, err := repo.ListTasks(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "task-a" {
+		t.Fatalf("listed ids=%v want [task-a]", taskIDs(listed))
+	}
+
+	count, err := repo.CountTasks(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("CountTasks: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("count=%d want 2; count must ignore pagination", count)
+	}
+}
+
+func TestSQLiteRepositoryFilteredQueryUsesCompositeIndex(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	filter := domain.TaskFilter{
+		ProjectID: types.ProjectID("project-1"),
+		Status:    []domain.TaskStatus{domain.TaskStatusActive},
+	}
+	where, args, err := taskWhere(filter)
+	if err != nil {
+		t.Fatalf("taskWhere: %v", err)
+	}
+	rows, err := repo.db.Query("EXPLAIN QUERY PLAN SELECT task_json FROM tasks"+where, args...)
+	if err != nil {
+		t.Fatalf("explain query plan: %v", err)
+	}
+	defer rows.Close()
+
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "idx_tasks_project_status") {
+		t.Fatalf("query plan does not use composite filter index: %v", plan)
+	}
+}
+
+func TestSQLiteRepositoryDateBoundsPreserveNanoseconds(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	before := infraTask("task-before", "project-1", domain.TaskStatusActive)
+	after := infraTask("task-after", "project-1", domain.TaskStatusActive)
+	beforeAt := infraTestNow.Add(time.Nanosecond)
+	afterAt := infraTestNow.Add(2 * time.Nanosecond)
+	before.CreatedAt = &beforeAt
+	after.CreatedAt = &afterAt
+	for _, task := range []domain.Task{before, after} {
+		if err := repo.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.ID, err)
+		}
+	}
+
+	listed, err := repo.ListTasks(context.Background(), domain.TaskFilter{
+		FromDate: &afterAt,
+		ToDate:   &afterAt,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "task-after" {
+		t.Fatalf("listed ids=%v want [task-after]", taskIDs(listed))
+	}
+}
+
+func TestNormalizeTaskTimestampsUpgradesLegacyValues(t *testing.T) {
+	repo := newSQLiteRepositoryForTest(t)
+	if _, err := repo.db.Exec(`
+		INSERT INTO tasks (task_id, project_id, status, created_at, updated_at, task_json)
+		VALUES ('legacy', 'project-1', 'pending', '2026-05-15T13:00:00.1Z',
+			'2026-05-15T13:00:00Z', '{}')
+	`); err != nil {
+		t.Fatalf("insert legacy task: %v", err)
+	}
+	if err := normalizeTaskTimestamps(context.Background(), repo.db); err != nil {
+		t.Fatalf("normalizeTaskTimestamps: %v", err)
+	}
+
+	var createdAt, updatedAt string
+	if err := repo.db.QueryRow(`SELECT created_at, updated_at FROM tasks WHERE task_id = 'legacy'`).Scan(&createdAt, &updatedAt); err != nil {
+		t.Fatalf("read normalized timestamps: %v", err)
+	}
+	if createdAt != "2026-05-15T13:00:00.100000000Z" {
+		t.Fatalf("created_at=%q", createdAt)
+	}
+	if updatedAt != "2026-05-15T13:00:00.000000000Z" {
+		t.Fatalf("updated_at=%q", updatedAt)
+	}
+}
+
 func TestSQLiteRepositoryMissingTaskFailsLoudly(t *testing.T) {
 	repo := newSQLiteRepositoryForTest(t)
 	_, err := repo.GetTask(context.Background(), domain.TaskID("missing-task"))
@@ -139,7 +268,7 @@ func TestSQLiteRepositoryFreshSchemaExcludesPlanColumns(t *testing.T) {
 	}
 }
 
-func newSQLiteRepositoryForTest(t *testing.T) *SQLiteRepository {
+func newSQLiteRepositoryForTest(t testing.TB) *SQLiteRepository {
 	t.Helper()
 	handle, err := storagedb.Open(context.Background(), storagedb.Config{
 		Driver:  storagedb.DriverSQLite,
@@ -205,4 +334,12 @@ func infraTask(id string, projectID string, status domain.TaskStatus) domain.Tas
 		Metadata:     map[string]any{"history": []any{map[string]any{"event": "created"}}},
 		KeyResultRef: "kr-1",
 	}
+}
+
+func taskIDs(tasks []domain.Task) []domain.TaskID {
+	ids := make([]domain.TaskID, len(tasks))
+	for i := range tasks {
+		ids[i] = tasks[i].ID
+	}
+	return ids
 }

@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
 	"github.com/tinoosan/agen8/pkg/fsutil"
@@ -21,14 +20,12 @@ import (
 type Driver string
 
 const (
-	DriverSQLite   Driver = "sqlite"
-	DriverPostgres Driver = "postgres"
+	DriverSQLite Driver = "sqlite"
 )
 
 type Config struct {
 	Driver       Driver
 	DataDir      string
-	DatabaseURL  string
 	Pool         PoolConfig
 	Migrate      Migrator
 	MigrationKey string
@@ -99,26 +96,11 @@ func (sqliteDialect) Placeholder(int) string { return "?" }
 func (sqliteDialect) JSONType() string       { return "TEXT" }
 func (sqliteDialect) NowExpr() string        { return "CURRENT_TIMESTAMP" }
 
-type postgresDialect struct{}
-
-func (postgresDialect) Placeholder(n int) string {
-	if n <= 0 {
-		n = 1
-	}
-	return "$" + strconv.Itoa(n)
-}
-func (postgresDialect) JSONType() string { return "JSONB" }
-func (postgresDialect) NowExpr() string  { return "NOW()" }
-
 const (
 	defaultSQLiteMaxOpenConns  = 25
 	defaultSQLiteMaxIdleConns  = 25
 	defaultSQLiteConnMaxLife   = 5 * time.Minute
 	defaultSQLiteBusyTimeoutMS = 10000
-
-	defaultPostgresMaxOpenConns = 25
-	defaultPostgresMaxIdleConns = 25
-	defaultPostgresConnMaxLife  = 30 * time.Minute
 )
 
 var (
@@ -133,17 +115,23 @@ func Open(ctx context.Context, cfg Config) (*Handle, error) {
 	if driver == "" {
 		driver = DriverSQLite
 	}
+	if driver != DriverSQLite {
+		return nil, fmt.Errorf("db: Agen8 supports SQLite storage only")
+	}
 	dbPath := ""
 	if driver == DriverSQLite {
 		dbPath = SQLitePath(cfg.DataDir)
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 			return nil, fmt.Errorf("sqlite: create data dir: %w", err)
 		}
+		mu.Lock()
 		if err := ensureSQLiteFileSecure(dbPath); err != nil {
+			mu.Unlock()
 			return nil, fmt.Errorf("sqlite: secure db file: %w", err)
 		}
+		mu.Unlock()
 	}
-	key, sqlDriver, dsn, dialect, pool, err := resolve(cfg, driver)
+	key, sqlDriver, dsn, dialect, pool, err := resolve(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +156,7 @@ func Open(ctx context.Context, cfg Config) (*Handle, error) {
 	if cfg.Migrate != nil && !migrated[migrationKey] {
 		if err := cfg.Migrate(ctx, handle.db, driver); err != nil {
 			if openedNow {
-				handle.db.Close()
+				_ = handle.db.Close()
 				delete(handles, key)
 			}
 			return nil, err
@@ -182,14 +170,34 @@ func ensureSQLiteFileSecure(path string) error {
 	if path == "" {
 		return fmt.Errorf("sqlite: db path is required")
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o600)
+	dir := filepath.Dir(path)
+	name := filepath.Base(path)
+	if dir == "." || name == "." || name == string(filepath.Separator) {
+		return fmt.Errorf("sqlite: db path %q is invalid", path)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open sqlite root %s: %w", dir, err)
+	}
+	defer root.Close()
+	if info, err := root.Lstat(name); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("sqlite: db file must not be a symlink")
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("sqlite: db path is not a regular file")
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat sqlite db file: %w", err)
+	}
+	file, err := root.OpenFile(name, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
 	if closeErr := file.Close(); closeErr != nil {
 		return fmt.Errorf("close %s: %w", path, closeErr)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := root.Chmod(name, 0o600); err != nil {
 		return fmt.Errorf("chmod %s: %w", path, err)
 	}
 	return nil
@@ -219,23 +227,12 @@ func SQLiteDSN(path string) string {
 	return u.String()
 }
 
-func resolve(cfg Config, driver Driver) (key, sqlDriver, dsn string, dialect Dialect, pool PoolConfig, err error) {
-	switch driver {
-	case DriverSQLite:
-		path := SQLitePath(cfg.DataDir)
-		if strings.TrimSpace(path) == "" {
-			return "", "", "", nil, PoolConfig{}, fmt.Errorf("sqlite: data dir is required")
-		}
-		return "sqlite:" + path, "sqlite", SQLiteDSN(path), sqliteDialect{}, sqlitePool(cfg.Pool), nil
-	case DriverPostgres:
-		dsn := strings.TrimSpace(cfg.DatabaseURL)
-		if dsn == "" {
-			return "", "", "", nil, PoolConfig{}, fmt.Errorf("postgres: database url is required")
-		}
-		return "postgres:" + dsn, "pgx", dsn, postgresDialect{}, postgresPool(cfg.Pool), nil
-	default:
-		return "", "", "", nil, PoolConfig{}, fmt.Errorf("db: unsupported driver %q", driver)
+func resolve(cfg Config) (key, sqlDriver, dsn string, dialect Dialect, pool PoolConfig, err error) {
+	path := SQLitePath(cfg.DataDir)
+	if strings.TrimSpace(path) == "" {
+		return "", "", "", nil, PoolConfig{}, fmt.Errorf("sqlite: data dir is required")
 	}
+	return "sqlite:" + path, "sqlite", SQLiteDSN(path), sqliteDialect{}, sqlitePool(cfg.Pool), nil
 }
 
 func applyPool(db *sql.DB, pool PoolConfig) {
@@ -266,19 +263,6 @@ func sqlitePool(pool PoolConfig) PoolConfig {
 	}
 	if pool.ConnMaxLifetime <= 0 {
 		pool.ConnMaxLifetime = envDuration("AGEN8_SQLITE_CONN_MAX_LIFETIME", defaultSQLiteConnMaxLife)
-	}
-	return pool
-}
-
-func postgresPool(pool PoolConfig) PoolConfig {
-	if pool.MaxOpenConns <= 0 {
-		pool.MaxOpenConns = envInt("AGEN8_POSTGRES_MAX_OPEN_CONNS", defaultPostgresMaxOpenConns)
-	}
-	if pool.MaxIdleConns <= 0 {
-		pool.MaxIdleConns = envInt("AGEN8_POSTGRES_MAX_IDLE_CONNS", defaultPostgresMaxIdleConns)
-	}
-	if pool.ConnMaxLifetime <= 0 {
-		pool.ConnMaxLifetime = envDuration("AGEN8_POSTGRES_CONN_MAX_LIFETIME", defaultPostgresConnMaxLife)
 	}
 	return pool
 }

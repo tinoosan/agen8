@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FolderTree, WrapText, X } from 'lucide-react'
 import { rpcCall } from '../../lib/rpc'
 import { qk } from '../../lib/queryKeys'
 import { basename } from '../files/filePreviewUtils'
 import ArtifactViewer from '../files/ArtifactViewer'
-import DiffView from '../files/DiffView'
 import { FileBrowserPane } from './FileBrowserPane'
 import {
   Sheet,
@@ -15,6 +14,9 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet'
 import type { ArtifactNode, ArtifactGetResult } from '../../lib/types'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
+
+const DiffView = lazyWithRetry(() => import('../files/DiffView'), 'components/files/DiffView')
 
 // Caps the preview fetch; files.get reports `truncated` past this so the
 // viewer can say so instead of silently clipping.
@@ -45,7 +47,7 @@ function baselineUnavailableReason(baseline: FileBaselineResult | undefined, err
   return null
 }
 
-interface ArtifactViewerPanelProps {
+export interface ArtifactViewerPanelProps {
   projectId: string | null
   vpath: string
   onClose: () => void
@@ -219,7 +221,11 @@ export function ArtifactViewerPanel({ projectId, vpath, onClose, layout }: Artif
       }
       const reason = baselineUnavailableReason(baselineQuery.data, !!baselineQuery.error)
       if (!reason) {
-        return <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} filePath={activeVPath} wrap={wrap} />
+        return (
+          <Suspense fallback={<div className="flex h-full items-center justify-center"><span className="spinner spinner-md" /></div>}>
+            <DiffView baseline={baselineQuery.data?.content ?? ''} current={previewQuery.data?.content ?? ''} filePath={activeVPath} wrap={wrap} />
+          </Suspense>
+        )
       }
       // Degrade: notice banner + the normal view, never a dead pane.
       return (

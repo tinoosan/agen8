@@ -108,7 +108,7 @@ AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true</code></pre>
 
   <p>Published release images are pushed to GitHub Container Registry when a <code>v*</code> release tag is created:</p>
 
-<pre><code class="lang-shell">docker pull ghcr.io/tinoosan/agen8:v0.0.1</code></pre>
+<pre><code class="lang-shell">docker pull ghcr.io/tinoosan/agen8:&lt;release-tag&gt;</code></pre>
 
   <p>Check health:</p>
 
@@ -120,12 +120,18 @@ docker inspect --format '{{json .State.Health.Status}}' agen8</code></pre>
 
   <p>Before applying it:</p>
   <ol>
-    <li>Choose the image tag to deploy. The sample uses <code>ghcr.io/tinoosan/agen8:v0.0.1</code>; release tags also publish <code>latest</code> and semver aliases.</li>
+    <li>Replace <code>replace-with-release-tag</code> in the image with the immutable release tag you intend to deploy.</li>
     <li>Replace every <code>agen8.example.com</code> value with your real hostname.</li>
-    <li>Replace <code>replace-with-a-long-random-setup-token</code> with a generated token.</li>
     <li>Adjust the ingress class and cert-manager issuer for your cluster.</li>
     <li>Confirm your storage class supports a <code>ReadWriteOnce</code> PVC.</li>
   </ol>
+
+  <p>Create the referenced Secret separately so applying the reusable manifest can never overwrite it:</p>
+<pre><code class="lang-shell">export AGEN8_SETUP_TOKEN="$(openssl rand -hex 32)"
+kubectl create namespace agen8 --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n agen8 create secret generic agen8-secrets \
+  --from-literal=AGEN8_SETUP_TOKEN="${AGEN8_SETUP_TOKEN}" \
+  --dry-run=client -o yaml | kubectl apply -f -</code></pre>
 
 <pre><code class="lang-shell">kubectl apply -f deploy/kubernetes/agen8.yaml
 kubectl -n agen8 rollout status deployment/agen8
@@ -140,14 +146,13 @@ kubectl -n agen8 get pods,svc,ingress,pvc</code></pre>
     <li><code>replicas: 1</code></li>
     <li><code>strategy.type: Recreate</code></li>
     <li>one PVC mounted at <code>/data</code></li>
-    <li>readiness and liveness probes on <code>/healthz</code></li>
+    <li>storage readiness on <code>/readyz</code> and process liveness on <code>/healthz</code></li>
     <li><code>AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true</code></li>
   </ul>
 
   <p>
-    Do not scale the SQLite deployment above one replica. SQLite is the default
-    storage backend and should be treated as a single-writer deployment.
-    Horizontal scaling should wait for a documented shared database backend.
+    Do not scale the SQLite deployment above one replica. Agen8 intentionally
+    ships as a single-writer SQLite service.
   </p>
 
   <h2 id="harness">Connect a harness</h2>
@@ -164,16 +169,33 @@ bearer_token_env_var = "AGEN8_MCP_TOKEN"</code></pre>
 
 <pre><code class="lang-shell">export AGEN8_MCP_TOKEN='ak_...'</code></pre>
 
-  <p>Claude Code MCP config:</p>
+  <p>Claude Code one-command setup:</p>
 
-<pre><code class="lang-shell">claude mcp add --transport http --scope user agen8 \
-  'https://agen8.example.com/mcp' \
-  --header 'Authorization: Bearer ak_...'</code></pre>
+<pre><code class="lang-shell">cd /path/to/local/project
+agen8 client setup --harness claude \
+  --url https://agen8.example.com \
+  --token ak_...</code></pre>
 
-  <p>Install the Agen8 workflow skill locally:</p>
+  <p>
+    This installs the Claude workflow skills, project attention hooks, and a
+    local-scope MCP connection together. The Projects page generates the command
+    for new and existing projects. Display-name changes do not require reconnecting
+    Claude. Re-run the setup command from the local project directory to repair the
+    client integration, or pass <code>--project-dir</code> explicitly.
+  </p>
 
-<pre><code class="lang-shell">agen8 skill install --harness codex
-agen8 skill install --harness claude-cli</code></pre>
+  <p>
+    When a project folder moves or is renamed, use <strong>Project actions &gt;
+    Change project folder</strong>. The operation keeps the existing project ID
+    and validates the new directory on the project's configured location.
+    Hosted setup commands use project-bound <code>wlt_</code> credentials, so
+    generate a fresh command with <strong>Configure Claude MCP</strong> after
+    relocating the project.
+  </p>
+
+  <p>Install the Agen8 workflow skill for Codex locally:</p>
+
+<pre><code class="lang-shell">agen8 skill install --harness codex</code></pre>
 
   <h2 id="hooks">Install attention hooks</h2>
   <p>
@@ -189,7 +211,7 @@ agen8 skill install --harness claude-cli</code></pre>
   --url https://agen8.example.com \
   --token ak_...</code></pre>
 
-  <p>Claude Code:</p>
+  <p>Claude Code repair command when only hooks need replacing:</p>
 
 <pre><code class="lang-shell">agen8 hooks install \
   --harness claude \
@@ -222,6 +244,7 @@ agen8 skill install --harness claude-cli</code></pre>
   </ul>
 
   <h2 id="upgrade">Upgrade notes</h2>
+  <p>Back up the volume before replacing the binary. Agen8 transactionally migrates the supported schema-5 baseline to schema 6; older incompatible schemas fail startup without replacing the database.</p>
   <p>For Docker, replace the container while keeping the named volume:</p>
 
 <pre><code class="lang-shell">docker pull &lt;image&gt;
@@ -235,7 +258,8 @@ kubectl -n agen8 rollout status deployment/agen8</code></pre>
 
   <p>Always confirm:</p>
 
-<pre><code class="lang-shell">curl -fsS https://agen8.example.com/healthz</code></pre>
+<pre><code class="lang-shell">curl -fsS https://agen8.example.com/healthz
+curl -fsS https://agen8.example.com/readyz</code></pre>
 
 </div>
 

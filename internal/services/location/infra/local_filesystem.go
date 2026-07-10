@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -189,10 +190,27 @@ func (t Transport) MoveFile(ctx context.Context, location locationdomain.Locatio
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		srcRoot, rootSourcePath, err := localRootForPath(source)
+		if err != nil {
 			return err
 		}
-		return os.Rename(source, destination)
+		defer func() {
+			_ = srcRoot.Close()
+		}()
+		dstRoot, rootDestinationPath, err := localRootForPath(destination)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = dstRoot.Close()
+		}()
+		if srcRoot.Name() != dstRoot.Name() {
+			return fmt.Errorf("move across local filesystem roots is not supported")
+		}
+		if err := srcRoot.MkdirAll(filepath.ToSlash(filepath.Dir(rootDestinationPath)), 0o700); err != nil {
+			return err
+		}
+		return srcRoot.Rename(rootSourcePath, rootDestinationPath)
 	case locationdomain.KindSSH:
 		return t.moveSSHFile(ctx, location, source, destination)
 	default:
@@ -245,10 +263,25 @@ func (t Transport) WriteFile(ctx context.Context, location locationdomain.Locati
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		root, rootPath, err := localRootForPath(path)
+		if err != nil {
 			return err
 		}
-		return os.WriteFile(path, contents, 0o600)
+		defer func() {
+			_ = root.Close()
+		}()
+		if err := root.MkdirAll(filepath.ToSlash(filepath.Dir(rootPath)), 0o700); err != nil {
+			return err
+		}
+		file, err := root.OpenFile(rootPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			return err
+		}
+		if _, err := file.Write(contents); err != nil {
+			_ = file.Close()
+			return err
+		}
+		return file.Close()
 	case locationdomain.KindSSH:
 		return t.writeSSHFile(ctx, location, path, contents)
 	default:
@@ -646,7 +679,7 @@ func copyLocalPath(src string, dst string, info os.FileInfo) error {
 			}
 			target := filepath.Join(dst, rel)
 			if entry.IsDir() {
-				return os.MkdirAll(target, 0o700)
+				return mkdirLocalPath(target, 0o700)
 			}
 			entryInfo, err := entry.Info()
 			if err != nil {
@@ -662,7 +695,14 @@ func copyLocalPath(src string, dst string, info os.FileInfo) error {
 }
 
 func copyLocalFile(src string, dst string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+	outRoot, rootDstPath, err := localRootForPath(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = outRoot.Close()
+	}()
+	if err := outRoot.MkdirAll(filepath.ToSlash(filepath.Dir(rootDstPath)), 0o700); err != nil {
 		return err
 	}
 	srcRoot, rootSrcPath, err := localRootForPath(src)
@@ -671,14 +711,6 @@ func copyLocalFile(src string, dst string, mode os.FileMode) error {
 	}
 	defer func() {
 		_ = srcRoot.Close()
-	}()
-	outRoot, rootDstPath, err := localRootForPath(dst)
-	if err != nil {
-		_ = srcRoot.Close()
-		return err
-	}
-	defer func() {
-		_ = outRoot.Close()
 	}()
 	in, err := srcRoot.Open(rootSrcPath)
 	if err != nil {
@@ -699,6 +731,21 @@ func copyLocalFile(src string, dst string, mode os.FileMode) error {
 		return err
 	}
 	return out.Close()
+}
+
+func mkdirLocalPath(path string, perm os.FileMode) error {
+	path, err := validateLocalPath(path)
+	if err != nil {
+		return err
+	}
+	root, rootPath, err := localRootForPath(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	return root.MkdirAll(rootPath, perm)
 }
 
 func localRootForPath(path string) (*os.Root, string, error) {
@@ -941,6 +988,13 @@ const gitBaselineMaxBytes = 16 * 1024 * 1024
 // git (e.g. a giant repo or a hung filesystem) must not pin a daemon goroutine.
 const gitBaselineTimeout = 20 * time.Second
 
+// sshCommandMaxBytes bounds generic fixed-command output used for SSH probes
+// and remote home resolution. The transport does not expose generic remote
+// exec, so these outputs should be tiny; anything larger is treated as invalid.
+const sshCommandMaxBytes = 64 * 1024
+
+var errSSHCommandOutputTooLarge = errors.New("ssh command output exceeded limit")
+
 // shellSingleQuote wraps an arbitrary string so a POSIX shell treats it as one
 // literal argument, neutralizing every metacharacter. This is THE injection
 // control for remote command execution: SSH exec passes a single string to the
@@ -1066,14 +1120,17 @@ func runSSHCommandWithInput(ctx context.Context, client *ssh.Client, command str
 	if input != "" {
 		session.Stdin = strings.NewReader(input)
 	}
+	output := newBoundedOutput(sshCommandMaxBytes)
+	session.Stdout = output
+	session.Stderr = output
 	type result struct {
 		output []byte
 		err    error
 	}
 	done := make(chan result, 1)
 	go func() {
-		output, err := session.CombinedOutput(command)
-		done <- result{output: output, err: err}
+		err := session.Run(command)
+		done <- result{output: output.Bytes(), err: errors.Join(output.Err(), err)}
 	}()
 	select {
 	case <-ctx.Done():
@@ -1082,6 +1139,53 @@ func runSSHCommandWithInput(ctx context.Context, client *ssh.Client, command str
 	case result := <-done:
 		return string(result.output), result.err
 	}
+}
+
+type boundedOutput struct {
+	mu       sync.Mutex
+	buf      []byte
+	maxBytes int64
+	err      error
+}
+
+func newBoundedOutput(maxBytes int64) *boundedOutput {
+	return &boundedOutput{maxBytes: maxBytes}
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.err != nil {
+		return len(p), nil
+	}
+	if b.maxBytes <= 0 {
+		b.err = fmt.Errorf("maxBytes is required")
+		return len(p), nil
+	}
+	remaining := int(b.maxBytes) - len(b.buf)
+	if remaining <= 0 {
+		b.err = fmt.Errorf("%w: %d bytes", errSSHCommandOutputTooLarge, b.maxBytes)
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		b.buf = append(b.buf, p[:remaining]...)
+		b.err = fmt.Errorf("%w: %d bytes", errSSHCommandOutputTooLarge, b.maxBytes)
+		return len(p), nil
+	}
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *boundedOutput) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buf...)
+}
+
+func (b *boundedOutput) Err() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.err
 }
 
 func validateLocalPath(path string) (string, error) {

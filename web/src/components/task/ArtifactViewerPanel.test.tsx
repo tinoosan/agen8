@@ -71,7 +71,7 @@ describe('ArtifactViewerPanel', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Diff' }))
 
-    expect(await screen.findByTestId('diff-view')).toBeInTheDocument()
+    expect(await screen.findByTestId('diff-view', {}, { timeout: 5_000 })).toBeInTheDocument()
     expect(screen.getByText('line two')).toBeInTheDocument()
     expect(screen.getByText('line two changed')).toBeInTheDocument()
     expect(mockRpcCall).toHaveBeenCalledWith('files.baseline', {
@@ -208,6 +208,6 @@ describe('ArtifactViewerPanel', () => {
     })
     renderPanel('/project/main.go', 'inline')
     await userEvent.click(await screen.findByRole('button', { name: 'Diff' }))
-    expect(await screen.findByTestId('diff-view')).toBeInTheDocument()
+    expect(await screen.findByTestId('diff-view', {}, { timeout: 5_000 })).toBeInTheDocument()
   })
 })

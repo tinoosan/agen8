@@ -1,7 +1,8 @@
 // Package hookinstaller provisions the harness attention hooks: the curl
 // one-liners that tell agen8 when an agent is waiting on the human (see
-// internal/services/attention). One explicit `agen8 hooks install` run per
-// machine/harness — never installed silently.
+// internal/services/attention). Explicit `agen8 hooks install` runs are used
+// for repair, hosted, and client-machine setup; local project creation can call
+// the same installer best-effort.
 //
 // The installed hook is deliberately a bare curl pipe: the daemon normalizes
 // the harness's raw payload server-side (POST /hooks/attention?harness=&kind=),
@@ -10,13 +11,17 @@
 package hookinstaller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Harness selects which harness's hook config to write.
@@ -55,16 +60,20 @@ type Result struct {
 	Path string
 }
 
-// MCPOptions configures project-local Claude MCP server provisioning.
+// MCPOptions configures private, project-local Claude MCP provisioning.
 type MCPOptions struct {
 	// BaseURL of the agen8 daemon, e.g. http://127.0.0.1:7777 or a hosted URL.
 	BaseURL string
 	// Token is the bearer credential Claude Code will send to /mcp.
 	Token string
-	// ProjectDir is where Claude Code's project-scoped settings live.
+	// ProjectDir identifies the local-scope project in Claude Code's user config.
 	ProjectDir string
 	// ServerName is the mcpServers key. Defaults to "agen8".
 	ServerName string
+	// Context bounds the Claude CLI operation. Background is used when omitted.
+	Context context.Context
+	// runCommand is replaced by focused tests. Production uses the Claude CLI.
+	runCommand claudeCommandRunner
 }
 
 // MCPResult reports what InstallClaudeMCP did.
@@ -73,6 +82,13 @@ type MCPResult struct {
 	ServerName string
 	URL        string
 }
+
+type claudeCommandRunner func(ctx context.Context, projectDir string, args ...string) ([]byte, error)
+
+const (
+	claudeMCPCommandTimeout = 15 * time.Second
+	claudeMCPOutputMaxBytes = 64 * 1024
+)
 
 // claudeHookEvents maps Claude Code hook events to attention kinds. Which hook
 // fired tells us everything — the payload itself is passed through raw.
@@ -140,11 +156,11 @@ func Install(opts Options) (Result, error) {
 	}
 }
 
-// InstallClaudeMCP merges agen8's HTTP MCP server into
-// <project>/.claude/settings.local.json. settings.local.json keeps the bearer
-// credential local, matching the hook installer. The merge only upserts
-// mcpServers.<serverName>; hooks, permissions, and other MCP servers are
-// preserved.
+// InstallClaudeMCP uses Claude Code's config manager to replace Agen8's
+// private, project-local MCP entry in ~/.claude.json. Claude settings files do
+// not accept mcpServers, while a project .mcp.json would expose the bearer
+// credential to version control. Delegating the merge to `claude mcp` preserves
+// every unrelated setting and follows Claude's current config schema.
 func InstallClaudeMCP(opts MCPOptions) (MCPResult, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(opts.BaseURL), "/")
 	if baseURL == "" {
@@ -164,38 +180,92 @@ func InstallClaudeMCP(opts MCPOptions) (MCPResult, error) {
 	if serverName == "" {
 		serverName = "agen8"
 	}
-	path := filepath.Join(projectDir, ".claude", "settings.local.json")
-	if err := validateHookConfigPath(path); err != nil {
-		return MCPResult{}, fmt.Errorf("claude mcp install: validate %s: %w", path, err)
+	projectDir, err := filepath.Abs(projectDir)
+	if err != nil {
+		return MCPResult{}, fmt.Errorf("claude mcp install: resolve project dir: %w", err)
 	}
-
-	settings := map[string]any{}
-	if raw, err := readHookConfig(path); err == nil {
-		if err := json.Unmarshal(raw, &settings); err != nil {
-			return MCPResult{}, fmt.Errorf("claude mcp install: %s exists but is not valid JSON: %w", path, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return MCPResult{}, fmt.Errorf("claude mcp install: read %s: %w", path, err)
+	info, err := os.Stat(projectDir)
+	if err != nil {
+		return MCPResult{}, fmt.Errorf("claude mcp install: stat project dir: %w", err)
 	}
-
-	mcpServers, _ := settings["mcpServers"].(map[string]any)
-	if mcpServers == nil {
-		mcpServers = map[string]any{}
+	if !info.IsDir() {
+		return MCPResult{}, fmt.Errorf("claude mcp install: project dir is not a directory")
 	}
 	mcpURL := baseURL + "/mcp"
-	mcpServers[serverName] = map[string]any{
+	serverJSON, err := json.Marshal(map[string]any{
 		"type": "http",
 		"url":  mcpURL,
 		"headers": map[string]any{
 			"Authorization": "Bearer " + strings.TrimSpace(opts.Token),
 		},
+	})
+	if err != nil {
+		return MCPResult{}, fmt.Errorf("claude mcp install: encode server config: %w", err)
 	}
-	settings["mcpServers"] = mcpServers
 
-	if err := writeJSONFile(path, settings); err != nil {
-		return MCPResult{}, err
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return MCPResult{Path: path, ServerName: serverName, URL: mcpURL}, nil
+	ctx, cancel := context.WithTimeout(ctx, claudeMCPCommandTimeout)
+	defer cancel()
+	run := opts.runCommand
+	if run == nil {
+		run = runClaudeCommand
+	}
+	removeOutput, removeErr := run(ctx, projectDir, "mcp", "remove", "--scope", "local", serverName)
+	if removeErr != nil && !strings.Contains(string(removeOutput), "No project-local MCP server found") {
+		return MCPResult{}, fmt.Errorf("claude mcp install: remove existing server: %w", removeErr)
+	}
+	if _, err := run(ctx, projectDir, "mcp", "add-json", "--scope", "local", serverName, string(serverJSON)); err != nil {
+		return MCPResult{}, fmt.Errorf("claude mcp install: add server: %w", err)
+	}
+	return MCPResult{Path: claudeLocalConfigPath(), ServerName: serverName, URL: mcpURL}, nil
+}
+
+func runClaudeCommand(ctx context.Context, projectDir string, args ...string) ([]byte, error) {
+	// #nosec G204 -- the executable is fixed; arguments are passed directly and
+	// never interpreted by a shell. Claude owns validation of its config values.
+	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd.Dir = projectDir
+	output := &boundedCommandOutput{limit: claudeMCPOutputMaxBytes}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	err := cmd.Run()
+	return output.Bytes(), err
+}
+
+func claudeLocalConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "~/.claude.json"
+	}
+	return filepath.Join(home, ".claude.json")
+}
+
+type boundedCommandOutput struct {
+	mu    sync.Mutex
+	data  []byte
+	limit int
+}
+
+func (b *boundedCommandOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	remaining := b.limit - len(b.data)
+	if remaining > 0 {
+		if len(p) < remaining {
+			remaining = len(p)
+		}
+		b.data = append(b.data, p[:remaining]...)
+	}
+	return len(p), nil
+}
+
+func (b *boundedCommandOutput) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.data...)
 }
 
 // hookCommand renders the curl one-liner for one harness+kind. Short timeout,

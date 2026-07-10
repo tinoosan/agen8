@@ -73,7 +73,7 @@
       <tr><td>Canonical <code>Note</code> records and body validation.</td><td>The lifecycle, creation, or deletion of durable nodes (decisions, missions, key results, tasks) — including whether they can be deleted at all.</td></tr>
       <tr><td>The curated <code>type</code> label — a soft, scannable facet that does not gate what a note may lead to.</td><td>Drawing consequence edges into being: the node that grows from a note references it and draws the <code>spawned</code> / <code>informed_by</code> edge. The note service only reads those edges.</td></tr>
       <tr><td>The derived open&harr;frozen latch: a note is editable and deletable iff it currently has no consequence edge.</td><td>The graph's cascade behavior. When a durable node is deleted, the graph removes its incident edges; the note re-opens as a consequence, not by note-service action.</td></tr>
-      <tr><td>The <code>archived</code> visibility flag, kept independent of the latch.</td><td>Writing harness memory files such as <code>MEMORY.md</code>; a note's reach is graph-only.</td></tr>
+      <tr><td>The <code>archived</code> visibility flag, kept independent of the latch.</td><td>Writing harness-local memory files; a note's reach is graph-only.</td></tr>
       <tr><td>The note's own associative edges (a <code>made_during</code> context link at capture) and their cleanup when an open note is deleted.</td><td>Surfacing notes to a human — delivery and routing are a separate concern.</td></tr>
       <tr><td>Project-scoped note queries, graph hydration, and lifecycle event publication.</td><td>Transcript card rendering or activity-feed formatting.</td></tr>
     </tbody>

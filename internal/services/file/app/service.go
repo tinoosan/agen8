@@ -24,11 +24,38 @@ import (
 const (
 	defaultPreviewMaxBytes = 1024 * 1024
 	previewMaxBytesCap     = 16 * 1024 * 1024
+	uploadMaxBytes         = 25 << 20
 )
 
 // errGitBaselineNotPermitted aliases the domain sentinel so Baseline can match
 // the capability-denied case from the repository.
 var errGitBaselineNotPermitted = filedomain.ErrGitBaselineNotPermitted
+
+type uploadLimitReader struct {
+	reader    io.Reader
+	remaining int64
+	probe     [1]byte
+}
+
+func newUploadLimitReader(reader io.Reader) *uploadLimitReader {
+	return &uploadLimitReader{reader: reader, remaining: uploadMaxBytes}
+}
+
+func (r *uploadLimitReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		n, err := r.reader.Read(r.probe[:])
+		if n > 0 {
+			return 0, fmt.Errorf("upload exceeds %d bytes", uploadMaxBytes)
+		}
+		return 0, err
+	}
+	if int64(len(p)) > r.remaining {
+		p = p[:r.remaining]
+	}
+	n, err := r.reader.Read(p)
+	r.remaining -= int64(n)
+	return n, err
+}
 
 // remoteGitBaseliner is the optional capability a file repository may implement
 // to produce git baselines for files on non-local locations. The repository
@@ -285,7 +312,7 @@ func (s *Service) Baseline(ctx context.Context, input GetInput) (BaselineResult,
 		return BaselineResult{Path: resolved.vpath, Tracked: false}, nil
 	}
 
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:./"+name).Output()
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:./"+name).Output() // #nosec G204 -- fixed git binary with argv-only arguments after dir is constrained under the project root.
 	if err != nil {
 		// Untracked file, file new in the working tree, or no git repo at
 		// all: there is no baseline to diff against. Degrade, don't fail.
@@ -447,6 +474,9 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (PathResult, er
 	} else {
 		raw = []byte(input.Content)
 	}
+	if int64(len(raw)) > uploadMaxBytes {
+		return PathResult{}, fmt.Errorf("upload exceeds %d bytes", uploadMaxBytes)
+	}
 	if err := s.files.WriteFile(ctx, resolved.ref, raw); err != nil {
 		return PathResult{}, fmt.Errorf("write upload %s: %w", resolved.vpath, err)
 	}
@@ -461,15 +491,16 @@ func (s *Service) UploadReader(ctx context.Context, input UploadReaderInput) (Pa
 	if input.Reader == nil {
 		return PathResult{}, fmt.Errorf("reader is required")
 	}
+	reader := newUploadLimitReader(input.Reader)
 	if writer, ok := s.files.(interface {
 		WriteFileReader(context.Context, filedomain.Reference, io.Reader) error
 	}); ok {
-		if err := writer.WriteFileReader(ctx, resolved.ref, input.Reader); err != nil {
+		if err := writer.WriteFileReader(ctx, resolved.ref, reader); err != nil {
 			return PathResult{}, fmt.Errorf("write upload %s: %w", resolved.vpath, err)
 		}
 		return PathResult{Path: resolved.vpath}, nil
 	}
-	raw, err := io.ReadAll(input.Reader)
+	raw, err := io.ReadAll(reader)
 	if err != nil {
 		return PathResult{}, fmt.Errorf("read upload %s: %w", resolved.vpath, err)
 	}

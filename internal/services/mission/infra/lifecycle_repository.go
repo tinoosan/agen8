@@ -23,14 +23,6 @@ func (r *SQLiteRepository) ListLifecycleEvents(ctx context.Context, missionID mi
 	return listLifecycleEvents(ctx, r.db, nil, missionID, filter)
 }
 
-func (r *PostgresRepository) AppendLifecycleEvent(ctx context.Context, event types.EventRecord) error {
-	return appendLifecycleEvent(ctx, r.db, r.dialect, event)
-}
-
-func (r *PostgresRepository) ListLifecycleEvents(ctx context.Context, missionID mission.MissionID, filter missionapp.LifecycleHistoryFilter) ([]types.EventRecord, int, error) {
-	return listLifecycleEvents(ctx, r.db, r.dialect, missionID, filter)
-}
-
 func appendLifecycleEvent(ctx context.Context, db *sql.DB, dialect storagedb.Dialect, event types.EventRecord) error {
 	event, missionID, keyResultID, err := normalizeLifecycleEvent(event)
 	if err != nil {

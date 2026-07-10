@@ -210,17 +210,16 @@ func (s *sqlStore) ensureSchema(ctx context.Context) error {
 	return nil
 }
 
-func (s *sqlStore) ensurePreferencesColumn(ctx context.Context) error {
-	if s.driver == storagedb.DriverPostgres {
-		if _, err := s.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
-			return fmt.Errorf("ensure users preferences column: add postgres column: %w", err)
-		}
-		return nil
-	}
+func (s *sqlStore) ensurePreferencesColumn(ctx context.Context) (returnErr error) {
 	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(users)`)
 	if err != nil {
 		return fmt.Errorf("ensure users preferences column: table info: %w", err)
 	}
+	defer func() {
+		if err := rows.Close(); err != nil && returnErr == nil {
+			returnErr = fmt.Errorf("ensure users preferences column: close table info: %w", err)
+		}
+	}()
 	hasColumn := false
 	for rows.Next() {
 		var cid int
@@ -229,7 +228,6 @@ func (s *sqlStore) ensurePreferencesColumn(ctx context.Context) error {
 		var dflt sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			rows.Close()
 			return fmt.Errorf("ensure users preferences column: scan table info: %w", err)
 		}
 		if strings.TrimSpace(name) == "preferences_json" {
@@ -237,10 +235,8 @@ func (s *sqlStore) ensurePreferencesColumn(ctx context.Context) error {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
 		return fmt.Errorf("ensure users preferences column: iterate table info: %w", err)
 	}
-	rows.Close()
 	if hasColumn {
 		return nil
 	}

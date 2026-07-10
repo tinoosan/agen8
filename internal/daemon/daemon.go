@@ -13,6 +13,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/tinoosan/agen8/internal/mcp"
 	"github.com/tinoosan/agen8/internal/rpc"
 	"github.com/tinoosan/agen8/internal/services/attention"
+	locationdomain "github.com/tinoosan/agen8/internal/services/location/domain"
 	projectrpc "github.com/tinoosan/agen8/internal/services/project/rpc"
 	"github.com/tinoosan/agen8/internal/web"
 	"github.com/tinoosan/agen8/pkg/buildinfo"
@@ -31,15 +33,17 @@ import (
 type loopbackIPLookup func(string) ([]net.IP, error)
 
 type Daemon struct {
-	cfg         Config
-	app         *app.Application
-	rpc         *rpc.Server
-	mcpTokens   *mcp.TokenStore
-	mcp         *mcp.Server
-	mcpResolver *mcpSessionResolver
-	events      *eventsHub
-	attention   *attention.Service
-	logger      *slog.Logger
+	cfg          Config
+	app          *app.Application
+	rpc          *rpc.Server
+	mcpTokens    *mcp.TokenStore
+	mcp          *mcp.Server
+	mcpResolver  *mcpSessionResolver
+	events       *eventsHub
+	attention    *attention.Service
+	loginLimiter *loginAttemptLimiter
+	ready        func(context.Context) error
+	logger       *slog.Logger
 }
 
 const maxRPCRequestBodyBytes = 1024 * 1024
@@ -76,10 +80,8 @@ func New(cfg Config) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build attention service: %w", err)
 	}
-	var projectProvisioner *projectHooksProvisioner
-	if !cfg.DisableLocalHookProvisioning {
-		projectProvisioner = newProjectHooksProvisionerWithBaseURL(application.AuthSvc, cfg.externalBaseURL(), logger.With("service", "hooks-provision"))
-	}
+	projectProvisioner := newProjectHooksProvisionerWithBaseURL(application.AuthSvc, cfg.externalBaseURL(), logger.With("service", "hooks-provision"))
+	projectProvisioner.localInstallation = !cfg.DisableLocalHookProvisioning
 	reg := rpc.NewRegistry()
 	for _, register := range []func() error{
 		func() error { return rpc.RegisterAuth(reg, application.AuthSvc) },
@@ -92,24 +94,40 @@ func New(cfg Config) (*Daemon, error) {
 		func() error { return rpc.RegisterGraph(reg, application.GraphSvc, application.GraphLinks) },
 		func() error { return rpc.RegisterMission(reg, application.MissionSvc) },
 		func() error {
-			var postCreate rpc.PostProjectCreate
-			var configureClaudeMCP rpc.ConfigureProjectClaudeMCP
-			if projectProvisioner != nil {
-				postCreate = projectProvisioner.ProvisionHooks
-				configureClaudeMCP = func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
-					result, err := projectProvisioner.ProvisionClaudeMCP(ctx, userID, projectTitle, root)
-					if err != nil {
-						return projectrpc.ProjectClaudeMCPConfigureResult{}, err
-					}
-					return projectrpc.ProjectClaudeMCPConfigureResult{
-						Installed:  result.Installed,
-						Path:       result.Path,
-						ServerName: result.ServerName,
-						URL:        result.URL,
-					}, nil
+			postCreate := func(ctx context.Context, userID, projectID, projectTitle, locationID, root string) projectrpc.ProjectSetupResult {
+				if strings.TrimSpace(locationID) != "local" {
+					return projectrpc.ProjectSetupResult{Warnings: []string{"Automatic harness setup is available only for local projects."}}
+				}
+				result := projectProvisioner.ProvisionProject(ctx, userID, projectID, projectTitle, root)
+				return projectrpc.ProjectSetupResult{
+					Attempted:            projectProvisioner.localInstallation,
+					HooksInstalled:       result.HooksInstalled,
+					ClaudeMCPConfigured:  result.ClaudeMCP.Installed,
+					ClaudeMCPPath:        result.ClaudeMCP.Path,
+					RequiresClientAction: result.RequiresClientAction,
+					ClientSetupCommand:   result.ClientSetupCommand,
+					Warnings:             result.Warnings,
 				}
 			}
-			return rpc.RegisterProject(reg, application.ProjectSvc, postCreate, configureClaudeMCP)
+			configureClaudeMCP := func(ctx context.Context, userID, projectID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
+				result, err := projectProvisioner.ProvisionClaudeMCP(ctx, userID, projectID, projectTitle, root)
+				if err != nil {
+					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
+				}
+				return projectrpc.ProjectClaudeMCPConfigureResult{
+					Installed:            result.Installed,
+					Path:                 result.Path,
+					ServerName:           result.ServerName,
+					URL:                  result.URL,
+					RequiresClientAction: result.RequiresClientAction,
+					ClientSetupCommand:   result.ClientSetupCommand,
+				}, nil
+			}
+			validateProjectRoot := func(ctx context.Context, locationID, root string) error {
+				_, err := application.LocationSvc.ListDir(ctx, locationdomain.ID(locationID), root)
+				return err
+			}
+			return rpc.RegisterProject(reg, application.ProjectSvc, postCreate, configureClaudeMCP, validateProjectRoot)
 		},
 		func() error { return rpc.RegisterFile(reg, application.FileSvc) },
 		func() error { return rpc.RegisterLocation(reg, application.LocationSvc) },
@@ -149,11 +167,12 @@ func New(cfg Config) (*Daemon, error) {
 			files:              application.FileSvc,
 			missions:           application.MissionSvc,
 			projectProvisioner: projectProvisioner,
-			externalBaseURL:    cfg.externalBaseURL(),
 		}),
-		events:    newEventsHub(application.EventBus, logger.With("service", "events")),
-		attention: attentionSvc,
-		logger:    logger.With("service", "daemon"),
+		events:       newEventsHub(application.EventBus, logger.With("service", "events")),
+		attention:    attentionSvc,
+		loginLimiter: newLoginAttemptLimiter(),
+		ready:        application.Ready,
+		logger:       logger.With("service", "daemon"),
 	}
 	mcpServer.SetSessionResolver(d.resolveMCPSession)
 	return d, nil
@@ -202,6 +221,7 @@ func (d *Daemon) serveHTTP(ctx context.Context, ln net.Listener) error {
 func (d *Daemon) httpHandler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", d.handleHealthz)
+	mux.HandleFunc("GET /readyz", d.handleReadyz)
 	mux.HandleFunc("POST /rpc", d.handleRPC)
 	mux.HandleFunc("POST /uploads/files", d.handleFileUpload)
 	mux.Handle("/mcp", d.mcp.Handler())
@@ -214,8 +234,8 @@ func (d *Daemon) httpHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mount web ui: %w", err)
 	}
-	mux.Handle("/", d.handleWeb(webHandler))
-	return mux, nil
+	mux.Handle("/", webHandler)
+	return securityHeaders(mux), nil
 }
 
 func (d *Daemon) webHandler() (http.Handler, error) {
@@ -343,16 +363,6 @@ func isDNSLabelSafe(host string) bool {
 	return true
 }
 
-func (d *Daemon) handleWeb(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && d.setupAvailable(r.Context()) && wantsHTML(r) {
-			http.Redirect(w, r, "/setup?token="+d.cfg.SetupToken, http.StatusFound)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (d *Daemon) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -365,6 +375,19 @@ func (d *Daemon) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func (d *Daemon) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if d == nil || d.ready == nil || d.ready(ctx) != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": false})
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
 func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 	body, err := readRequestBody(r, maxRPCRequestBodyBytes)
 	if err != nil {
@@ -375,28 +398,73 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read request body", http.StatusBadRequest)
 		return
 	}
-	if setupStatusRPCMethod(rpcMethod(body)) {
+	method := rpcMethod(body)
+	if setupStatusRPCMethod(method) {
 		d.handleSetupStatusRPC(w, r, body)
 		return
 	}
-	ctx := r.Context()
-	if methodRequiresHTTPIdentity(rpcMethod(body), r.Header.Get("Authorization")) {
-		identity, err := d.httpIdentity(r.Context(), r.Header.Get("Authorization"))
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+	usesSessionCookie := strings.TrimSpace(r.Header.Get("Authorization")) == "" && requestHasSessionCookie(r)
+	if usesSessionCookie && !checkSameOriginRequest(r) {
+		http.Error(w, "cross-origin request blocked", http.StatusForbidden)
+		return
+	}
+	if method == rpc.MethodAuthLogout && strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+		d.handleCookieLogoutRPC(w, r, body)
+		return
+	}
+	loginKey := ""
+	if method == rpc.MethodAuthLogin {
+		loginKey = loginAttemptKey(body)
+		if retryAfter, allowed := d.loginLimiter.Allow(loginKey); !allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Round(time.Second)/time.Second)))
+			http.Error(w, "too many login attempts", http.StatusTooManyRequests)
 			return
 		}
-		ctx = rpc.ContextWithIdentity(ctx, identity)
-		ctx = caller.ContextWithCaller(ctx, caller.Caller{
-			UserID:   identity.UserID,
-			MemberID: identity.MemberID,
-			Role:     identity.Role,
-		})
+	}
+	ctx := r.Context()
+	if methodRequiresHTTPIdentity(method, r.Header.Get("Authorization"), requestHasSessionCookie(r)) {
+		identity, err := d.httpIdentityFromRequest(r.Context(), r)
+		if err != nil {
+			if usesSessionCookie {
+				d.clearSessionCookie(w, r)
+				if method == rpc.MethodAuthStatus {
+					identity = rpc.Identity{}
+				} else {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+			} else {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		if strings.TrimSpace(identity.UserID) != "" {
+			ctx = rpc.ContextWithIdentity(ctx, identity)
+			ctx = caller.ContextWithCaller(ctx, caller.Caller{
+				UserID:   identity.UserID,
+				MemberID: identity.MemberID,
+				Role:     identity.Role,
+			})
+		}
 	}
 	resp, err := d.rpc.Handle(ctx, body)
 	if err != nil {
 		http.Error(w, "handle rpc request", http.StatusInternalServerError)
 		return
+	}
+	if method == rpc.MethodAuthLogin {
+		if rpcResponseSucceeded(resp) {
+			sanitized, token, expiresAt, sanitizedOK := sanitizeLoginResponse(resp)
+			if !sanitizedOK {
+				http.Error(w, "handle login response", http.StatusInternalServerError)
+				return
+			}
+			d.loginLimiter.Reset(loginKey)
+			d.setSessionCookie(w, r, token, expiresAt)
+			resp = sanitized
+		} else {
+			d.loginLimiter.RecordFailure(loginKey)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(resp)
@@ -424,9 +492,6 @@ func (d *Daemon) handleSetupStatusRPC(w http.ResponseWriter, r *http.Request, bo
 	}
 	setupOpen := d.setupAvailable(r.Context())
 	result := map[string]any{"setupOpen": setupOpen}
-	if setupOpen {
-		result["setupUrl"] = "/setup?token=" + url.QueryEscape(d.cfg.SetupToken)
-	}
 	raw, err := json.Marshal(result)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -593,16 +658,15 @@ func rpcMethod(body []byte) string {
 	return strings.TrimSpace(env.Method)
 }
 
-func methodRequiresHTTPIdentity(method string, authorization string) bool {
+func methodRequiresHTTPIdentity(method string, authorization string, hasSessionCookie bool) bool {
 	method = strings.TrimSpace(method)
-	if method == "" {
-		return false
-	}
 	switch method {
-	case "auth.login", "auth.setupStatus", "user.setupStatus":
+	case rpc.MethodAuthLogin:
 		return false
+	case rpc.MethodAuthStatus:
+		return strings.TrimSpace(authorization) != "" || hasSessionCookie
 	default:
-		return strings.TrimSpace(authorization) != ""
+		return true
 	}
 }
 

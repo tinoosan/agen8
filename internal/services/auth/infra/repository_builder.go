@@ -21,12 +21,8 @@ func NewRepositories(handle *storagedb.Handle) (Repositories, error) {
 	if handle == nil {
 		return Repositories{}, fmt.Errorf("storage handle is required")
 	}
-	switch handle.Driver() {
-	case storagedb.DriverSQLite:
-		return newSQLiteRepositories(handle)
-	case storagedb.DriverPostgres:
-		return newPostgresRepositories(handle)
-	default:
-		return Repositories{}, fmt.Errorf("unsupported auth repository driver %q", handle.Driver())
+	if handle.Driver() != storagedb.DriverSQLite {
+		return Repositories{}, fmt.Errorf("auth repositories require SQLite storage")
 	}
+	return newSQLiteRepositories(handle)
 }

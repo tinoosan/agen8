@@ -16,6 +16,7 @@ const (
 	MethodProjectClaudeMCPConfigure = "project.claudeMCP.configure"
 	MethodProjectSave               = "project.save"
 	MethodProjectUpdate             = "project.update"
+	MethodProjectRelocate           = "project.relocate"
 	MethodProjectArchive            = "project.archive"
 	MethodProjectDelete             = "project.delete"
 	MethodProjectList               = "project.list"
@@ -47,19 +48,18 @@ func withProjectCaller[Params any, Result any](fn func(context.Context, Params) 
 	}
 }
 
-// PostProjectCreate runs after a successful project.create — the daemon wires
-// hook auto-provisioning here so the project service stays free of auth/hook
-// dependencies. Returns whether hooks were installed; must never error.
-type PostProjectCreate func(ctx context.Context, userID, projectTitle, root string) bool
+// PostProjectCreate runs after a successful project.create. Setup is
+// best-effort and its result never rolls back the durable project.
+type PostProjectCreate func(ctx context.Context, userID, projectID, projectTitle, locationID, root string) projectrpc.ProjectSetupResult
 
 // ConfigureProjectClaudeMCP provisions/repairs a project's Claude MCP config.
-type ConfigureProjectClaudeMCP func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error)
+type ConfigureProjectClaudeMCP func(ctx context.Context, userID, projectID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error)
 
-func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate PostProjectCreate, configureClaudeMCP ConfigureProjectClaudeMCP) error {
+func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate PostProjectCreate, configureClaudeMCP ConfigureProjectClaudeMCP, rootValidators ...projectrpc.ProjectRootValidator) error {
 	if projectSvc == nil {
 		return fmt.Errorf("project service is required")
 	}
-	handler := projectrpc.NewHandler(projectSvc)
+	handler := projectrpc.NewHandler(projectSvc, rootValidators...)
 	return RegisterHandlers(
 		func() error {
 			return AddBoundHandler(reg, MethodProjectGet, false, handler.ProjectGet)
@@ -74,8 +74,8 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 				if idErr != nil {
 					return res, nil
 				}
-				installed := postCreate(ctx, identity.UserID, res.Project.Title, res.Project.Root)
-				res.HooksInstalled = &installed
+				setup := postCreate(ctx, identity.UserID, res.Project.ID, res.Project.Title, res.Project.LocationID, res.Project.Root)
+				res.Setup = &setup
 				return res, nil
 			}))
 		},
@@ -84,7 +84,7 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 				if configureClaudeMCP == nil {
 					return projectrpc.ProjectClaudeMCPConfigureResult{}, fmt.Errorf("claude mcp provisioner is not configured")
 				}
-				loaded, err := handler.ProjectGet(ctx, projectrpc.ProjectGetParams{ProjectID: p.ProjectID})
+				loaded, err := handler.ProjectGet(ctx, projectrpc.ProjectGetParams(p))
 				if err != nil {
 					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
 				}
@@ -92,7 +92,7 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 				if err != nil {
 					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
 				}
-				result, err := configureClaudeMCP(ctx, identity.UserID, loaded.Project.Title, loaded.Project.Root)
+				result, err := configureClaudeMCP(ctx, identity.UserID, loaded.Project.ID, loaded.Project.Title, loaded.Project.Root)
 				if err != nil {
 					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
 				}
@@ -105,6 +105,9 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectUpdate, false, withProjectCaller(handler.ProjectUpdate))
+		},
+		func() error {
+			return AddBoundHandler(reg, MethodProjectRelocate, false, withProjectCaller(handler.ProjectRelocate))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectArchive, false, handler.ProjectArchive)

@@ -22,7 +22,7 @@
   <p class="lede">
     This page describes the current releasable local baseline for agen8 MCP. It is a practical setup and verification checklist for the daemon, web UI, retained MCP tools, local data directory, and schema preservation policy.
   </p>
-  <p>For release-facing notes and the v0.0.1 preflight checklist, see <a href="./release-notes-v0.0.1.html">v0.0.1 Release Notes</a>.</p>
+  <p>For release-facing changes that have not been tagged, see <a href="./release-notes-next.html">Next Release Draft</a>.</p>
 
   <nav class="toc" aria-label="On this page">
     <div class="toc-label">On this page</div>
@@ -61,12 +61,14 @@ agen8 daemon start --data-dir /tmp/agen8-release-check --listener http --http-ad
 
   <p>The repository should not contain a live <code>agen8.db</code>. Local SQLite files belong in the resolved data directory; use an isolated <code>DATA_DIR</code> or <code>AGEN8_DATA_DIR</code> for clean setup checks.</p>
 
+  <p>On SQLite startup, the daemon creates the data directory with owner-only access and secures the database file as <code>0600</code>. Startup refuses a symlinked database file or a database path that resolves to a directory or other non-regular file.</p>
+
   <p><code>make clean</code> removes build artifacts and logs only. It does not remove <code>agen8.db</code>, <code>agen8.db-wal</code>, or <code>agen8.db-shm</code>. Use isolated data directories for repeatable setup checks instead of resetting the active local database.</p>
 
   <h2 id="build">3. Build and version checks</h2>
   <p>The release version source is <code>pkg/buildinfo</code>. Builds set <code>Version</code>, <code>Commit</code>, and <code>BuildDate</code> with Go ldflags. Local development defaults to <code>dev</code> and <code>none</code>.</p>
 
-<pre><code class="lang-shell">make build-go VERSION=v0.0.1 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+<pre><code class="lang-shell">make build-go VERSION=vX.Y.Z COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ./bin/agen8 version
 curl http://127.0.0.1:7777/healthz</code></pre>
 
@@ -115,27 +117,22 @@ curl http://127.0.0.1:7777/healthz</code></pre>
   </table>
 
   <h2 id="schema">7. Schema preservation policy</h2>
-  <p>The local SQLite schema validates the current MCP-first baseline at startup. If the daemon sees an incompatible old schema, startup fails loudly with migration guidance. It does not automatically archive, delete, or replace the active database. Use preserving migration scripts for development data and use an explicitly isolated <code>DATA_DIR</code> or <code>AGEN8_DATA_DIR</code> for clean release checks.</p>
+  <p>The local SQLite schema validates the current MCP-first baseline at startup. Schema version 5 is upgraded transactionally to version 6 with credential ownership preserved; an ambiguous multi-user credential owner rolls the migration back. Older incompatible schemas fail loudly with migration guidance. Startup never archives, deletes, or replaces the active database.</p>
 
   <p>Schema validation rejects removed tables and legacy columns from removed concepts. The current task schema keeps mission and key-result references and rejects legacy task plan columns. A destructive reset is only a deliberate release-finalization or operator action, never the default startup or cleanup path.</p>
 
   <h2 id="release">8. Before tagging</h2>
   <p>Run these checks before creating a release tag:</p>
 
-<pre><code class="lang-shell">go test ./... -count=1
-npm --prefix web run lint
-npm --prefix web run test -- --run
-npm --prefix web run build
-npm --prefix web audit --audit-level=moderate
-go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-make build-go VERSION=v0.0.1 COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+<pre><code class="lang-shell">make ci
+make build-go VERSION=vX.Y.Z COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ./bin/agen8 version
 make dev remote
 # Run retained MCP tool UAT from a real harness connection.</code></pre>
 
   <p>Start and end with <code>git status --short</code>. The release candidate should be clean before tagging. The generated bundle in <code>internal/web/dist</code> is not committed (only the <code>.gitkeep</code> placeholder is tracked), so <code>npm --prefix web run build</code> leaves git status clean; the binary embeds the freshly built bundle at <code>make build</code> time. Keep the real local <code>.mcp.json</code> ignored; publish <code>.mcp.example.json</code> only.</p>
 
-  <p>The release workflow builds <code>agen8</code> archives for Linux and macOS on version tags matching <code>v*</code>.</p>
+  <p>The release workflow verifies strict SemVer tags, then builds <code>agen8</code> archives for Linux and macOS before publishing the release and container image.</p>
 
 </div>
 

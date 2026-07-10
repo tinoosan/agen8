@@ -18,13 +18,6 @@ type Config struct {
 	// Note: the CLI resolves the default using ResolveDataDir (home/XDG by
 	// default, with overrides via --data-dir / AGEN8_DATA_DIR).
 	DataDir string
-
-	// DBDriver selects the storage backend. Empty means sqlite for local
-	// compatibility. Hosted deployments should set this to postgres.
-	DBDriver string
-
-	// DatabaseURL is required when DBDriver is postgres.
-	DatabaseURL string
 }
 
 // Default returns the default host configuration. Runtime entrypoints resolve
@@ -37,19 +30,7 @@ func Default() Config {
 }
 
 func (c Config) Validate() error {
-	if err := nonEmpty("config.DataDir", c.DataDir); err != nil {
-		return err
-	}
-	switch c.DBDriver {
-	case "", "sqlite":
-	case "postgres":
-		if err := nonEmpty("config.DatabaseURL", c.DatabaseURL); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("config.DBDriver: unknown driver %q (want %q or %q)", c.DBDriver, "sqlite", "postgres")
-	}
-	return nil
+	return nonEmpty("config.DataDir", c.DataDir)
 }
 
 func nonEmpty(name, value string) error {

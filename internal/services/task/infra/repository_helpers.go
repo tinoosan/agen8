@@ -6,15 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/agen8/internal/core/types"
-	"github.com/tinoosan/agen8/internal/services/project/domain/member"
 	"github.com/tinoosan/agen8/internal/services/task/domain"
 )
-
-func validateTaskFilter(filter domain.TaskFilter) error {
-	_, _, err := taskWhere(filter)
-	return err
-}
 
 func taskWhere(filter domain.TaskFilter) (string, []any, error) {
 	if len(filter.MetadataFilter) > 0 {
@@ -22,19 +15,19 @@ func taskWhere(filter domain.TaskFilter) (string, []any, error) {
 	}
 	var clauses []string
 	var args []any
-	if filter.ProjectID != "" {
+	if strings.TrimSpace(string(filter.ProjectID)) != "" {
 		clauses = append(clauses, "project_id = ?")
 		args = append(args, strings.TrimSpace(string(filter.ProjectID)))
 	}
-	if filter.AssignedTo != "" {
+	if strings.TrimSpace(string(filter.AssignedTo)) != "" {
 		clauses = append(clauses, "assigned_to = ?")
 		args = append(args, strings.TrimSpace(string(filter.AssignedTo)))
 	}
-	if filter.ClaimedBy != "" {
+	if strings.TrimSpace(string(filter.ClaimedBy)) != "" {
 		clauses = append(clauses, "claimed_by_member_id = ?")
 		args = append(args, strings.TrimSpace(string(filter.ClaimedBy)))
 	}
-	if filter.TaskKind != "" {
+	if strings.TrimSpace(filter.TaskKind) != "" {
 		clauses = append(clauses, "task_kind = ?")
 		args = append(args, strings.TrimSpace(filter.TaskKind))
 	}
@@ -54,62 +47,16 @@ func taskWhere(filter domain.TaskFilter) (string, []any, error) {
 	}
 	if filter.FromDate != nil {
 		clauses = append(clauses, "created_at >= ?")
-		args = append(args, filter.FromDate.UTC().Format(time.RFC3339Nano))
+		args = append(args, taskTimeString(*filter.FromDate))
 	}
 	if filter.ToDate != nil {
 		clauses = append(clauses, "created_at <= ?")
-		args = append(args, filter.ToDate.UTC().Format(time.RFC3339Nano))
+		args = append(args, taskTimeString(*filter.ToDate))
 	}
 	if len(clauses) == 0 {
 		return "", args, nil
 	}
 	return " WHERE " + strings.Join(clauses, " AND "), args, nil
-}
-
-func taskMatchesFilter(task domain.Task, filter domain.TaskFilter) bool {
-	if strings.TrimSpace(string(filter.ProjectID)) != "" && task.ProjectID != types.ProjectID(strings.TrimSpace(string(filter.ProjectID))) {
-		return false
-	}
-	if strings.TrimSpace(string(filter.AssignedTo)) != "" && task.AssignedTo != member.ID(strings.TrimSpace(string(filter.AssignedTo))) {
-		return false
-	}
-	if strings.TrimSpace(string(filter.ClaimedBy)) != "" && task.ClaimedByMemberID != member.ID(strings.TrimSpace(string(filter.ClaimedBy))) {
-		return false
-	}
-	if strings.TrimSpace(filter.TaskKind) != "" && task.TaskKind != strings.TrimSpace(filter.TaskKind) {
-		return false
-	}
-	if len(filter.Status) > 0 {
-		matchedStatus := false
-		for _, status := range filter.Status {
-			if status == "" {
-				continue
-			}
-			if task.Status == domain.TaskStatus(strings.TrimSpace(string(status))) {
-				matchedStatus = true
-				break
-			}
-		}
-		if !matchedStatus {
-			return false
-		}
-	}
-	if filter.FromDate != nil {
-		filteredAfter := filter.FromDate.UTC()
-		if task.CreatedAt == nil || task.CreatedAt.Before(filteredAfter) {
-			return false
-		}
-	}
-	if filter.ToDate != nil {
-		filteredBefore := filter.ToDate.UTC()
-		if task.CreatedAt != nil && task.CreatedAt.After(filteredBefore) {
-			return false
-		}
-		if task.CreatedAt == nil {
-			return false
-		}
-	}
-	return true
 }
 
 func taskOrderColumn(filter domain.TaskFilter) string {
@@ -127,29 +74,44 @@ func taskOrderColumn(filter domain.TaskFilter) string {
 	}
 }
 
-func taskOrderDescending(filter domain.TaskFilter) bool {
-	return filter.SortDesc || strings.TrimSpace(filter.SortBy) == ""
+func taskOrderBy(filter domain.TaskFilter) string {
+	column := taskOrderColumn(filter)
+	direction := " ASC"
+	if taskOrderDescending(filter) {
+		direction = " DESC"
+	}
+	if column == "status" {
+		return " ORDER BY status" + direction + ", task_id ASC"
+	}
+	return " ORDER BY " + column + direction + ", task_id ASC"
 }
 
-func taskOrderBy(filter domain.TaskFilter) string {
-	column := "created_at"
-	switch strings.TrimSpace(filter.SortBy) {
-	case "", "created_at", "createdAt":
-		column = "created_at"
-	case "updated_at", "updatedAt":
-		column = "updated_at"
-	case "completed_at", "completedAt":
-		column = "completed_at"
-	case "status":
-		column = "status"
-	default:
-		column = "created_at"
+func taskPagination(query string, args []any, filter domain.TaskFilter) (string, []any) {
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+		if filter.Offset > 0 {
+			query += " OFFSET ?"
+			args = append(args, filter.Offset)
+		}
+		return query, args
 	}
-	direction := "ASC"
-	if filter.SortDesc || strings.TrimSpace(filter.SortBy) == "" {
-		direction = "DESC"
+	if filter.Offset > 0 {
+		query += " LIMIT -1 OFFSET ?"
+		args = append(args, filter.Offset)
 	}
-	return " ORDER BY " + column + " " + direction + ", task_id ASC"
+	return query, args
+}
+
+func taskResultCapacity(filter domain.TaskFilter) int {
+	if filter.Limit > 0 {
+		return filter.Limit
+	}
+	return 0
+}
+
+func taskOrderDescending(filter domain.TaskFilter) bool {
+	return filter.SortDesc || strings.TrimSpace(filter.SortBy) == ""
 }
 
 func unmarshalTask(raw []byte) (domain.Task, error) {
@@ -167,7 +129,13 @@ func timeString(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	return taskTimeString(*t)
+}
+
+const taskTimestampLayout = "2006-01-02T15:04:05.000000000Z"
+
+func taskTimeString(value time.Time) string {
+	return value.UTC().Format(taskTimestampLayout)
 }
 
 func isDuplicateColumnError(err error) bool {

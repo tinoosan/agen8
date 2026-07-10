@@ -6,11 +6,85 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must be semantic version syntax (for example v0.1.0 or v0.1.0-rc.1)" >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install pinned Go checks
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install github.com/mgechev/revive@v1.15.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Verify Go source
+        run: |
+          mapfile -t go_files < <(git ls-files '*.go')
+          drift="$(gofmt -l "${go_files[@]}")"
+          test -z "$drift" || { printf 'gofmt drift:\n%s\n' "$drift" >&2; exit 1; }
+          go vet ./...
+          staticcheck ./...
+          revive -config revive.toml -set_exit_status ./...
+          go test ./... -count=1
+          go test -race ./cmd/... ./internal/... ./pkg/... -count=1
+          go build ./cmd/agen8
+
+      - name: Verify Go security
+        run: |
+          govulncheck ./...
+          gosec -quiet ./internal/daemon/... ./internal/hookinstaller/...
+          kubeconform -strict -summary deploy/kubernetes/agen8.yaml
+          actionlint
+
+      - name: Install and audit web dependencies
+        working-directory: web
+        run: |
+          npm ci
+          npm audit --audit-level=low
+
+      - name: Audit workspace tooling dependencies
+        run: npm audit --package-lock-only --audit-level=low
+
+      - name: Verify web app
+        working-directory: web
+        run: |
+          npm run lint -- --max-warnings 0
+          npm test -- --run
+          npm run build
+          test -z "$(find ../internal/web/dist -type f -name '*.map' -print -quit)"
+
   archives:
+    needs: verify
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -36,7 +110,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -65,16 +139,43 @@ jobs:
           tar -C "${binary_dir}" -czf "dist/${archive}" agen8
           shasum -a 256 "dist/${archive}" > "dist/${archive}.sha256"
 
-      - name: Publish release assets
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  publish-release:
+    needs: archives
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/*.sha256
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   image:
+    needs: publish-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -102,7 +203,7 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and publish image
         uses: docker/build-push-action@v6

@@ -86,7 +86,7 @@ Published release images are pushed to GitHub Container Registry when a `v*`
 release tag is created:
 
 ```sh
-docker pull ghcr.io/tinoosan/agen8:v0.0.1
+docker pull ghcr.io/tinoosan/agen8:<release-tag>
 ```
 
 Check health:
@@ -102,13 +102,22 @@ The sample manifest is at `deploy/kubernetes/agen8.yaml`.
 
 Before applying it:
 
-1. Choose the image tag to deploy. The sample uses
-   `ghcr.io/tinoosan/agen8:v0.0.1`; release tags also publish `latest` and
-   semver aliases.
+1. Replace `replace-with-release-tag` in the image with the immutable release
+   tag you intend to deploy.
 2. Replace every `agen8.example.com` value with your real hostname.
-3. Replace `replace-with-a-long-random-setup-token` with a generated token.
-4. Adjust the ingress class and cert-manager issuer for your cluster.
-5. Confirm your storage class supports a `ReadWriteOnce` PVC.
+3. Adjust the ingress class and cert-manager issuer for your cluster.
+4. Confirm your storage class supports a `ReadWriteOnce` PVC.
+
+Create the referenced Secret separately so applying the reusable manifest can
+never overwrite it:
+
+```sh
+export AGEN8_SETUP_TOKEN="$(openssl rand -hex 32)"
+kubectl create namespace agen8 --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n agen8 create secret generic agen8-secrets \
+  --from-literal=AGEN8_SETUP_TOKEN="${AGEN8_SETUP_TOKEN}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
 
 Apply:
 
@@ -134,12 +143,11 @@ The manifest intentionally uses:
 - `replicas: 1`
 - `strategy.type: Recreate`
 - one PVC mounted at `/data`
-- readiness and liveness probes on `/healthz`
+- storage readiness on `/readyz` and process liveness on `/healthz`
 - `AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true`
 
-Do not scale the SQLite deployment above one replica. SQLite is the default
-storage backend and should be treated as a single-writer deployment. Horizontal
-scaling should wait for a documented shared database backend.
+Do not scale the SQLite deployment above one replica. Agen8 intentionally ships
+as a single-writer SQLite service.
 
 ## Connect A Harness
 
@@ -160,19 +168,31 @@ Then set the token before launching Codex:
 export AGEN8_MCP_TOKEN='ak_...'
 ```
 
-Claude Code MCP config:
+Claude Code one-command setup:
 
 ```sh
-claude mcp add --transport http --scope user agen8 \
-  'https://agen8.example.com/mcp' \
-  --header 'Authorization: Bearer ak_...'
+cd /path/to/local/project
+agen8 client setup --harness claude \
+  --url https://agen8.example.com \
+  --token ak_...
 ```
 
-Install the Agen8 workflow skill locally:
+This installs the Claude workflow skills, project attention hooks, and a
+local-scope MCP connection together. The Projects page generates the command
+for new and existing projects. Display-name changes do not require reconnecting
+Claude. Re-run the setup command from the local project directory to repair the
+client integration, or pass `--project-dir` explicitly.
+
+When a project folder moves or is renamed, use **Project actions > Change
+project folder**. The operation keeps the existing project ID and validates the
+new directory on the project's configured location. Hosted setup commands use
+project-bound `wlt_` credentials, so generate a fresh command with **Configure
+Claude MCP** after relocating the project.
+
+Install the Agen8 workflow skill for Codex locally:
 
 ```sh
 agen8 skill install --harness codex
-agen8 skill install --harness claude-cli
 ```
 
 ## Install Attention Hooks
@@ -190,7 +210,7 @@ agen8 hooks install \
   --token ak_...
 ```
 
-Claude Code:
+Claude Code repair command when only hooks need replacing:
 
 ```sh
 agen8 hooks install \
@@ -220,6 +240,10 @@ machine.
 
 ## Upgrade Notes
 
+Back up the volume before replacing the binary. Agen8 transactionally migrates
+the supported schema-5 baseline to schema 6; older incompatible schemas fail
+startup without replacing the database.
+
 For Docker, replace the container while keeping the named volume:
 
 ```sh
@@ -240,4 +264,5 @@ Always confirm:
 
 ```sh
 curl -fsS https://agen8.example.com/healthz
+curl -fsS https://agen8.example.com/readyz
 ```

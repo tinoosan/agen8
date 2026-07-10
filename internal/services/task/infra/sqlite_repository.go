@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/tinoosan/agen8/internal/core/types"
 	"github.com/tinoosan/agen8/internal/services/project/domain/member"
@@ -73,19 +71,21 @@ func (r *SQLiteRepository) GetTask(ctx context.Context, taskID domain.TaskID) (d
 }
 
 func (r *SQLiteRepository) ListTasks(ctx context.Context, filter domain.TaskFilter) ([]domain.Task, error) {
-	if err := validateTaskFilter(filter); err != nil {
+	where, args, err := taskWhere(filter)
+	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT task_json
-		FROM tasks
-	`)
+	// #nosec G202 -- SQL structure comes only from repository-owned allowlists;
+	// every caller-supplied value remains a bound argument.
+	query := "SELECT task_json FROM tasks" + where + taskOrderBy(filter)
+	query, args = taskPagination(query, args, filter)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
 	defer rows.Close()
 
-	var tasks []domain.Task
+	tasks := make([]domain.Task, 0, taskResultCapacity(filter))
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
@@ -101,112 +101,17 @@ func (r *SQLiteRepository) ListTasks(ctx context.Context, filter domain.TaskFilt
 		return nil, fmt.Errorf("iterate tasks: %w", err)
 	}
 
-	filtered := make([]domain.Task, 0, len(tasks))
-	for _, task := range tasks {
-		if taskMatchesFilter(task, filter) {
-			filtered = append(filtered, task)
-		}
-	}
-	sortTasks(filtered, filter)
-	start := 0
-	if filter.Offset > 0 {
-		start = filter.Offset
-	}
-	if start >= len(filtered) {
-		return []domain.Task{}, nil
-	}
-	end := len(filtered)
-	if filter.Limit > 0 {
-		end = start + filter.Limit
-	}
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-	filtered = filtered[start:end]
-	return filtered, nil
-}
-
-func sortTasks(tasks []domain.Task, filter domain.TaskFilter) {
-	column := taskOrderColumn(filter)
-	desc := taskOrderDescending(filter)
-	sort.SliceStable(tasks, func(i, j int) bool {
-		left := tasks[i]
-		right := tasks[j]
-		switch column {
-		case "updated_at":
-			leftAt, rightAt := taskSortTime(left.UpdatedAt), taskSortTime(right.UpdatedAt)
-			if !leftAt.Equal(rightAt) {
-				if desc {
-					return leftAt.After(rightAt)
-				}
-				return leftAt.Before(rightAt)
-			}
-		case "completed_at":
-			leftAt, rightAt := taskSortTime(left.CompletedAt), taskSortTime(right.CompletedAt)
-			if !leftAt.Equal(rightAt) {
-				if desc {
-					return leftAt.After(rightAt)
-				}
-				return leftAt.Before(rightAt)
-			}
-		case "status":
-			if left.Status != right.Status {
-				if desc {
-					return left.Status > right.Status
-				}
-				return left.Status < right.Status
-			}
-		case "created_at":
-			fallthrough
-		default:
-			leftAt, rightAt := taskSortTime(left.CreatedAt), taskSortTime(right.CreatedAt)
-			if !leftAt.Equal(rightAt) {
-				if desc {
-					return leftAt.After(rightAt)
-				}
-				return leftAt.Before(rightAt)
-			}
-		}
-		return string(left.ID) < string(right.ID)
-	})
-}
-
-func taskSortTime(value *time.Time) time.Time {
-	if value == nil {
-		return time.Time{}
-	}
-	return value.UTC()
+	return tasks, nil
 }
 
 func (r *SQLiteRepository) countTasks(ctx context.Context, filter domain.TaskFilter) (int, error) {
-	if err := validateTaskFilter(filter); err != nil {
+	where, args, err := taskWhere(filter)
+	if err != nil {
 		return 0, err
 	}
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT task_json
-		FROM tasks
-	`)
-	if err != nil {
-		return 0, fmt.Errorf("count tasks: %w", err)
-	}
-	defer rows.Close()
-
 	var count int
-	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
-			return 0, fmt.Errorf("scan task: %w", err)
-		}
-		task, err := unmarshalTask(raw)
-		if err != nil {
-			return 0, fmt.Errorf("unmarshal task: %w", err)
-		}
-		if taskMatchesFilter(task, filter) {
-			count++
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate tasks: %w", err)
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks"+where, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count tasks: %w", err)
 	}
 	return count, nil
 }
@@ -300,6 +205,9 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 			return fmt.Errorf("ensure tasks column: %w", err)
 		}
 	}
+	if err := normalizeTaskTimestamps(ctx, r.db); err != nil {
+		return err
+	}
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to)`,
@@ -307,10 +215,46 @@ func (r *SQLiteRepository) ensureSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_kind ON tasks(task_kind)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status)`,
 	} {
 		if _, err := r.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("ensure tasks index: %w", err)
 		}
+	}
+	return nil
+}
+
+// normalizeTaskTimestamps upgrades RFC3339Nano values written by earlier
+// versions to a fixed-width UTC form. Equal-width ISO-8601 values compare in
+// chronological order, preserving nanosecond precision while allowing SQLite
+// to use the timestamp indexes directly.
+func normalizeTaskTimestamps(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin task timestamp normalization: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck -- commit is the only successful exit.
+
+	for _, column := range []string{"created_at", "updated_at", "completed_at"} {
+		// #nosec G201 -- column is selected from the closed list immediately above.
+		query := fmt.Sprintf(`
+			UPDATE tasks
+			SET %[1]s = CASE
+				WHEN length(%[1]s) = 20 THEN substr(%[1]s, 1, 19) || '.000000000Z'
+				ELSE substr(%[1]s, 1, 20) ||
+					substr(substr(%[1]s, 21, length(%[1]s) - 21) || '000000000', 1, 9) || 'Z'
+			END
+			WHERE %[1]s IS NOT NULL
+				AND length(%[1]s) BETWEEN 20 AND 29
+				AND substr(%[1]s, 1, 19) GLOB '????-??-??T??:??:??'
+				AND substr(%[1]s, -1) = 'Z'
+		`, column)
+		if _, err := tx.ExecContext(ctx, query); err != nil {
+			return fmt.Errorf("normalize task %s: %w", column, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit task timestamp normalization: %w", err)
 	}
 	return nil
 }

@@ -11,9 +11,8 @@ import (
 	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
-// sqlStore is the dialect-neutral pin store. The sqlite and postgres
-// repositories embed it; the only dialect-specific concern is placeholder
-// rebinding, handled by rebind().
+// sqlStore owns SQLite persistence for pins. Query rebinding remains centralized
+// so repository methods contain only the domain-relevant SQL.
 type sqlStore struct {
 	db      *sql.DB
 	dialect storagedb.Dialect

@@ -119,9 +119,18 @@ func (r *SQLiteRepository) Save(ctx context.Context, record project.Record) (pro
 			customization = excluded.customization
 	`, record.ID, record.LocationID, record.Root, record.Title, record.Status, record.UserID, timeString(record.CreatedAt), timeString(record.UpdatedAt), customization)
 	if err != nil {
+		if isUniqueConstraintError(err) {
+			return project.Record{}, project.ErrRootInUse
+		}
 		return project.Record{}, fmt.Errorf("save project %s: %w", record.ID, err)
 	}
 	return r.Get(ctx, record.ID)
+}
+
+func isUniqueConstraintError(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint failed: projects.location_id, projects.root") ||
+		strings.Contains(message, "idx_projects_location_root")
 }
 
 func (r *SQLiteRepository) Delete(ctx context.Context, id types.ProjectID) error {

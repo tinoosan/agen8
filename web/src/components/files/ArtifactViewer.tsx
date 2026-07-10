@@ -1,10 +1,11 @@
-import { lazy, Suspense } from 'react'
+import { Suspense } from 'react'
 import { isSpreadsheetFile, isMarkdownFile } from './filePreviewUtils'
-import ArtifactPreviewPane from './ArtifactPreviewPane'
-import DocumentViewer from './DocumentViewer'
 import type { ArtifactNode, ArtifactGetResult } from '../../lib/types'
+import { lazyWithRetry } from '../../lib/lazyWithRetry'
 
-const SpreadsheetViewer = lazy(() => import('./SpreadsheetViewer'))
+const ArtifactPreviewPane = lazyWithRetry(() => import('./ArtifactPreviewPane'), 'components/files/ArtifactPreviewPane')
+const DocumentViewer = lazyWithRetry(() => import('./DocumentViewer'), 'components/files/DocumentViewer')
+const SpreadsheetViewer = lazyWithRetry(() => import('./SpreadsheetViewer'), 'components/files/SpreadsheetViewer')
 
 type Variant = 'page' | 'slideover'
 
@@ -27,30 +28,30 @@ interface ArtifactViewerProps {
  */
 export default function ArtifactViewer(props: ArtifactViewerProps) {
   const path = props.file.vpath ?? props.file.diskPath ?? props.file.label ?? ''
+  const fallback = (
+    <div className="flex h-full items-center justify-center opacity-60" role="status" aria-label="Loading file preview">
+      <span className="spinner spinner-md" />
+    </div>
+  )
 
-  // DocumentViewer is imported directly (not lazy) because it handles
-  // BlockNote loading internally via dynamic import(). The heavy BlockNote
-  // chunk only loads in-browser when the editor mounts.
   if (isMarkdownFile(path)) {
     return (
-      <DocumentViewer
-        file={props.file}
-        preview={props.preview}
-        isLoading={props.isLoading}
-        error={props.error}
-        variant={props.variant}
-      />
+      <Suspense fallback={fallback}>
+        <DocumentViewer
+          file={props.file}
+          preview={props.preview}
+          isLoading={props.isLoading}
+          error={props.error}
+          variant={props.variant}
+        />
+      </Suspense>
     )
   }
 
   if (isSpreadsheetFile(path)) {
     return (
       <Suspense
-        fallback={
-          <div className="flex items-center justify-center h-full opacity-60">
-            Loading viewer...
-          </div>
-        }
+        fallback={fallback}
       >
         <SpreadsheetViewer
           file={props.file}
@@ -62,5 +63,9 @@ export default function ArtifactViewer(props: ArtifactViewerProps) {
     )
   }
 
-  return <ArtifactPreviewPane {...props} />
+  return (
+    <Suspense fallback={fallback}>
+      <ArtifactPreviewPane {...props} />
+    </Suspense>
+  )
 }

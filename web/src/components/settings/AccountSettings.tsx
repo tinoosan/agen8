@@ -425,13 +425,13 @@ export function AccountMCPAccessSection() {
                   value={snippets.codexCommand}
                 />
                 <SetupSnippet
-                  title="Claude Code command"
-                  description="Adds Agen8 for Claude Code at user scope."
+                  title="Claude Code setup"
+                  description="Run inside the project. Installs the skill, attention hooks, and local-scope MCP connection."
                   value={snippets.claudeCommand}
                 />
                 <SetupSnippet
-                  title="Hooks — Claude Code"
-                  description="Optional. Run inside a project to see when its agents are waiting on you."
+                  title="Claude Code hooks repair"
+                  description="Lower-level repair command when only the project hooks need replacing."
                   value={snippets.hooksClaudeCommand}
                 />
                 <SetupSnippet

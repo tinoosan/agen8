@@ -50,10 +50,10 @@ const MOBILE_VIEW_TITLES: Partial<Record<ActiveView, string>> = {
 }
 
 /** Mobile-only top bar: hamburger (opens the sidebar drawer) + app icon +
- *  contextual page title + a search button. On the context map the button
- *  opens that page's node-search panel (the "/" shortcut, unreachable on
- *  touch); on dashboard and other views, search stays intentionally absent
- *  and no global command-palette shortcut exists anymore.
+ *  contextual page title + a search button. On the context map and dashboard
+ *  the button opens that page's node-search panel (the "/" shortcut,
+ *  unreachable on touch). Other pages hide the mobile button, but the global
+ *  keyboard search still lives in GlobalNodeSearch.
  *  Must live inside SidebarProvider so useSidebar() resolves. */
 function MobileTopBar() {
   const { toggleSidebar } = useSidebar()

@@ -13,14 +13,21 @@ import (
 )
 
 type Handler struct {
-	svc *projectapp.Service
+	svc          *projectapp.Service
+	validateRoot ProjectRootValidator
 }
 
-func NewHandler(svc *projectapp.Service) *Handler {
+type ProjectRootValidator func(ctx context.Context, locationID, root string) error
+
+func NewHandler(svc *projectapp.Service, validators ...ProjectRootValidator) *Handler {
 	if svc == nil {
 		panic("project RPC handler requires project service")
 	}
-	return &Handler{svc: svc}
+	var validateRoot ProjectRootValidator
+	if len(validators) > 0 {
+		validateRoot = validators[0]
+	}
+	return &Handler{svc: svc, validateRoot: validateRoot}
 }
 
 func (h *Handler) ProjectGet(ctx context.Context, p ProjectGetParams) (ProjectGetResult, error) {
@@ -32,16 +39,11 @@ func (h *Handler) ProjectGet(ctx context.Context, p ProjectGetParams) (ProjectGe
 	if err != nil {
 		return ProjectGetResult{}, err
 	}
-	return ProjectGetResult{Project: h.projectView(ctx, project)}, nil
+	return ProjectGetResult{Project: h.projectView(project)}, nil
 }
 
-// projectView builds a ProjectView whose root is the project's effective
-// (workspace-sourced) root rather than the stored seed, so reads reflect where
-// the project currently lives on disk.
-func (h *Handler) projectView(ctx context.Context, p projectdomain.Project) ProjectView {
-	view := NewProjectView(p)
-	view.Root = h.svc.ResolveRoot(ctx, p)
-	return view
+func (h *Handler) projectView(p projectdomain.Project) ProjectView {
+	return NewProjectView(p)
 }
 
 func (h *Handler) ProjectCreate(ctx context.Context, p ProjectCreateParams) (ProjectCreateResult, error) {
@@ -106,6 +108,32 @@ func (h *Handler) ProjectUpdate(ctx context.Context, p ProjectUpdateParams) (Pro
 	return ProjectUpdateResult{Project: NewProjectView(project)}, nil
 }
 
+func (h *Handler) ProjectRelocate(ctx context.Context, p ProjectRelocateParams) (ProjectRelocateResult, error) {
+	projectID, err := requireProjectID(p.ProjectID)
+	if err != nil {
+		return ProjectRelocateResult{}, err
+	}
+	root := strings.TrimSpace(p.Root)
+	if root == "" {
+		return ProjectRelocateResult{}, invalidParams("root is required")
+	}
+	relocated, err := h.svc.RelocateProject(ctx, projectapp.RelocateProjectInput{
+		ProjectID: projectID,
+		Root:      root,
+		Validate:  h.validateRoot,
+	})
+	if errors.Is(err, projectapp.ErrInvalidProjectRoot) {
+		return ProjectRelocateResult{}, invalidParams("project root is not an accessible directory")
+	}
+	if errors.Is(err, projectdomain.ErrRootInUse) {
+		return ProjectRelocateResult{}, invalidParams("another project already uses this folder")
+	}
+	if err != nil {
+		return ProjectRelocateResult{}, internalError("relocate project", err)
+	}
+	return ProjectRelocateResult{Project: NewProjectView(relocated)}, nil
+}
+
 func (h *Handler) ProjectList(ctx context.Context, p ProjectListParams) (ProjectListResult, error) {
 	projects, err := h.svc.ListProjects(ctx, projectdomain.Filter{
 		Status: projectdomain.Status(strings.TrimSpace(p.Status)),
@@ -117,7 +145,7 @@ func (h *Handler) ProjectList(ctx context.Context, p ProjectListParams) (Project
 	}
 	views := make([]ProjectView, 0, len(projects))
 	for _, project := range projects {
-		views = append(views, h.projectView(ctx, project))
+		views = append(views, h.projectView(project))
 	}
 	return ProjectListResult{Projects: views}, nil
 }

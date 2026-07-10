@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- used only for stable legacy-compatible identifiers, not cryptography.
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -89,10 +89,46 @@ func (s *Service) ListWorkspaces(ctx context.Context, filter workspace.Filter) (
 	return s.workspaces.List(ctx, filter)
 }
 
+// ResolveBoundWorkspaceRoot returns the exact active workspace root bound to a
+// registered member. Every ownership and location field must still match the
+// project; a stale or corrupted binding fails closed instead of falling back to
+// another session's most-recent workspace.
+func (s *Service) ResolveBoundWorkspaceRoot(ctx context.Context, projectID, userID, locationID, workspaceID string) (string, error) {
+	if s == nil || s.workspaces == nil {
+		return "", fmt.Errorf("workspace repository is required")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return "", fmt.Errorf("workspace binding is required")
+	}
+	bound, err := s.workspaces.Get(ctx, workspaceID)
+	if err != nil {
+		return "", fmt.Errorf("load bound workspace %s: %w", workspaceID, err)
+	}
+	if strings.TrimSpace(bound.ProjectID) != strings.TrimSpace(projectID) {
+		return "", fmt.Errorf("bound workspace does not belong to the session project")
+	}
+	if strings.TrimSpace(bound.UserID) != strings.TrimSpace(userID) {
+		return "", fmt.Errorf("bound workspace does not belong to the session user")
+	}
+	if normalizeLocationID(bound.LocationID) != normalizeLocationID(locationID) {
+		return "", fmt.Errorf("bound workspace does not belong to the project location")
+	}
+	if strings.TrimSpace(bound.LifecycleState) != workspace.LifecycleActive {
+		return "", fmt.Errorf("bound workspace is not active")
+	}
+	root := strings.TrimSpace(bound.Root)
+	if root == "" {
+		return "", fmt.Errorf("bound workspace root is empty")
+	}
+	return root, nil
+}
+
 // deterministicWorkspaceID derives a stable workspace id from its identity tuple.
 // It mirrors deterministicMemberID: same inputs, same id, so a re-link of the
 // same folder on the same machine resolves to the same workspace row.
 func deterministicWorkspaceID(projectID, locationID, root, machine string) workspace.ID {
+	// #nosec G401 -- durable compatibility identifier; not used for cryptographic security.
 	sum := sha1.Sum([]byte(strings.TrimSpace(projectID) + "\x00" +
 		strings.TrimSpace(locationID) + "\x00" +
 		strings.TrimSpace(root) + "\x00" +

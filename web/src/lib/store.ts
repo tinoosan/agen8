@@ -70,10 +70,10 @@ interface AppStore {
   artifactsOpen: boolean
   setArtifactsOpen: (open: boolean) => void
 
-  /** Context-map node search ("/" inside the map). Lifted into the store so the
-   *  global mobile top-bar search button can open the same panel the keyboard
-   *  shortcut does, even though the panel itself lives inside the StrategyMap
-   *  page. Only meaningful while that page is mounted. */
+  /** Context-map node search open state. Lifted into the store so the mobile
+   *  top bar, dashboard search affordance, and GlobalNodeSearch keyboard
+   *  wrapper can all open the same StrategyMapSearch UI. Pages with a local
+   *  mount render it in place; other pages use the global wrapper. */
   strategySearchOpen: boolean
   setStrategySearchOpen: (open: boolean) => void
 

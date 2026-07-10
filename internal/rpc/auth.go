@@ -12,9 +12,9 @@ const (
 	MethodAuthStatus       = "auth.status"
 	MethodAuthLogin        = "auth.login"
 	MethodAuthLogout       = "auth.logout"
-	MethodAuthAPIKeyList   = "auth.apiKey.list"
-	MethodAuthAPIKeyCreate = "auth.apiKey.create"
-	MethodAuthAPIKeyRevoke = "auth.apiKey.revoke"
+	MethodAuthAPIKeyList   = "auth.apiKey.list"   // #nosec G101 -- RPC method name, not a credential.
+	MethodAuthAPIKeyCreate = "auth.apiKey.create" // #nosec G101 -- RPC method name, not a credential.
+	MethodAuthAPIKeyRevoke = "auth.apiKey.revoke" // #nosec G101 -- RPC method name, not a credential.
 )
 
 func RegisterAuth(reg *Registry, authSvc *authapp.Service) error {

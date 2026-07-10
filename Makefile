@@ -11,6 +11,7 @@ GO_LDFLAGS := -X github.com/tinoosan/agen8/pkg/buildinfo.Version=$(VERSION) -X g
 WEB_NPM := npm
 AIR ?= air
 GO_PACKAGES ?= ./cmd/... ./internal/... ./pkg/...
+GO_FILES := $(shell git ls-files '*.go')
 VITE_HOST := $(word 1,$(subst :, ,$(VITE_ADDR)))
 VITE_PORT := $(word 2,$(subst :, ,$(VITE_ADDR)))
 LAN_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $$1}' || echo 127.0.0.1)
@@ -24,7 +25,7 @@ DOCS_DIR ?= docs
 DOCS_HOST ?= 0.0.0.0
 DOCS_PORT ?= 8088
 
-.PHONY: run clean reset-local-data seed-clean seed-list ensure-air web-install web-build build-go build dev remote dev-remote daemon-remote test test-go test-web lint lint-go lint-web fmt-check guardrails ci race install-hooks worktree-create worktree-clean docs
+.PHONY: run clean reset-local-data ensure-air web-install web-build build-go build dev remote dev-remote daemon-remote test test-go test-web lint lint-go lint-web fmt-check guardrails workflow-check manifest-check audit ci race docs
 
 # Seeding is automatic at startup (from ./defaults) for now.
 run: daemon-remote
@@ -48,6 +49,8 @@ web-install:
 
 web-build: web-install
 	@cd web && $(WEB_NPM) run build
+	@maps="$$(find internal/web/dist -type f -name '*.map' -print)"; \
+	if [ -n "$$maps" ]; then printf 'production source maps are forbidden:\n%s\n' "$$maps" >&2; exit 1; fi
 
 build-go:
 	@mkdir -p ./bin
@@ -59,36 +62,44 @@ build: web-build build-go
 test: test-go test-web
 
 test-go:
-	@go test $(GO_PACKAGES)
+	@go test $(GO_PACKAGES) -count=1
 
 test-web: web-install
-	@cd web && $(WEB_NPM) test
+	@cd web && $(WEB_NPM) test -- --run
 
 lint: lint-go lint-web
 
 lint-go:
 	@go vet $(GO_PACKAGES)
-
-lint-go-strict:
-	@./scripts/ci/check_go_lint.sh
+	@staticcheck $(GO_PACKAGES)
+	@revive -config revive.toml -set_exit_status $(GO_PACKAGES)
 
 lint-web: web-install
-	@cd web && $(WEB_NPM) run lint
+	@cd web && $(WEB_NPM) run lint -- --max-warnings 0
 
 fmt-check:
-	@./scripts/ci/check_gofmt.sh
+	@drift="$$(gofmt -l $(GO_FILES))"; \
+	if [ -n "$$drift" ]; then printf 'gofmt drift:\n%s\n' "$$drift" >&2; exit 1; fi
 
 guardrails:
-	@./scripts/ci/agent_guardrails.sh
+	@go test ./internal/architecture -count=1
 
-ci: fmt-check guardrails lint test race build
+workflow-check:
+	@actionlint
+
+manifest-check:
+	@kubeconform -strict -summary deploy/kubernetes/agen8.yaml
+
+audit: web-install
+	@govulncheck $(GO_PACKAGES)
+	@gosec -quiet -exclude-generated $(GO_PACKAGES)
+	@$(WEB_NPM) audit --package-lock-only --audit-level=low
+	@cd web && $(WEB_NPM) audit --audit-level=low
+
+ci: fmt-check guardrails workflow-check manifest-check lint test race audit build
 
 race:
-	@./scripts/ci/check_go_race.sh
-
-install-hooks:
-	@ln -sf ../../scripts/ci/pre-commit.sh .git/hooks/pre-commit
-	@echo "Pre-commit hook installed"
+	@go test -race $(GO_PACKAGES) -count=1
 
 # Development runtime.
 #
@@ -128,12 +139,6 @@ dev-remote: ensure-air web-install
 	AGEN8_DEV_WEB_URL="http://127.0.0.1:$(REMOTE_VITE_PORT)" \
 	"$$AIR_BIN" \
 		-build.full_bin "./tmp/agen8-dev daemon start $(DATA_DIR_FLAG) --listener http --http-addr \"$(REMOTE_HTTP_ADDR)\""
-
-worktree-create:
-	@./scripts/worktree/create.sh "$(KIND)" "$(TASK)" "$(SLUG)" "$(or $(BASE),dev)"
-
-worktree-clean:
-	@./scripts/worktree/cleanup.sh "$(BRANCH)"
 
 # Serve the static architecture docs over HTTP for easy reading.
 #
