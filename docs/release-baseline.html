@@ -117,7 +117,7 @@ curl http://127.0.0.1:7777/healthz</code></pre>
   </table>
 
   <h2 id="schema">7. Schema preservation policy</h2>
-  <p>The local SQLite schema validates the current MCP-first baseline at startup. If the daemon sees an incompatible old schema, startup fails loudly with migration guidance. It does not automatically archive, delete, or replace the active database. Use preserving migration scripts for development data and use an explicitly isolated <code>DATA_DIR</code> or <code>AGEN8_DATA_DIR</code> for clean release checks.</p>
+  <p>The local SQLite schema validates the current MCP-first baseline at startup. Schema version 5 is upgraded transactionally to version 6 with credential ownership preserved; an ambiguous multi-user credential owner rolls the migration back. Older incompatible schemas fail loudly with migration guidance. Startup never archives, deletes, or replaces the active database.</p>
 
   <p>Schema validation rejects removed tables and legacy columns from removed concepts. The current task schema keeps mission and key-result references and rejects legacy task plan columns. A destructive reset is only a deliberate release-finalization or operator action, never the default startup or cleanup path.</p>
 

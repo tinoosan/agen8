@@ -226,6 +226,76 @@ func TestCredentialOwnershipMigrationRejectsAmbiguousUsers(t *testing.T) {
 	if rollbackErr := tx.Rollback(); rollbackErr != nil {
 		t.Fatalf("rollback: %v", rollbackErr)
 	}
+	if hasTableColumn(t, db, "credentials", "user_id") {
+		t.Fatal("failed migration left user_id behind after rollback")
+	}
+}
+
+func TestMigrateSQLiteUpgradesVersionFiveCredentialOwnership(t *testing.T) {
+	db, err := sql.Open("sqlite", storagedb.SQLiteDSN(storagedb.SQLitePath(t.TempDir())))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := migrateSQLite(db); err != nil {
+		t.Fatalf("create current schema: %v", err)
+	}
+
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
+		INSERT INTO users (user_id, created_at) VALUES ('user-a', '2026-01-01T00:00:00Z');
+		DROP INDEX idx_credentials_user_project;
+		ALTER TABLE credentials DROP COLUMN project_id;
+		ALTER TABLE credentials DROP COLUMN user_id;
+		INSERT INTO credentials (credential_id, kind, label, status, fields_json, created_at, updated_at)
+		VALUES ('cred-v5', 'api_key', 'Preserved', 'active', '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+		DELETE FROM schema_version;
+		INSERT INTO schema_version (version, applied_at) VALUES (5, '2026-01-01T00:00:00Z');
+	`); err != nil {
+		t.Fatalf("prepare version 5 schema: %v", err)
+	}
+
+	if err := migrateSQLite(db); err != nil {
+		t.Fatalf("migrate version 5: %v", err)
+	}
+	var version int
+	if err := db.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("read schema version: %v", err)
+	}
+	if version != currentSchemaVersion {
+		t.Fatalf("schema version=%d want %d", version, currentSchemaVersion)
+	}
+	var userID, projectID, label string
+	if err := db.QueryRow(`SELECT user_id, project_id, label FROM credentials WHERE credential_id = 'cred-v5'`).Scan(&userID, &projectID, &label); err != nil {
+		t.Fatalf("read migrated credential: %v", err)
+	}
+	if userID != "user-a" || projectID != "" || label != "Preserved" {
+		t.Fatalf("migrated credential=(%q,%q,%q)", userID, projectID, label)
+	}
+}
+
+func hasTableColumn(t *testing.T, db *sql.DB, table, column string) bool {
+	t.Helper()
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		t.Fatalf("table info %s: %v", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan table info %s: %v", table, err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate table info %s: %v", table, err)
+	}
+	return false
 }
 
 func legacyCredentialDatabase(t *testing.T, userIDs []string) *sql.DB {

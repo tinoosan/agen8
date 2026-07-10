@@ -228,6 +228,10 @@ machine.
 
 ## Upgrade Notes
 
+Back up the volume before replacing the binary. Agen8 transactionally migrates
+the supported schema-5 baseline to schema 6; older incompatible schemas fail
+startup without replacing the database.
+
 For Docker, replace the container while keeping the named volume:
 
 ```sh
@@ -248,4 +252,5 @@ Always confirm:
 
 ```sh
 curl -fsS https://agen8.example.com/healthz
+curl -fsS https://agen8.example.com/readyz
 ```

@@ -227,6 +227,7 @@ agen8 skill install --harness claude-cli</code></pre>
   </ul>
 
   <h2 id="upgrade">Upgrade notes</h2>
+  <p>Back up the volume before replacing the binary. Agen8 transactionally migrates the supported schema-5 baseline to schema 6; older incompatible schemas fail startup without replacing the database.</p>
   <p>For Docker, replace the container while keeping the named volume:</p>
 
 <pre><code class="lang-shell">docker pull &lt;image&gt;
@@ -240,7 +241,8 @@ kubectl -n agen8 rollout status deployment/agen8</code></pre>
 
   <p>Always confirm:</p>
 
-<pre><code class="lang-shell">curl -fsS https://agen8.example.com/healthz</code></pre>
+<pre><code class="lang-shell">curl -fsS https://agen8.example.com/healthz
+curl -fsS https://agen8.example.com/readyz</code></pre>
 
 </div>
 
