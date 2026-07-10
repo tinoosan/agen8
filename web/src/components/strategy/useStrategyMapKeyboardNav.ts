@@ -320,7 +320,7 @@ export function useStrategyMapKeyboardNav({
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [effectiveFocusNodeId, displayNodes, nodeById, missionsSorted, setCenter, getZoom, markInteraction, fitView, zoomIn, zoomOut, helpOpen, searchOpen, filterResult, selectedNodeId])
+  }, [effectiveFocusNodeId, displayNodes, nodeById, missionsSorted, setCenter, getZoom, markInteraction, fitView, zoomIn, zoomOut, helpOpen, searchOpen, filterResult, selectedNodeId, setActiveFilter, setFocusNodeId, setHelpOpen, setSearchOpen, setSelectedNodeId])
 
   // Capture-phase handler for keys that ReactFlow may swallow.
   // Fires before any element can stopPropagation.
@@ -353,5 +353,5 @@ export function useStrategyMapKeyboardNav({
     }
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [selectedNodeId, focusNodeId, activeFilter, helpOpen, searchOpen])
+  }, [selectedNodeId, focusNodeId, activeFilter, helpOpen, searchOpen, setActiveFilter, setFocusNodeId, setSelectedNodeId])
 }

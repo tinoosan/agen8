@@ -84,7 +84,7 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 				if configureClaudeMCP == nil {
 					return projectrpc.ProjectClaudeMCPConfigureResult{}, fmt.Errorf("claude mcp provisioner is not configured")
 				}
-				loaded, err := handler.ProjectGet(ctx, projectrpc.ProjectGetParams{ProjectID: p.ProjectID})
+				loaded, err := handler.ProjectGet(ctx, projectrpc.ProjectGetParams(p))
 				if err != nil {
 					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
 				}

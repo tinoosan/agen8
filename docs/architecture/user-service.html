@@ -309,21 +309,17 @@
 
   <h2 id="repository-builder">8. Repository builder</h2>
 
-  <p>The application composition root does not choose concrete user repository types directly. It asks the user infra package to build the repository from the configured storage handle. SQLite/Postgres selection stays inside the user service infrastructure boundary.</p>
+  <p>The application composition root does not choose concrete user repository types directly. It asks the user infra package to build the SQLite repository from the configured storage handle.</p>
 
 <pre><code class="lang-go"><span class="tok-comment">// internal/services/user/infra/repository_builder.go</span>
 <span class="tok-kw">func</span> <span class="tok-fn">NewRepository</span>(handle *<span class="tok-pkg">storagedb</span>.<span class="tok-type">Handle</span>) (<span class="tok-pkg">user</span>.<span class="tok-type">Repository</span>, error) {
-    <span class="tok-kw">switch</span> handle.<span class="tok-fn">Dialect</span>() {
-    <span class="tok-kw">case</span> <span class="tok-pkg">storagedb</span>.<span class="tok-field">DialectSQLite</span>:
-        <span class="tok-kw">return</span> <span class="tok-fn">NewSQLiteRepository</span>(handle)
-    <span class="tok-kw">case</span> <span class="tok-pkg">storagedb</span>.<span class="tok-field">DialectPostgres</span>:
-        <span class="tok-kw">return</span> <span class="tok-fn">NewPostgresRepository</span>(handle)
-    <span class="tok-kw">default</span>:
-        <span class="tok-kw">return</span> nil, fmt.Errorf(<span class="tok-string">"unsupported user repository dialect %q"</span>, handle.<span class="tok-fn">Dialect</span>())
+    <span class="tok-kw">if</span> handle.<span class="tok-fn">Driver</span>() != <span class="tok-pkg">storagedb</span>.<span class="tok-field">DriverSQLite</span> {
+        <span class="tok-kw">return</span> nil, fmt.Errorf(<span class="tok-string">"user repository requires SQLite storage"</span>)
     }
+    <span class="tok-kw">return</span> <span class="tok-fn">NewSQLiteRepository</span>(handle)
 }</code></pre>
 
-  <p><code>internal/app.NewApplication</code> calls only <code>userinfra.NewRepository(handle)</code>. It never imports or selects <code>NewSQLiteRepository</code> or <code>NewPostgresRepository</code> directly.</p>
+  <p><code>internal/app.NewApplication</code> calls only <code>userinfra.NewRepository(handle)</code>. It does not import the concrete SQLite repository directly.</p>
 
   <h2 id="layout">9. Code layout</h2>
 
@@ -342,7 +338,6 @@
   infra/
     repository_builder.go # storage strategy selection from configured handle
     sqlite_repository.go    # SQLite implementation
-    postgres_repository.go  # PostgreSQL implementation
     repository_assertions_test.go
 
   rpc/

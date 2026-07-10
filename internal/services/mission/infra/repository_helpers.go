@@ -11,33 +11,6 @@ import (
 	"github.com/tinoosan/agen8/internal/services/mission/domain/mission"
 )
 
-func missionWhere(filter mission.MissionFilter) (string, []any) {
-	var clauses []string
-	var args []any
-	if strings.TrimSpace(filter.ProjectID) != "" {
-		clauses = append(clauses, "project_id = ?")
-		args = append(args, strings.TrimSpace(filter.ProjectID))
-	}
-	if len(filter.Statuses) > 0 {
-		placeholders := make([]string, 0, len(filter.Statuses))
-		for _, status := range filter.Statuses {
-			status = mission.MissionStatus(strings.TrimSpace(string(status)))
-			if status == "" {
-				continue
-			}
-			placeholders = append(placeholders, "?")
-			args = append(args, string(status))
-		}
-		if len(placeholders) > 0 {
-			clauses = append(clauses, "status IN ("+strings.Join(placeholders, ", ")+")")
-		}
-	}
-	if len(clauses) == 0 {
-		return "", args
-	}
-	return " WHERE " + strings.Join(clauses, " AND "), args
-}
-
 func missionMatchesFilter(record mission.Mission, filter mission.MissionFilter) bool {
 	if filter.ProjectID != "" && record.ProjectID != filter.ProjectID {
 		return false

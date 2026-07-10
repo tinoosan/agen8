@@ -97,24 +97,12 @@ func getDBHandle(ctx context.Context, cfg config.Config) (*storagedb.Handle, err
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	driver := storagedb.Driver(strings.TrimSpace(cfg.DBDriver))
-	if driver == "" {
-		driver = storagedb.DriverSQLite
-	}
 	openCfg := storagedb.Config{
-		Driver:       driver,
+		Driver:       storagedb.DriverSQLite,
 		DataDir:      cfg.DataDir,
-		DatabaseURL:  cfg.DatabaseURL,
 		MigrationKey: "app",
-		Migrate: func(ctx context.Context, db *sql.DB, driver storagedb.Driver) error {
-			switch driver {
-			case storagedb.DriverSQLite:
-				return migrateSQLite(db)
-			case storagedb.DriverPostgres:
-				return migratePostgres(ctx, db)
-			default:
-				return fmt.Errorf("unsupported db driver %q", driver)
-			}
+		Migrate: func(_ context.Context, db *sql.DB, _ storagedb.Driver) error {
+			return migrateSQLite(db)
 		},
 	}
 	handle, err := storagedb.Open(ctx, openCfg)
@@ -122,66 +110,6 @@ func getDBHandle(ctx context.Context, cfg config.Config) (*storagedb.Handle, err
 		return handle, nil
 	}
 	return nil, err
-}
-
-func migratePostgres(ctx context.Context, db *sql.DB) error {
-	if db == nil {
-		return fmt.Errorf("postgres: db is nil")
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("postgres: begin migration: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_version (
-		version INTEGER PRIMARY KEY,
-		applied_at TEXT NOT NULL
-	);`); err != nil {
-		return rollbackWithError(tx, fmt.Errorf("postgres: schema_version: %w", err))
-	}
-	version, err := currentSchema(tx)
-	if err != nil {
-		return rollbackWithError(tx, fmt.Errorf("postgres: %w", err))
-	}
-	if version > 0 && version != currentSchemaVersion {
-		return rollbackWithError(tx, fmt.Errorf("postgres: incompatible schema version %d; this build requires schema version %d; apply a preserving migration or use an explicitly isolated database", version, currentSchemaVersion))
-	}
-	if version == 0 {
-		stmt, err := loadPostgresSchemaSQL()
-		if err != nil {
-			return rollbackWithError(tx, err)
-		}
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return rollbackWithError(tx, fmt.Errorf("postgres: migrate schema: %w", err))
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO schema_version (version, applied_at) VALUES ($1, $2)
-			 ON CONFLICT (version) DO UPDATE SET applied_at = EXCLUDED.applied_at`,
-			currentSchemaVersion,
-			time.Now().UTC().Format(time.RFC3339Nano),
-		); err != nil {
-			return rollbackWithError(tx, fmt.Errorf("postgres: record schema version: %w", err))
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("postgres: commit migration: %w", err)
-	}
-	return nil
-}
-
-func loadPostgresSchemaSQL() (string, error) {
-	data, err := migrationsFS.ReadFile("migrations/004_schema.sql")
-	if err != nil {
-		return "", fmt.Errorf("postgres: read schema snapshot: %w", err)
-	}
-	return postgresSchemaSQL(string(data)), nil
-}
-
-func postgresSchemaSQL(sql string) string {
-	sql = strings.ReplaceAll(sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
-	sql = strings.ReplaceAll(sql, "DATETIME", "TIMESTAMPTZ")
-	sql = strings.ReplaceAll(sql, "BOOLEAN NOT NULL DEFAULT 1", "BOOLEAN NOT NULL DEFAULT TRUE")
-	sql = strings.ReplaceAll(sql, "BLOB", "BYTEA")
-	return sql
 }
 
 func migrateSQLite(db *sql.DB) error {

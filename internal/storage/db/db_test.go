@@ -60,12 +60,12 @@ func TestOpenSQLiteConcurrentOpenUsesSingleHandle(t *testing.T) {
 	}
 }
 
-func TestOpenPostgresRequiresDatabaseURL(t *testing.T) {
-	_, err := Open(context.Background(), Config{Driver: DriverPostgres})
+func TestOpenRejectsUnsupportedDriver(t *testing.T) {
+	_, err := Open(context.Background(), Config{Driver: Driver("unsupported")})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "database url is required") {
+	if !strings.Contains(err.Error(), "supports SQLite storage only") {
 		t.Fatalf("error = %q", err)
 	}
 }
@@ -104,21 +104,13 @@ func TestOpenTracksMigrationsByScope(t *testing.T) {
 	}
 }
 
-func TestDialects(t *testing.T) {
+func TestSQLiteDialect(t *testing.T) {
 	sqlite := sqliteDialect{}
 	if got := sqlite.Placeholder(3); got != "?" {
 		t.Fatalf("sqlite placeholder = %q", got)
 	}
 	if got := sqlite.JSONType(); got != "TEXT" {
 		t.Fatalf("sqlite json type = %q", got)
-	}
-
-	postgres := postgresDialect{}
-	if got := postgres.Placeholder(3); got != "$3" {
-		t.Fatalf("postgres placeholder = %q", got)
-	}
-	if got := postgres.JSONType(); got != "JSONB" {
-		t.Fatalf("postgres json type = %q", got)
 	}
 }
 
@@ -145,12 +137,43 @@ func TestOpenSQLiteSecuresDatabaseFileMode(t *testing.T) {
 	}
 }
 
+func TestOpenSQLiteRejectsSymlinkedDatabaseFile(t *testing.T) {
+	dataDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "outside.db")
+	if err := os.WriteFile(target, []byte{}, 0o600); err != nil {
+		t.Fatalf("seed outside db: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(dataDir, "agen8.db")); err != nil {
+		t.Fatalf("symlink sqlite db: %v", err)
+	}
+
+	_, err := Open(context.Background(), Config{DataDir: dataDir})
+	if err == nil {
+		t.Fatal("expected symlinked sqlite db file to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must not be a symlink") {
+		t.Fatalf("error=%v want symlink rejection", err)
+	}
+}
+
+func TestOpenSQLiteRejectsDirectoryDatabasePath(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dataDir, "agen8.db"), 0o700); err != nil {
+		t.Fatalf("mkdir sqlite db path: %v", err)
+	}
+
+	_, err := Open(context.Background(), Config{DataDir: dataDir})
+	if err == nil {
+		t.Fatal("expected directory sqlite db path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("error=%v want non-regular rejection", err)
+	}
+}
+
 func TestRebind(t *testing.T) {
 	query := `SELECT * FROM auth_users WHERE email = ? AND user_id = ?`
 	if got := Rebind(query, sqliteDialect{}); got != query {
 		t.Fatalf("sqlite rebind = %q", got)
-	}
-	if got := Rebind(query, postgresDialect{}); got != `SELECT * FROM auth_users WHERE email = $1 AND user_id = $2` {
-		t.Fatalf("postgres rebind = %q", got)
 	}
 }

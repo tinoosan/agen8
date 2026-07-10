@@ -7,19 +7,13 @@ import (
 	storagedb "github.com/tinoosan/agen8/internal/storage/db"
 )
 
-// NewRepository is the storage-strategy entry point used by the composition
-// root. The concrete repository types remain SQLiteRepository and
-// PostgresRepository; this function only selects between them from config.
+// NewRepository builds the SQLite task repository used by the composition root.
 func NewRepository(handle *storagedb.Handle) (domain.TaskRepository, error) {
 	if handle == nil {
 		return nil, fmt.Errorf("task repository: db handle is required")
 	}
-	switch handle.Driver() {
-	case storagedb.DriverSQLite:
-		return NewSQLiteRepository(handle)
-	case storagedb.DriverPostgres:
-		return NewPostgresRepository(handle)
-	default:
-		return nil, fmt.Errorf("task repository: unsupported storage driver %q", handle.Driver())
+	if handle.Driver() != storagedb.DriverSQLite {
+		return nil, fmt.Errorf("task repository requires SQLite storage")
 	}
+	return NewSQLiteRepository(handle)
 }

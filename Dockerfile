@@ -10,7 +10,7 @@ COPY web ./web
 COPY internal/web ./internal/web
 RUN cd web && npm run build
 
-FROM golang:1.25.11-bookworm AS go-builder
+FROM golang:1.25.12-bookworm AS go-builder
 WORKDIR /src
 
 COPY go.mod go.sum ./

@@ -12,12 +12,6 @@ const (
 	// EnvDataDir overrides the agen8 data directory.
 	EnvDataDir = "AGEN8_DATA_DIR"
 
-	// EnvDBDriver selects the SQL storage driver. Empty means sqlite.
-	EnvDBDriver = "AGEN8_DB_DRIVER"
-
-	// EnvDatabaseURL contains the Postgres connection string for hosted mode.
-	EnvDatabaseURL = "AGEN8_DATABASE_URL"
-
 	// EnvXDGStateHome is the XDG base directory for state data.
 	// If set, agen8 defaults to "$XDG_STATE_HOME/agen8".
 	EnvXDGStateHome = "XDG_STATE_HOME"

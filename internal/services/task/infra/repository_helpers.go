@@ -131,27 +131,6 @@ func taskOrderDescending(filter domain.TaskFilter) bool {
 	return filter.SortDesc || strings.TrimSpace(filter.SortBy) == ""
 }
 
-func taskOrderBy(filter domain.TaskFilter) string {
-	column := "created_at"
-	switch strings.TrimSpace(filter.SortBy) {
-	case "", "created_at", "createdAt":
-		column = "created_at"
-	case "updated_at", "updatedAt":
-		column = "updated_at"
-	case "completed_at", "completedAt":
-		column = "completed_at"
-	case "status":
-		column = "status"
-	default:
-		column = "created_at"
-	}
-	direction := "ASC"
-	if filter.SortDesc || strings.TrimSpace(filter.SortBy) == "" {
-		direction = "DESC"
-	}
-	return " ORDER BY " + column + " " + direction + ", task_id ASC"
-}
-
 func unmarshalTask(raw []byte) (domain.Task, error) {
 	if len(raw) == 0 {
 		return domain.Task{}, fmt.Errorf("task_json is empty")

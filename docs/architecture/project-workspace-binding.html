@@ -372,7 +372,6 @@ _, err = s.workspaces.<span class="tok-fn">Upsert</span>(ctx, workspace.Record{
   <span class="dir">infra/</span>
     <span class="file">sql_store.go</span><span class="note">edit — ensureSchema: auth_link_tokens table</span>
     <span class="file">sqlite_repository.go</span><span class="note">edit — thin wrappers</span>
-    <span class="file">postgres_repository.go</span><span class="note">edit — thin wrappers</span>
     <span class="file">repository_builder.go</span><span class="note">edit — LinkTokens in Repositories</span>
   <span class="dir">app/</span>
     <span class="file">service.go</span><span class="note">edit — CreateLinkToken / ValidateLinkToken / RevokeLinkToken</span>
@@ -383,7 +382,6 @@ _, err = s.workspaces.<span class="tok-fn">Upsert</span>(ctx, workspace.Record{
     <span class="file">repository.go</span><span class="note">new — Reader/Writer/Repository + Filter + ErrNotFound</span>
   <span class="dir">infra/</span>
     <span class="file">workspace_sqlite_repository.go</span><span class="note">new — self-creating workspaces table</span>
-    <span class="file">workspace_postgres_repository.go</span><span class="note">new</span>
     <span class="file">repository_builder.go</span><span class="note">edit — NewWorkspaceRepository</span>
   <span class="dir">app/</span>
     <span class="file">workspace_service.go</span><span class="note">new — Upsert / List / Touch</span>

@@ -81,7 +81,6 @@
   contextlink/
     repository.go
     sqlite_repository.go
-    postgres_repository.go
   rpc/
     handler.go
     types.go
@@ -637,10 +636,9 @@ internal/mcp/tools/graph/
   sql_helpers.go
   sql_store.go
   sqlite_repository.go
-  sqlite_repository_test.go
-  postgres_repository.go</code></pre>
+  sqlite_repository_test.go</code></pre>
 
-  <p>SQLite and Postgres implementations share the same assertion suite. The suite verifies insert, duplicate rejection, replace, source lookup, target lookup, between lookup, edge-type lookup, delete by id, delete by entity, metadata round-trip, timestamp round-trip, and transaction rollback on replace failure.</p>
+  <p>The SQLite assertion suite verifies insert, duplicate rejection, replace, source lookup, target lookup, between lookup, edge-type lookup, delete by id, delete by entity, metadata round-trip, timestamp round-trip, and transaction rollback on replace failure.</p>
 
   <h3>Replace and transactions</h3>
   <p><code>Replace</code> is a repository operation because the uniqueness boundary belongs with persistence. It updates the one row identified by source, target, and edge type. If the row exists, <code>Replace</code> preserves id and creation audit unless the caller explicitly provides a new id for a create path. If the row does not exist, it inserts the supplied link. The operation is atomic.</p>

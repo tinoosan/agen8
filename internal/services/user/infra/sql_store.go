@@ -211,12 +211,6 @@ func (s *sqlStore) ensureSchema(ctx context.Context) error {
 }
 
 func (s *sqlStore) ensurePreferencesColumn(ctx context.Context) error {
-	if s.driver == storagedb.DriverPostgres {
-		if _, err := s.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
-			return fmt.Errorf("ensure users preferences column: add postgres column: %w", err)
-		}
-		return nil
-	}
 	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(users)`)
 	if err != nil {
 		return fmt.Errorf("ensure users preferences column: table info: %w", err)

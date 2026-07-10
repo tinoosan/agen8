@@ -14,12 +14,8 @@ func NewRepository(handle *storagedb.Handle, dataDir string) (credentialdomain.R
 	if dataDir == "" {
 		return nil, fmt.Errorf("credential data dir is required")
 	}
-	switch handle.Driver() {
-	case storagedb.DriverSQLite:
-		return NewSQLiteRepository(handle, dataDir)
-	case storagedb.DriverPostgres:
-		return NewPostgresRepository(handle, dataDir)
-	default:
-		return nil, fmt.Errorf("credential repository: unsupported storage driver %q", handle.Driver())
+	if handle.Driver() != storagedb.DriverSQLite {
+		return nil, fmt.Errorf("credential repository requires SQLite storage")
 	}
+	return NewSQLiteRepository(handle, dataDir)
 }
