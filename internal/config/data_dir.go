@@ -139,6 +139,7 @@ func ensureDirWritable(dir string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("data dir %q is not a directory", dir)
 	}
+	// #nosec G302 -- this is a directory; 0700 is the least-privilege mode.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("harden data dir %q permissions: %w", dir, err)
 	}
@@ -150,12 +151,15 @@ func ensureDirWritable(dir string) error {
 	name := f.Name()
 	_, writeErr := f.Write([]byte("ok"))
 	closeErr := f.Close()
-	os.Remove(name)
+	removeErr := os.Remove(name)
 	if writeErr != nil {
 		return fmt.Errorf("data dir %q is not writable: %w", dir, writeErr)
 	}
 	if closeErr != nil {
 		return fmt.Errorf("data dir %q is not writable: %w", dir, closeErr)
+	}
+	if removeErr != nil {
+		return fmt.Errorf("data dir %q cannot remove temporary files: %w", dir, removeErr)
 	}
 	return nil
 }

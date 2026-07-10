@@ -189,7 +189,7 @@ func (s *Server) RunListener(ctx context.Context, listener net.Listener, wg *syn
 			defer wg.Done()
 		}
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Debug("mcp server shutdown error", "error", err)

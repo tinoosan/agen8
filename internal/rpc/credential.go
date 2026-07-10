@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	MethodCredentialList   = "credential.list"
-	MethodCredentialGet    = "credential.get"
-	MethodCredentialCreate = "credential.create"
-	MethodCredentialUpdate = "credential.update"
-	MethodCredentialDelete = "credential.delete"
+	MethodCredentialList   = "credential.list"   // #nosec G101 -- RPC method name, not a credential.
+	MethodCredentialGet    = "credential.get"    // #nosec G101 -- RPC method name, not a credential.
+	MethodCredentialCreate = "credential.create" // #nosec G101 -- RPC method name, not a credential.
+	MethodCredentialUpdate = "credential.update" // #nosec G101 -- RPC method name, not a credential.
+	MethodCredentialDelete = "credential.delete" // #nosec G101 -- RPC method name, not a credential.
 )
 
 func RegisterCredential(reg *Registry, credentialSvc *credentialapp.Service) error {
