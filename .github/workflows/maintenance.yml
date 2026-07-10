@@ -27,7 +27,7 @@ jobs:
         run: go build -o bin/agen8 ./cmd/agen8
 
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
 
       - name: Run scoped security scan
         run: gosec ./internal/daemon ./internal/hookinstaller
@@ -44,7 +44,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 

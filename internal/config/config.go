@@ -30,10 +30,7 @@ func Default() Config {
 }
 
 func (c Config) Validate() error {
-	if err := nonEmpty("config.DataDir", c.DataDir); err != nil {
-		return err
-	}
-	return nil
+	return nonEmpty("config.DataDir", c.DataDir)
 }
 
 func nonEmpty(name, value string) error {

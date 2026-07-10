@@ -41,6 +41,7 @@ type Daemon struct {
 	events       *eventsHub
 	attention    *attention.Service
 	loginLimiter *loginAttemptLimiter
+	ready        func(context.Context) error
 	logger       *slog.Logger
 }
 
@@ -167,6 +168,7 @@ func New(cfg Config) (*Daemon, error) {
 		events:       newEventsHub(application.EventBus, logger.With("service", "events")),
 		attention:    attentionSvc,
 		loginLimiter: newLoginAttemptLimiter(),
+		ready:        application.Ready,
 		logger:       logger.With("service", "daemon"),
 	}
 	mcpServer.SetSessionResolver(d.resolveMCPSession)
@@ -216,6 +218,7 @@ func (d *Daemon) serveHTTP(ctx context.Context, ln net.Listener) error {
 func (d *Daemon) httpHandler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", d.handleHealthz)
+	mux.HandleFunc("GET /readyz", d.handleReadyz)
 	mux.HandleFunc("POST /rpc", d.handleRPC)
 	mux.HandleFunc("POST /uploads/files", d.handleFileUpload)
 	mux.Handle("/mcp", d.mcp.Handler())
@@ -367,6 +370,19 @@ func (d *Daemon) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 		OK:   true,
 		Info: buildinfo.Current(),
 	})
+}
+
+func (d *Daemon) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if d == nil || d.ready == nil || d.ready(ctx) != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": false})
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {

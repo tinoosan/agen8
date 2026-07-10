@@ -86,7 +86,7 @@ Published release images are pushed to GitHub Container Registry when a `v*`
 release tag is created:
 
 ```sh
-docker pull ghcr.io/tinoosan/agen8:v0.0.1
+docker pull ghcr.io/tinoosan/agen8:<release-tag>
 ```
 
 Check health:
@@ -102,13 +102,22 @@ The sample manifest is at `deploy/kubernetes/agen8.yaml`.
 
 Before applying it:
 
-1. Choose the image tag to deploy. The sample uses
-   `ghcr.io/tinoosan/agen8:v0.0.1`; release tags also publish `latest` and
-   semver aliases.
+1. Replace `replace-with-release-tag` in the image with the immutable release
+   tag you intend to deploy.
 2. Replace every `agen8.example.com` value with your real hostname.
-3. Replace `replace-with-a-long-random-setup-token` with a generated token.
-4. Adjust the ingress class and cert-manager issuer for your cluster.
-5. Confirm your storage class supports a `ReadWriteOnce` PVC.
+3. Adjust the ingress class and cert-manager issuer for your cluster.
+4. Confirm your storage class supports a `ReadWriteOnce` PVC.
+
+Create the referenced Secret separately so applying the reusable manifest can
+never overwrite it:
+
+```sh
+export AGEN8_SETUP_TOKEN="$(openssl rand -hex 32)"
+kubectl create namespace agen8 --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n agen8 create secret generic agen8-secrets \
+  --from-literal=AGEN8_SETUP_TOKEN="${AGEN8_SETUP_TOKEN}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
 
 Apply:
 
@@ -134,12 +143,11 @@ The manifest intentionally uses:
 - `replicas: 1`
 - `strategy.type: Recreate`
 - one PVC mounted at `/data`
-- readiness and liveness probes on `/healthz`
+- storage readiness on `/readyz` and process liveness on `/healthz`
 - `AGEN8_DISABLE_LOCAL_HOOK_PROVISIONING=true`
 
-Do not scale the SQLite deployment above one replica. SQLite is the default
-storage backend and should be treated as a single-writer deployment. Horizontal
-scaling should wait for a documented shared database backend.
+Do not scale the SQLite deployment above one replica. Agen8 intentionally ships
+as a single-writer SQLite service.
 
 ## Connect A Harness
 

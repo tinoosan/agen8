@@ -108,7 +108,7 @@ docker compose up --build
 Published release images are available from GitHub Container Registry:
 
 ```sh
-docker pull ghcr.io/tinoosan/agen8:v0.0.1
+docker pull ghcr.io/tinoosan/agen8:<release-tag>
 ```
 
 Set `AGEN8_PUBLIC_URL` to the URL users will put in their harness MCP config.
@@ -281,22 +281,20 @@ Common development commands:
 make build-go          # Go-only rebuild
 make test-go           # Go test suite
 make test-web          # web vitest suite
-make lint              # go vet + web lint
+make lint              # vet, staticcheck, revive, and zero-warning web lint
 make fmt-check         # gofmt guard
+make audit             # Go and npm vulnerability/security scans
+make ci                # complete local release gate
 make docs              # serve static docs on the LAN
 ```
 
 ## Contributing
 
-Before opening a pull request, run the local checks:
+Before opening a pull request, install the pinned tools named in the Test
+workflow, then run the complete local gate:
 
 ```sh
-go test ./... -count=1
-npm --prefix web run lint
-npm --prefix web run test -- --run
-npm --prefix web run build
-npm --prefix web audit --audit-level=moderate
-go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+make ci
 ```
 
 Do not commit local runtime data, API keys, setup tokens, generated binaries, or

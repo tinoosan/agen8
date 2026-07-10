@@ -24,7 +24,7 @@
 - Local checks run:
   - [ ] `make guardrails`
   - [ ] `make lint`
-  - [ ] `make test`
+  - [ ] `make ci`
   - [ ] `make build`
 - Additional targeted checks:
 

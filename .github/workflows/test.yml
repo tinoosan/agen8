@@ -38,6 +38,10 @@ jobs:
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
           go install github.com/mgechev/revive@v1.15.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
       - name: Run staticcheck
         run: staticcheck ./...
@@ -47,6 +51,19 @@ jobs:
 
       - name: Run Go tests
         run: go test ./... -count=1
+
+      - name: Run Go race tests
+        run: go test -race ./cmd/... ./internal/... ./pkg/... -count=1
+
+      - name: Run security checks
+        run: |
+          govulncheck ./...
+          gosec -quiet ./internal/daemon/... ./internal/hookinstaller/...
+
+      - name: Validate Kubernetes manifest
+        run: |
+          kubeconform -strict -summary deploy/kubernetes/agen8.yaml
+          actionlint
 
       - name: Build agen8 binary
         run: go build -o bin/agen8 ./cmd/agen8
@@ -63,15 +80,18 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
         run: npm ci
 
+      - name: Audit web dependencies
+        run: npm audit --audit-level=low
+
       - name: Run web lint
-        run: npm run lint
+        run: npm run lint -- --max-warnings 0
 
       - name: Run web tests
         run: npm test

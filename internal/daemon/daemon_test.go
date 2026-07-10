@@ -777,6 +777,29 @@ func TestHealthzIncludesBuildInfo(t *testing.T) {
 	}
 }
 
+func TestReadyzReflectsStorageAvailability(t *testing.T) {
+	d, err := New(Config{AppConfig: config.Config{DataDir: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	d.handleReadyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ready status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	d.ready = func(context.Context) error { return errors.New("storage unavailable") }
+	rec = httptest.NewRecorder()
+	d.handleReadyz(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unready status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "storage unavailable") {
+		t.Fatalf("readiness response leaked internal error: %s", rec.Body.String())
+	}
+}
+
 func TestEventsStreamsPinChangesToMatchingProjectClients(t *testing.T) {
 	d, err := New(Config{
 		AppConfig:  config.Config{DataDir: t.TempDir()},

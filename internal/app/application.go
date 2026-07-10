@@ -74,6 +74,15 @@ type Application struct {
 	PinSvc          *pinapp.Service
 	NotificationSvc *notificationapp.Service
 	LastSeenStore   *lastseen.Store
+	ready           func(context.Context) error
+}
+
+// Ready verifies that the process can reach its durable SQLite store.
+func (a *Application) Ready(ctx context.Context) error {
+	if a == nil || a.ready == nil {
+		return fmt.Errorf("application readiness is not configured")
+	}
+	return a.ready(ctx)
 }
 
 // NewApplication builds the retained service graph.
@@ -348,6 +357,7 @@ func NewApplication(cfg Config) (*Application, error) {
 		PinSvc:          pinSvc,
 		NotificationSvc: notificationSvc,
 		LastSeenStore:   lastSeenStore,
+		ready:           handle.DB().PingContext,
 	}, nil
 }
 
