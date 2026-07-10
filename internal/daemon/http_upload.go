@@ -21,7 +21,10 @@ const (
 	maxAttachmentUploadFieldBytes   int64 = 64 << 10
 )
 
-var errAttachmentUploadFileTooLarge = errors.New("attachment upload file is too large")
+var (
+	errAttachmentUploadFileTooLarge = errors.New("attachment upload file is too large")
+	errAttachmentUploadTrailingPart = errors.New("file must be the final multipart field")
+)
 
 func (d *Daemon) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	usesSessionCookie := strings.TrimSpace(r.Header.Get("Authorization")) == "" && requestHasSessionCookie(r)
@@ -80,7 +83,7 @@ func (d *Daemon) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 
 func decodeFileUploadMultipart(reader *multipart.Reader) (fileapp.UploadReaderInput, error) {
 	var input fileapp.UploadReaderInput
-	var fileSeen bool
+	seen := make(map[string]struct{}, 4)
 	for {
 		part, err := reader.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -89,7 +92,12 @@ func decodeFileUploadMultipart(reader *multipart.Reader) (fileapp.UploadReaderIn
 		if err != nil {
 			return fileapp.UploadReaderInput{}, err
 		}
-		switch part.FormName() {
+		field := strings.TrimSpace(part.FormName())
+		if _, duplicate := seen[field]; duplicate {
+			return fileapp.UploadReaderInput{}, fmt.Errorf("%s field must be provided once", field)
+		}
+		seen[field] = struct{}{}
+		switch field {
 		case "projectId":
 			value, err := readUploadField(part)
 			if err != nil {
@@ -109,15 +117,19 @@ func decodeFileUploadMultipart(reader *multipart.Reader) (fileapp.UploadReaderIn
 			}
 			input.Path = value
 		case "file":
-			if fileSeen {
-				return fileapp.UploadReaderInput{}, fmt.Errorf("file field must be provided once")
+			if err := validateFileUploadInput(input, true); err != nil {
+				return fileapp.UploadReaderInput{}, err
 			}
-			input.Reader = &attachmentUploadLimitReader{r: part, remaining: maxAttachmentUploadFileBytes}
-			fileSeen = true
-			return input, validateFileUploadInput(input, fileSeen)
+			input.Reader = &finalMultipartFileReader{
+				file:      &attachmentUploadLimitReader{r: part, remaining: maxAttachmentUploadFileBytes},
+				multipart: reader,
+			}
+			return input, nil
+		default:
+			return fileapp.UploadReaderInput{}, fmt.Errorf("unsupported multipart field %q", field)
 		}
 	}
-	return input, validateFileUploadInput(input, fileSeen)
+	return input, validateFileUploadInput(input, false)
 }
 
 func validateFileUploadInput(input fileapp.UploadReaderInput, fileSeen bool) error {
@@ -147,6 +159,32 @@ func readUploadField(part *multipart.Part) (string, error) {
 type attachmentUploadLimitReader struct {
 	r         io.Reader
 	remaining int64
+}
+
+// finalMultipartFileReader preserves streaming while proving that the file is
+// the final part. A trailing field becomes a read error, so the file service's
+// atomic writer cannot commit an upload whose metadata was silently ignored.
+type finalMultipartFileReader struct {
+	file      io.Reader
+	multipart *multipart.Reader
+	validated bool
+}
+
+func (r *finalMultipartFileReader) Read(p []byte) (int, error) {
+	n, err := r.file.Read(p)
+	if !errors.Is(err, io.EOF) || r.validated {
+		return n, err
+	}
+	r.validated = true
+	part, nextErr := r.multipart.NextPart()
+	if errors.Is(nextErr, io.EOF) {
+		return n, io.EOF
+	}
+	if nextErr != nil {
+		return n, fmt.Errorf("validate multipart trailer: %w", nextErr)
+	}
+	_ = part.Close()
+	return n, errAttachmentUploadTrailingPart
 }
 
 func (r *attachmentUploadLimitReader) Read(p []byte) (int, error) {
