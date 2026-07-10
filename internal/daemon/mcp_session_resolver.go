@@ -109,7 +109,7 @@ func (r *mcpSessionResolver) Resolve(ctx context.Context, token string, header h
 		return mcp.Session{}, err
 	}
 	session = sessionWithMember(session, rosterMember)
-	return r.sessionWithProjectRoot(ctx, session)
+	return r.sessionWithMemberProjectRoot(ctx, session, rosterMember)
 }
 
 func (r *mcpSessionResolver) resolveToken(ctx context.Context, token string) (mcp.Session, error) {
@@ -188,7 +188,11 @@ func (c projectClaudeMCPConfigurator) ConfigureClaudeMCP(ctx context.Context, re
 	if err != nil {
 		return projecttool.ConfigureClaudeMCPResult{}, err
 	}
-	result, err := c.provisioner.ProvisionClaudeMCP(ctx, strings.TrimSpace(req.UserID), project.Title(), c.projects.ResolveRoot(ctx, project))
+	root := strings.TrimSpace(req.ProjectRoot)
+	if root == "" {
+		root = project.Root()
+	}
+	result, err := c.provisioner.ProvisionClaudeMCP(ctx, strings.TrimSpace(req.UserID), project.Title(), root)
 	if err != nil {
 		return projecttool.ConfigureClaudeMCPResult{}, err
 	}
@@ -224,6 +228,10 @@ func sessionWithMember(session mcp.Session, rosterMember member.Record) mcp.Sess
 }
 
 func (r *mcpSessionResolver) sessionWithProjectRoot(ctx context.Context, session mcp.Session) (mcp.Session, error) {
+	return r.sessionWithMemberProjectRoot(ctx, session, member.Record{})
+}
+
+func (r *mcpSessionResolver) sessionWithMemberProjectRoot(ctx context.Context, session mcp.Session, rosterMember member.Record) (mcp.Session, error) {
 	projectID := types.ProjectID(strings.TrimSpace(session.ProjectID))
 	if projectID == "" || r.projects == nil {
 		return session, nil
@@ -240,7 +248,23 @@ func (r *mcpSessionResolver) sessionWithProjectRoot(ctx context.Context, session
 	if owner := strings.TrimSpace(project.UserID()); owner == "" || owner != strings.TrimSpace(session.UserID) {
 		return mcp.Session{}, fmt.Errorf("resolve project root: project access denied")
 	}
-	session.ProjectRoot = strings.TrimSpace(r.projects.ResolveRoot(projectCtx, project))
+	workspaceID := strings.TrimSpace(rosterMember.WorkspaceID)
+	if workspaceID == "" {
+		// Legacy registrations predate explicit workspace binding. Keep their
+		// established behavior until the next project.register backfills it.
+		session.ProjectRoot = strings.TrimSpace(project.Root())
+	} else {
+		session.ProjectRoot, err = r.projects.ResolveBoundWorkspaceRoot(
+			projectCtx,
+			string(project.ID()),
+			strings.TrimSpace(session.UserID),
+			string(project.LocationID()),
+			workspaceID,
+		)
+		if err != nil {
+			return mcp.Session{}, fmt.Errorf("resolve bound workspace root: %w", err)
+		}
+	}
 	session.CredentialResolver = httpCredentialResolver{
 		credentials: r.credentials,
 		userID:      strings.TrimSpace(session.UserID),

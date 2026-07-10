@@ -21,6 +21,7 @@ type UpsertExternalHarnessMemberParams struct {
 	ID               member.ID
 	UserID           string
 	ProjectID        string
+	WorkspaceID      string
 	ChannelID        string
 	NativeSessionRef string
 	DisplayName      string
@@ -67,6 +68,7 @@ func (s *Service) UpsertExternalHarnessMember(ctx context.Context, p UpsertExter
 		ID:               memberID,
 		UserID:           strings.TrimSpace(p.UserID),
 		ProjectID:        string(projectID),
+		WorkspaceID:      strings.TrimSpace(p.WorkspaceID),
 		ChannelID:        strings.TrimSpace(p.ChannelID),
 		NativeSessionRef: strings.TrimSpace(p.NativeSessionRef),
 		DisplayName:      strings.TrimSpace(p.DisplayName),

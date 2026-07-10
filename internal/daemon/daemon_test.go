@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -1369,8 +1371,14 @@ func createProjectLinkTokenForTest(t *testing.T, handler http.Handler, sessionTo
 func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
 	dataDir := t.TempDir()
 	projectRoot := t.TempDir()
-	rootA := t.TempDir()
-	rootB := t.TempDir()
+	rootA := filepath.Join(t.TempDir(), "worktree-a")
+	rootB := filepath.Join(t.TempDir(), "worktree-b")
+	runGitForDaemonTest(t, projectRoot, "init")
+	runGitForDaemonTest(t, projectRoot, "config", "user.email", "test@example.com")
+	runGitForDaemonTest(t, projectRoot, "config", "user.name", "Test User")
+	runGitForDaemonTest(t, projectRoot, "commit", "--allow-empty", "-m", "initial")
+	runGitForDaemonTest(t, projectRoot, "worktree", "add", "-b", "session-a", rootA)
+	runGitForDaemonTest(t, projectRoot, "worktree", "add", "-b", "session-b", rootB)
 	d, err := New(Config{
 		AppConfig:  config.Config{DataDir: dataDir},
 		SetupToken: "test-setup-token",
@@ -1426,12 +1434,18 @@ func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
 	if gotA.MemberID != memberA {
 		t.Fatalf("session A resolved to member %q want %q", gotA.MemberID, memberA)
 	}
+	if gotA.ProjectRoot != rootA {
+		t.Fatalf("session A root=%q want %q", gotA.ProjectRoot, rootA)
+	}
 	gotB, err := d.resolveMCPSession(ctx, linkToken, http.Header{}, claimBodyForSession("claude-sess-B"))
 	if err != nil {
 		t.Fatalf("resolve session B: %v", err)
 	}
 	if gotB.MemberID != memberB {
 		t.Fatalf("session B resolved to member %q want %q", gotB.MemberID, memberB)
+	}
+	if gotB.ProjectRoot != rootB {
+		t.Fatalf("session B root=%q want %q", gotB.ProjectRoot, rootB)
 	}
 
 	// Body-over-header precedence (the resolveMCPSession flip): a stale transport
@@ -1446,6 +1460,14 @@ func TestConcurrentSessionsResolveToOwnMember(t *testing.T) {
 	}
 	if gotMixed.MemberID != memberA {
 		t.Fatalf("in-band session A lost to stale header: resolved %q want %q", gotMixed.MemberID, memberA)
+	}
+}
+
+func runGitForDaemonTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}
 }
 

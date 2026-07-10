@@ -8,16 +8,12 @@ import (
 )
 
 type ProjectSnapshot struct {
-	ID           types.ProjectID
-	LocationID   types.LocationID
-	Root         string
-	ResolvedRoot string
+	ID         types.ProjectID
+	LocationID types.LocationID
+	Root       string
 }
 
 func (p ProjectSnapshot) EffectiveRoot() string {
-	if resolved := strings.TrimSpace(p.ResolvedRoot); resolved != "" {
-		return resolved
-	}
 	return strings.TrimSpace(p.Root)
 }
 

@@ -105,12 +105,18 @@ func (l projectDirLookup) ProjectIDForDir(ctx context.Context, dir string) (stri
 	}
 	bestID, bestLen := "", 0
 	for _, p := range all {
-		root := strings.TrimRight(strings.TrimSpace(l.projects.ResolveRoot(ctx, p)), string(filepath.Separator))
-		if root == "" || len(root) <= bestLen {
+		roots, err := l.projects.ActiveWorkspaceRoots(ctx, p)
+		if err != nil {
 			continue
 		}
-		if dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
-			bestID, bestLen = string(p.ID()), len(root)
+		for _, candidate := range roots {
+			root := strings.TrimRight(strings.TrimSpace(candidate), string(filepath.Separator))
+			if root == "" || len(root) <= bestLen {
+				continue
+			}
+			if dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
+				bestID, bestLen = string(p.ID()), len(root)
+			}
 		}
 	}
 	return bestID, bestID != ""

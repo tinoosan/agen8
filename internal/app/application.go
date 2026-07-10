@@ -490,7 +490,7 @@ func (a fileProjectLoaderAdapter) GetProject(ctx context.Context, projectID type
 	if err != nil {
 		return fileapp.ProjectSnapshot{}, err
 	}
-	return a.projectSnapshot(ctx, project), nil
+	return a.projectSnapshot(project), nil
 }
 
 func (a fileProjectLoaderAdapter) ListProjects(ctx context.Context, filter fileapp.ProjectFilter) ([]fileapp.ProjectSnapshot, error) {
@@ -507,17 +507,16 @@ func (a fileProjectLoaderAdapter) ListProjects(ctx context.Context, filter filea
 	}
 	out := make([]fileapp.ProjectSnapshot, 0, len(projects))
 	for _, project := range projects {
-		out = append(out, a.projectSnapshot(ctx, project))
+		out = append(out, a.projectSnapshot(project))
 	}
 	return out, nil
 }
 
-func (a fileProjectLoaderAdapter) projectSnapshot(ctx context.Context, p projectdomain.Project) fileapp.ProjectSnapshot {
+func (a fileProjectLoaderAdapter) projectSnapshot(p projectdomain.Project) fileapp.ProjectSnapshot {
 	return fileapp.ProjectSnapshot{
-		ID:           p.ID(),
-		LocationID:   p.LocationID(),
-		Root:         p.Root(),
-		ResolvedRoot: a.projects.ResolveRoot(ctx, p),
+		ID:         p.ID(),
+		LocationID: p.LocationID(),
+		Root:       p.Root(),
 	}
 }
 

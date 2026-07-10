@@ -644,6 +644,7 @@ func executeNativeMCPTool(ctx context.Context, def nativeToolDef, session Sessio
 			UserID:           strings.TrimSpace(session.UserID),
 			HarnessKind:      strings.TrimSpace(session.HarnessKind),
 			ProjectID:        strings.TrimSpace(session.ProjectID),
+			ProjectRoot:      strings.TrimSpace(session.ProjectRoot),
 			ActorMemberID:    strings.TrimSpace(session.MemberID),
 			SessionID:        sessionID,
 			ThreadID:         threadID,

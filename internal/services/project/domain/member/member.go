@@ -22,6 +22,7 @@ type Record struct {
 	ID               ID         `json:"id"`
 	UserID           string     `json:"userId,omitempty"`
 	ProjectID        string     `json:"projectId"`
+	WorkspaceID      string     `json:"workspaceId,omitempty"`
 	NativeSessionRef string     `json:"nativeSessionRef,omitempty"`
 	ChannelID        string     `json:"channelId"`
 	DisplayName      string     `json:"displayName"`

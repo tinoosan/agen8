@@ -130,14 +130,16 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	// Record the folder as a Workspace of this project — metadata, never identity.
 	// This happens in every resolution path (bound, explicit, fallback): cwd tells
 	// us where a workspace is, not which project it is.
-	if _, err := s.UpsertWorkspace(ctx, UpsertWorkspaceParams{
+	boundWorkspace, err := s.UpsertWorkspace(ctx, UpsertWorkspaceParams{
 		ProjectID:  string(projectID),
 		UserID:     userID,
 		LocationID: string(locationID),
 		Root:       workspaceRoot,
-	}); err != nil {
+	})
+	if err != nil {
 		return RegisterMCPContextResult{}, fmt.Errorf("record workspace: %w", err)
 	}
+	workspaceID := strings.TrimSpace(string(boundWorkspace.ID))
 	nativeRef := nativeRefForRegister(input)
 	if nativeRef == "" {
 		nativeRef = "token:" + token
@@ -161,6 +163,7 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 			ID:               memberID,
 			UserID:           userID,
 			ProjectID:        string(projectID),
+			WorkspaceID:      workspaceID,
 			NativeSessionRef: nativeRef,
 			DisplayName:      displayName,
 			MemberType:       memberType,
@@ -185,9 +188,16 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 		}
 		existing = s.withResolvedPermissionMode(existing)
 	}
+	if strings.TrimSpace(existing.WorkspaceID) != workspaceID {
+		existing.WorkspaceID = workspaceID
+		existing.UpdatedAt = s.clock.Now().UTC()
+		if err := s.members.Update(ctx, existing); err != nil {
+			return RegisterMCPContextResult{}, fmt.Errorf("bind registered member to workspace: %w", err)
+		}
+	}
 	return RegisterMCPContextResult{
 		ProjectID:         string(projectID),
-		ProjectRoot:       projectRoot,
+		ProjectRoot:       workspaceRoot,
 		LocationID:        string(locationID),
 		MemberID:          string(existing.ID),
 		DisplayName:       strings.TrimSpace(existing.DisplayName),

@@ -518,8 +518,8 @@ func TestRegisterMCPContextWorktreeRootResolvesCanonicalProject(t *testing.T) {
 	if worktreeResult.ProjectID != mainResult.ProjectID {
 		t.Fatalf("worktree project=%q want canonical %q", worktreeResult.ProjectID, mainResult.ProjectID)
 	}
-	if worktreeResult.ProjectRoot != mainRoot {
-		t.Fatalf("worktree projectRoot=%q want canonical root %q", worktreeResult.ProjectRoot, mainRoot)
+	if worktreeResult.ProjectRoot != worktreeRoot {
+		t.Fatalf("worktree projectRoot=%q want current workspace %q", worktreeResult.ProjectRoot, worktreeRoot)
 	}
 	if worktreeResult.ProjectID != string(ProjectIDForLocationRoot("local", mainRoot)) {
 		t.Fatalf("project id=%q want main-root hash", worktreeResult.ProjectID)
@@ -536,6 +536,123 @@ func TestRegisterMCPContextWorktreeRootResolvesCanonicalProject(t *testing.T) {
 	if !roots[mainRoot] || !roots[worktreeRoot] {
 		t.Fatalf("workspace roots=%v want main and worktree roots", roots)
 	}
+
+	mainMember := memberForNativeSession(t, service, mainResult.ProjectID, "session-main")
+	worktreeMember := memberForNativeSession(t, service, mainResult.ProjectID, "session-worktree")
+	if mainMember.WorkspaceID == "" || worktreeMember.WorkspaceID == "" {
+		t.Fatalf("workspace bindings main=%q worktree=%q", mainMember.WorkspaceID, worktreeMember.WorkspaceID)
+	}
+	if mainMember.WorkspaceID == worktreeMember.WorkspaceID {
+		t.Fatalf("independent session roots share workspace binding %q", mainMember.WorkspaceID)
+	}
+	mainResolved, err := service.ResolveBoundWorkspaceRoot(ctx, mainResult.ProjectID, "user-1", "local", mainMember.WorkspaceID)
+	if err != nil {
+		t.Fatalf("resolve main workspace: %v", err)
+	}
+	worktreeResolved, err := service.ResolveBoundWorkspaceRoot(ctx, mainResult.ProjectID, "user-1", "local", worktreeMember.WorkspaceID)
+	if err != nil {
+		t.Fatalf("resolve worktree workspace: %v", err)
+	}
+	if mainResolved != mainRoot || worktreeResolved != worktreeRoot {
+		t.Fatalf("resolved roots main=%q worktree=%q", mainResolved, worktreeResolved)
+	}
+}
+
+func TestRegisterMCPContextRebindsExistingMemberWorkspace(t *testing.T) {
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	mainRoot, worktreeRoot := createGitWorktreeFixture(t)
+
+	first, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token: "ak_test_token", UserID: "user-1", ProjectRoot: mainRoot,
+		HarnessKind: "codex", SessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatalf("register main workspace: %v", err)
+	}
+	firstMember := memberForNativeSession(t, service, first.ProjectID, "session-1")
+
+	second, err := service.RegisterMCPContext(ctx, RegisterMCPContextInput{
+		Token: "ak_test_token", UserID: "user-1", ProjectRoot: worktreeRoot,
+		HarnessKind: "codex", SessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatalf("register moved workspace: %v", err)
+	}
+	secondMember := memberForNativeSession(t, service, first.ProjectID, "session-1")
+	if second.MemberID != first.MemberID || !second.AlreadyRegistered {
+		t.Fatalf("member was not reused: first=%q second=%q reused=%v", first.MemberID, second.MemberID, second.AlreadyRegistered)
+	}
+	if second.ProjectRoot != worktreeRoot {
+		t.Fatalf("second root=%q want %q", second.ProjectRoot, worktreeRoot)
+	}
+	if secondMember.WorkspaceID == firstMember.WorkspaceID {
+		t.Fatalf("workspace binding did not change from %q", firstMember.WorkspaceID)
+	}
+}
+
+func TestResolveBoundWorkspaceRootRejectsInvalidBindings(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := newProjectServiceForMCPContextTest(t)
+	upsert := func(params UpsertWorkspaceParams) workspace.Record {
+		t.Helper()
+		record, err := service.UpsertWorkspace(ctx, params)
+		if err != nil {
+			t.Fatalf("create workspace %s: %v", params.Root, err)
+		}
+		return record
+	}
+	valid := upsert(UpsertWorkspaceParams{
+		ProjectID: "project-1", UserID: "user-1", LocationID: "local", Root: "/valid",
+	})
+	foreignProject := upsert(UpsertWorkspaceParams{
+		ProjectID: "project-2", UserID: "user-1", LocationID: "local", Root: "/foreign-project",
+	})
+	foreignUser := upsert(UpsertWorkspaceParams{
+		ProjectID: "project-1", UserID: "user-2", LocationID: "local", Root: "/foreign-user",
+	})
+	foreignLocation := upsert(UpsertWorkspaceParams{
+		ProjectID: "project-1", UserID: "user-1", LocationID: "ssh", Root: "/foreign-location",
+	})
+	removed := upsert(UpsertWorkspaceParams{
+		ProjectID: "project-1", UserID: "user-1", LocationID: "local", Root: "/removed",
+	})
+	removed.LifecycleState = workspace.LifecycleRemoved
+	if err := service.workspaces.Update(ctx, removed); err != nil {
+		t.Fatalf("remove workspace: %v", err)
+	}
+
+	if root, err := service.ResolveBoundWorkspaceRoot(ctx, "project-1", "user-1", "local", string(valid.ID)); err != nil || root != "/valid" {
+		t.Fatalf("valid binding root=%q err=%v", root, err)
+	}
+	for name, workspaceID := range map[string]string{
+		"missing":          "ws-missing",
+		"foreign project":  string(foreignProject.ID),
+		"foreign user":     string(foreignUser.ID),
+		"foreign location": string(foreignLocation.ID),
+		"removed":          string(removed.ID),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if root, err := service.ResolveBoundWorkspaceRoot(ctx, "project-1", "user-1", "local", workspaceID); err == nil || root != "" {
+				t.Fatalf("root=%q err=%v want fail-closed rejection", root, err)
+			}
+		})
+	}
+}
+
+func memberForNativeSession(t *testing.T, service *Service, projectID, nativeRef string) member.Record {
+	t.Helper()
+	records, err := service.members.List(context.Background(), member.Filter{
+		ProjectID: projectID, NativeSessionRef: nativeRef, LifecycleState: member.LifecycleActive,
+	})
+	if err != nil {
+		t.Fatalf("list member %s: %v", nativeRef, err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("members for %s=%d want 1", nativeRef, len(records))
+	}
+	return records[0]
 }
 
 func TestRegisterMCPContextRegularGitSubdirKeepsPathHashFallback(t *testing.T) {
@@ -653,8 +770,8 @@ func TestRegisterMCPContextBoundProjectDoesNotTrustUnrelatedWorkspaceRoot(t *tes
 	if err != nil {
 		t.Fatalf("get bound project: %v", err)
 	}
-	if got := service.ResolveRoot(ctx, proj); got != rootA {
-		t.Fatalf("ResolveRoot=%q want original root %q; unrelated registration root %q must not become effective", got, rootA, rootB)
+	if got := proj.Root(); got != rootA {
+		t.Fatalf("stored root=%q want original root %q; unrelated registration root %q must not become effective", got, rootA, rootB)
 	}
 	workspaces, err := service.ListWorkspaces(ctx, workspace.Filter{ProjectID: bound.ProjectID})
 	if err != nil {

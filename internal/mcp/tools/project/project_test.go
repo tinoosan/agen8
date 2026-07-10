@@ -168,12 +168,13 @@ func TestConfigureClaudeMCPUsesSessionProject(t *testing.T) {
 		},
 		UserID:        "user-1",
 		ProjectID:     "project-1",
+		ProjectRoot:   "/workspace/project-1",
 		ActorMemberID: "member-1",
 	}, json.RawMessage(`{"action":"configure_claude_mcp"}`))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if gotReq.UserID != "user-1" || gotReq.ProjectID != "project-1" {
+	if gotReq.UserID != "user-1" || gotReq.ProjectID != "project-1" || gotReq.ProjectRoot != "/workspace/project-1" {
 		t.Fatalf("request = %+v", gotReq)
 	}
 	structured := result.Structured.(map[string]any)

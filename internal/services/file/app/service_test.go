@@ -100,18 +100,17 @@ func TestServiceGetUsesProjectIDBeforeProjectRoot(t *testing.T) {
 	require.Equal(t, []filedomain.Reference{{LocationID: "ssh-build", Path: "/srv/app/README.md"}}, repo.readPaths)
 }
 
-func TestServiceGetUsesResolvedRootForProjectID(t *testing.T) {
+func TestServiceGetUsesStableProjectRoot(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &spyFileRepository{
 		stats: map[filedomain.Reference]filedomain.Info{
-			{LocationID: "local", Path: "/moved/app/README.md"}: {Size: 7, ModifiedAt: time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)},
+			{LocationID: "local", Path: "/stored/app/README.md"}: {Size: 7, ModifiedAt: time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)},
 		},
 	}
 	svc := newTestServiceWithProjects(t, repo, testProject{
-		root:         "/stored/app",
-		resolvedRoot: "/moved/app",
-		locationID:   "local",
+		root:       "/stored/app",
+		locationID: "local",
 	})
 
 	_, err := svc.Get(ctx, GetInput{
@@ -120,8 +119,8 @@ func TestServiceGetUsesResolvedRootForProjectID(t *testing.T) {
 		MaxBytes:  1024,
 	})
 	require.NoError(t, err)
-	require.Equal(t, []filedomain.Reference{{LocationID: "local", Path: "/moved/app/README.md"}}, repo.statPaths)
-	require.Equal(t, []filedomain.Reference{{LocationID: "local", Path: "/moved/app/README.md"}}, repo.readPaths)
+	require.Equal(t, []filedomain.Reference{{LocationID: "local", Path: "/stored/app/README.md"}}, repo.statPaths)
+	require.Equal(t, []filedomain.Reference{{LocationID: "local", Path: "/stored/app/README.md"}}, repo.readPaths)
 }
 
 func newTestService(t *testing.T, projectRoot string, repo filedomain.Repository) *Service {
@@ -142,9 +141,8 @@ func newTestServiceWithProjects(t *testing.T, repo filedomain.Repository, projec
 }
 
 type testProject struct {
-	root         string
-	resolvedRoot string
-	locationID   types.LocationID
+	root       string
+	locationID types.LocationID
 }
 
 type staticProjectLoader struct {
@@ -168,10 +166,9 @@ func (l staticProjectLoader) ListProjects(context.Context, ProjectFilter) ([]Pro
 	out := make([]ProjectSnapshot, 0, len(l.projects))
 	for i, input := range l.projects {
 		out = append(out, ProjectSnapshot{
-			ID:           projectSnapshotID(i),
-			LocationID:   input.locationID,
-			Root:         input.root,
-			ResolvedRoot: input.resolvedRoot,
+			ID:         projectSnapshotID(i),
+			LocationID: input.locationID,
+			Root:       input.root,
 		})
 	}
 	return out, nil

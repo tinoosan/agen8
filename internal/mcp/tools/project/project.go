@@ -43,8 +43,9 @@ type ClaudeMCPConfigurator interface {
 }
 
 type ConfigureClaudeMCPRequest struct {
-	UserID    string
-	ProjectID string
+	UserID      string
+	ProjectID   string
+	ProjectRoot string
 }
 
 type ConfigureClaudeMCPResult struct {
@@ -98,6 +99,7 @@ type CallContext struct {
 	UserID           string
 	HarnessKind      string
 	ProjectID        string
+	ProjectRoot      string
 	ActorMemberID    string
 	SessionID        string
 	ThreadID         string
@@ -169,8 +171,9 @@ func (h Handler) configureClaudeMCP(ctx context.Context, call CallContext, proje
 		return Result{}, fmt.Errorf("project: session project id is required for action=configure_claude_mcp")
 	}
 	result, err := call.ClaudeMCP.ConfigureClaudeMCP(ctx, ConfigureClaudeMCPRequest{
-		UserID:    strings.TrimSpace(userID),
-		ProjectID: projectID,
+		UserID:      strings.TrimSpace(userID),
+		ProjectID:   projectID,
+		ProjectRoot: strings.TrimSpace(call.ProjectRoot),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("project: configure claude mcp: %w", err)

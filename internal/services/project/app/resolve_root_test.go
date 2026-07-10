@@ -10,13 +10,6 @@ import (
 	"github.com/tinoosan/agen8/internal/services/project/domain/workspace"
 )
 
-// ResolveRoot is the read-time bridge that lets a project's filesystem location
-// follow wherever it is currently checked out. The stored project.root is only a
-// seed; the live root is the most-recently-seen active workspace in the
-// project's own location. These tests pin that contract: most-recent active
-// workspace wins, removed and foreign-location workspaces are ignored, and with
-// nothing to consult we fall back to the seed.
-
 func seedProject(t *testing.T, ctx context.Context, svc *Service, root string) project.Project {
 	t.Helper()
 	proj, err := svc.CreateProject(ctx, CreateProjectInput{Root: root, Title: "Seed"})
@@ -33,104 +26,47 @@ func mustCreateWorkspace(t *testing.T, ctx context.Context, svc *Service, ws wor
 	}
 }
 
-func at(base time.Time, d time.Duration) *time.Time {
-	t := base.Add(d)
-	return &t
-}
-
-func TestResolveRootFallsBackToStoredRootWhenNoWorkspace(t *testing.T) {
+func TestActiveWorkspaceRootsIncludesStableRootAndOwnedWorkspaces(t *testing.T) {
 	t.Parallel()
-	clock := &mutableClock{now: time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)}
-	svc := newProjectServiceWithClock(t, clock)
+	svc := newProjectServiceWithClock(t, &mutableClock{now: time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)})
 	ctx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
-
-	proj := seedProject(t, ctx, svc, "/seed/app")
-
-	if got := svc.ResolveRoot(ctx, proj); got != proj.Root() {
-		t.Fatalf("ResolveRoot=%q want stored seed %q", got, proj.Root())
-	}
-}
-
-func TestResolveRootPrefersMostRecentActiveWorkspace(t *testing.T) {
-	t.Parallel()
-	clock := &mutableClock{now: time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)}
-	svc := newProjectServiceWithClock(t, clock)
-	ctx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
-
-	proj := seedProject(t, ctx, svc, "/seed/app")
-	loc := string(proj.LocationID())
-	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-
-	// Two active workspaces in the project's location. The moved one was seen
-	// most recently, so it must win over both the seed and the older workspace.
-	mustCreateWorkspace(t, ctx, svc, workspace.Record{
-		ID: "ws-old", ProjectID: string(proj.ID()), LocationID: loc,
-		Root: "/old/app", LifecycleState: workspace.LifecycleActive,
-		LinkedAt: base, UpdatedAt: base, LastSeenAt: at(base, time.Hour),
-	})
-	mustCreateWorkspace(t, ctx, svc, workspace.Record{
-		ID: "ws-moved", ProjectID: string(proj.ID()), LocationID: loc,
-		Root: "/moved/app", LifecycleState: workspace.LifecycleActive,
-		LinkedAt: base, UpdatedAt: base, LastSeenAt: at(base, 48*time.Hour),
-	})
-
-	if got := svc.ResolveRoot(ctx, proj); got != "/moved/app" {
-		t.Fatalf("ResolveRoot=%q want most-recent active workspace /moved/app", got)
-	}
-}
-
-func TestResolveRootIgnoresRemovedAndForeignLocationWorkspaces(t *testing.T) {
-	t.Parallel()
-	clock := &mutableClock{now: time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)}
-	svc := newProjectServiceWithClock(t, clock)
-	ctx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
-
-	proj := seedProject(t, ctx, svc, "/seed/app")
-	loc := string(proj.LocationID())
-	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-
-	// A removed workspace and a foreign-location workspace are both newer than the
-	// only valid candidate, yet neither may win: a removed link is gone, and a
-	// root from another location is not interpretable here.
-	mustCreateWorkspace(t, ctx, svc, workspace.Record{
-		ID: "ws-removed", ProjectID: string(proj.ID()), LocationID: loc,
-		Root: "/removed/app", LifecycleState: workspace.LifecycleRemoved,
-		LinkedAt: base, UpdatedAt: base, LastSeenAt: at(base, 72*time.Hour),
-	})
-	mustCreateWorkspace(t, ctx, svc, workspace.Record{
-		ID: "ws-foreign", ProjectID: string(proj.ID()), LocationID: "remote-box",
-		Root: "/foreign/app", LifecycleState: workspace.LifecycleActive,
-		LinkedAt: base, UpdatedAt: base, LastSeenAt: at(base, 96*time.Hour),
-	})
-	mustCreateWorkspace(t, ctx, svc, workspace.Record{
-		ID: "ws-valid", ProjectID: string(proj.ID()), LocationID: loc,
-		Root: "/valid/app", LifecycleState: workspace.LifecycleActive,
-		LinkedAt: base, UpdatedAt: base, LastSeenAt: at(base, time.Hour),
-	})
-
-	if got := svc.ResolveRoot(ctx, proj); got != "/valid/app" {
-		t.Fatalf("ResolveRoot=%q want same-location active /valid/app", got)
-	}
-}
-
-func TestResolveRootFallsBackWhenOnlyInvalidWorkspaces(t *testing.T) {
-	t.Parallel()
-	clock := &mutableClock{now: time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)}
-	svc := newProjectServiceWithClock(t, clock)
-	ctx := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
-
 	proj := seedProject(t, ctx, svc, "/seed/app")
 	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 
-	// Only a foreign-location workspace exists. With no usable candidate, the
-	// effective root must be the stored seed rather than the foreign root.
-	mustCreateWorkspace(t, ctx, svc, workspace.Record{
-		ID: "ws-foreign", ProjectID: string(proj.ID()), LocationID: "remote-box",
-		Root: "/foreign/app", LifecycleState: workspace.LifecycleActive,
-		LinkedAt: base, UpdatedAt: base, LastSeenAt: at(base, time.Hour),
-	})
+	for _, item := range []workspace.Record{
+		{ID: "ws-worktree", ProjectID: string(proj.ID()), UserID: "user-owner", LocationID: string(proj.LocationID()), Root: "/worktree/app", LifecycleState: workspace.LifecycleActive, LinkedAt: base, UpdatedAt: base},
+		{ID: "ws-duplicate", ProjectID: string(proj.ID()), UserID: "user-owner", LocationID: string(proj.LocationID()), Root: "/seed/app", LifecycleState: workspace.LifecycleActive, LinkedAt: base, UpdatedAt: base},
+		{ID: "ws-removed", ProjectID: string(proj.ID()), UserID: "user-owner", LocationID: string(proj.LocationID()), Root: "/removed/app", LifecycleState: workspace.LifecycleRemoved, LinkedAt: base, UpdatedAt: base},
+		{ID: "ws-foreign-location", ProjectID: string(proj.ID()), UserID: "user-owner", LocationID: "remote", Root: "/remote/app", LifecycleState: workspace.LifecycleActive, LinkedAt: base, UpdatedAt: base},
+		{ID: "ws-foreign-user", ProjectID: string(proj.ID()), UserID: "user-other", LocationID: string(proj.LocationID()), Root: "/other/app", LifecycleState: workspace.LifecycleActive, LinkedAt: base, UpdatedAt: base},
+	} {
+		mustCreateWorkspace(t, ctx, svc, item)
+	}
 
-	if got := svc.ResolveRoot(ctx, proj); got != proj.Root() {
-		t.Fatalf("ResolveRoot=%q want stored seed %q", got, proj.Root())
+	roots, err := svc.ActiveWorkspaceRoots(ctx, proj)
+	if err != nil {
+		t.Fatalf("ActiveWorkspaceRoots: %v", err)
+	}
+	want := map[string]bool{"/seed/app": true, "/worktree/app": true}
+	if len(roots) != len(want) {
+		t.Fatalf("roots=%v want stable root and owned active worktree", roots)
+	}
+	for _, root := range roots {
+		if !want[root] {
+			t.Fatalf("unexpected active root %q in %v", root, roots)
+		}
+	}
+}
+
+func TestActiveWorkspaceRootsReturnsStableRootWithoutWorkspaceRepository(t *testing.T) {
+	proj, err := project.New(project.NewInput{
+		ID: "project-1", Root: "/seed/app", UserID: "user-owner", CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("project.New: %v", err)
+	}
+	roots, err := (*Service)(nil).ActiveWorkspaceRoots(context.Background(), proj)
+	if err != nil || len(roots) != 1 || roots[0] != "/seed/app" {
+		t.Fatalf("roots=%v err=%v", roots, err)
 	}
 }
