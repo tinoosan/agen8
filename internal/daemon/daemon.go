@@ -79,10 +79,8 @@ func New(cfg Config) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build attention service: %w", err)
 	}
-	var projectProvisioner *projectHooksProvisioner
-	if !cfg.DisableLocalHookProvisioning {
-		projectProvisioner = newProjectHooksProvisionerWithBaseURL(application.AuthSvc, cfg.externalBaseURL(), logger.With("service", "hooks-provision"))
-	}
+	projectProvisioner := newProjectHooksProvisionerWithBaseURL(application.AuthSvc, cfg.externalBaseURL(), logger.With("service", "hooks-provision"))
+	projectProvisioner.localInstallation = !cfg.DisableLocalHookProvisioning
 	reg := rpc.NewRegistry()
 	for _, register := range []func() error{
 		func() error { return rpc.RegisterAuth(reg, application.AuthSvc) },
@@ -95,34 +93,34 @@ func New(cfg Config) (*Daemon, error) {
 		func() error { return rpc.RegisterGraph(reg, application.GraphSvc, application.GraphLinks) },
 		func() error { return rpc.RegisterMission(reg, application.MissionSvc) },
 		func() error {
-			var postCreate rpc.PostProjectCreate
-			var configureClaudeMCP rpc.ConfigureProjectClaudeMCP
-			if projectProvisioner != nil {
-				postCreate = func(ctx context.Context, userID, projectTitle, locationID, root string) projectrpc.ProjectSetupResult {
-					if strings.TrimSpace(locationID) != "local" {
-						return projectrpc.ProjectSetupResult{Warnings: []string{"Automatic harness setup is available only for local projects."}}
-					}
-					result := projectProvisioner.ProvisionProject(ctx, userID, projectTitle, root)
-					return projectrpc.ProjectSetupResult{
-						Attempted:           true,
-						HooksInstalled:      result.HooksInstalled,
-						ClaudeMCPConfigured: result.ClaudeMCP.Installed,
-						ClaudeMCPPath:       result.ClaudeMCP.Path,
-						Warnings:            result.Warnings,
-					}
+			postCreate := func(ctx context.Context, userID, projectTitle, locationID, root string) projectrpc.ProjectSetupResult {
+				if strings.TrimSpace(locationID) != "local" {
+					return projectrpc.ProjectSetupResult{Warnings: []string{"Automatic harness setup is available only for local projects."}}
 				}
-				configureClaudeMCP = func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
-					result, err := projectProvisioner.ProvisionClaudeMCP(ctx, userID, projectTitle, root)
-					if err != nil {
-						return projectrpc.ProjectClaudeMCPConfigureResult{}, err
-					}
-					return projectrpc.ProjectClaudeMCPConfigureResult{
-						Installed:  result.Installed,
-						Path:       result.Path,
-						ServerName: result.ServerName,
-						URL:        result.URL,
-					}, nil
+				result := projectProvisioner.ProvisionProject(ctx, userID, projectTitle, root)
+				return projectrpc.ProjectSetupResult{
+					Attempted:            projectProvisioner.localInstallation,
+					HooksInstalled:       result.HooksInstalled,
+					ClaudeMCPConfigured:  result.ClaudeMCP.Installed,
+					ClaudeMCPPath:        result.ClaudeMCP.Path,
+					RequiresClientAction: result.RequiresClientAction,
+					ClientSetupCommand:   result.ClientSetupCommand,
+					Warnings:             result.Warnings,
 				}
+			}
+			configureClaudeMCP := func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
+				result, err := projectProvisioner.ProvisionClaudeMCP(ctx, userID, projectTitle, root)
+				if err != nil {
+					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
+				}
+				return projectrpc.ProjectClaudeMCPConfigureResult{
+					Installed:            result.Installed,
+					Path:                 result.Path,
+					ServerName:           result.ServerName,
+					URL:                  result.URL,
+					RequiresClientAction: result.RequiresClientAction,
+					ClientSetupCommand:   result.ClientSetupCommand,
+				}, nil
 			}
 			return rpc.RegisterProject(reg, application.ProjectSvc, postCreate, configureClaudeMCP)
 		},

@@ -13,6 +13,7 @@ import EditProjectDialog from '../components/projects/EditProjectDialog'
 import CreateProjectDialog from '../components/projects/CreateProjectDialog'
 import ProjectTableRow from '../components/projects/ProjectTableRow'
 import RemoveProjectDialog, { type ProjectRemoveAction } from '../components/projects/RemoveProjectDialog'
+import ClientSetupDialog from '../components/projects/ClientSetupDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -72,6 +73,7 @@ export default function ProjectPage() {
   const [removeTarget, setRemoveTarget] = useState<{ project: Project; action: ProjectRemoveAction } | null>(null)
   const [linkTarget, setLinkTarget] = useState<Project | null>(null)
   const [editTarget, setEditTarget] = useState<Project | null>(null)
+  const [clientSetup, setClientSetup] = useState<{ command: string; projectName: string; continueTo?: string } | null>(null)
 
   // Filter projects by status + search
   const filteredProjects = useMemo(() => {
@@ -99,6 +101,14 @@ export default function ProjectPage() {
   const handleCreateSuccess = ({ project, setup }: ProjectCreateResult) => {
     queryClient.invalidateQueries({ queryKey: qk.projectsAll })
     toast.success(`Project "${projectDisplayName(project)}" created`)
+    if (setup?.requiresClientAction && setup.clientSetupCommand) {
+      setClientSetup({
+        command: setup.clientSetupCommand,
+        projectName: projectDisplayName(project),
+        continueTo: project.id ? `/project/${encodeURIComponent(project.id)}` : undefined,
+      })
+      return
+    }
     if (setup?.claudeMcpConfigured && setup.hooksInstalled) {
       toast.success('Claude MCP and attention hooks configured')
     } else if (setup && (setup.attempted || (setup.warnings?.length ?? 0) > 0)) {
@@ -112,6 +122,10 @@ export default function ProjectPage() {
   const configureClaudeMCP = async (project: Project) => {
     try {
       const result = await rpcCall<ProjectClaudeMCPConfigureResult>('project.claudeMCP.configure', { projectId: project.id })
+      if (result.requiresClientAction && result.clientSetupCommand) {
+        setClientSetup({ command: result.clientSetupCommand, projectName: projectDisplayName(project) })
+        return
+      }
       if (!result.installed) throw new Error('Claude MCP configuration was not installed')
       toast.success(`Claude MCP configured for "${projectDisplayName(project)}"`)
     } catch (error) {
@@ -330,6 +344,18 @@ export default function ProjectPage() {
               setEditTarget(null)
               queryClient.invalidateQueries({ queryKey: qk.projectsAll })
               toast.success(`Project renamed to "${projectDisplayName(updated)}"`)
+            }}
+          />
+        )}
+
+        {clientSetup && (
+          <ClientSetupDialog
+            command={clientSetup.command}
+            projectName={clientSetup.projectName}
+            onDone={() => {
+              const continueTo = clientSetup.continueTo
+              setClientSetup(null)
+              if (continueTo) navigate(continueTo)
             }}
           />
         )}

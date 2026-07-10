@@ -35,6 +35,7 @@ func newRootCmd() *cobra.Command {
 	root.SetVersionTemplate(versionText())
 	root.AddCommand(
 		newDaemonCmd(),
+		newClientCmd(),
 		newSkillCmd(),
 		newHooksCmd(),
 		newHealthcheckCmd(),

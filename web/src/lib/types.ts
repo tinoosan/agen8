@@ -33,6 +33,8 @@ export interface ProjectSetupResult {
   claudeMcpConfigured: boolean;
   claudeMcpPath?: string;
   warnings?: string[];
+  requiresClientAction?: boolean;
+  clientSetupCommand?: string;
 }
 
 export interface ProjectCreateResult {
@@ -46,6 +48,8 @@ export interface ProjectClaudeMCPConfigureResult {
   path?: string;
   serverName?: string;
   url?: string;
+  requiresClientAction?: boolean;
+  clientSetupCommand?: string;
 }
 
 export interface LocationAddress {

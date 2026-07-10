@@ -24,6 +24,8 @@ import (
 	"github.com/tinoosan/agen8/internal/rpc"
 	authapp "github.com/tinoosan/agen8/internal/services/auth/app"
 	auth "github.com/tinoosan/agen8/internal/services/auth/domain"
+	projectrpc "github.com/tinoosan/agen8/internal/services/project/rpc"
+	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/buildinfo"
 )
 
@@ -376,6 +378,108 @@ func TestDaemonConfigRejectsInvalidPublicURL(t *testing.T) {
 	}.withDefaults()
 	if err == nil {
 		t.Fatal("expected invalid public URL to fail")
+	}
+}
+
+func TestHostedProjectSetupReturnsOneTimeClientCommand(t *testing.T) {
+	dataDir := t.TempDir()
+	d, err := New(Config{
+		AppConfig:                    config.Config{DataDir: dataDir},
+		DisableLocalHookProvisioning: true,
+		PublicURL:                    "https://agen8.example.com",
+		SetupToken:                   "test-setup-token",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handler, err := d.httpHandler()
+	if err != nil {
+		t.Fatalf("httpHandler: %v", err)
+	}
+	sessionToken, _ := setupSessionAndAPIKeyForTest(t, handler)
+	projectRoot := t.TempDir()
+
+	createBody := []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0","id":1,"method":"project.create",
+		"params":{"root":%q,"title":"Hosted Project"}
+	}`, projectRoot))
+	createReq := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+sessionToken)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("project.create status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var createResponse struct {
+		Error  *rpc.Error                     `json:"error"`
+		Result projectrpc.ProjectCreateResult `json:"result"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createResponse); err != nil {
+		t.Fatalf("decode project.create: %v", err)
+	}
+	if createResponse.Error != nil {
+		t.Fatalf("project.create error=%+v", createResponse.Error)
+	}
+	setup := createResponse.Result.Setup
+	if setup == nil || setup.Attempted || !setup.RequiresClientAction {
+		t.Fatalf("hosted setup=%+v", setup)
+	}
+	assertHostedClientSetupCommand(t, setup.ClientSetupCommand)
+
+	configureBody := []byte(fmt.Sprintf(`{
+		"jsonrpc":"2.0","id":2,"method":"project.claudeMCP.configure",
+		"params":{"projectId":%q}
+	}`, createResponse.Result.Project.ID))
+	configureReq := httptest.NewRequest(http.MethodPost, "/rpc", bytes.NewReader(configureBody))
+	configureReq.Header.Set("Content-Type", "application/json")
+	configureReq.Header.Set("Authorization", "Bearer "+sessionToken)
+	configureRec := httptest.NewRecorder()
+	handler.ServeHTTP(configureRec, configureReq)
+	if configureRec.Code != http.StatusOK {
+		t.Fatalf("project.configure status=%d body=%s", configureRec.Code, configureRec.Body.String())
+	}
+	var configureResponse struct {
+		Error  *rpc.Error                                 `json:"error"`
+		Result projectrpc.ProjectClaudeMCPConfigureResult `json:"result"`
+	}
+	if err := json.Unmarshal(configureRec.Body.Bytes(), &configureResponse); err != nil {
+		t.Fatalf("decode project.configure: %v", err)
+	}
+	if configureResponse.Error != nil {
+		t.Fatalf("project.configure error=%+v", configureResponse.Error)
+	}
+	if configureResponse.Result.Installed || !configureResponse.Result.RequiresClientAction {
+		t.Fatalf("hosted configure=%+v", configureResponse.Result)
+	}
+	assertHostedClientSetupCommand(t, configureResponse.Result.ClientSetupCommand)
+
+	db, err := implstore.GetDB(config.Config{DataDir: dataDir})
+	if err != nil {
+		t.Fatalf("open project store: %v", err)
+	}
+	var leaked int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM project_registry
+		WHERE metadata_json LIKE '%ak_%' OR COALESCE(name, '') LIKE '%ak_%'
+	`).Scan(&leaked); err != nil {
+		t.Fatalf("scan project credential leakage: %v", err)
+	}
+	if leaked != 0 {
+		t.Fatalf("raw setup credential persisted in %d project records", leaked)
+	}
+}
+
+func assertHostedClientSetupCommand(t *testing.T, command string) {
+	t.Helper()
+	for _, want := range []string{
+		"agen8 client setup --harness claude",
+		"--url 'https://agen8.example.com'",
+		"--token 'ak_",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("client setup command missing %q", want)
+		}
 	}
 }
 

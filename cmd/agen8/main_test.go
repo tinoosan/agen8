@@ -54,7 +54,7 @@ func TestHelpListsHumanFacingCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run %v: unexpected error %v", args, err)
 		}
-		for _, want := range []string{"daemon", "skill", "hooks", "healthcheck", "version"} {
+		for _, want := range []string{"daemon", "client", "skill", "hooks", "healthcheck", "version"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("run %v output missing %q:\n%s", args, want, output)
 			}
@@ -64,6 +64,59 @@ func TestHelpListsHumanFacingCommands(t *testing.T) {
 			t.Fatalf("run %v leaked the internal claude entrypoint into help:\n%s", args, output)
 		}
 	}
+}
+
+func TestClientSetupInstallsClaudeIntegrations(t *testing.T) {
+	home := t.TempDir()
+	projectDir := t.TempDir()
+	fakeBin := t.TempDir()
+	claudeLog := filepath.Join(t.TempDir(), "claude.log")
+	claudePath := filepath.Join(fakeBin, "claude")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellSingleQuoteForTest(claudeLog) + "\n"
+	if err := os.WriteFile(claudePath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	output, err := runCLI(t,
+		"client", "setup",
+		"--harness", "claude",
+		"--url", "https://agen8.example.com",
+		"--token", "ak_client_test",
+		"--project-dir", projectDir,
+		"--home", home,
+	)
+	if err != nil {
+		t.Fatalf("client setup: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(home, ".claude", "skills", "agen8", "SKILL.md"),
+		filepath.Join(projectDir, ".claude", "settings.local.json"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected client artifact %s: %v", path, err)
+		}
+	}
+	calls, err := os.ReadFile(claudeLog)
+	if err != nil {
+		t.Fatalf("read claude calls: %v", err)
+	}
+	for _, want := range []string{
+		"configured agen8 for claude",
+		"server: https://agen8.example.com/mcp",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output %q missing %q", output, want)
+		}
+	}
+	if !strings.Contains(string(calls), "mcp add-json --scope local agen8") {
+		t.Fatalf("claude calls missing local MCP install: %s", calls)
+	}
+}
+
+func shellSingleQuoteForTest(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func TestUnknownCommandErrors(t *testing.T) {

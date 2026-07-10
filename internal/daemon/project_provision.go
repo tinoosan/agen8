@@ -20,22 +20,27 @@ import (
 // must never fail project creation. `agen8 hooks install` remains the manual
 // repair path.
 type projectHooksProvisioner struct {
-	auth    *authapp.Service
-	baseURL string
-	logger  *slog.Logger
+	auth              *authapp.Service
+	baseURL           string
+	localInstallation bool
+	logger            *slog.Logger
 }
 
 type projectClaudeMCPProvisionResult struct {
-	Installed  bool
-	Path       string
-	ServerName string
-	URL        string
+	Installed            bool
+	Path                 string
+	ServerName           string
+	URL                  string
+	RequiresClientAction bool
+	ClientSetupCommand   string
 }
 
 type projectProvisionResult struct {
-	HooksInstalled bool
-	ClaudeMCP      projectClaudeMCPProvisionResult
-	Warnings       []string
+	HooksInstalled       bool
+	ClaudeMCP            projectClaudeMCPProvisionResult
+	RequiresClientAction bool
+	ClientSetupCommand   string
+	Warnings             []string
 }
 
 func newProjectHooksProvisionerWithBaseURL(auth *authapp.Service, baseURL string, logger *slog.Logger) *projectHooksProvisioner {
@@ -46,7 +51,7 @@ func newProjectHooksProvisionerWithBaseURL(auth *authapp.Service, baseURL string
 	if logger == nil {
 		logger = slog.Default().With("service", "project-provision")
 	}
-	return &projectHooksProvisioner{auth: auth, baseURL: baseURL, logger: logger}
+	return &projectHooksProvisioner{auth: auth, baseURL: baseURL, localInstallation: true, logger: logger}
 }
 
 // ProvisionHooks mints a key and writes both harness configs. Returns whether
@@ -94,6 +99,18 @@ func (p *projectHooksProvisioner) ProvisionClaudeMCP(ctx context.Context, userID
 	if p == nil {
 		return projectClaudeMCPProvisionResult{}, fmt.Errorf("claude mcp provisioner is not configured")
 	}
+	if !p.localInstallation {
+		command, err := p.claudeClientSetupCommand(ctx, userID, projectTitle, root)
+		if err != nil {
+			return projectClaudeMCPProvisionResult{}, err
+		}
+		return projectClaudeMCPProvisionResult{
+			ServerName:           "agen8",
+			URL:                  p.baseURL + "/mcp",
+			RequiresClientAction: true,
+			ClientSetupCommand:   command,
+		}, nil
+	}
 	token, err := p.mintProjectToken(ctx, userID, projectTitle, root, "claude mcp")
 	if err != nil {
 		p.logger.Warn("claude mcp provision: mint api key", "error", err)
@@ -130,6 +147,17 @@ func (p *projectHooksProvisioner) ProvisionProject(ctx context.Context, userID, 
 		result.Warnings = append(result.Warnings, "Local harness setup is not configured.")
 		return result
 	}
+	if !p.localInstallation {
+		command, err := p.claudeClientSetupCommand(ctx, userID, projectTitle, root)
+		if err != nil {
+			p.logger.Warn("project provision: create client setup command", "error", err)
+			result.Warnings = append(result.Warnings, "Could not create a client setup command.")
+			return result
+		}
+		result.RequiresClientAction = true
+		result.ClientSetupCommand = command
+		return result
+	}
 	token, err := p.mintProjectToken(ctx, userID, projectTitle, root, "project integration")
 	if err != nil {
 		p.logger.Warn("project provision: mint api key", "error", err)
@@ -147,6 +175,18 @@ func (p *projectHooksProvisioner) ProvisionProject(ctx context.Context, userID, 
 		result.ClaudeMCP = claudeMCP
 	}
 	return result
+}
+
+func (p *projectHooksProvisioner) claudeClientSetupCommand(ctx context.Context, userID, projectTitle, root string) (string, error) {
+	token, err := p.mintProjectToken(ctx, userID, projectTitle, root, "client setup")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"agen8 client setup --harness claude --url %s --token %s",
+		shellQuote(p.baseURL),
+		shellQuote(token),
+	), nil
 }
 
 func (p *projectHooksProvisioner) mintProjectToken(ctx context.Context, userID, projectTitle, root, purpose string) (string, error) {

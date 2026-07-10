@@ -180,6 +180,9 @@ func (c projectClaudeMCPConfigurator) ConfigureClaudeMCP(ctx context.Context, re
 	if c.provisioner == nil {
 		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("claude mcp provisioner is not configured")
 	}
+	if !c.provisioner.localInstallation {
+		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("hosted Claude setup must be completed from the Agen8 Projects page")
+	}
 	projectID := strings.TrimSpace(req.ProjectID)
 	if projectID == "" {
 		return projecttool.ConfigureClaudeMCPResult{}, fmt.Errorf("project id is required")

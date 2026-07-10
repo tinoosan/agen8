@@ -67,11 +67,13 @@ type ProjectCreateResult struct {
 }
 
 type ProjectSetupResult struct {
-	Attempted           bool     `json:"attempted"`
-	HooksInstalled      bool     `json:"hooksInstalled"`
-	ClaudeMCPConfigured bool     `json:"claudeMcpConfigured"`
-	ClaudeMCPPath       string   `json:"claudeMcpPath,omitempty"`
-	Warnings            []string `json:"warnings,omitempty"`
+	Attempted            bool     `json:"attempted"`
+	HooksInstalled       bool     `json:"hooksInstalled"`
+	ClaudeMCPConfigured  bool     `json:"claudeMcpConfigured"`
+	ClaudeMCPPath        string   `json:"claudeMcpPath,omitempty"`
+	RequiresClientAction bool     `json:"requiresClientAction,omitempty"`
+	ClientSetupCommand   string   `json:"clientSetupCommand,omitempty"`
+	Warnings             []string `json:"warnings,omitempty"`
 }
 
 type ProjectClaudeMCPConfigureParams struct {
@@ -79,11 +81,13 @@ type ProjectClaudeMCPConfigureParams struct {
 }
 
 type ProjectClaudeMCPConfigureResult struct {
-	ProjectID  string `json:"projectId"`
-	Installed  bool   `json:"installed"`
-	Path       string `json:"path,omitempty"`
-	ServerName string `json:"serverName,omitempty"`
-	URL        string `json:"url,omitempty"`
+	ProjectID            string `json:"projectId"`
+	Installed            bool   `json:"installed"`
+	Path                 string `json:"path,omitempty"`
+	ServerName           string `json:"serverName,omitempty"`
+	URL                  string `json:"url,omitempty"`
+	RequiresClientAction bool   `json:"requiresClientAction,omitempty"`
+	ClientSetupCommand   string `json:"clientSetupCommand,omitempty"`
 }
 
 type ProjectSaveParams struct {

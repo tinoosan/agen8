@@ -139,6 +139,31 @@ describe('Project page', () => {
     })
   })
 
+  it('shows a one-time client command for hosted existing-project setup', async () => {
+    const user = userEvent.setup()
+    const command = "agen8 client setup --harness claude --url 'https://agen8.example.com' --token 'ak_once'"
+    mockRpcCall.mockImplementation((method: string) => {
+      if (method === 'project.claudeMCP.configure') {
+        return Promise.resolve({
+          projectId: 'alpha',
+          installed: false,
+          requiresClientAction: true,
+          clientSetupCommand: command,
+        })
+      }
+      return Promise.resolve({})
+    })
+
+    renderProjectPage()
+    await user.click(screen.getAllByRole('button', { name: /project actions/i })[0])
+    await user.click(screen.getByRole('menuitem', { name: /configure claude mcp/i }))
+
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Finish Claude setup')
+    expect(screen.getByText(command)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /done/i }))
+    expect(screen.queryByText(command)).not.toBeInTheDocument()
+  })
+
   it('uses the ready local location by default when creating the first project', async () => {
     const user = userEvent.setup()
     mockUseProjects.mockReturnValue({ isLoading: false, data: [] })
@@ -166,6 +191,47 @@ describe('Project page', () => {
         title: undefined,
       })
     })
+  })
+
+  it('keeps the hosted setup command visible after creating a project', async () => {
+    const user = userEvent.setup()
+    const command = "agen8 client setup --harness claude --url 'https://agen8.example.com' --token 'ak_once'"
+    mockUseProjects.mockReturnValue({ isLoading: false, data: [] })
+    mockRpcCall.mockImplementation((method: string) => {
+      if (method === 'location.fs.listDir') {
+        return Promise.resolve({ entries: [{ name: 'repo', path: '/Users/tino/repo', type: 'directory' }] })
+      }
+      if (method === 'project.create') {
+        return Promise.resolve({
+          project: {
+            id: 'proj_repo',
+            locationId: 'local',
+            root: '/Users/tino/repo',
+            title: 'repo',
+            status: 'open',
+          },
+          setup: {
+            attempted: false,
+            hooksInstalled: false,
+            claudeMcpConfigured: false,
+            requiresClientAction: true,
+            clientSetupCommand: command,
+          },
+        })
+      }
+      return Promise.resolve({})
+    })
+
+    renderProjectPage()
+    await user.click(screen.getByRole('button', { name: /new project/i }))
+    await user.click(await screen.findByText('repo'))
+    await user.click(screen.getByRole('button', { name: /select folder/i }))
+    await user.click(screen.getByRole('button', { name: /create project/i }))
+
+    expect(await screen.findByText(command)).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('Finish Claude setup')
+    await user.click(screen.getByRole('button', { name: /done/i }))
+    expect(screen.queryByText(command)).not.toBeInTheDocument()
   })
 
   it('deletes an archived project from the project table', async () => {
