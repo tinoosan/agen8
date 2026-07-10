@@ -195,9 +195,6 @@ func (s *Service) Create(ctx context.Context, params CreateTaskParams) (domain.T
 	if err := s.tasks.CreateTask(ctx, next); err != nil {
 		return domain.Task{}, fmt.Errorf("create task: %w", err)
 	}
-	if err := s.validateKeyResultMissionLinkage(ctx, next); err != nil {
-		return domain.Task{}, err
-	}
 	s.logTaskTransition("create", next, caller)
 	return next, nil
 }
@@ -237,40 +234,6 @@ func (s *Service) Count(ctx context.Context, filter domain.TaskFilter) (int, err
 		return 0, fmt.Errorf("task count offset must be non-negative")
 	}
 	return s.tasks.CountTasks(ctx, filter)
-}
-
-// validateKeyResultMissionLinkage guards the structural tree at create time:
-// a task's key result must resolve to a mission, and any mission ref supplied
-// in metadata must agree with it. A key result without mission linkage, or a
-// contradictory metadata mission ref, would mis-cluster the task on the map.
-//
-// This used to also emit task→KR and task→mission "serves" context links, but
-// those just restated the structural tree (the frontend already draws KR→task
-// structurally), so they were removed. Only the validation remains.
-func (s *Service) validateKeyResultMissionLinkage(ctx context.Context, task domain.Task) error {
-	keyResultRef := strings.TrimSpace(task.KeyResultRef)
-	if keyResultRef == "" {
-		return nil
-	}
-	metadataMissionRef, err := missionRefFromMetadata(task.Metadata)
-	if err != nil {
-		return err
-	}
-	if s.missions == nil {
-		return fmt.Errorf("task service: key result mission reader is required")
-	}
-	resolvedMissionRef, err := s.missions.KeyResultMission(ctx, keyResultRef)
-	if err != nil {
-		return fmt.Errorf("resolve task key result %s mission: %w", keyResultRef, err)
-	}
-	resolvedMissionRef = strings.TrimSpace(resolvedMissionRef)
-	if resolvedMissionRef == "" {
-		return fmt.Errorf("task service: key result %s is missing mission linkage", keyResultRef)
-	}
-	if metadataMissionRef != "" && !strings.EqualFold(metadataMissionRef, resolvedMissionRef) {
-		return fmt.Errorf("task service: key result %s belongs to mission %s, but metadata provided %s", keyResultRef, resolvedMissionRef, metadataMissionRef)
-	}
-	return nil
 }
 
 func missionRefFromMetadata(metadata map[string]any) (string, error) {
