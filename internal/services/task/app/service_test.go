@@ -186,6 +186,28 @@ func TestCreateRejectsInvalidKeyResultBeforePersisting(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsMismatchedMissionBeforePersisting(t *testing.T) {
+	repo := &fakeTaskRepository{}
+	svc := newBoundaryService(repo, caller.Caller{MemberID: "coord-1"})
+	svc.missions = fakeKeyResultMissionReader{missions: map[string]string{"kr-1": "mission-1"}}
+
+	_, err := svc.Create(context.Background(), CreateTaskParams{
+		ProjectID:          "space-1",
+		AssignedTo:         "worker-1",
+		Title:              "Mismatched linked task",
+		Description:        "Must not survive contradictory linkage",
+		AcceptanceCriteria: []string{"done"},
+		KeyResultRef:       "kr-1",
+		MissionRef:         "mission-2",
+	})
+	if err == nil {
+		t.Fatal("expected mission mismatch error")
+	}
+	if len(repo.tasks) != 0 {
+		t.Fatalf("persisted tasks=%d want 0", len(repo.tasks))
+	}
+}
+
 func TestAssignUsesTaskOwnedMemberSnapshotForAssigneeLabel(t *testing.T) {
 	repo := &fakeTaskRepository{tasks: map[string]taskdomain.Task{
 		"task-1": {ID: "task-1", ProjectID: "space-1", AssignedTo: "coord-1", Status: taskdomain.TaskStatusActive},
