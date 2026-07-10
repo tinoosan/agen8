@@ -60,6 +60,36 @@ func TestSaveProjectStampsOwningUser(t *testing.T) {
 	}
 }
 
+func TestProjectReadsAreScopedToCaller(t *testing.T) {
+	t.Parallel()
+	svc := newProjectServiceWithIssuer(t, &fakeLinkTokenIssuer{})
+	ownerA := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-a"})
+	ownerB := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-b"})
+
+	projectA, err := svc.CreateProject(ownerA, CreateProjectInput{Root: "/work/a", Title: "A"})
+	if err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB, err := svc.CreateProject(ownerB, CreateProjectInput{Root: "/work/b", Title: "B"})
+	if err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	if _, err := svc.GetProject(ownerA, projectB.ID()); err == nil {
+		t.Fatal("owner A read owner B's project")
+	}
+	listed, err := svc.ListProjects(ownerA, project.Filter{})
+	if err != nil {
+		t.Fatalf("list owner A projects: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID() != projectA.ID() {
+		t.Fatalf("owner A projects=%v want only %s", listed, projectA.ID())
+	}
+	if _, err := svc.ArchiveProject(ownerA, projectB.ID()); err == nil {
+		t.Fatal("owner A archived owner B's project")
+	}
+}
+
 // Deletion is a deliberate two-step: a project must be archived before it can be
 // permanently removed. Deleting an open project must return ErrNotArchived (a
 // client precondition the RPC layer surfaces as invalid-params), NOT a generic

@@ -23,6 +23,8 @@ type Record struct {
 }
 
 type Filter struct {
+	ID     types.ProjectID
+	UserID string
 	Status Status
 	Limit  int
 	Offset int

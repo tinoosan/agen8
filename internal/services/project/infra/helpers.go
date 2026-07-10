@@ -96,29 +96,6 @@ func parseTime(value string) time.Time {
 	return t.UTC()
 }
 
-func projectWhere(filter project.Filter) (string, []any, error) {
-	if filter.Limit < 0 || filter.Offset < 0 {
-		return "", nil, fmt.Errorf("project limit and offset must be non-negative")
-	}
-	var clauses []string
-	var args []any
-	if filter.Status != "" {
-		clauses = append(clauses, "status = ?")
-		args = append(args, strings.TrimSpace(string(filter.Status)))
-	}
-	if len(clauses) == 0 {
-		return "", args, nil
-	}
-	return " WHERE " + strings.Join(clauses, " AND "), args, nil
-}
-
-func projectMatchesFilter(record project.Record, filter project.Filter) bool {
-	if filter.Status != "" && record.Status != project.Status(strings.TrimSpace(string(filter.Status))) {
-		return false
-	}
-	return true
-}
-
 func scanProject(scanner interface{ Scan(dest ...any) error }) (project.Record, error) {
 	var record project.Record
 	var createdAt, updatedAt, customization string
