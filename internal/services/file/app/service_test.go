@@ -188,6 +188,7 @@ type spyFileRepository struct {
 	statPaths    []filedomain.Reference
 	listDirPaths []filedomain.Reference
 	readPaths    []filedomain.Reference
+	writePaths   []filedomain.Reference
 }
 
 func (r *spyFileRepository) Stat(_ context.Context, ref filedomain.Reference) (filedomain.Info, error) {
@@ -217,7 +218,8 @@ func (*spyFileRepository) Copy(context.Context, filedomain.Reference, filedomain
 	return nil
 }
 func (*spyFileRepository) Delete(context.Context, filedomain.Reference) error { return nil }
-func (*spyFileRepository) WriteFile(context.Context, filedomain.Reference, []byte) error {
+func (r *spyFileRepository) WriteFile(_ context.Context, ref filedomain.Reference, _ []byte) error {
+	r.writePaths = append(r.writePaths, ref)
 	return nil
 }
 
@@ -253,6 +255,64 @@ func TestUploadGetRoundTripsPNGAttachment(t *testing.T) {
 	roundTripped, err := base64.StdEncoding.DecodeString(got.BytesB64)
 	require.NoError(t, err)
 	require.Equal(t, sha256.Sum256(pngBytes), sha256.Sum256(roundTripped), "bytes must round-trip identically")
+}
+
+func TestUploadRejectsOversizedContent(t *testing.T) {
+	projectRoot := t.TempDir()
+	repo := &spyFileRepository{}
+	svc := newTestService(t, projectRoot, repo)
+
+	_, err := svc.Upload(context.Background(), UploadInput{
+		ProjectID: "project-test-0",
+		Path:      "/project/large.bin",
+		Bytes:     bytes.Repeat([]byte{0x78}, int(uploadMaxBytes)+1),
+	})
+	require.ErrorContains(t, err, "upload exceeds")
+	require.Empty(t, repo.writePaths)
+}
+
+func TestUploadReaderFallbackRejectsOversizedContent(t *testing.T) {
+	projectRoot := t.TempDir()
+	repo := &spyFileRepository{}
+	svc := newTestService(t, projectRoot, repo)
+
+	_, err := svc.UploadReader(context.Background(), UploadReaderInput{
+		ProjectID: "project-test-0",
+		Path:      "/project/large.bin",
+		Reader:    bytes.NewReader(bytes.Repeat([]byte{0x78}, int(uploadMaxBytes)+1)),
+	})
+	require.ErrorContains(t, err, "upload exceeds")
+	require.Empty(t, repo.writePaths)
+}
+
+func TestUploadReaderStreamingRepositoryRejectsOversizedContent(t *testing.T) {
+	projectRoot := t.TempDir()
+	svc := newTestService(t, projectRoot, fileinfra.NewLocalRepository())
+
+	_, err := svc.UploadReader(context.Background(), UploadReaderInput{
+		ProjectID: "project-test-0",
+		Path:      "/project/large.bin",
+		Reader:    bytes.NewReader(bytes.Repeat([]byte{0x78}, int(uploadMaxBytes)+1)),
+	})
+	require.ErrorContains(t, err, "upload exceeds")
+	_, statErr := os.Stat(filepath.Join(projectRoot, "large.bin"))
+	require.True(t, os.IsNotExist(statErr), "oversized streaming upload must not leave a final file")
+}
+
+func TestUploadReaderStreamingRepositoryAllowsMaxSizedContent(t *testing.T) {
+	projectRoot := t.TempDir()
+	svc := newTestService(t, projectRoot, fileinfra.NewLocalRepository())
+
+	uploaded, err := svc.UploadReader(context.Background(), UploadReaderInput{
+		ProjectID: "project-test-0",
+		Path:      "/project/max.bin",
+		Reader:    bytes.NewReader(bytes.Repeat([]byte{0x78}, int(uploadMaxBytes))),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "/project/max.bin", uploaded.Path)
+	info, err := os.Stat(filepath.Join(projectRoot, "max.bin"))
+	require.NoError(t, err)
+	require.Equal(t, int64(uploadMaxBytes), info.Size())
 }
 
 // TestBaselineReturnsCommittedContent exercises the real git path: a repo

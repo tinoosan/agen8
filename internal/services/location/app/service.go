@@ -23,6 +23,8 @@ type Service struct {
 	logger    *slog.Logger
 }
 
+const maxLocationListLimit = 100
+
 type Config struct {
 	Locations locationdomain.Repository
 	Transport Transport
@@ -252,8 +254,9 @@ func (s *Service) ListLocations(ctx context.Context, filter locationdomain.Filte
 	if s == nil {
 		return nil, fmt.Errorf("location service is nil")
 	}
-	if filter.Limit < 0 || filter.Offset < 0 {
-		return nil, fmt.Errorf("location limit and offset must be non-negative")
+	filter, err := normalizeLocationListFilter(filter)
+	if err != nil {
+		return nil, err
 	}
 	records, err := s.locations.List(ctx, filter)
 	if err != nil {
@@ -268,6 +271,16 @@ func (s *Service) ListLocations(ctx context.Context, filter locationdomain.Filte
 		out = append(out, location)
 	}
 	return out, nil
+}
+
+func normalizeLocationListFilter(filter locationdomain.Filter) (locationdomain.Filter, error) {
+	if filter.Limit < 0 || filter.Offset < 0 {
+		return locationdomain.Filter{}, fmt.Errorf("location limit and offset must be non-negative")
+	}
+	if filter.Limit == 0 || filter.Limit > maxLocationListLimit {
+		filter.Limit = maxLocationListLimit
+	}
+	return filter, nil
 }
 
 func (s *Service) DeleteLocation(ctx context.Context, id locationdomain.ID) error {

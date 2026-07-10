@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- used only for stable legacy-compatible identifiers, not cryptography.
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -93,6 +93,7 @@ func (s *Service) ListWorkspaces(ctx context.Context, filter workspace.Filter) (
 // It mirrors deterministicMemberID: same inputs, same id, so a re-link of the
 // same folder on the same machine resolves to the same workspace row.
 func deterministicWorkspaceID(projectID, locationID, root, machine string) workspace.ID {
+	// #nosec G401 -- durable compatibility identifier; not used for cryptographic security.
 	sum := sha1.Sum([]byte(strings.TrimSpace(projectID) + "\x00" +
 		strings.TrimSpace(locationID) + "\x00" +
 		strings.TrimSpace(root) + "\x00" +

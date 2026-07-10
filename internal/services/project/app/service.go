@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- used only for stable legacy-compatible identifiers, not cryptography.
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -428,6 +428,7 @@ func ProjectIDForLocationRoot(locationID types.LocationID, root string) types.Pr
 	if slug == "" {
 		slug = "project"
 	}
+	// #nosec G401 -- durable compatibility identifier; not used for cryptographic security.
 	sum := sha1.Sum([]byte(string(locationID) + "\x00" + cleaned))
 	return types.ProjectID(fmt.Sprintf("%s-%s", slug, hex.EncodeToString(sum[:])[:8]))
 }
