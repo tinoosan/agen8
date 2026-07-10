@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { codeViewLanguageExtensions } from './codeViewLanguages'
+import { loadCodeViewLanguageExtensions } from './codeViewLanguages'
 
-describe('codeViewLanguageExtensions', () => {
-  it('uses a shell parser for shell scripts', () => {
-    expect(codeViewLanguageExtensions('/project/scripts/homelab-readiness-check.sh')).toHaveLength(1)
-    expect(codeViewLanguageExtensions('/project/scripts/deploy.bash')).toHaveLength(1)
-    expect(codeViewLanguageExtensions('/project/scripts/dev.zsh')).toHaveLength(1)
+describe('loadCodeViewLanguageExtensions', () => {
+  it('uses a shell parser for shell scripts', async () => {
+    await expect(loadCodeViewLanguageExtensions('/project/scripts/homelab-readiness-check.sh')).resolves.toHaveLength(1)
+    await expect(loadCodeViewLanguageExtensions('/project/scripts/deploy.bash')).resolves.toHaveLength(1)
+    await expect(loadCodeViewLanguageExtensions('/project/scripts/dev.zsh')).resolves.toHaveLength(1)
   })
 
-  it('leaves unknown extensions as plain text', () => {
-    expect(codeViewLanguageExtensions('/project/README.unknown')).toHaveLength(0)
+  it('leaves unknown extensions as plain text', async () => {
+    await expect(loadCodeViewLanguageExtensions('/project/README.unknown')).resolves.toHaveLength(0)
   })
 })

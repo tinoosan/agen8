@@ -29,7 +29,7 @@ function preview(content: string): ArtifactGetResult {
 }
 
 describe('ArtifactViewer', () => {
-  it('renders non-markdown text through the IDE-style code viewer', () => {
+  it('renders non-markdown text through the IDE-style code viewer', async () => {
     render(
       <ArtifactViewer
         file={file('/project/scripts/homelab-readiness-check.sh')}
@@ -40,12 +40,12 @@ describe('ArtifactViewer', () => {
       />,
     )
 
-    expect(screen.getByTestId('code-view')).toBeInTheDocument()
+    expect(await screen.findByTestId('code-view')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Search file content' })).toBeInTheDocument()
     expect(screen.queryByTestId('document-viewer')).not.toBeInTheDocument()
   })
 
-  it('does not duplicate the selected filename in slideover previews', () => {
+  it('does not duplicate the selected filename in slideover previews', async () => {
     render(
       <ArtifactViewer
         file={file('/project/scripts/homelab-readiness-check.sh')}
@@ -56,11 +56,11 @@ describe('ArtifactViewer', () => {
       />,
     )
 
+    expect(await screen.findByText('.sh')).toBeInTheDocument()
     expect(screen.queryByText('homelab-readiness-check.sh')).not.toBeInTheDocument()
-    expect(screen.getByText('.sh')).toBeInTheDocument()
   })
 
-  it('keeps the selected path title on full page previews', () => {
+  it('keeps the selected path title on full page previews', async () => {
     render(
       <ArtifactViewer
         file={file('/project/scripts/homelab-readiness-check.sh')}
@@ -71,10 +71,10 @@ describe('ArtifactViewer', () => {
       />,
     )
 
-    expect(screen.getByText('/project/scripts/homelab-readiness-check.sh')).toBeInTheDocument()
+    expect(await screen.findByText('/project/scripts/homelab-readiness-check.sh')).toBeInTheDocument()
   })
 
-  it('keeps markdown on the rendered document viewer path', () => {
+  it('keeps markdown on the rendered document viewer path', async () => {
     render(
       <ArtifactViewer
         file={file('/project/README.md')}
@@ -85,7 +85,7 @@ describe('ArtifactViewer', () => {
       />,
     )
 
-    expect(screen.getByTestId('document-viewer')).toBeInTheDocument()
+    expect(await screen.findByTestId('document-viewer')).toBeInTheDocument()
     expect(screen.queryByTestId('code-view')).not.toBeInTheDocument()
   })
 })
