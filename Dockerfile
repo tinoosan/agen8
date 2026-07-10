@@ -26,12 +26,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 	-ldflags="-s -w -X github.com/tinoosan/agen8/pkg/buildinfo.Version=${VERSION} -X github.com/tinoosan/agen8/pkg/buildinfo.Commit=${COMMIT} -X github.com/tinoosan/agen8/pkg/buildinfo.BuildDate=${BUILD_DATE}" \
 	-o /out/agen8 ./cmd/agen8
 
-FROM debian:bookworm-slim AS runtime
+FROM alpine:3.22.5 AS runtime
 
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends ca-certificates git \
-	&& rm -rf /var/lib/apt/lists/* \
-	&& useradd --system --uid 10001 --home-dir /data --create-home --shell /usr/sbin/nologin agen8
+RUN apk add --no-cache ca-certificates git \
+	&& addgroup -S -g 10001 agen8 \
+	&& adduser -S -D -H -u 10001 -G agen8 -s /sbin/nologin agen8 \
+	&& mkdir -p /data \
+	&& chown agen8:agen8 /data
 
 COPY --from=go-builder /out/agen8 /usr/local/bin/agen8
 
