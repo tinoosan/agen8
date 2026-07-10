@@ -92,7 +92,7 @@ manifest-check:
 
 audit: web-install
 	@govulncheck $(GO_PACKAGES)
-	@gosec -quiet ./internal/daemon/... ./internal/hookinstaller/...
+	@gosec -quiet -exclude-generated $(GO_PACKAGES)
 	@$(WEB_NPM) audit --package-lock-only --audit-level=low
 	@cd web && $(WEB_NPM) audit --audit-level=low
 
