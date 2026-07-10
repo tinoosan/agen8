@@ -58,7 +58,7 @@ jobs:
       - name: Run security checks
         run: |
           govulncheck ./...
-          gosec -quiet ./internal/daemon/... ./internal/hookinstaller/...
+          gosec -quiet -exclude-generated ./...
 
       - name: Validate Kubernetes manifest
         run: |
@@ -107,3 +107,60 @@ jobs:
 
       - name: Reject production source maps
         run: test -z "$(find ../internal/web/dist -type f -name '*.map' -print -quit)"
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build release container
+        run: |
+          docker build \
+            --build-arg VERSION=ci \
+            --build-arg COMMIT="$GITHUB_SHA" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --tag agen8:ci \
+            .
+
+      - name: Verify runtime contract
+        run: |
+          test "$(docker image inspect agen8:ci --format '{{.Config.User}}')" = "agen8"
+          size="$(docker image inspect agen8:ci --format '{{.Size}}')"
+          echo "Uncompressed image size: ${size} bytes"
+          test "$size" -lt 170000000
+          docker run --rm --entrypoint git agen8:ci --version
+
+          container_id="$(docker run --detach \
+            --read-only \
+            --tmpfs /data:uid=10001,gid=10001,mode=0700 \
+            --tmpfs /tmp:uid=10001,gid=10001,mode=0700 \
+            agen8:ci)"
+          trap 'docker rm --force "$container_id" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 30); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$container_id")"
+            if [ "$health" = "healthy" ]; then
+              exit 0
+            fi
+            if [ "$health" = "unhealthy" ]; then
+              docker logs "$container_id"
+              exit 1
+            fi
+            sleep 2
+          done
+          docker logs "$container_id"
+          exit 1
+
+      - name: Scan release container
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy-cache"
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$RUNNER_TEMP/trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
+            image \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            agen8:ci
