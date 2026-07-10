@@ -95,12 +95,12 @@ func (p *projectHooksProvisioner) installHooks(root, token string) bool {
 // ProvisionClaudeMCP mints a fresh project-scoped key and upserts Claude Code's
 // project-local Agen8 MCP server entry. Unlike project creation hooks, this is
 // caller-visible: repair failures are returned so the caller can act.
-func (p *projectHooksProvisioner) ProvisionClaudeMCP(ctx context.Context, userID, projectTitle, root string) (projectClaudeMCPProvisionResult, error) {
+func (p *projectHooksProvisioner) ProvisionClaudeMCP(ctx context.Context, userID, projectID, projectTitle, root string) (projectClaudeMCPProvisionResult, error) {
 	if p == nil {
 		return projectClaudeMCPProvisionResult{}, fmt.Errorf("claude mcp provisioner is not configured")
 	}
 	if !p.localInstallation {
-		command, err := p.claudeClientSetupCommand(ctx, userID, projectTitle, root)
+		command, err := p.claudeClientSetupCommand(ctx, userID, projectID, projectTitle)
 		if err != nil {
 			return projectClaudeMCPProvisionResult{}, err
 		}
@@ -141,14 +141,14 @@ func (p *projectHooksProvisioner) installClaudeMCP(ctx context.Context, root, to
 // ProvisionProject uses one project-scoped credential for attention hooks and
 // Claude MCP, then reports each outcome independently. Failures never undo the
 // project record.
-func (p *projectHooksProvisioner) ProvisionProject(ctx context.Context, userID, projectTitle, root string) projectProvisionResult {
+func (p *projectHooksProvisioner) ProvisionProject(ctx context.Context, userID, projectID, projectTitle, root string) projectProvisionResult {
 	result := projectProvisionResult{}
 	if p == nil {
 		result.Warnings = append(result.Warnings, "Local harness setup is not configured.")
 		return result
 	}
 	if !p.localInstallation {
-		command, err := p.claudeClientSetupCommand(ctx, userID, projectTitle, root)
+		command, err := p.claudeClientSetupCommand(ctx, userID, projectID, projectTitle)
 		if err != nil {
 			p.logger.Warn("project provision: create client setup command", "error", err)
 			result.Warnings = append(result.Warnings, "Could not create a client setup command.")
@@ -177,8 +177,8 @@ func (p *projectHooksProvisioner) ProvisionProject(ctx context.Context, userID, 
 	return result
 }
 
-func (p *projectHooksProvisioner) claudeClientSetupCommand(ctx context.Context, userID, projectTitle, root string) (string, error) {
-	token, err := p.mintProjectToken(ctx, userID, projectTitle, root, "client setup")
+func (p *projectHooksProvisioner) claudeClientSetupCommand(ctx context.Context, userID, projectID, projectTitle string) (string, error) {
+	token, err := p.mintProjectLinkToken(ctx, userID, projectID, projectTitle)
 	if err != nil {
 		return "", err
 	}
@@ -187,6 +187,33 @@ func (p *projectHooksProvisioner) claudeClientSetupCommand(ctx context.Context, 
 		shellQuote(p.baseURL),
 		shellQuote(token),
 	), nil
+}
+
+func (p *projectHooksProvisioner) mintProjectLinkToken(ctx context.Context, userID, projectID, projectTitle string) (string, error) {
+	if p == nil || p.auth == nil {
+		return "", fmt.Errorf("project provisioner is not configured")
+	}
+	uid, err := userdomain.NewID(userID)
+	if err != nil {
+		return "", err
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return "", fmt.Errorf("project id is required")
+	}
+	label := "client setup"
+	if title := strings.TrimSpace(projectTitle); title != "" {
+		label += ": " + title
+	}
+	issued, err := p.auth.CreateLinkToken(ctx, authapp.CreateLinkTokenParams{
+		UserID:    uid,
+		ProjectID: projectID,
+		Label:     label,
+	})
+	if err != nil {
+		return "", err
+	}
+	return issued.Token, nil
 }
 
 func (p *projectHooksProvisioner) mintProjectToken(ctx context.Context, userID, projectTitle, root, purpose string) (string, error) {

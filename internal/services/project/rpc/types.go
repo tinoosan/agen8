@@ -115,6 +115,15 @@ type ProjectUpdateResult struct {
 	Project ProjectView `json:"project"`
 }
 
+type ProjectRelocateParams struct {
+	ProjectID string `json:"projectId"`
+	Root      string `json:"root"`
+}
+
+type ProjectRelocateResult struct {
+	Project ProjectView `json:"project"`
+}
+
 type ProjectArchiveParams struct {
 	ProjectID string `json:"projectId"`
 }

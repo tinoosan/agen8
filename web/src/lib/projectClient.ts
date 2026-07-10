@@ -87,3 +87,11 @@ export async function updateProject(
   if (changes.customization !== undefined) params.customization = changes.customization
   return rpcUnwrap<Project>('project.update', params, 'project')
 }
+
+export async function relocateProject(projectId: string, root: string): Promise<Project> {
+  const id = projectId.trim()
+  const nextRoot = root.trim()
+  if (!id) throw new Error('project id is required to relocate a project')
+  if (!nextRoot) throw new Error('project root is required')
+  return rpcUnwrap<Project>('project.relocate', { projectId: id, root: nextRoot }, 'project')
+}

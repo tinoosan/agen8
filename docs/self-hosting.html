@@ -184,6 +184,15 @@ agen8 client setup --harness claude \
     client integration, or pass <code>--project-dir</code> explicitly.
   </p>
 
+  <p>
+    When a project folder moves or is renamed, use <strong>Project actions &gt;
+    Change project folder</strong>. The operation keeps the existing project ID
+    and validates the new directory on the project's configured location.
+    Hosted setup commands use project-bound <code>wlt_</code> credentials, so
+    generate a fresh command with <strong>Configure Claude MCP</strong> after
+    relocating the project.
+  </p>
+
   <p>Install the Agen8 workflow skill for Codex locally:</p>
 
 <pre><code class="lang-shell">agen8 skill install --harness codex</code></pre>

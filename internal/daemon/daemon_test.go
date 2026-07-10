@@ -429,7 +429,11 @@ func TestHostedProjectSetupReturnsOneTimeClientCommand(t *testing.T) {
 	if setup == nil || setup.Attempted || !setup.RequiresClientAction {
 		t.Fatalf("hosted setup=%+v", setup)
 	}
-	assertHostedClientSetupCommand(t, setup.ClientSetupCommand)
+	setupToken := assertHostedClientSetupCommand(t, setup.ClientSetupCommand)
+	setupBinding, err := d.app.AuthSvc.ValidateLinkToken(context.Background(), setupToken)
+	if err != nil || setupBinding.ProjectID != createResponse.Result.Project.ID {
+		t.Fatalf("hosted create token binding project=%q err=%v", setupBinding.ProjectID, err)
+	}
 
 	configureBody := []byte(fmt.Sprintf(`{
 		"jsonrpc":"2.0","id":2,"method":"project.claudeMCP.configure",
@@ -456,7 +460,11 @@ func TestHostedProjectSetupReturnsOneTimeClientCommand(t *testing.T) {
 	if configureResponse.Result.Installed || !configureResponse.Result.RequiresClientAction {
 		t.Fatalf("hosted configure=%+v", configureResponse.Result)
 	}
-	assertHostedClientSetupCommand(t, configureResponse.Result.ClientSetupCommand)
+	configureToken := assertHostedClientSetupCommand(t, configureResponse.Result.ClientSetupCommand)
+	configureBinding, err := d.app.AuthSvc.ValidateLinkToken(context.Background(), configureToken)
+	if err != nil || configureBinding.ProjectID != createResponse.Result.Project.ID {
+		t.Fatalf("hosted configure token binding project=%q err=%v", configureBinding.ProjectID, err)
+	}
 
 	db, err := implstore.GetDB(config.Config{DataDir: dataDir})
 	if err != nil {
@@ -465,7 +473,8 @@ func TestHostedProjectSetupReturnsOneTimeClientCommand(t *testing.T) {
 	var leaked int
 	if err := db.QueryRow(`
 		SELECT COUNT(*) FROM project_registry
-		WHERE metadata_json LIKE '%ak_%' OR COALESCE(name, '') LIKE '%ak_%'
+		WHERE metadata_json LIKE '%ak_%' OR metadata_json LIKE '%wlt_%'
+		   OR COALESCE(name, '') LIKE '%ak_%' OR COALESCE(name, '') LIKE '%wlt_%'
 	`).Scan(&leaked); err != nil {
 		t.Fatalf("scan project credential leakage: %v", err)
 	}
@@ -474,17 +483,28 @@ func TestHostedProjectSetupReturnsOneTimeClientCommand(t *testing.T) {
 	}
 }
 
-func assertHostedClientSetupCommand(t *testing.T, command string) {
+func assertHostedClientSetupCommand(t *testing.T, command string) string {
 	t.Helper()
 	for _, want := range []string{
 		"agen8 client setup --harness claude",
 		"--url 'https://agen8.example.com'",
-		"--token 'ak_",
+		"--token 'wlt_",
 	} {
 		if !strings.Contains(command, want) {
 			t.Fatalf("client setup command missing %q", want)
 		}
 	}
+	const marker = "--token '"
+	start := strings.Index(command, marker)
+	if start < 0 {
+		t.Fatal("client setup command is missing token marker")
+	}
+	start += len(marker)
+	end := strings.Index(command[start:], "'")
+	if end < 0 {
+		t.Fatal("client setup command has an unterminated token")
+	}
+	return command[start : start+end]
 }
 
 func TestAttentionHookAcceptsRemoteStyleRawPayload(t *testing.T) {

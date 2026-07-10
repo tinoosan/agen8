@@ -195,7 +195,7 @@ func (c projectClaudeMCPConfigurator) ConfigureClaudeMCP(ctx context.Context, re
 	if root == "" {
 		root = project.Root()
 	}
-	result, err := c.provisioner.ProvisionClaudeMCP(ctx, strings.TrimSpace(req.UserID), project.Title(), root)
+	result, err := c.provisioner.ProvisionClaudeMCP(ctx, strings.TrimSpace(req.UserID), string(project.ID()), project.Title(), root)
 	if err != nil {
 		return projecttool.ConfigureClaudeMCPResult{}, err
 	}

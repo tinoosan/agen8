@@ -155,6 +155,23 @@ func (p Project) Update(input UpdateInput, now time.Time) Project {
 	return next
 }
 
+// Relocate changes only the canonical directory used to identify the project.
+// The project ID stays stable so missions, tasks, members, and history do not
+// fork when a repository is moved or its folder is renamed.
+func (p Project) Relocate(root string, now time.Time) (Project, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return Project{}, fmt.Errorf("project root is required")
+	}
+	if root == p.root {
+		return p, nil
+	}
+	next := p
+	next.root = root
+	next.updatedAt = now.UTC()
+	return next, nil
+}
+
 // Close moves an active project to closed.
 func (p Project) Close(now time.Time) (Project, error) {
 	return p.transition(StatusClosed, now)

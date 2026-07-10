@@ -2,10 +2,13 @@ package project
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/tinoosan/agen8/internal/core/types"
 )
+
+var ErrRootInUse = errors.New("project root is already registered")
 
 type Record struct {
 	ID            types.ProjectID

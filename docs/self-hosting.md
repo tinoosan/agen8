@@ -183,6 +183,12 @@ for new and existing projects. Display-name changes do not require reconnecting
 Claude. Re-run the setup command from the local project directory to repair the
 client integration, or pass `--project-dir` explicitly.
 
+When a project folder moves or is renamed, use **Project actions > Change
+project folder**. The operation keeps the existing project ID and validates the
+new directory on the project's configured location. Hosted setup commands use
+project-bound `wlt_` credentials, so generate a fresh command with **Configure
+Claude MCP** after relocating the project.
+
 Install the Agen8 workflow skill for Codex locally:
 
 ```sh

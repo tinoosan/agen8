@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1" // #nosec G505 -- used only for stable legacy-compatible identifiers, not cryptography.
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -168,6 +169,14 @@ type UpdateProjectInput struct {
 	Customization *project.Customization
 }
 
+type RelocateProjectInput struct {
+	ProjectID types.ProjectID
+	Root      string
+	Validate  func(context.Context, string, string) error
+}
+
+var ErrInvalidProjectRoot = errors.New("invalid project root")
+
 // UpdateProject edits the user-editable fields of an owned project. Unlike
 // SaveProject (an upsert that re-owns the caller and clobbers createdAt /
 // customization), this is a load-modify-save that requires the caller to
@@ -193,6 +202,43 @@ func (s *Service) UpdateProject(ctx context.Context, input UpdateProjectInput) (
 		Customization: input.Customization,
 	}, s.now())
 	saved, err := s.projects.Save(ctx, updated.Record())
+	if err != nil {
+		return project.Project{}, err
+	}
+	return project.Wrap(saved)
+}
+
+// RelocateProject changes the canonical root of an owned project without
+// changing its identity. Existing workspace bindings remain valid because they
+// represent explicit linked checkouts; unbound sessions resolve to the new root.
+func (s *Service) RelocateProject(ctx context.Context, input RelocateProjectInput) (project.Project, error) {
+	if s == nil {
+		return project.Project{}, fmt.Errorf("project service is nil")
+	}
+	c, err := s.resolveCaller(ctx)
+	if err != nil {
+		return project.Project{}, err
+	}
+	current, err := s.GetProject(ctx, input.ProjectID)
+	if err != nil {
+		return project.Project{}, err
+	}
+	if err := requireOwnedProject(c, current); err != nil {
+		return project.Project{}, err
+	}
+	if input.Validate != nil {
+		if err := input.Validate(ctx, string(current.LocationID()), strings.TrimSpace(input.Root)); err != nil {
+			return project.Project{}, fmt.Errorf("%w: %v", ErrInvalidProjectRoot, err)
+		}
+	}
+	relocated, err := current.Relocate(input.Root, s.now())
+	if err != nil {
+		return project.Project{}, err
+	}
+	if relocated.Root() == current.Root() {
+		return current, nil
+	}
+	saved, err := s.projects.Save(ctx, relocated.Record())
 	if err != nil {
 		return project.Project{}, err
 	}

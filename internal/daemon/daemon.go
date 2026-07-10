@@ -24,6 +24,7 @@ import (
 	"github.com/tinoosan/agen8/internal/mcp"
 	"github.com/tinoosan/agen8/internal/rpc"
 	"github.com/tinoosan/agen8/internal/services/attention"
+	locationdomain "github.com/tinoosan/agen8/internal/services/location/domain"
 	projectrpc "github.com/tinoosan/agen8/internal/services/project/rpc"
 	"github.com/tinoosan/agen8/internal/web"
 	"github.com/tinoosan/agen8/pkg/buildinfo"
@@ -93,11 +94,11 @@ func New(cfg Config) (*Daemon, error) {
 		func() error { return rpc.RegisterGraph(reg, application.GraphSvc, application.GraphLinks) },
 		func() error { return rpc.RegisterMission(reg, application.MissionSvc) },
 		func() error {
-			postCreate := func(ctx context.Context, userID, projectTitle, locationID, root string) projectrpc.ProjectSetupResult {
+			postCreate := func(ctx context.Context, userID, projectID, projectTitle, locationID, root string) projectrpc.ProjectSetupResult {
 				if strings.TrimSpace(locationID) != "local" {
 					return projectrpc.ProjectSetupResult{Warnings: []string{"Automatic harness setup is available only for local projects."}}
 				}
-				result := projectProvisioner.ProvisionProject(ctx, userID, projectTitle, root)
+				result := projectProvisioner.ProvisionProject(ctx, userID, projectID, projectTitle, root)
 				return projectrpc.ProjectSetupResult{
 					Attempted:            projectProvisioner.localInstallation,
 					HooksInstalled:       result.HooksInstalled,
@@ -108,8 +109,8 @@ func New(cfg Config) (*Daemon, error) {
 					Warnings:             result.Warnings,
 				}
 			}
-			configureClaudeMCP := func(ctx context.Context, userID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
-				result, err := projectProvisioner.ProvisionClaudeMCP(ctx, userID, projectTitle, root)
+			configureClaudeMCP := func(ctx context.Context, userID, projectID, projectTitle, root string) (projectrpc.ProjectClaudeMCPConfigureResult, error) {
+				result, err := projectProvisioner.ProvisionClaudeMCP(ctx, userID, projectID, projectTitle, root)
 				if err != nil {
 					return projectrpc.ProjectClaudeMCPConfigureResult{}, err
 				}
@@ -122,7 +123,11 @@ func New(cfg Config) (*Daemon, error) {
 					ClientSetupCommand:   result.ClientSetupCommand,
 				}, nil
 			}
-			return rpc.RegisterProject(reg, application.ProjectSvc, postCreate, configureClaudeMCP)
+			validateProjectRoot := func(ctx context.Context, locationID, root string) error {
+				_, err := application.LocationSvc.ListDir(ctx, locationdomain.ID(locationID), root)
+				return err
+			}
+			return rpc.RegisterProject(reg, application.ProjectSvc, postCreate, configureClaudeMCP, validateProjectRoot)
 		},
 		func() error { return rpc.RegisterFile(reg, application.FileSvc) },
 		func() error { return rpc.RegisterLocation(reg, application.LocationSvc) },

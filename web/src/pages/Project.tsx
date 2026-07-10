@@ -14,6 +14,7 @@ import CreateProjectDialog from '../components/projects/CreateProjectDialog'
 import ProjectTableRow from '../components/projects/ProjectTableRow'
 import RemoveProjectDialog, { type ProjectRemoveAction } from '../components/projects/RemoveProjectDialog'
 import ClientSetupDialog from '../components/projects/ClientSetupDialog'
+import RelocateProjectDialog from '../components/projects/RelocateProjectDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -73,6 +74,7 @@ export default function ProjectPage() {
   const [removeTarget, setRemoveTarget] = useState<{ project: Project; action: ProjectRemoveAction } | null>(null)
   const [linkTarget, setLinkTarget] = useState<Project | null>(null)
   const [editTarget, setEditTarget] = useState<Project | null>(null)
+  const [relocateTarget, setRelocateTarget] = useState<Project | null>(null)
   const [clientSetup, setClientSetup] = useState<{ command: string; projectName: string; continueTo?: string } | null>(null)
 
   // Filter projects by status + search
@@ -273,6 +275,7 @@ export default function ProjectPage() {
                       onRemove={(action) => setRemoveTarget({ project, action })}
                       onLink={() => setLinkTarget(project)}
                       onEdit={() => setEditTarget(project)}
+                      onRelocate={() => setRelocateTarget(project)}
                       onConfigureClaudeMCP={() => { void configureClaudeMCP(project) }}
                     />
                   ))}
@@ -344,6 +347,18 @@ export default function ProjectPage() {
               setEditTarget(null)
               queryClient.invalidateQueries({ queryKey: qk.projectsAll })
               toast.success(`Project renamed to "${projectDisplayName(updated)}"`)
+            }}
+          />
+        )}
+
+        {relocateTarget && (
+          <RelocateProjectDialog
+            project={relocateTarget}
+            onClose={() => setRelocateTarget(null)}
+            onRelocated={(updated) => {
+              setRelocateTarget(null)
+              queryClient.invalidateQueries({ queryKey: qk.projectsAll })
+              toast.success(`Project folder changed to "${updated.root}"`)
             }}
           />
         )}

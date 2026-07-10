@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,5 +150,109 @@ func TestUpdateProjectRejectsNonOwner(t *testing.T) {
 	}
 	if after.Title() != "Owned" {
 		t.Fatalf("Title=%q want unchanged Owned after rejected update", after.Title())
+	}
+}
+
+func TestRelocateProjectPreservesIdentityAndRejectsRootCollision(t *testing.T) {
+	t.Parallel()
+	clock := &mutableClock{now: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)}
+	svc := newProjectServiceWithClock(t, clock)
+	owner := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+
+	first, err := svc.CreateProject(owner, CreateProjectInput{Root: "/work/first", Title: "First"})
+	if err != nil {
+		t.Fatalf("CreateProject first: %v", err)
+	}
+	if _, err := svc.CreateProject(owner, CreateProjectInput{Root: "/work/taken", Title: "Taken"}); err != nil {
+		t.Fatalf("CreateProject taken: %v", err)
+	}
+
+	clock.now = clock.now.Add(time.Hour)
+	relocated, err := svc.RelocateProject(owner, RelocateProjectInput{ProjectID: first.ID(), Root: "/work/renamed"})
+	if err != nil {
+		t.Fatalf("RelocateProject: %v", err)
+	}
+	if relocated.ID() != first.ID() || relocated.Root() != "/work/renamed" {
+		t.Fatalf("relocated project id=%q root=%q", relocated.ID(), relocated.Root())
+	}
+	if relocated.Title() != first.Title() || relocated.UserID() != first.UserID() || !relocated.CreatedAt().Equal(first.CreatedAt()) {
+		t.Fatalf("relocation changed non-root identity: before=%+v after=%+v", first.Record(), relocated.Record())
+	}
+
+	_, err = svc.RelocateProject(owner, RelocateProjectInput{ProjectID: first.ID(), Root: "/work/taken"})
+	if !errors.Is(err, project.ErrRootInUse) {
+		t.Fatalf("collision error=%v want ErrRootInUse", err)
+	}
+	after, err := svc.GetProject(owner, first.ID())
+	if err != nil {
+		t.Fatalf("GetProject after collision: %v", err)
+	}
+	if after.Root() != "/work/renamed" {
+		t.Fatalf("collision partially changed root to %q", after.Root())
+	}
+}
+
+func TestRelocateProjectRejectsNonOwner(t *testing.T) {
+	t.Parallel()
+	svc := newProjectServiceWithClock(t, &mutableClock{now: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)})
+	owner := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+	created, err := svc.CreateProject(owner, CreateProjectInput{Root: "/work/original"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	intruder := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-intruder"})
+	validated := false
+	if _, err := svc.RelocateProject(intruder, RelocateProjectInput{
+		ProjectID: created.ID(),
+		Root:      "/work/hijacked",
+		Validate: func(context.Context, string, string) error {
+			validated = true
+			return nil
+		},
+	}); err == nil {
+		t.Fatal("expected non-owner relocation to fail")
+	}
+	if validated {
+		t.Fatal("non-owner reached project root validation")
+	}
+	after, err := svc.GetProject(owner, created.ID())
+	if err != nil || after.Root() != "/work/original" {
+		t.Fatalf("rejected relocation changed project: root=%q err=%v", after.Root(), err)
+	}
+}
+
+func TestRelocateProjectKeepsExplicitWorkspacesAndDropsTheOldCanonicalRoot(t *testing.T) {
+	t.Parallel()
+	svc := newProjectServiceWithClock(t, &mutableClock{now: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)})
+	owner := caller.ContextWithCaller(context.Background(), caller.Caller{UserID: "user-owner"})
+	created, err := svc.CreateProject(owner, CreateProjectInput{Root: "/repo/old"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	linked, err := svc.UpsertWorkspace(owner, UpsertWorkspaceParams{
+		ProjectID:  string(created.ID()),
+		UserID:     "user-owner",
+		LocationID: "local",
+		Root:       "/repo/worktree",
+		Machine:    "laptop",
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspace: %v", err)
+	}
+	relocated, err := svc.RelocateProject(owner, RelocateProjectInput{ProjectID: created.ID(), Root: "/repo/new"})
+	if err != nil {
+		t.Fatalf("RelocateProject: %v", err)
+	}
+	resolved, err := svc.ResolveBoundWorkspaceRoot(owner, string(created.ID()), "user-owner", "local", linked.ID.String())
+	if err != nil || resolved != "/repo/worktree" {
+		t.Fatalf("explicit workspace resolved=%q err=%v", resolved, err)
+	}
+	roots, err := svc.ActiveWorkspaceRoots(owner, relocated)
+	if err != nil {
+		t.Fatalf("ActiveWorkspaceRoots: %v", err)
+	}
+	joined := strings.Join(roots, "\n")
+	if !strings.Contains(joined, "/repo/new") || !strings.Contains(joined, "/repo/worktree") || strings.Contains(joined, "/repo/old") {
+		t.Fatalf("active roots after relocation=%v", roots)
 	}
 }

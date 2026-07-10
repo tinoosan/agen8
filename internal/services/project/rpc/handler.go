@@ -13,14 +13,21 @@ import (
 )
 
 type Handler struct {
-	svc *projectapp.Service
+	svc          *projectapp.Service
+	validateRoot ProjectRootValidator
 }
 
-func NewHandler(svc *projectapp.Service) *Handler {
+type ProjectRootValidator func(ctx context.Context, locationID, root string) error
+
+func NewHandler(svc *projectapp.Service, validators ...ProjectRootValidator) *Handler {
 	if svc == nil {
 		panic("project RPC handler requires project service")
 	}
-	return &Handler{svc: svc}
+	var validateRoot ProjectRootValidator
+	if len(validators) > 0 {
+		validateRoot = validators[0]
+	}
+	return &Handler{svc: svc, validateRoot: validateRoot}
 }
 
 func (h *Handler) ProjectGet(ctx context.Context, p ProjectGetParams) (ProjectGetResult, error) {
@@ -99,6 +106,32 @@ func (h *Handler) ProjectUpdate(ctx context.Context, p ProjectUpdateParams) (Pro
 		return ProjectUpdateResult{}, internalError("update project", err)
 	}
 	return ProjectUpdateResult{Project: NewProjectView(project)}, nil
+}
+
+func (h *Handler) ProjectRelocate(ctx context.Context, p ProjectRelocateParams) (ProjectRelocateResult, error) {
+	projectID, err := requireProjectID(p.ProjectID)
+	if err != nil {
+		return ProjectRelocateResult{}, err
+	}
+	root := strings.TrimSpace(p.Root)
+	if root == "" {
+		return ProjectRelocateResult{}, invalidParams("root is required")
+	}
+	relocated, err := h.svc.RelocateProject(ctx, projectapp.RelocateProjectInput{
+		ProjectID: projectID,
+		Root:      root,
+		Validate:  h.validateRoot,
+	})
+	if errors.Is(err, projectapp.ErrInvalidProjectRoot) {
+		return ProjectRelocateResult{}, invalidParams("project root is not an accessible directory")
+	}
+	if errors.Is(err, projectdomain.ErrRootInUse) {
+		return ProjectRelocateResult{}, invalidParams("another project already uses this folder")
+	}
+	if err != nil {
+		return ProjectRelocateResult{}, internalError("relocate project", err)
+	}
+	return ProjectRelocateResult{Project: NewProjectView(relocated)}, nil
 }
 
 func (h *Handler) ProjectList(ctx context.Context, p ProjectListParams) (ProjectListResult, error) {

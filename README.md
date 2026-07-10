@@ -173,6 +173,12 @@ existing projects. Re-running it repairs or refreshes the client setup. Project
 display-name changes do not require reconnecting Claude. Run it from the local
 project directory or pass `--project-dir /path/to/local/project`.
 
+If a project folder itself moves or is renamed, use **Project actions > Change
+project folder**. Agen8 validates the replacement directory and keeps the same
+project ID, history, members, missions, and tasks. It never moves files on disk.
+Afterward, run **Configure Claude MCP** for that project to generate a fresh
+project-bound client command when using a hosted daemon.
+
 For Codex or another MCP client, add a server entry pointing at the daemon and
 use the API key as a bearer token. `.mcp.example.json` at the repo root is a
 ready-to-copy template. Keep the real `.mcp.json` local because it is
