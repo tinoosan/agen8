@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/tinoosan/agen8/internal/core/types"
@@ -48,53 +47,30 @@ func (r *SQLiteRepository) Get(ctx context.Context, id types.ProjectID) (project
 }
 
 func (r *SQLiteRepository) List(ctx context.Context, filter project.Filter) ([]project.Record, error) {
-	_, _, err := projectWhere(filter)
-	if err != nil {
-		return nil, err
+	if filter.Limit < 0 || filter.Offset < 0 {
+		return nil, fmt.Errorf("project limit and offset must be non-negative")
+	}
+	projectID := strings.TrimSpace(string(filter.ID))
+	userID := strings.TrimSpace(filter.UserID)
+	status := strings.TrimSpace(string(filter.Status))
+	limit := filter.Limit
+	if limit == 0 {
+		limit = -1
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT project_id, location_id, root, title, status, created_at, updated_at, user_id, customization
 		FROM projects
-	`)
+		WHERE (? = '' OR project_id = ?)
+			AND (? = '' OR user_id = ?)
+			AND (? = '' OR status = ?)
+		ORDER BY updated_at DESC, project_id ASC
+		LIMIT ? OFFSET ?
+	`, projectID, projectID, userID, userID, status, status, limit, filter.Offset)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
 	defer rows.Close()
-	all, err := scanProjects(rows)
-	if err != nil {
-		return nil, err
-	}
-	filtered := make([]project.Record, 0, len(all))
-	for _, record := range all {
-		if projectMatchesFilter(record, filter) {
-			filtered = append(filtered, record)
-		}
-	}
-	sort.SliceStable(filtered, func(i, j int) bool {
-		left := filtered[i]
-		right := filtered[j]
-		leftUpdated := left.UpdatedAt.UTC()
-		rightUpdated := right.UpdatedAt.UTC()
-		if !leftUpdated.Equal(rightUpdated) {
-			return leftUpdated.After(rightUpdated)
-		}
-		return string(left.ID) < string(right.ID)
-	})
-	start := 0
-	if filter.Offset > 0 {
-		start = filter.Offset
-	}
-	if start >= len(filtered) {
-		return []project.Record{}, nil
-	}
-	end := len(filtered)
-	if filter.Limit > 0 {
-		end = start + filter.Limit
-	}
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-	return filtered[start:end], nil
+	return scanProjects(rows)
 }
 
 func (r *SQLiteRepository) Save(ctx context.Context, record project.Record) (project.Record, error) {

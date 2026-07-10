@@ -62,7 +62,7 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 	handler := projectrpc.NewHandler(projectSvc, rootValidators...)
 	return RegisterHandlers(
 		func() error {
-			return AddBoundHandler(reg, MethodProjectGet, false, handler.ProjectGet)
+			return AddBoundHandler(reg, MethodProjectGet, false, withProjectCaller(handler.ProjectGet))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectCreate, false, withProjectCaller(func(ctx context.Context, p projectrpc.ProjectCreateParams) (projectrpc.ProjectCreateResult, error) {
@@ -110,13 +110,13 @@ func RegisterProject(reg *Registry, projectSvc *projectapp.Service, postCreate P
 			return AddBoundHandler(reg, MethodProjectRelocate, false, withProjectCaller(handler.ProjectRelocate))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectArchive, false, handler.ProjectArchive)
+			return AddBoundHandler(reg, MethodProjectArchive, false, withProjectCaller(handler.ProjectArchive))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectDelete, false, handler.ProjectDelete)
+			return AddBoundHandler(reg, MethodProjectDelete, false, withProjectCaller(handler.ProjectDelete))
 		},
 		func() error {
-			return AddBoundHandler(reg, MethodProjectList, true, handler.ProjectList)
+			return AddBoundHandler(reg, MethodProjectList, true, withProjectCaller(handler.ProjectList))
 		},
 		func() error {
 			return AddBoundHandler(reg, MethodProjectLinkTokenCreate, false, withProjectCaller(handler.LinkTokenCreate))

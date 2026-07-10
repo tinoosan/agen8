@@ -90,6 +90,31 @@ func TestHandleFileUploadRejectsOverCeilingCleanly(t *testing.T) {
 	}
 }
 
+func TestHandleFileUploadRedactsServiceErrors(t *testing.T) {
+	projectRoot := t.TempDir()
+	handler := newUploadTestHandler(t)
+	sessionToken := setupSessionForEventsTest(t, handler)
+	projectID := createProjectForLinkTokenTest(t, handler, sessionToken, projectRoot)
+
+	body, contentType := multipartUploadBody(t, map[string]string{
+		"projectId": projectID,
+		"path":      "/outside/secret.txt",
+	}, []byte("secret"), "secret.txt")
+	req := httptest.NewRequest(http.MethodPost, "/uploads/files", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+sessionToken)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if strings.TrimSpace(rec.Body.String()) != "attachment upload failed" {
+		t.Fatalf("upload error disclosed backend detail: %q", rec.Body.String())
+	}
+}
+
 func newUploadTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	d, err := New(Config{

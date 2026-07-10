@@ -253,6 +253,23 @@ func (s *Service) GetProject(ctx context.Context, projectID types.ProjectID) (pr
 	if projectID == "" {
 		return project.Project{}, fmt.Errorf("project id is required")
 	}
+	c, err := s.resolveCaller(ctx)
+	if err != nil {
+		return project.Project{}, err
+	}
+	loaded, err := s.loadProject(ctx, projectID)
+	if err != nil {
+		return project.Project{}, err
+	}
+	if err := s.requireProjectVisibility(ctx, c, loaded); err != nil {
+		return project.Project{}, err
+	}
+	return loaded, nil
+}
+
+// loadProject bypasses caller visibility for service-internal migration paths.
+// User-facing operations must call GetProject so authorization cannot be skipped.
+func (s *Service) loadProject(ctx context.Context, projectID types.ProjectID) (project.Project, error) {
 	record, err := s.projects.Get(ctx, projectID)
 	if err != nil {
 		return project.Project{}, err
@@ -266,6 +283,25 @@ func (s *Service) ListProjects(ctx context.Context, filter project.Filter) ([]pr
 	}
 	if filter.Limit < 0 || filter.Offset < 0 {
 		return nil, fmt.Errorf("project limit and offset must be non-negative")
+	}
+	c, err := s.resolveCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case c.UserID != "":
+		filter.UserID = c.UserID
+		filter.ID = ""
+	case c.ProjectID != "":
+		filter.ID = c.ProjectID
+		filter.UserID = ""
+	case c.MemberID != "":
+		rosterMember, err := s.members.Get(ctx, string(c.MemberID))
+		if err != nil {
+			return nil, fmt.Errorf("load project caller member: %w", err)
+		}
+		filter.ID = types.ProjectID(strings.TrimSpace(rosterMember.ProjectID))
+		filter.UserID = ""
 	}
 	records, err := s.projects.List(ctx, filter)
 	if err != nil {
@@ -353,6 +389,13 @@ func (s *Service) ArchiveProject(ctx context.Context, projectID types.ProjectID)
 	if err != nil {
 		return project.Project{}, err
 	}
+	c, err := s.resolveCaller(ctx)
+	if err != nil {
+		return project.Project{}, err
+	}
+	if err := requireOwnedProject(c, current); err != nil {
+		return project.Project{}, err
+	}
 	record := current.Record()
 	record.Status = project.StatusArchived
 	record.UpdatedAt = s.now()
@@ -369,6 +412,13 @@ func (s *Service) DeleteProject(ctx context.Context, projectID types.ProjectID) 
 	}
 	current, err := s.GetProject(ctx, projectID)
 	if err != nil {
+		return err
+	}
+	c, err := s.resolveCaller(ctx)
+	if err != nil {
+		return err
+	}
+	if err := requireOwnedProject(c, current); err != nil {
 		return err
 	}
 	if current.Status() != project.StatusArchived {
@@ -396,6 +446,23 @@ func requireVisibleProject(c Caller, p project.Project) error {
 		return nil
 	}
 	if c.ProjectID != "" && p.ID() == c.ProjectID {
+		return nil
+	}
+	return fmt.Errorf("project %s is not visible to caller", p.ID())
+}
+
+func (s *Service) requireProjectVisibility(ctx context.Context, c Caller, p project.Project) error {
+	if err := requireVisibleProject(c, p); err == nil {
+		return nil
+	}
+	if c.MemberID == "" {
+		return fmt.Errorf("project %s is not visible to caller", p.ID())
+	}
+	rosterMember, err := s.members.Get(ctx, string(c.MemberID))
+	if err != nil {
+		return fmt.Errorf("load project caller member: %w", err)
+	}
+	if types.ProjectID(strings.TrimSpace(rosterMember.ProjectID)) == p.ID() {
 		return nil
 	}
 	return fmt.Errorf("project %s is not visible to caller", p.ID())

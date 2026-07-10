@@ -100,7 +100,7 @@ func (s *Service) RegisterMCPContext(ctx context.Context, input RegisterMCPConte
 	}
 	userID := userIDForMCPToken(token, input.UserID)
 	ctx = caller.ContextWithCaller(ctx, caller.Caller{UserID: userID})
-	loadedProject, err := s.GetProject(ctx, projectID)
+	loadedProject, err := s.loadProject(ctx, projectID)
 	if err != nil {
 		if !errors.Is(err, project.ErrNotFound) {
 			return RegisterMCPContextResult{}, fmt.Errorf("load project: %w", err)

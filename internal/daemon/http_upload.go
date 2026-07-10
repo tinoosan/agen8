@@ -71,7 +71,7 @@ func (d *Daemon) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "attachment upload file is too large", http.StatusRequestEntityTooLarge)
 			return
 		}
-		http.Error(w, "upload file: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "attachment upload failed", http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
