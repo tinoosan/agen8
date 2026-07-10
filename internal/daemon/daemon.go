@@ -13,6 +13,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,15 +32,16 @@ import (
 type loopbackIPLookup func(string) ([]net.IP, error)
 
 type Daemon struct {
-	cfg         Config
-	app         *app.Application
-	rpc         *rpc.Server
-	mcpTokens   *mcp.TokenStore
-	mcp         *mcp.Server
-	mcpResolver *mcpSessionResolver
-	events      *eventsHub
-	attention   *attention.Service
-	logger      *slog.Logger
+	cfg          Config
+	app          *app.Application
+	rpc          *rpc.Server
+	mcpTokens    *mcp.TokenStore
+	mcp          *mcp.Server
+	mcpResolver  *mcpSessionResolver
+	events       *eventsHub
+	attention    *attention.Service
+	loginLimiter *loginAttemptLimiter
+	logger       *slog.Logger
 }
 
 const maxRPCRequestBodyBytes = 1024 * 1024
@@ -151,9 +153,10 @@ func New(cfg Config) (*Daemon, error) {
 			projectProvisioner: projectProvisioner,
 			externalBaseURL:    cfg.externalBaseURL(),
 		}),
-		events:    newEventsHub(application.EventBus, logger.With("service", "events")),
-		attention: attentionSvc,
-		logger:    logger.With("service", "daemon"),
+		events:       newEventsHub(application.EventBus, logger.With("service", "events")),
+		attention:    attentionSvc,
+		loginLimiter: newLoginAttemptLimiter(),
+		logger:       logger.With("service", "daemon"),
 	}
 	mcpServer.SetSessionResolver(d.resolveMCPSession)
 	return d, nil
@@ -214,8 +217,8 @@ func (d *Daemon) httpHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mount web ui: %w", err)
 	}
-	mux.Handle("/", d.handleWeb(webHandler))
-	return mux, nil
+	mux.Handle("/", webHandler)
+	return securityHeaders(mux), nil
 }
 
 func (d *Daemon) webHandler() (http.Handler, error) {
@@ -343,16 +346,6 @@ func isDNSLabelSafe(host string) bool {
 	return true
 }
 
-func (d *Daemon) handleWeb(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && d.setupAvailable(r.Context()) && wantsHTML(r) {
-			http.Redirect(w, r, "/setup?token="+d.cfg.SetupToken, http.StatusFound)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (d *Daemon) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -375,12 +368,22 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read request body", http.StatusBadRequest)
 		return
 	}
-	if setupStatusRPCMethod(rpcMethod(body)) {
+	method := rpcMethod(body)
+	if setupStatusRPCMethod(method) {
 		d.handleSetupStatusRPC(w, r, body)
 		return
 	}
+	loginKey := ""
+	if method == rpc.MethodAuthLogin {
+		loginKey = loginAttemptKey(body)
+		if retryAfter, allowed := d.loginLimiter.Allow(loginKey); !allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Round(time.Second)/time.Second)))
+			http.Error(w, "too many login attempts", http.StatusTooManyRequests)
+			return
+		}
+	}
 	ctx := r.Context()
-	if methodRequiresHTTPIdentity(rpcMethod(body), r.Header.Get("Authorization")) {
+	if methodRequiresHTTPIdentity(method, r.Header.Get("Authorization")) {
 		identity, err := d.httpIdentity(r.Context(), r.Header.Get("Authorization"))
 		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -397,6 +400,13 @@ func (d *Daemon) handleRPC(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "handle rpc request", http.StatusInternalServerError)
 		return
+	}
+	if method == rpc.MethodAuthLogin {
+		if rpcResponseSucceeded(resp) {
+			d.loginLimiter.Reset(loginKey)
+		} else {
+			d.loginLimiter.RecordFailure(loginKey)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(resp)
@@ -424,9 +434,6 @@ func (d *Daemon) handleSetupStatusRPC(w http.ResponseWriter, r *http.Request, bo
 	}
 	setupOpen := d.setupAvailable(r.Context())
 	result := map[string]any{"setupOpen": setupOpen}
-	if setupOpen {
-		result["setupUrl"] = "/setup?token=" + url.QueryEscape(d.cfg.SetupToken)
-	}
 	raw, err := json.Marshal(result)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -595,14 +602,13 @@ func rpcMethod(body []byte) string {
 
 func methodRequiresHTTPIdentity(method string, authorization string) bool {
 	method = strings.TrimSpace(method)
-	if method == "" {
-		return false
-	}
 	switch method {
-	case "auth.login", "auth.setupStatus", "user.setupStatus":
+	case rpc.MethodAuthLogin:
 		return false
-	default:
+	case rpc.MethodAuthStatus:
 		return strings.TrimSpace(authorization) != ""
+	default:
+		return true
 	}
 }
 

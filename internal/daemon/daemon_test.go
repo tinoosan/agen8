@@ -414,7 +414,7 @@ func TestAttentionHookAcceptsRemoteStyleRawPayload(t *testing.T) {
 	}
 }
 
-func TestSetupStatusRPCReturnsSetupURLWhileOpen(t *testing.T) {
+func TestSetupStatusRPCDoesNotDiscloseSetupToken(t *testing.T) {
 	d, err := New(Config{
 		AppConfig:  config.Config{DataDir: t.TempDir()},
 		SetupToken: "test setup token",
@@ -452,8 +452,8 @@ func TestSetupStatusRPCReturnsSetupURLWhileOpen(t *testing.T) {
 	if !result.SetupOpen {
 		t.Fatal("setup should be open")
 	}
-	if result.SetupURL != "/setup?token=test+setup+token" {
-		t.Fatalf("setupUrl=%q", result.SetupURL)
+	if result.SetupURL != "" {
+		t.Fatalf("setupUrl=%q want empty", result.SetupURL)
 	}
 }
 

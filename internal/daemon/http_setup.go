@@ -94,11 +94,6 @@ func (h httpSetupHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func wantsHTML(r *http.Request) bool {
-	accept := strings.ToLower(r.Header.Get("Accept"))
-	return accept == "" || strings.Contains(accept, "text/html") || strings.Contains(accept, "*/*")
-}
-
 func (h httpSetupHandler) available(ctx context.Context) bool {
 	if h.users == nil {
 		return false
