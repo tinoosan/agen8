@@ -98,7 +98,7 @@
 
   <p>The hook body cap is intentionally small: <code>maxAttentionHookBodyBytes</code> is 16 KiB. Hook payloads carry lifecycle context, not artifacts. A bad payload returns a 4xx to the HTTP client, but installed hook commands still exit successfully so a slow or down agen8 daemon cannot break the agent's own hook chain.</p>
 
-  <p>Local project creation can best-effort call the hook installer and report whether hooks were installed, but hook installation failures never fail project creation. Manual <code>agen8 hooks install</code> remains the repair path and the required path for hosted/client-machine setup. Claude Code writes project-local <code>.claude/settings.local.json</code>; Codex writes user-level <code>~/.codex/hooks.json</code>. Both files embed a bearer token.</p>
+  <p>Local project creation can best-effort call the hook installer and report whether hooks were installed, but hook installation failures never fail project creation. For hosted Claude clients, <code>agen8 client setup</code> installs hooks together with skills and MCP configuration; manual <code>agen8 hooks install</code> remains the lower-level repair path. Claude Code writes project-local <code>.claude/settings.local.json</code>; Codex writes user-level <code>~/.codex/hooks.json</code>. Both files embed a bearer token.</p>
 
   <h2 id="events">5. Bus events</h2>
   <p>When an attributed entry is raised or cleared, the service publishes an <code>eventbus.AttentionEvent</code> on <code>attention.lifecycle</code>. The SSE hub forwards these as project-scoped events.</p>

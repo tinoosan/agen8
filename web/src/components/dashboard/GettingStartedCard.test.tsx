@@ -55,11 +55,11 @@ describe('GettingStartedCard', () => {
     expect(renderCard().container).toBeEmptyDOMElement()
   })
 
-  it('fresh project: shows the checklist with the skill command and a token button', () => {
+  it('fresh project: shows the checklist with one Claude setup path and a token button', () => {
     renderCard()
     expect(screen.getByText('Getting started')).toBeInTheDocument()
     expect(screen.getByText('Project created')).toBeInTheDocument()
-    expect(screen.getByText('agen8 skill install --harness claude-cli')).toBeInTheDocument()
+    expect(screen.getByText('Included in the Claude setup command above.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Generate connect command' })).toBeInTheDocument()
   })
 
@@ -96,7 +96,7 @@ describe('GettingStartedCard', () => {
     renderCard()
     fireEvent.click(screen.getByRole('button', { name: 'Generate connect command' }))
     await waitFor(() => {
-      expect(screen.getByText(/claude mcp add/)).toBeInTheDocument()
+      expect(screen.getByText(/agen8 client setup --harness claude/)).toBeInTheDocument()
     })
     expect(screen.getByText(/ak_test_secret/)).toBeInTheDocument()
     expect(mockCreateAPIKey).toHaveBeenCalledWith('Agen8 MCP key')

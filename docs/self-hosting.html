@@ -169,16 +169,24 @@ bearer_token_env_var = "AGEN8_MCP_TOKEN"</code></pre>
 
 <pre><code class="lang-shell">export AGEN8_MCP_TOKEN='ak_...'</code></pre>
 
-  <p>Claude Code MCP config:</p>
+  <p>Claude Code one-command setup:</p>
 
-<pre><code class="lang-shell">claude mcp add --transport http --scope user agen8 \
-  'https://agen8.example.com/mcp' \
-  --header 'Authorization: Bearer ak_...'</code></pre>
+<pre><code class="lang-shell">cd /path/to/local/project
+agen8 client setup --harness claude \
+  --url https://agen8.example.com \
+  --token ak_...</code></pre>
 
-  <p>Install the Agen8 workflow skill locally:</p>
+  <p>
+    This installs the Claude workflow skills, project attention hooks, and a
+    local-scope MCP connection together. The Projects page generates the command
+    for new and existing projects. Display-name changes do not require reconnecting
+    Claude. Re-run the setup command from the local project directory to repair the
+    client integration, or pass <code>--project-dir</code> explicitly.
+  </p>
 
-<pre><code class="lang-shell">agen8 skill install --harness codex
-agen8 skill install --harness claude-cli</code></pre>
+  <p>Install the Agen8 workflow skill for Codex locally:</p>
+
+<pre><code class="lang-shell">agen8 skill install --harness codex</code></pre>
 
   <h2 id="hooks">Install attention hooks</h2>
   <p>
@@ -194,7 +202,7 @@ agen8 skill install --harness claude-cli</code></pre>
   --url https://agen8.example.com \
   --token ak_...</code></pre>
 
-  <p>Claude Code:</p>
+  <p>Claude Code repair command when only hooks need replacing:</p>
 
 <pre><code class="lang-shell">agen8 hooks install \
   --harness claude \

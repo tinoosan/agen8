@@ -264,8 +264,9 @@ func TestHandleSetupJSONIncludesMCPArtifacts(t *testing.T) {
 		`"bearer_token_env_var": "AGEN8_MCP_TOKEN"`,
 		"codex mcp add agen8 --url",
 		"--bearer-token-env-var AGEN8_MCP_TOKEN",
-		"claude mcp add --transport http --scope user agen8",
-		"--header",
+		"agen8 client setup --harness claude",
+		"--url 'http://127.0.0.1:7777'",
+		"--token",
 		"agen8 skill install --harness codex",
 		"agen8 skill install --harness claude-cli",
 	} {
@@ -322,10 +323,13 @@ func TestHandleSetupJSONUsesPublicURLWhenConfigured(t *testing.T) {
 	if result.MCP.URL != "https://agen8.example.com/mcp" {
 		t.Fatalf("mcp url=%q want public URL", result.MCP.URL)
 	}
-	for _, got := range []string{result.MCP.CompatibilityURL, result.MCP.CodexCommand, result.MCP.ClaudeCommand} {
+	for _, got := range []string{result.MCP.CompatibilityURL, result.MCP.CodexCommand} {
 		if !strings.Contains(got, "https://agen8.example.com/mcp") {
 			t.Fatalf("setup artifact did not use public URL: %s", got)
 		}
+	}
+	if !strings.Contains(result.MCP.ClaudeCommand, "--url 'https://agen8.example.com'") {
+		t.Fatalf("Claude setup command did not use public URL: %s", result.MCP.ClaudeCommand)
 	}
 }
 
@@ -635,8 +639,9 @@ func TestHandleSetupFormRevealsMCPArtifacts(t *testing.T) {
 		".mcp.json",
 		"codex mcp add agen8 --url",
 		"--bearer-token-env-var AGEN8_MCP_TOKEN",
-		"claude mcp add --transport http --scope user agen8",
-		"--header",
+		"agen8 client setup --harness claude",
+		"--url &#39;http://127.0.0.1:7777&#39;",
+		"--token",
 		"agen8 skill install --harness codex",
 	} {
 		if !strings.Contains(body, want) {

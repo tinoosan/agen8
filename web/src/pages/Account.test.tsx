@@ -139,7 +139,7 @@ describe('Account page', () => {
     expect(await screen.findByText('ak_test_secret')).toBeInTheDocument()
     expect(screen.getByText(/mcpServers/)).toBeInTheDocument()
     expect(screen.getByText(/codex mcp add agen8 --url/)).toBeInTheDocument()
-    expect(screen.getByText(/claude mcp add --transport http --scope user agen8/)).toBeInTheDocument()
+    expect(screen.getByText(/agen8 client setup --harness claude/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /generate another key/i })).toBeInTheDocument()
   })
 

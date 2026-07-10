@@ -168,19 +168,25 @@ Then set the token before launching Codex:
 export AGEN8_MCP_TOKEN='ak_...'
 ```
 
-Claude Code MCP config:
+Claude Code one-command setup:
 
 ```sh
-claude mcp add --transport http --scope user agen8 \
-  'https://agen8.example.com/mcp' \
-  --header 'Authorization: Bearer ak_...'
+cd /path/to/local/project
+agen8 client setup --harness claude \
+  --url https://agen8.example.com \
+  --token ak_...
 ```
 
-Install the Agen8 workflow skill locally:
+This installs the Claude workflow skills, project attention hooks, and a
+local-scope MCP connection together. The Projects page generates the command
+for new and existing projects. Display-name changes do not require reconnecting
+Claude. Re-run the setup command from the local project directory to repair the
+client integration, or pass `--project-dir` explicitly.
+
+Install the Agen8 workflow skill for Codex locally:
 
 ```sh
 agen8 skill install --harness codex
-agen8 skill install --harness claude-cli
 ```
 
 ## Install Attention Hooks
@@ -198,7 +204,7 @@ agen8 hooks install \
   --token ak_...
 ```
 
-Claude Code:
+Claude Code repair command when only hooks need replacing:
 
 ```sh
 agen8 hooks install \

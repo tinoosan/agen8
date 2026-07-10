@@ -20,6 +20,7 @@ type setupMCPResult struct {
 }
 
 func (h httpSetupHandler) setupMCPArtifacts(r *http.Request, token string) (setupMCPResult, error) {
+	baseURL := h.setupRequestOrigin(r)
 	mcpURL := h.setupMCPURL(r)
 	compatibilityURL := h.setupMCPCompatibilityURL(r, token)
 	config, err := setupMCPConfig(mcpURL)
@@ -31,7 +32,7 @@ func (h httpSetupHandler) setupMCPArtifacts(r *http.Request, token string) (setu
 		CompatibilityURL:   compatibilityURL,
 		Config:             config,
 		CodexCommand:       "export AGEN8_MCP_TOKEN=" + shellQuote(token) + "\n" + "codex mcp add agen8 --url " + shellQuote(mcpURL) + " --bearer-token-env-var AGEN8_MCP_TOKEN",
-		ClaudeCommand:      "claude mcp add --transport http --scope user agen8 " + shellQuote(mcpURL) + " --header " + shellQuote("Authorization: Bearer "+token),
+		ClaudeCommand:      "agen8 client setup --harness claude --url " + shellQuote(baseURL) + " --token " + shellQuote(token),
 		CodexSkillCommand:  "agen8 skill install --harness codex",
 		ClaudeSkillCommand: "agen8 skill install --harness claude-cli",
 	}, nil

@@ -36,7 +36,7 @@ export function buildMCPSetup(secret: string, origin = browserOrigin()): MCPSetu
       },
     }, null, 2),
     codexCommand: `export AGEN8_MCP_TOKEN=${shellQuote(token)}\ncodex mcp add ${SERVER_NAME} --url ${shellQuote(url)} --bearer-token-env-var AGEN8_MCP_TOKEN`,
-    claudeCommand: `claude mcp add --transport http --scope user ${SERVER_NAME} ${shellQuote(url)} --header ${shellQuote(`Authorization: Bearer ${token}`)}`,
+    claudeCommand: `agen8 client setup --harness claude --url ${shellQuote(daemonOrigin)} --token ${shellQuote(token)}`,
     hooksClaudeCommand: `agen8 hooks install --harness claude --url ${shellQuote(daemonOrigin)} --token ${shellQuote(token)}`,
     hooksCodexCommand: `agen8 hooks install --harness codex --url ${shellQuote(daemonOrigin)} --token ${shellQuote(token)}`,
   }

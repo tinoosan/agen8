@@ -129,7 +129,13 @@ export default function GettingStartedCard({ projectId }: { projectId: string | 
           </StepRow>
 
           <StepRow index={3} done={state.done.skill} title="Install the agen8 skill">
-            <CommandLine value={skillCommand} />
+            {harness === 'claude' ? (
+              <p className="m-0 text-[0.75rem] text-[var(--text-3)]">
+                Included in the Claude setup command above.
+              </p>
+            ) : (
+              <CommandLine value={skillCommand} />
+            )}
           </StepRow>
 
           <StepRow index={4} done={state.done.agent} title="Start an agent in this project folder">
@@ -148,8 +154,9 @@ export default function GettingStartedCard({ projectId }: { projectId: string | 
           <div className="mt-2 flex items-center gap-1.5 border-t border-[var(--border)] pt-2 text-[0.6875rem] text-[var(--text-3)]">
             <Check size={11} className="text-[var(--green)]" aria-hidden />
             <span>
-              Attention hooks were installed automatically when this project was created. If "waiting on
-              you" alerts never show up, run <code className="text-[var(--text-2)]">agen8 hooks install</code>.
+              {harness === 'claude'
+                ? 'The Claude setup command installs project attention hooks.'
+                : <>Install attention reporting with <code className="text-[var(--text-2)]">agen8 hooks install</code>.</>}
             </span>
           </div>
         </div>

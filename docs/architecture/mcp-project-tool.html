@@ -45,7 +45,7 @@
   </tr>
   <tr>
     <td><code>configure_claude_mcp</code></td>
-    <td>Mint a fresh project-scoped MCP token and use Claude Code's config manager to replace its private local-scope <code>mcpServers.agen8</code> entry for the bound project.</td>
+    <td>On a local daemon, mint a fresh token and use Claude Code's config manager to replace its private local-scope <code>mcpServers.agen8</code> entry. Hosted daemons reject this MCP action because returning the credential through an agent transcript would expose it; users generate the one-time client command from the Projects page instead.</td>
     <td><code>ProjectSvc.GetMember</code>, <code>ClaudeMCP.ConfigureClaudeMCP</code>.</td>
     <td>Installed flag, settings path, server name, and MCP URL.</td>
   </tr>
@@ -200,7 +200,7 @@ project.NewHandler().Handle(ctx, project.CallContext{
   <tr><td><code>location_id</code></td><td><code>register</code></td><td>Optional. Defaults to the local location when a project root creates a project.</td></tr>
   <tr><td><code>session_id</code></td><td><code>register</code></td><td>Optional stable native harness session id. Explicit arguments take precedence over MCP metadata.</td></tr>
   <tr><td><code>thread_id</code></td><td><code>register</code></td><td>Optional stable native harness thread id. Explicit arguments take precedence over MCP metadata and session id.</td></tr>
-  <tr><td>No additional fields</td><td><code>configure_claude_mcp</code></td><td>The action uses the bound MCP session project and current root. The installer invokes <code>claude mcp</code> with local scope, keeping the Authorization header in the user's <code>~/.claude.json</code> rather than a repository file.</td></tr>
+  <tr><td>No additional fields</td><td><code>configure_claude_mcp</code></td><td>For a local daemon, the action uses the bound MCP session project and current root. The installer invokes <code>claude mcp</code> with local scope, keeping the Authorization header in the user's <code>~/.claude.json</code> rather than a repository file. Hosted setup is initiated from the Projects page.</td></tr>
   <tr><td><code>member_id</code></td><td><code>member_get</code>, <code>member_update</code>, <code>member_remove</code></td><td>Required target member id.</td></tr>
   <tr><td><code>display_name</code></td><td><code>member_create</code>, <code>register</code></td><td>Required for <code>member_create</code>. Optional for <code>register</code> (fallback display label is generated if omitted).</td></tr>
   <tr><td><code>display_name</code></td><td><code>member_update</code></td><td>Required target member display label.</td></tr>
