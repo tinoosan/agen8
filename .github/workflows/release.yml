@@ -49,7 +49,8 @@ jobs:
 
       - name: Verify Go source
         run: |
-          drift="$(gofmt -l $(git ls-files '*.go'))"
+          mapfile -t go_files < <(git ls-files '*.go')
+          drift="$(gofmt -l "${go_files[@]}")"
           test -z "$drift" || { printf 'gofmt drift:\n%s\n' "$drift" >&2; exit 1; }
           go vet ./...
           staticcheck ./...
