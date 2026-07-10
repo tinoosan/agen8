@@ -66,7 +66,7 @@ func TestSQLiteRepositoryStatsDecisions(t *testing.T) {
 			ProjectID:      "project-1",
 			Source:         domain.DecisionSourceAgent,
 			SourceIdentity: "member-1",
-			Title:          "Adopt Postgres",
+			Title:          "Adopt SQLite",
 			Confidence:     0.9,
 			TaskRef:        "task-1",
 			CreatedAt:      createdAt,
@@ -123,7 +123,7 @@ func TestSQLiteRepositoryStatsDecisions(t *testing.T) {
 	}
 
 	// Stats must honor the same filters as list/count: a query narrows the set.
-	filtered, err := repo.StatsDecisions(ctx, domain.DecisionFilter{ProjectID: "project-1", Query: "postgres"})
+	filtered, err := repo.StatsDecisions(ctx, domain.DecisionFilter{ProjectID: "project-1", Query: "sqlite"})
 	if err != nil {
 		t.Fatalf("StatsDecisions filtered: %v", err)
 	}
