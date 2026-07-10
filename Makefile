@@ -49,6 +49,8 @@ web-install:
 
 web-build: web-install
 	@cd web && $(WEB_NPM) run build
+	@maps="$$(find internal/web/dist -type f -name '*.map' -print)"; \
+	if [ -n "$$maps" ]; then printf 'production source maps are forbidden:\n%s\n' "$$maps" >&2; exit 1; fi
 
 build-go:
 	@mkdir -p ./bin
@@ -91,6 +93,7 @@ manifest-check:
 audit: web-install
 	@govulncheck $(GO_PACKAGES)
 	@gosec -quiet ./internal/daemon/... ./internal/hookinstaller/...
+	@$(WEB_NPM) audit --package-lock-only --audit-level=low
 	@cd web && $(WEB_NPM) audit --audit-level=low
 
 ci: fmt-check guardrails workflow-check manifest-check lint test race audit build

@@ -46,10 +46,19 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Audit workspace tooling dependencies
+        working-directory: .
+        run: npm audit --package-lock-only --audit-level=low
 
       - name: Install web dependencies
         run: npm ci
+
+      - name: Audit web dependencies
+        run: npm audit --audit-level=low
 
       - name: Run web lint
         run: npm run lint
@@ -59,3 +68,6 @@ jobs:
 
       - name: Build web app
         run: npm run build
+
+      - name: Reject production source maps
+        run: test -z "$(find ../internal/web/dist -type f -name '*.map' -print -quit)"

@@ -34,7 +34,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
 
       - name: Install pinned Go checks
         run: |
@@ -69,12 +71,16 @@ jobs:
           npm ci
           npm audit --audit-level=low
 
+      - name: Audit workspace tooling dependencies
+        run: npm audit --package-lock-only --audit-level=low
+
       - name: Verify web app
         working-directory: web
         run: |
           npm run lint -- --max-warnings 0
           npm test -- --run
           npm run build
+          test -z "$(find ../internal/web/dist -type f -name '*.map' -print -quit)"
 
   archives:
     needs: verify
