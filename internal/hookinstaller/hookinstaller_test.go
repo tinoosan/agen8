@@ -111,6 +111,51 @@ func TestInstallClaudeWritesSettingsLocal(t *testing.T) {
 	}
 }
 
+func TestInstallClaudeUserScopeMigratesCurrentLocalHooks(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	localPath := filepath.Join(project, ".claude", "settings.local.json")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	local := `{"permissions":{"allow":["Bash"]},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo user"}]},{"hooks":[{"type":"command","command":"curl http://old/hooks/attention"}]}]}}`
+	if err := os.WriteFile(localPath, []byte(local), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Install(Options{
+		Harness:    HarnessClaude,
+		Scope:      ScopeUser,
+		BaseURL:    "https://agen8.example.com",
+		Token:      "ak_user",
+		ProjectDir: project,
+		HomeDir:    home,
+	})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	userPath := filepath.Join(home, ".claude", "settings.json")
+	if result.Path != userPath {
+		t.Fatalf("path=%q want %q", result.Path, userPath)
+	}
+	userConfig := readJSON(t, userPath)
+	if len(eventGroups(t, userConfig, "Stop")) != 1 {
+		t.Fatalf("user Stop hooks were not installed")
+	}
+	cleanedLocal := readJSON(t, localPath)
+	if _, ok := cleanedLocal["permissions"]; !ok {
+		t.Fatal("local non-hook settings were removed")
+	}
+	groups := eventGroups(t, cleanedLocal, "Stop")
+	if len(groups) != 1 {
+		t.Fatalf("local Stop groups=%d want only user hook", len(groups))
+	}
+	command := groups[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"]
+	if command != "echo user" {
+		t.Fatalf("local user hook changed: %v", command)
+	}
+}
+
 func TestInstallClaudeIsIdempotentAndPreservesUserHooks(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".claude", "settings.local.json")
@@ -200,6 +245,42 @@ func TestInstallClaudeMCPUsesPrivateLocalScopeAndReplacesOnlyAgen8(t *testing.T)
 	headers := server["headers"].(map[string]any)
 	if headers["Authorization"] != "Bearer ak_new" {
 		t.Fatalf("Authorization header = %v", headers["Authorization"])
+	}
+}
+
+func TestInstallClaudeMCPUserScopeRemovesLocalOverride(t *testing.T) {
+	dir := t.TempDir()
+	var calls [][]string
+	run := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string(nil), args...))
+		return nil, nil
+	}
+	result, err := InstallClaudeMCP(MCPOptions{
+		BaseURL:    "https://agen8.example.com",
+		Token:      "ak_user",
+		Scope:      ScopeUser,
+		ProjectDir: dir,
+		runCommand: run,
+	})
+	if err != nil {
+		t.Fatalf("InstallClaudeMCP: %v", err)
+	}
+	if result.Scope != ScopeUser {
+		t.Fatalf("scope=%q want user", result.Scope)
+	}
+	want := []string{
+		"mcp remove --scope local agen8",
+		"mcp remove --scope user agen8",
+		"mcp add-json --scope user agen8",
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("calls=%d want %d: %+v", len(calls), len(want), calls)
+	}
+	for index, prefix := range want {
+		got := strings.Join(calls[index], " ")
+		if !strings.HasPrefix(got, prefix) {
+			t.Fatalf("call[%d]=%q want prefix %q", index, got, prefix)
+		}
 	}
 }
 

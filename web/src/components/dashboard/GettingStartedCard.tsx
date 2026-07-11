@@ -112,7 +112,7 @@ export default function GettingStartedCard({ projectId }: { projectId: string | 
             {connectCommand ? (
               <>
                 <p className="m-0 mb-1.5 text-[0.75rem] text-[var(--text-3)]">
-                  This token is shown once — the command below already includes it.
+                  This token is shown once. Claude uses this account-level connection in every project.
                 </p>
                 <CommandLine value={connectCommand} />
               </>
@@ -155,7 +155,7 @@ export default function GettingStartedCard({ projectId }: { projectId: string | 
             <Check size={11} className="text-[var(--green)]" aria-hidden />
             <span>
               {harness === 'claude'
-                ? 'The Claude setup command installs project attention hooks.'
+                ? 'The Claude setup command installs account-level attention hooks once.'
                 : <>Install attention reporting with <code className="text-[var(--text-2)]">agen8 hooks install</code>.</>}
             </span>
           </div>

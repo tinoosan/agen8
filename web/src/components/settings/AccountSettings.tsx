@@ -426,12 +426,12 @@ export function AccountMCPAccessSection() {
                 />
                 <SetupSnippet
                   title="Claude Code setup"
-                  description="Run inside the project. Installs the skill, attention hooks, and local-scope MCP connection."
+                  description="Run once. Connects every Claude project and installs account-level skills and attention hooks."
                   value={snippets.claudeCommand}
                 />
                 <SetupSnippet
                   title="Claude Code hooks repair"
-                  description="Lower-level repair command when only the project hooks need replacing."
+                  description="Lower-level project repair for a legacy local hook configuration."
                   value={snippets.hooksClaudeCommand}
                 />
                 <SetupSnippet

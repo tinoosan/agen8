@@ -29,14 +29,15 @@ func newClientSetupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "configured agen8 for %s\nproject: %s\nskills: %s\nhooks: %s\nmcp: %s\nserver: %s\n",
-				result.Harness, result.ProjectDir, result.SkillRoot, result.HooksPath, result.MCPPath, result.MCPURL)
+			fmt.Fprintf(cmd.OutOrStdout(), "configured agen8 for %s\nscope: %s\nproject: %s\nskills: %s\nhooks: %s\nmcp: %s\nserver: %s\n",
+				result.Harness, result.Scope, result.ProjectDir, result.SkillRoot, result.HooksPath, result.MCPPath, result.MCPURL)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&opts.Harness, "harness", "claude", "target harness: claude")
 	cmd.Flags().StringVar(&opts.BaseURL, "url", "http://127.0.0.1:7777", "Agen8 daemon base URL")
 	cmd.Flags().StringVar(&opts.Token, "token", "", "Agen8 API key (ak_...)")
+	cmd.Flags().StringVar(&opts.Scope, "scope", "auto", "Claude configuration scope: auto, user, or local")
 	cmd.Flags().StringVar(&opts.ProjectDir, "project-dir", "", "local project directory (default: cwd)")
 	cmd.Flags().StringVar(&opts.HomeDir, "home", "", "home directory override")
 	return cmd
