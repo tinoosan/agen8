@@ -5,11 +5,21 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 import { createTestQueryClient } from '../test/test-utils'
+import type { Project as ProjectRecord } from '../lib/types'
 
 const mockUseProjects = vi.fn()
 const mockSetFocusedProjectRoot = vi.fn()
 const mockUseLocations = vi.fn()
 const mockRpcCall = vi.fn()
+const mockToastError = vi.fn()
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+    success: vi.fn(),
+    warning: vi.fn(),
+  },
+}))
 
 vi.mock('../hooks/useProjects', () => ({
   useProjects: () => mockUseProjects(),
@@ -21,6 +31,14 @@ vi.mock('../hooks/useLocations', () => ({
 
 vi.mock('../lib/rpc', () => ({
   rpcCall: (...args: unknown[]) => mockRpcCall(...args),
+}))
+
+vi.mock('../components/projects/RelocateProjectDialog', () => ({
+  default: ({ project, onRelocated }: { project: ProjectRecord; onRelocated: (project: ProjectRecord) => void }) => (
+    <button type="button" onClick={() => onRelocated({ ...project, root: '/repo/alpha-renamed' })}>
+      Confirm relocation
+    </button>
+  ),
 }))
 
 vi.mock('../lib/routing', () => ({
@@ -162,6 +180,71 @@ describe('Project page', () => {
     expect(screen.getByText(command)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /done/i }))
     expect(screen.queryByText(command)).not.toBeInTheDocument()
+  })
+
+  it('repairs Claude automatically after relocating a local project', async () => {
+    const user = userEvent.setup()
+    mockRpcCall.mockImplementation((method: string) => {
+      if (method === 'project.claudeMCP.configure') {
+        return Promise.resolve({ projectId: 'alpha', installed: true, serverName: 'agen8' })
+      }
+      return Promise.resolve({})
+    })
+
+    renderProjectPage()
+    await user.click(screen.getAllByRole('button', { name: /project actions/i })[0])
+    await user.click(screen.getByRole('menuitem', { name: /change project folder/i }))
+    await user.click(screen.getByRole('button', { name: /confirm relocation/i }))
+
+    await waitFor(() => {
+      expect(mockRpcCall).toHaveBeenCalledWith('project.claudeMCP.configure', { projectId: 'alpha' })
+    })
+  })
+
+  it('shows the hosted Claude setup command immediately after relocation', async () => {
+    const user = userEvent.setup()
+    const command = "agen8 client setup --harness claude --scope user --token 'ak_once'"
+    mockRpcCall.mockImplementation((method: string) => {
+      if (method === 'project.claudeMCP.configure') {
+        return Promise.resolve({
+          projectId: 'alpha',
+          installed: false,
+          requiresClientAction: true,
+          clientSetupCommand: command,
+        })
+      }
+      return Promise.resolve({})
+    })
+
+    renderProjectPage()
+    await user.click(screen.getAllByRole('button', { name: /project actions/i })[0])
+    await user.click(screen.getByRole('menuitem', { name: /change project folder/i }))
+    await user.click(screen.getByRole('button', { name: /confirm relocation/i }))
+
+    expect(await screen.findByText(command)).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('Finish Claude setup')
+  })
+
+  it('keeps relocation successful when Claude repair needs attention', async () => {
+    const user = userEvent.setup()
+    mockRpcCall.mockImplementation((method: string) => {
+      if (method === 'project.claudeMCP.configure') {
+        return Promise.reject(new Error('Claude CLI is unavailable'))
+      }
+      return Promise.resolve({})
+    })
+
+    renderProjectPage()
+    await user.click(screen.getAllByRole('button', { name: /project actions/i })[0])
+    await user.click(screen.getByRole('menuitem', { name: /change project folder/i }))
+    await user.click(screen.getByRole('button', { name: /confirm relocation/i }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        'Project moved, but Claude setup needs attention: Claude CLI is unavailable',
+      )
+    })
+    expect(screen.queryByRole('button', { name: /confirm relocation/i })).not.toBeInTheDocument()
   })
 
   it('uses the ready local location by default when creating the first project', async () => {
