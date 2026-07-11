@@ -121,7 +121,7 @@ export default function ProjectPage() {
     }
   }
 
-  const configureClaudeMCP = async (project: Project) => {
+  const configureClaudeMCP = async (project: Project, afterRelocation = false) => {
     try {
       const result = await rpcCall<ProjectClaudeMCPConfigureResult>('project.claudeMCP.configure', { projectId: project.id })
       if (result.requiresClientAction && result.clientSetupCommand) {
@@ -131,7 +131,8 @@ export default function ProjectPage() {
       if (!result.installed) throw new Error('Claude MCP configuration was not installed')
       toast.success(`Claude MCP configured for "${projectDisplayName(project)}"`)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to configure Claude MCP')
+      const message = error instanceof Error ? error.message : 'Failed to configure Claude MCP'
+      toast.error(afterRelocation ? `Project moved, but Claude setup needs attention: ${message}` : message)
     }
   }
 
@@ -359,6 +360,7 @@ export default function ProjectPage() {
               setRelocateTarget(null)
               queryClient.invalidateQueries({ queryKey: qk.projectsAll })
               toast.success(`Project folder changed to "${updated.root}"`)
+              void configureClaudeMCP(updated, true)
             }}
           />
         )}
