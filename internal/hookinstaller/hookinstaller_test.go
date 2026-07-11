@@ -270,6 +270,7 @@ func TestInstallClaudeMCPUserScopeRemovesLocalOverride(t *testing.T) {
 	}
 	want := []string{
 		"mcp remove --scope local agen8",
+		"mcp remove --scope project agen8",
 		"mcp remove --scope user agen8",
 		"mcp add-json --scope user agen8",
 	}
