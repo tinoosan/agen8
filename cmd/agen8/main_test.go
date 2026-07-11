@@ -92,7 +92,7 @@ func TestClientSetupInstallsClaudeIntegrations(t *testing.T) {
 	}
 	for _, path := range []string{
 		filepath.Join(home, ".claude", "skills", "agen8", "SKILL.md"),
-		filepath.Join(projectDir, ".claude", "settings.local.json"),
+		filepath.Join(home, ".claude", "settings.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected client artifact %s: %v", path, err)
@@ -104,14 +104,15 @@ func TestClientSetupInstallsClaudeIntegrations(t *testing.T) {
 	}
 	for _, want := range []string{
 		"configured agen8 for claude",
+		"scope: user",
 		"server: https://agen8.example.com/mcp",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output %q missing %q", output, want)
 		}
 	}
-	if !strings.Contains(string(calls), "mcp add-json --scope local agen8") {
-		t.Fatalf("claude calls missing local MCP install: %s", calls)
+	if !strings.Contains(string(calls), "mcp add-json --scope user agen8") {
+		t.Fatalf("claude calls missing user MCP install: %s", calls)
 	}
 }
 

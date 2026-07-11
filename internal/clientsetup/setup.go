@@ -16,10 +16,17 @@ import (
 
 const HarnessClaude = "claude"
 
+const (
+	ScopeAuto  = "auto"
+	ScopeLocal = "local"
+	ScopeUser  = "user"
+)
+
 type Options struct {
 	Harness    string
 	BaseURL    string
 	Token      string
+	Scope      string
 	ProjectDir string
 	HomeDir    string
 	Context    context.Context
@@ -32,6 +39,7 @@ type Result struct {
 	HooksPath  string
 	MCPPath    string
 	MCPURL     string
+	Scope      string
 }
 
 // Install validates the complete request before writing, then performs the
@@ -48,6 +56,10 @@ func Install(opts Options) (Result, error) {
 	}
 	if strings.TrimSpace(opts.Token) == "" {
 		return Result{}, fmt.Errorf("client setup: --token is required")
+	}
+	scope, err := setupScope(opts.Scope, opts.Token)
+	if err != nil {
+		return Result{}, err
 	}
 	projectDir := strings.TrimSpace(opts.ProjectDir)
 	if projectDir == "" {
@@ -77,9 +89,11 @@ func Install(opts Options) (Result, error) {
 	}
 	hooks, err := hookinstaller.Install(hookinstaller.Options{
 		Harness:    hookinstaller.HarnessClaude,
+		Scope:      hookinstaller.Scope(scope),
 		BaseURL:    baseURL,
 		Token:      opts.Token,
 		ProjectDir: projectDir,
+		HomeDir:    strings.TrimSpace(opts.HomeDir),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("client setup: install hooks: %w", err)
@@ -87,6 +101,7 @@ func Install(opts Options) (Result, error) {
 	mcpResult, err := hookinstaller.InstallClaudeMCP(hookinstaller.MCPOptions{
 		BaseURL:    baseURL,
 		Token:      opts.Token,
+		Scope:      hookinstaller.Scope(scope),
 		ProjectDir: projectDir,
 		Context:    opts.Context,
 	})
@@ -100,5 +115,23 @@ func Install(opts Options) (Result, error) {
 		HooksPath:  hooks.Path,
 		MCPPath:    mcpResult.Path,
 		MCPURL:     mcpResult.URL,
+		Scope:      scope,
 	}, nil
+}
+
+func setupScope(requested string, token string) (string, error) {
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	if requested == "" || requested == ScopeAuto {
+		if strings.HasPrefix(strings.TrimSpace(token), "wlt_") {
+			return ScopeLocal, nil
+		}
+		return ScopeUser, nil
+	}
+	if requested != ScopeLocal && requested != ScopeUser {
+		return "", fmt.Errorf("client setup: --scope must be auto, local, or user")
+	}
+	if requested == ScopeUser && strings.HasPrefix(strings.TrimSpace(token), "wlt_") {
+		return "", fmt.Errorf("client setup: project-bound wlt_ tokens cannot be installed at user scope")
+	}
+	return requested, nil
 }

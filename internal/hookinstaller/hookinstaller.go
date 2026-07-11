@@ -27,9 +27,13 @@ import (
 // Harness selects which harness's hook config to write.
 type Harness string
 
+type Scope string
+
 const (
 	HarnessClaude Harness = "claude"
 	HarnessCodex  Harness = "codex"
+	ScopeLocal    Scope   = "local"
+	ScopeUser     Scope   = "user"
 )
 
 // hookMarker identifies agen8's own entries inside a shared hooks file, so
@@ -39,6 +43,9 @@ const hookMarker = "/hooks/attention"
 // Options configures Install.
 type Options struct {
 	Harness Harness
+	// Scope controls whether Claude hooks apply to one project or every project.
+	// Codex hooks are already user-scoped and ignore this field.
+	Scope Scope
 	// BaseURL of the agen8 daemon, e.g. http://127.0.0.1:7777 or a hosted URL.
 	BaseURL string
 	// Token is the bearer credential the hook authenticates with (an MCP API
@@ -60,13 +67,17 @@ type Result struct {
 	Path string
 }
 
-// MCPOptions configures private, project-local Claude MCP provisioning.
+// MCPOptions configures private Claude MCP provisioning.
 type MCPOptions struct {
 	// BaseURL of the agen8 daemon, e.g. http://127.0.0.1:7777 or a hosted URL.
 	BaseURL string
 	// Token is the bearer credential Claude Code will send to /mcp.
 	Token string
-	// ProjectDir identifies the local-scope project in Claude Code's user config.
+	// Scope is local or user. The zero value preserves the historical local
+	// behavior for internal project-bound provisioning.
+	Scope Scope
+	// ProjectDir is Claude's working directory. Local scope binds to it; user
+	// scope uses it only to remove a stale local override.
 	ProjectDir string
 	// ServerName is the mcpServers key. Defaults to "agen8".
 	ServerName string
@@ -81,6 +92,7 @@ type MCPResult struct {
 	Path       string
 	ServerName string
 	URL        string
+	Scope      Scope
 }
 
 type claudeCommandRunner func(ctx context.Context, projectDir string, args ...string) ([]byte, error)
@@ -157,7 +169,7 @@ func Install(opts Options) (Result, error) {
 }
 
 // InstallClaudeMCP uses Claude Code's config manager to replace Agen8's
-// private, project-local MCP entry in ~/.claude.json. Claude settings files do
+// private MCP entry in ~/.claude.json. Claude settings files do
 // not accept mcpServers, while a project .mcp.json would expose the bearer
 // credential to version control. Delegating the merge to `claude mcp` preserves
 // every unrelated setting and follows Claude's current config schema.
@@ -168,6 +180,10 @@ func InstallClaudeMCP(opts MCPOptions) (MCPResult, error) {
 	}
 	if strings.TrimSpace(opts.Token) == "" {
 		return MCPResult{}, fmt.Errorf("claude mcp install: --token is required (an agen8 API key, ak_...)")
+	}
+	scope, err := claudeScope(opts.Scope)
+	if err != nil {
+		return MCPResult{}, err
 	}
 	projectDir := strings.TrimSpace(opts.ProjectDir)
 	if projectDir == "" {
@@ -180,7 +196,7 @@ func InstallClaudeMCP(opts MCPOptions) (MCPResult, error) {
 	if serverName == "" {
 		serverName = "agen8"
 	}
-	projectDir, err := filepath.Abs(projectDir)
+	projectDir, err = filepath.Abs(projectDir)
 	if err != nil {
 		return MCPResult{}, fmt.Errorf("claude mcp install: resolve project dir: %w", err)
 	}
@@ -213,14 +229,39 @@ func InstallClaudeMCP(opts MCPOptions) (MCPResult, error) {
 	if run == nil {
 		run = runClaudeCommand
 	}
-	removeOutput, removeErr := run(ctx, projectDir, "mcp", "remove", "--scope", "local", serverName)
-	if removeErr != nil && !strings.Contains(string(removeOutput), "No project-local MCP server found") {
-		return MCPResult{}, fmt.Errorf("claude mcp install: remove existing server: %w", removeErr)
+	if scope == ScopeUser {
+		// A local server shadows a user server with the same name. Remove Agen8's
+		// current-project override before installing the account-level connection.
+		if err := removeClaudeMCP(ctx, run, projectDir, ScopeLocal, serverName); err != nil {
+			return MCPResult{}, err
+		}
 	}
-	if _, err := run(ctx, projectDir, "mcp", "add-json", "--scope", "local", serverName, string(serverJSON)); err != nil {
+	if err := removeClaudeMCP(ctx, run, projectDir, scope, serverName); err != nil {
+		return MCPResult{}, err
+	}
+	if _, err := run(ctx, projectDir, "mcp", "add-json", "--scope", string(scope), serverName, string(serverJSON)); err != nil {
 		return MCPResult{}, fmt.Errorf("claude mcp install: add server: %w", err)
 	}
-	return MCPResult{Path: claudeLocalConfigPath(), ServerName: serverName, URL: mcpURL}, nil
+	return MCPResult{Path: claudeLocalConfigPath(), ServerName: serverName, URL: mcpURL, Scope: scope}, nil
+}
+
+func claudeScope(scope Scope) (Scope, error) {
+	scope = Scope(strings.ToLower(strings.TrimSpace(string(scope))))
+	if scope == "" {
+		return ScopeLocal, nil
+	}
+	if scope != ScopeLocal && scope != ScopeUser {
+		return "", fmt.Errorf("claude setup scope must be local or user")
+	}
+	return scope, nil
+}
+
+func removeClaudeMCP(ctx context.Context, run claudeCommandRunner, projectDir string, scope Scope, serverName string) error {
+	output, err := run(ctx, projectDir, "mcp", "remove", "--scope", string(scope), serverName)
+	if err == nil || strings.Contains(strings.ToLower(string(output)), "no ") && strings.Contains(strings.ToLower(string(output)), "mcp server found") {
+		return nil
+	}
+	return fmt.Errorf("claude mcp install: remove %s server: %w", scope, err)
 }
 
 func runClaudeCommand(ctx context.Context, projectDir string, args ...string) ([]byte, error) {
@@ -282,11 +323,17 @@ func hookCommand(baseURL, token, harness string, spec hookSpec) string {
 	)
 }
 
-// installClaude merges agen8's hook entries into <project>/.claude/settings.local.json.
-// settings.local.json (not settings.json) keeps the embedded token out of git.
+// installClaude merges Agen8's hooks into private Claude settings. Local scope
+// uses <project>/.claude/settings.local.json; user scope uses
+// ~/.claude/settings.json and removes Agen8's local hooks in the current folder
+// because Claude gives local settings precedence over user settings.
 // The merge is surgical: within each event, any existing group containing an
 // agen8 attention command is replaced; everything else is preserved verbatim.
 func installClaude(opts Options, baseURL string) (Result, error) {
+	scope, err := claudeScope(opts.Scope)
+	if err != nil {
+		return Result{}, fmt.Errorf("hooks install: %w", err)
+	}
 	projectDir := strings.TrimSpace(opts.ProjectDir)
 	if projectDir == "" {
 		wd, err := os.Getwd()
@@ -296,6 +343,19 @@ func installClaude(opts Options, baseURL string) (Result, error) {
 		projectDir = wd
 	}
 	path := filepath.Join(projectDir, ".claude", "settings.local.json")
+	if scope == ScopeUser {
+		homeDir := strings.TrimSpace(opts.HomeDir)
+		if homeDir == "" {
+			homeDir, err = os.UserHomeDir()
+			if err != nil {
+				return Result{}, fmt.Errorf("hooks install: resolve home directory: %w", err)
+			}
+		}
+		if err := removeClaudeHooks(filepath.Join(projectDir, ".claude", "settings.local.json")); err != nil {
+			return Result{}, err
+		}
+		path = filepath.Join(homeDir, ".claude", "settings.json")
+	}
 	if err := validateHookConfigPath(path); err != nil {
 		return Result{}, fmt.Errorf("hooks install: validate %s: %w", path, err)
 	}
@@ -315,6 +375,44 @@ func installClaude(opts Options, baseURL string) (Result, error) {
 		return Result{}, err
 	}
 	return Result{Harness: HarnessClaude, Path: path}, nil
+}
+
+func removeClaudeHooks(path string) error {
+	raw, err := readHookConfig(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("hooks install: read %s: %w", path, err)
+	}
+	settings := map[string]any{}
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return fmt.Errorf("hooks install: %s exists but is not valid JSON: %w", path, err)
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	changed := false
+	for event, groups := range hooks {
+		filtered := withoutAgen8Groups(groups)
+		original, _ := groups.([]any)
+		if len(filtered) != len(original) {
+			changed = true
+		}
+		if len(filtered) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = filtered
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if len(hooks) == 0 {
+		delete(settings, "hooks")
+	}
+	if err := writeJSONFile(path, settings); err != nil {
+		return fmt.Errorf("hooks install: remove local Agen8 hooks: %w", err)
+	}
+	return nil
 }
 
 // installCodex merges agen8's hook entries into ~/.codex/hooks.json — the

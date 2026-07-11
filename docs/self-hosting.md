@@ -171,23 +171,23 @@ export AGEN8_MCP_TOKEN='ak_...'
 Claude Code one-command setup:
 
 ```sh
-cd /path/to/local/project
 agen8 client setup --harness claude \
+  --scope user \
   --url https://agen8.example.com \
   --token ak_...
 ```
 
-This installs the Claude workflow skills, project attention hooks, and a
-local-scope MCP connection together. The Projects page generates the command
-for new and existing projects. Display-name changes do not require reconnecting
-Claude. Re-run the setup command from the local project directory to repair the
-client integration, or pass `--project-dir` explicitly.
+This installs the Claude workflow skills, account-level attention hooks, and a
+user-scope MCP connection together. Run it once for the developer account; new
+and existing project folders register when Claude starts there. Re-run it to
+rotate the credential or repair configuration. `--project-dir` identifies a
+current folder whose stale local Agen8 override should be removed.
 
 When a project folder moves or is renamed, use **Project actions > Change
 project folder**. The operation keeps the existing project ID and validates the
-new directory on the project's configured location. Hosted setup commands use
-project-bound `wlt_` credentials, so generate a fresh command with **Configure
-Claude MCP** after relocating the project.
+new directory on the project's configured location. Legacy hosted project
+commands may use project-bound `wlt_` credentials and remain local-scope.
+Account-level `ak_` setup does not need reinstalling after relocation.
 
 Install the Agen8 workflow skill for Codex locally:
 

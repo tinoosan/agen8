@@ -159,25 +159,28 @@ harness will use to talk to Agen8. Copy it somewhere safe.
 
 ### 5. Connect a harness
 
-For Claude Code, run one command from the local project directory. It installs
-the Agen8 skills, project attention hooks, and a local-scope MCP connection:
+For Claude Code, run one account-level command. It installs the Agen8 skills,
+attention hooks, and a user-scope MCP connection used in every project:
 
 ```sh
 agen8 client setup --harness claude \
+  --scope user \
   --url http://127.0.0.1:7777 \
   --token ak_...
 ```
 
-The Projects page generates this command automatically for both new and
-existing projects. Re-running it repairs or refreshes the client setup. Project
-display-name changes do not require reconnecting Claude. Run it from the local
-project directory or pass `--project-dir /path/to/local/project`.
+The dashboard and Account page generate this command. Run it once; new and
+existing folders register themselves when Claude starts there. Re-running it
+rotates the credential and repairs user-level setup. The current directory is
+used only to remove a stale project-local Agen8 override, or can be supplied
+with `--project-dir`.
 
 If a project folder itself moves or is renamed, use **Project actions > Change
 project folder**. Agen8 validates the replacement directory and keeps the same
 project ID, history, members, missions, and tasks. It never moves files on disk.
-Afterward, run **Configure Claude MCP** for that project to generate a fresh
-project-bound client command when using a hosted daemon.
+Legacy project-bound connections can still be repaired with **Configure Claude
+MCP**, but account-level setup does not need reconnecting after a display-name
+change.
 
 For Codex or another MCP client, add a server entry pointing at the daemon and
 use the API key as a bearer token. `.mcp.example.json` at the repo root is a
