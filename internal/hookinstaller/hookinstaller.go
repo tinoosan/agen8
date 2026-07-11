@@ -230,9 +230,14 @@ func InstallClaudeMCP(opts MCPOptions) (MCPResult, error) {
 		run = runClaudeCommand
 	}
 	if scope == ScopeUser {
-		// A local server shadows a user server with the same name. Remove Agen8's
-		// current-project override before installing the account-level connection.
+		// Local and project servers shadow a user server with the same name.
+		// Remove Agen8's current-folder overrides before installing the
+		// account-level connection. Claude's config manager edits only this server
+		// and preserves every unrelated entry in .mcp.json and ~/.claude.json.
 		if err := removeClaudeMCP(ctx, run, projectDir, ScopeLocal, serverName); err != nil {
+			return MCPResult{}, err
+		}
+		if err := removeClaudeMCP(ctx, run, projectDir, Scope("project"), serverName); err != nil {
 			return MCPResult{}, err
 		}
 	}
