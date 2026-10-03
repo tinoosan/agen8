@@ -862,7 +862,7 @@ button:not([data-static]):not(.react-flow__controls-button):active:not(:disabled
 button[data-static]:hover:not(:disabled) {
   box-shadow:none;
 }
-button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible {
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible {
   outline:2px solid var(--accent);
   outline-offset:3px;
 }

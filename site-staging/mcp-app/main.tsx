@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { App } from "@modelcontextprotocol/ext-apps";
 import { OpenAIExtensions } from "@openai/mcp-extensions/app";
+import { LoaderCircle } from "lucide-react";
 import Workspace, { type WorkspaceReader } from "../components/workspace";
 import type { Project, Snapshot, WorkNode } from "../lib/model";
 import { parseGraphPath, type GraphSelection } from "../lib/navigation";
@@ -78,4 +79,6 @@ async function start() {
   });
   render();
 }
+// The host connection and first tool result can take a moment; avoid an empty frame meanwhile.
+root.render(<main className="empty-state" role="status"><LoaderCircle className="spinning" />Opening work graph…</main>);
 void start().catch(error => root.render(<main className="empty-state" role="alert"><h2>Could not open the graph</h2><p>{error instanceof Error ? error.message : "Try opening the work graph again."}</p></main>));
