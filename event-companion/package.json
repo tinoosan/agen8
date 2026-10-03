@@ -1,0 +1,9 @@
+{
+  "name": "agen8-event-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "test": "node --test test/*.test.mjs", "start": "node server.mjs", "dispatch": "node dispatch.mjs" },
+  "dependencies": { "ipaddr.js": "2.5.0" }
+}

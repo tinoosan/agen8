@@ -1,0 +1,11 @@
+[Unit]
+Description=Revisit durable Agen8 event delivery rows
+
+[Timer]
+OnBootSec=10s
+OnUnitInactiveSec=30s
+AccuracySec=1s
+Unit=agen8-dispatch.service
+
+[Install]
+WantedBy=timers.target

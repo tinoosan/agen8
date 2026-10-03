@@ -11,6 +11,54 @@ on:
 # revive are pinned to specific versions so the gate is reproducible.
 
 jobs:
+  event-companion:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: event-companion
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: event-companion/package-lock.json
+      - name: Install companion dependency
+        run: npm ci --ignore-scripts
+      - name: Test secure transport and dispatcher
+        run: npm test
+      - name: Audit companion
+        run: npm audit --audit-level=low
+
+  site-staging:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site-staging
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: site-staging/package-lock.json
+      - name: Install staging dependencies
+        run: npm run install:ci
+      - name: Check staging types
+        run: npm run typecheck
+      - name: Test staging
+        run: npm test
+      - name: Build staging
+        run: npm run build
+      - name: Audit staging dependencies
+        run: npm audit --audit-level=low
+      - name: Lint staging source
+        run: npm run lint -- --ignore-pattern .mcp-app-build --max-warnings 0
+
   go:
     runs-on: ubuntu-latest
     steps:

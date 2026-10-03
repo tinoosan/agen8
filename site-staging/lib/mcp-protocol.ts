@@ -60,7 +60,7 @@ export async function withMcpProtocol(request: Request, handle: (body: McpReques
     if (!object(meta[CAPABILITIES_KEY])) return error(body, -32602, "Per-request client capabilities are required.");
     const clientInfo = meta["io.modelcontextprotocol/clientInfo"];
     if (clientInfo !== undefined && (!object(clientInfo) || typeof clientInfo.name !== "string" || typeof clientInfo.version !== "string")) return error(body, -32602, "Invalid client information.");
-    if (["tools/call", "resources/read", "prompts/get"].includes(body.method!)) {
+    if (["tools/call", "resources/read", "prompts/get", "events/subscribe", "events/unsubscribe"].includes(body.method!)) {
       const name = body.method === "resources/read" ? body.params?.uri : body.params?.name;
       const nameHeader = request.headers.get("mcp-name");
       if (typeof name !== "string" || (decodedHeader(nameHeader) !== name && !(sitesDispatch && nameHeader === null))) return error(body, -32020, "Mcp-Name does not match the request body.");
@@ -69,7 +69,7 @@ export async function withMcpProtocol(request: Request, handle: (body: McpReques
   const response = await handle(body, modern);
   if (!modern || response.status === 202 || response.status === 204) return response;
   const payload = await response.json() as { result?: Record<string, unknown>; error?: { code: number } };
-  if (payload.result) payload.result = { ...payload.result, ...(["server/discover", "tools/list", "resources/list", "resources/read", "resources/templates/list"].includes(body.method!) ? { ttlMs: 0, cacheScope: "private" } : {}), resultType: "complete", _meta: { ...payload.result._meta as Record<string, unknown>, "io.modelcontextprotocol/serverInfo": { name: "agen8-dev", version } } };
+  if (payload.result) payload.result = { ...payload.result, ...(["server/discover", "tools/list", "resources/list", "resources/read", "resources/templates/list", "events/list"].includes(body.method!) ? { ttlMs: 0, cacheScope: "private" } : {}), resultType: "complete", _meta: { ...payload.result._meta as Record<string, unknown>, "io.modelcontextprotocol/serverInfo": { name: "agen8-dev", version } } };
   const headers = new Headers(response.headers);
   headers.delete("content-length");
   const status = payload.error?.code === -32601 ? 404 : response.status;
