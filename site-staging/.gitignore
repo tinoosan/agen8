@@ -50,3 +50,6 @@ next-env.d.ts
 /output/
 /.mcp-app-build/
 /lib/generated/
+/.auth/
+/playwright-report/
+/test-results/

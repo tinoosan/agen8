@@ -3,7 +3,7 @@ import { WorkError } from "./validation";
 const DAY = 86_400_000;
 type Grant = { id: string; owner_id: string; expires_at: number };
 
-/** Privileged setup helper, deliberately absent from MCP tools and HTTP routes.
+/** Privileged setup helper behind the separately keyed operational access route.
  * Call only after approval, with a Sites-authenticated request on this Site.
  * Never derive this principal from account metadata, email or a request body.
  * Replacing a grant cancels its subscriptions; subscribe cannot renew a grant.

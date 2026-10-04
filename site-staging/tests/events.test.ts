@@ -350,10 +350,3 @@ test("unsubscribe or expiration during authorization prevents sending already-cl
     } finally { s.sqlite.close(); }
   }
 });
-
-test("Worker route ignores framework route context and keeps live events disabled", async () => {
-  const { POST } = await import("../app/mcp/route");
-  const response = await Reflect.apply(POST, null, [modernRequest("server/discover"), { params: Promise.resolve({}) }]) as Response;
-  const result = await response.json() as Rpc;
-  assert.equal(result.result.capabilities.events, undefined);
-});

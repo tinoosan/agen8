@@ -54,10 +54,10 @@ jobs:
         run: npm test
       - name: Build staging
         run: npm run build
-      - name: Audit staging dependencies
-        run: npm audit --audit-level=low
       - name: Lint staging source
         run: npm run lint -- --ignore-pattern .mcp-app-build --max-warnings 0
+      - name: Audit staging dependencies
+        run: npm audit --audit-level=low
 
   go:
     runs-on: ubuntu-latest

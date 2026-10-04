@@ -139,7 +139,7 @@ export class McpEvents {
     if (input.arguments.node_id) await work.node(input.arguments.project_id, input.arguments.node_id);
     await this.sql(`INSERT INTO mcp_subscriptions
       (id,owner_id,name,arguments,project_id,node_id,status,url,secret,secret_hash,verified_at,expires_at,start_sequence,active)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(rowid),0) FROM mcp_event_outbox),1)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(sequence),0) FROM mcp_event_outbox),1)
       ON CONFLICT(id) DO UPDATE SET
       previous_secret=CASE WHEN mcp_subscriptions.secret_hash<>excluded.secret_hash THEN mcp_subscriptions.secret ELSE mcp_subscriptions.previous_secret END,
       rotation_until=CASE WHEN mcp_subscriptions.secret_hash<>excluded.secret_hash THEN ? ELSE mcp_subscriptions.rotation_until END,
@@ -196,7 +196,7 @@ export async function dispatchEvents(db: D1Database, host: EventHost, owner: str
     SELECT s.id,e.id,'pending',? FROM mcp_subscriptions s JOIN mcp_event_outbox e
       ON e.owner_id=s.owner_id AND e.project_id=s.project_id AND e.name=s.name
     JOIN projects p ON p.id=e.project_id AND p.owner_id=s.owner_id
-    WHERE s.owner_id=? AND s.active=1 AND s.expires_at>? AND e.rowid>s.start_sequence
+    WHERE s.owner_id=? AND s.active=1 AND s.expires_at>? AND e.sequence>s.start_sequence
       AND (s.node_id IS NULL OR s.node_id=e.node_id) AND (s.status IS NULL OR s.status=e.transition)
     ON CONFLICT(subscription_id,event_id) DO NOTHING`, at, owner, at).run();
   const due = await sql(`SELECT d.subscription_id,d.event_id FROM mcp_deliveries d
@@ -217,7 +217,7 @@ export async function dispatchEvents(db: D1Database, host: EventHost, owner: str
       FROM mcp_subscriptions s JOIN mcp_event_outbox e ON e.id=? AND e.owner_id=s.owner_id AND e.project_id=s.project_id AND e.name=s.name
       JOIN projects p ON p.id=e.project_id AND p.owner_id=s.owner_id
       JOIN nodes n ON n.id=e.node_id AND n.project_id=p.id
-      WHERE s.id=? AND s.active=1 AND s.expires_at>? AND e.rowid>s.start_sequence`, item.event_id, item.subscription_id, clock()).first<Row>();
+      WHERE s.id=? AND s.active=1 AND s.expires_at>? AND e.sequence>s.start_sequence`, item.event_id, item.subscription_id, clock()).first<Row>();
     const finish = async (state: string, next = clock()) => {
       await sql("UPDATE mcp_deliveries SET state=?,next_attempt_at=?,lease_until=0,claim=NULL WHERE subscription_id=? AND event_id=? AND claim=?", state, next, item.subscription_id, item.event_id, claim).run();
     };
@@ -238,7 +238,7 @@ export async function dispatchEvents(db: D1Database, host: EventHost, owner: str
       const stillActive = await sql(`SELECT s.secret_hash FROM mcp_subscriptions s
         JOIN projects p ON p.id=s.project_id AND p.owner_id=s.owner_id
         JOIN nodes n ON n.id=? AND n.project_id=p.id
-        JOIN mcp_event_outbox e ON e.id=? AND e.rowid>s.start_sequence
+        JOIN mcp_event_outbox e ON e.id=? AND e.sequence>s.start_sequence
         WHERE s.id=? AND s.active=1 AND s.expires_at>?`, current.event_node, current.event_id, current.id, clock()).first<Row>();
       if (!stillActive) { await finish("cancelled"); continue; }
       if (stillActive.secret_hash !== current.secret_hash) { await finish("pending", clock() + 1000); continue; }

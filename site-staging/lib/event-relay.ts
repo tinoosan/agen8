@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { callbackUrl, dispatchEvents, readEventResponse, type EventHost } from "./mcp-events";
 import { dispatchGrant, grantOwnerAccess } from "./event-grants";
+import { pruneEvents } from "./event-retention";
 
 const configSchema = z.object({ url: z.string(), relayToken: z.string(), encryptionKey: z.string() }).strict();
 function keyBytes(value: string) {
@@ -41,7 +42,7 @@ export async function createRelayHost(configuration: z.infer<typeof configSchema
     },
   };
 }
-async function keyMatches(supplied: string | null, expected: string) {
+export async function dispatchKeyMatches(supplied: string | null, expected: string) {
   if (!supplied) return false;
   keyBytes(expected);
   const encoder = new TextEncoder();
@@ -56,7 +57,11 @@ export async function eventDispatchResponse(request: Request, integration?: { db
   // Sites consumes OAI-Sites-Authorization at its private access boundary.
   // Derive the owner solely from the configured grant, never a caller's identity/body.
   try {
-    if (!await keyMatches(request.headers.get("x-agen8-dispatch-key"), integration.dispatchKey)) return Response.json({ error: "Event dispatch is unauthorized." }, { status: 401 });
+    if (!await dispatchKeyMatches(request.headers.get("x-agen8-dispatch-key"), integration.dispatchKey)) return Response.json({ error: "Event dispatch is unauthorized." }, { status: 401 });
+    const recorded = await integration.db.prepare("SELECT owner_id FROM mcp_dispatch_grants WHERE id=?").bind(integration.grantId).first<{ owner_id: string }>();
+    if (!recorded) return Response.json({ error: "Event dispatch grant is unavailable." }, { status: 403 });
+    // Expired/revoked grants still permit scoped cleanup, never delivery or renewal.
+    await pruneEvents(integration.db, recorded.owner_id);
     const grant = await dispatchGrant(integration.db, integration.grantId);
     if (!grant) return Response.json({ error: "Event dispatch grant is unavailable." }, { status: 403 });
     const owner = grant.owner_id;
