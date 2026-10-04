@@ -250,15 +250,15 @@ func (d *Daemon) webHandler() (http.Handler, error) {
 	// #nosec G704 -- target was produced by parseLoopbackDevWebURL, which enforces
 	// absolute http(s) URL, disallows userinfo/unsafe host encoding, and requires
 	// loopback-only host/IP targets; transport dial-time checks re-validate each host.
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = &http.Transport{
-		DialContext: loopbackAwareDialContext(),
-	}
-	director := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		director(r)
-		r.Header.Del("Authorization")
-		r.Header.Del("Cookie")
+	proxy := &httputil.ReverseProxy{
+		Transport: &http.Transport{DialContext: loopbackAwareDialContext()},
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(target)
+			r.Out.Host = r.In.Host
+			r.SetXForwarded()
+			r.Out.Header.Del("Authorization")
+			r.Out.Header.Del("Cookie")
+		},
 	}
 	return proxy, nil
 }
