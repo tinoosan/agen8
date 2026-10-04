@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { publicHttpsPost, httpsDestination } from "./transport.mjs";
 import { credential } from "./server.mjs";
+import { dispatchConfiguration } from "./config.mjs";
 
 export async function dispatchOnce({ url, dispatchKey, siteServiceBearer, heartbeatPath }, { send = publicHttpsPost, clock = Date.now, heartbeat } = {}) {
   const destination = httpsDestination(url);
@@ -27,8 +28,7 @@ export async function dispatchOnce({ url, dispatchKey, siteServiceBearer, heartb
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const result = await dispatchOnce({ url: process.env.AGEN8_DISPATCH_URL, dispatchKey: process.env.AGEN8_DISPATCH_KEY,
-      siteServiceBearer: process.env.AGEN8_SITES_SERVICE_BEARER, heartbeatPath: process.env.AGEN8_HEARTBEAT_PATH });
+    const result = await dispatchOnce(await dispatchConfiguration());
     console.log(JSON.stringify(result));
   } catch { console.error("Agen8 dispatch failed; check authorization and relay readiness."); process.exitCode = 1; }
 }

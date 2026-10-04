@@ -3,6 +3,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { publicHttpsPost, httpsDestination } from "./transport.mjs";
+import { secret } from "./config.mjs";
 
 export function credential(value) {
   if (typeof value !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || Buffer.from(value, "base64").length !== 32 || Buffer.from(value, "base64").toString("base64") !== value) throw new Error("A canonical base64 32-byte credential is required.");
@@ -58,8 +59,10 @@ export function relayServer({ token, heartbeatPath, send = publicHttpsPost, read
   return server;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const token = credential(process.env.AGEN8_RELAY_TOKEN);
+  const token = credential(await secret("AGEN8_RELAY_TOKEN"));
   const heartbeatPath = process.env.AGEN8_HEARTBEAT_PATH;
   if (!heartbeatPath?.startsWith("/")) throw new Error("An absolute heartbeat file path is required.");
-  relayServer({ token, heartbeatPath }).listen(8788, "127.0.0.1");
+  const bind = process.env.AGEN8_RELAY_BIND ?? "127.0.0.1";
+  if (!["127.0.0.1", "0.0.0.0"].includes(bind)) throw new Error("Invalid relay bind address.");
+  relayServer({ token, heartbeatPath }).listen(8788, bind);
 }

@@ -53,6 +53,8 @@ test("production Worker routes stay disabled until configured and preserve tool 
     const integration = await configuredEvents(configuration, runtime.db);
     assert(integration); assert.equal(await integration.host.ownerHasAccess("site-principal"), false);
     await assert.rejects(configuredEvents({ ...configuration, AGEN8_EVENT_RELAY_URL: "http://example.com" }, runtime.db), /HTTPS/);
+    assert(await configuredEvents({ ...configuration, AGEN8_EVENT_RELAY_URL: "https://mugiwara.tail9aaa00.ts.net:10000" }, runtime.db));
+    await assert.rejects(configuredEvents({ ...configuration, AGEN8_EVENT_RELAY_URL: "https://example.com:8443" }, runtime.db), /port/);
   } finally { await runtime.close(); }
 });
 

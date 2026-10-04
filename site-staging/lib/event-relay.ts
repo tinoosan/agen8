@@ -4,6 +4,16 @@ import { dispatchGrant, grantOwnerAccess } from "./event-grants";
 import { pruneEvents } from "./event-retention";
 
 const configSchema = z.object({ url: z.string(), relayToken: z.string(), encryptionKey: z.string() }).strict();
+function relayOrigin(value: string) {
+  const origin = new URL(value);
+  // Fixed operator configuration may use Funnel's isolated public HTTPS port.
+  // Subscription callbacks still require standard HTTPS in callbackUrl.
+  if (origin.port && origin.port !== "10000") throw new Error("Unsupported trusted relay HTTPS port.");
+  const standard = new URL(origin); standard.port = "";
+  callbackUrl(standard.href);
+  if (origin.pathname !== "/" || origin.search) throw new Error("Configure only the trusted relay HTTPS origin.");
+  return origin;
+}
 function keyBytes(value: string) {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error("Invalid event adapter key.");
   const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0));
@@ -15,8 +25,7 @@ function keyBytes(value: string) {
  * The relay receives signed bytes only, never the webhook signing key or D1 credentials.
  */
 export async function createRelayHost(configuration: z.infer<typeof configSchema>, ownerHasAccess: EventHost["ownerHasAccess"], relayFetch = fetch): Promise<EventHost> {
-  const config = configSchema.parse(configuration), base = new URL(callbackUrl(config.url));
-  if (base.pathname !== "/" || base.search) throw new Error("Configure only the trusted relay HTTPS origin.");
+  const config = configSchema.parse(configuration), base = relayOrigin(config.url);
   keyBytes(config.relayToken);
   const encryptionKey = await crypto.subtle.importKey("raw", keyBytes(config.encryptionKey), "AES-GCM", false, ["encrypt", "decrypt"]);
   const call = async (path: string, init: RequestInit) => {

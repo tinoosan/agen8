@@ -31,6 +31,24 @@ jobs:
         run: npm test
       - name: Audit companion
         run: npm audit --audit-level=low
+      - name: Build companion container
+        run: docker build --pull -t agen8-events:test .
+      - name: Test companion container without external networking
+        run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges:true
+          --tmpfs /tmp:rw,noexec,nosuid,size=32m
+          -v "$PWD/test:/app/test:ro"
+          -v "$PWD/test-receiver.mjs:/app/test-receiver.mjs:ro" agen8-events:test
+          sh -c 'node --test test/*.test.mjs'
+      - name: Scan companion container
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy-cache"
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$RUNNER_TEMP/trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
+            image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 agen8-events:test
 
   site-staging:
     runs-on: ubuntu-latest
@@ -134,10 +152,6 @@ jobs:
             package-lock.json
             web/package-lock.json
 
-      - name: Audit workspace tooling dependencies
-        working-directory: .
-        run: npm audit --package-lock-only --audit-level=low
-
       - name: Install web dependencies
         run: npm ci
 
@@ -155,6 +169,10 @@ jobs:
 
       - name: Reject production source maps
         run: test -z "$(find ../internal/web/dist -type f -name '*.map' -print -quit)"
+
+      - name: Audit workspace tooling dependencies
+        working-directory: .
+        run: npm audit --package-lock-only --audit-level=low
 
   container:
     runs-on: ubuntu-latest
