@@ -25,3 +25,7 @@ Migration preserves IDs, text, evidence, relationships, and original timestamps.
 ## Staging hosting
 
 `.openai/hosting.json` identifies Agen8 Dev and declares D1 plus native MCP hosting. Use the Sites source workflow to check, build, push, package, and publish this checkout. Production and the legacy application remain separate. The open graph refreshes every ten seconds; content refreshes preserve layout by topology. No automatic conversation capture or runtime monitoring is implemented.
+
+## MCP Events implementation
+
+Work-status transitions and decision creation commit a minimal event outbox alongside history. [MCP Events](docs/mcp-events.md) describes the subscription and signed-delivery implementation, tests, and hosting requirements. Live event discovery and subscription acceptance remain disabled until the host supplies a verified durable dispatcher, secure callback transport, encryption key and finite Site-owner grant. Guarded server-only runtime wiring is included and defaults to disabled; the [activation proposal](docs/live-activation.md) specifies the remaining approvals and real-host checks. The existing MCP tools continue to work. The responsive workspace adds work-state shelves, selection focus, readable detail/history and keyboard focus restoration without editing or registration forms. Hosted E2E is prepared with two genuine account sessions and an explicit dev-only write preflight; it has not been run against the live Site.

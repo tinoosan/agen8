@@ -5,6 +5,8 @@ import { statuses, relations } from "./model";
 import { ZodError } from "zod";
 import { version } from "../package.json";
 import { extensionTools, extensionCapabilities, extensionCall, appResource, resourceTemplates, readExtensionResource } from "./extensions";
+import { eventDefinitions, EventError, McpEvents, type EventHost } from "./mcp-events";
+import { database } from "./database";
 const string = (description: string) => ({ type: "string", description });
 const common = {
   project_id: string("Exact project ID. Use project action=list first."), node_id: string("Exact shared record ID."),
@@ -26,10 +28,12 @@ export const tools = [
   tool("get_context", "Read concise project context, current and planned work, blockers, decisions, results, relationships and recent meaningful changes when starting or resuming. hasMore indicates a truncated graph; use direct node reads and history for details.", { project_id: common.project_id, since: string("Optional ISO timestamp for recent changes.") }, ["project_id"]),
 ];
 export const instructions = "Agen8 Dev is the isolated staging shared work graph. Find the relevant project, read get_context when starting or resuming, and reuse existing work records across chats. Record meaningful pieces of work, not every tool call. Keep titles short and summaries to one sentence. Update work at meaningful progress, changed approach, blockers, decisions, and before finishing. Link decisions and dependencies so both agents and humans can understand the work. Record results and checks and mark work done directly, or stopped with a reason. Reopen shared work when needed; history retains earlier results. Never register or track agent identities, assign or claim work, or create human review duties. Read before updating and include expected_version; on conflict reread and reconcile. The human interface is observational. The same graph opens from the plugin sidebar or beside a chat. Composer mentions and selected-node context identify shared records; reread them before updating because the attached version may be stale. Use the IDs in mentioned agen8:// resources to find the existing record. Existing execution tools own commands, files, conversations and SSH. Do not import legacy data or use production for tests.";
-export async function mcpResponse(request: Request) {
+// The deployed Worker supplies no EventHost. Advertise events only after a supported
+// transport and durable dispatcher have been integrated and verified on that host.
+export async function mcpResponse(request: Request, events?: { host: EventHost; db?: D1Database }) {
   return withMcpProtocol(request, async (body, modern) => {
     const result = (value: unknown) => Response.json({ jsonrpc: "2.0", id: body.id ?? null, result: value });
-    const capabilities = { tools: {}, ...extensionCapabilities };
+    const capabilities = { tools: {}, ...extensionCapabilities, ...(modern && events ? { events: {} } : {}) };
     if (body.method === "initialize") return result({ protocolVersion: "2025-06-18", capabilities, serverInfo: { name: "agen8-dev", version }, instructions });
     if (body.method === "server/discover") return result({ supportedVersions: MCP_SUPPORTED_VERSIONS, capabilities, serverInfo: { name: "agen8-dev", version }, instructions });
     if (body.method?.startsWith("notifications/")) return new Response(null, { status: 202 });
@@ -37,6 +41,30 @@ export async function mcpResponse(request: Request) {
     if (body.method === "resources/list") return result({ resources: [appResource] });
     if (body.method === "resources/templates/list") return result({ resourceTemplates });
     if (body.method === "ping") return result({});
+    if (modern && ["events/list", "events/subscribe", "events/unsubscribe"].includes(body.method!)) {
+      try {
+        const owner = request.headers.get("oai-authenticated-user-id");
+        if (!owner) throw new WorkError("Sign in with ChatGPT to access events.", 401);
+        const { _meta: _metadata, ...params } = body.params ?? {};
+        void _metadata;
+        if (body.method === "events/list") {
+          if (Object.keys(params).some(key => key !== "cursor") || (params.cursor !== undefined && params.cursor !== null)) throw new EventError(-32602, "Event catalog has no pagination cursor or filters.");
+          if (events && !await events.host.ownerHasAccess(owner)) throw new WorkError("Event access is unavailable for this account.", 403);
+          return result({ events: events ? eventDefinitions : [] });
+        }
+        // Fail before opening storage or making any outbound connection on Sites.
+        if (!events) throw new EventError(-32015, "MCP Events needs a supported secure callback transport and durable dispatcher.", "host_unavailable");
+        const handler = new McpEvents(events.db ?? await database(), owner, events.host);
+        return result(body.method === "events/subscribe" ? await handler.subscribe(params) : await handler.unsubscribe(params));
+      } catch (error) {
+        const status = error instanceof WorkError && [401, 403].includes(error.status) ? error.status : 200;
+        return Response.json({ jsonrpc: "2.0", id: body.id, error: {
+          code: error instanceof EventError ? error.code : error instanceof ZodError ? -32602 : error instanceof WorkError ? -32001 : -32603,
+          message: error instanceof EventError || error instanceof WorkError ? error.message : error instanceof ZodError ? "Invalid event parameters." : "Event storage is unavailable.",
+          ...(error instanceof EventError && error.reason ? { data: { reason: error.reason } } : {}),
+        } }, { status });
+      }
+    }
     if (!["tools/call", "resources/read"].includes(body.method!)) return Response.json({ jsonrpc: "2.0", id: body.id ?? null, error: { code: -32601, message: "Method not found." } }, { status: modern ? 404 : 200 });
     const name = body.params?.name;
     if (body.method === "tools/call" && (typeof name !== "string" || ![...tools, ...extensionTools].some(t => t.name === name))) return result({ isError: true, content: [{ type: "text", text: "Unknown coordination tool." }] });

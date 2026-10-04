@@ -38,3 +38,33 @@ export const activity = sqliteTable("activity", {
   summary: text("summary").notNull(), createdAt: text("created_at").notNull(),
   details: text("details").notNull().default("{}"),
 }, t => [index("activity_project_created").on(t.projectId, t.createdAt), index("activity_node").on(t.projectId, t.nodeId)]);
+
+// Minimal committed notifications. No bodies, artifacts or callback credentials.
+export const mcpDispatchGrants = sqliteTable("mcp_dispatch_grants", {
+  id: text("id").primaryKey(), ownerId: text("owner_id").notNull(),
+  active: integer("active").notNull(), expiresAt: integer("expires_at").notNull(),
+}, t => [uniqueIndex("mcp_dispatch_grant_owner").on(t.ownerId)]);
+export const mcpEventOutbox = sqliteTable("mcp_event_outbox", {
+  sequence: integer("sequence").primaryKey({ autoIncrement: true }),
+  id: text("id").notNull().unique(), ownerId: text("owner_id").notNull(),
+  projectId: text("project_id").notNull(), nodeId: text("node_id").notNull(),
+  name: text("name").notNull(), version: integer("version").notNull(),
+  status: text("status").notNull(), previousStatus: text("previous_status"),
+  transition: text("transition").notNull(), summary: text("summary").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+}, t => [index("mcp_events_owner_project").on(t.ownerId, t.projectId)]);
+export const mcpSubscriptions = sqliteTable("mcp_subscriptions", {
+  id: text("id").primaryKey(), ownerId: text("owner_id").notNull(), name: text("name").notNull(),
+  arguments: text("arguments").notNull(), projectId: text("project_id").notNull(),
+  nodeId: text("node_id"), status: text("status"), url: text("url").notNull(),
+  secret: text("secret").notNull(), secretHash: text("secret_hash").notNull(),
+  previousSecret: text("previous_secret"), rotationUntil: integer("rotation_until"),
+  verifiedAt: integer("verified_at").notNull(), expiresAt: integer("expires_at").notNull(),
+  startSequence: integer("start_sequence").notNull(), active: integer("active").notNull(),
+}, t => [index("mcp_subscriptions_owner").on(t.ownerId), index("mcp_subscriptions_callback").on(t.ownerId, t.url)]);
+export const mcpDeliveries = sqliteTable("mcp_deliveries", {
+  subscriptionId: text("subscription_id").notNull(), eventId: text("event_id").notNull(),
+  state: text("state").notNull(), attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: integer("next_attempt_at").notNull(), leaseUntil: integer("lease_until").notNull().default(0),
+  claim: text("claim"),
+}, t => [uniqueIndex("mcp_delivery_identity").on(t.subscriptionId, t.eventId), index("mcp_deliveries_due").on(t.state, t.nextAttemptAt)]);

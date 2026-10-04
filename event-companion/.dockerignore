@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!package.json
+!package-lock.json
+!server.mjs
+!transport.mjs
+!dispatch.mjs
+!dispatch-loop.mjs
+!config.mjs
+!healthcheck.mjs

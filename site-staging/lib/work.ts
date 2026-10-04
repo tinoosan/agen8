@@ -96,6 +96,10 @@ export class Work {
       this.sql("INSERT INTO activity (id,project_id,node_id,event,summary,created_at,details) VALUES (?,?,?,?,?,?,?)", newId("event"), project.id, id, `${node.kind}.created`, `Added ${node.title}`, at, JSON.stringify({ after: node })),
       this.sql("UPDATE projects SET updated_at=? WHERE id=?", at, project.id),
     ];
+    if (node.kind === "decision") queries.push(this.sql(`INSERT INTO mcp_event_outbox
+      (id,owner_id,project_id,node_id,name,version,status,transition,summary,occurred_at)
+      SELECT a.id,p.owner_id,a.project_id,a.node_id,'decision.created',1,'done','created',?,a.created_at
+      FROM activity a JOIN projects p ON p.id=a.project_id WHERE a.node_id=? AND a.event='decision.created'`, node.summary || node.title, id));
     if (input.parent_id) {
       const link: Link = { id: newId("link"), projectId: project.id, sourceId: id, targetId: input.parent_id, relation: "serves", rationale: "", createdAt: at };
       queries.push(this.sql("INSERT INTO links (id,project_id,source_id,target_id,relation,created_at) VALUES (?,?,?,?,?,?)", link.id, project.id, id, input.parent_id, link.relation, at));
@@ -116,11 +120,19 @@ export class Work {
     if (!changed.length) return current;
     next.version = current.version + 1; next.updatedAt = now();
     const eventId = newId("event"), at = next.updatedAt;
+    const transition = ["done", "stopped"].includes(current.status) && ["planned", "working", "blocked"].includes(next.status) ? "reopened" : next.status;
+    const event = current.kind !== "decision" && changed.includes("status") && ["blocked", "done", "stopped", "reopened"].includes(transition)
+      ? [this.sql(`INSERT INTO mcp_event_outbox
+        (id,owner_id,project_id,node_id,name,version,status,previous_status,transition,summary,occurred_at)
+        SELECT a.id,p.owner_id,a.project_id,a.node_id,'work.status_changed',?,?,?,?,?,a.created_at
+        FROM activity a JOIN projects p ON p.id=a.project_id WHERE a.id=?`,
+        next.version, next.status, current.status, transition, next.summary || next.title, eventId)] : [];
     const results = await this.db.batch([
       this.sql("UPDATE nodes SET title=?,summary=?,body=?,status=?,blocker=?,stop_reason=?,outcome=?,artifacts=?,version=?,mutation_id=?,updated_at=? WHERE id=? AND project_id=? AND version=?", next.title, next.summary, next.body, next.status, next.blocker, next.stopReason, next.outcome, JSON.stringify(next.artifacts), next.version, eventId, at, current.id, project.id, input.expected_version),
       // The marker prevents a losing concurrent update from emitting false history.
       this.sql("INSERT INTO activity (id,project_id,node_id,event,summary,created_at,details) SELECT ?,project_id,id,?,?,?,? FROM nodes WHERE id=? AND mutation_id=?", eventId, `${current.kind}.updated`, `${next.title}: ${changed.includes("status") ? `${current.status} → ${next.status}` : `updated ${changed.join(", ")}`}`, at, JSON.stringify({ before: current, after: next }), current.id, eventId),
       this.sql("UPDATE projects SET updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM nodes WHERE id=? AND mutation_id=?)", at, project.id, current.id, eventId),
+      ...event,
     ]);
     if (!results[0].meta.changes) throw new WorkError("This item changed. Read it again and reconcile your update.", 409);
     return this.node(project.id, current.id);

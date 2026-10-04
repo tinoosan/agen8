@@ -1,0 +1,23 @@
+[Unit]
+Description=Agen8 secure callback relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=agen8-relay
+Group=agen8-events
+WorkingDirectory=/opt/agen8/event-companion
+EnvironmentFile=/etc/agen8-events/relay.env
+ExecStart=/usr/bin/node /opt/agen8/event-companion/server.mjs
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectProc=invisible
+ReadOnlyPaths=/var/lib/agen8-events
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

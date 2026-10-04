@@ -1,0 +1,59 @@
+name: agen8-events
+services:
+  relay:
+    build: .
+    image: agen8-events:dev
+    user: "10001:10000"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    ports: ["127.0.0.1:8788:8788"]
+    environment:
+      AGEN8_RELAY_BIND: "0.0.0.0"
+      AGEN8_RELAY_TOKEN_FILE: /run/secrets/relay_token
+      AGEN8_HEARTBEAT_PATH: /var/lib/agen8-events/dispatch.json
+    secrets: [relay_token]
+    volumes: ["./state:/var/lib/agen8-events:ro"]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+  dispatcher:
+    image: agen8-events:dev
+    command: [node, dispatch-loop.mjs]
+    user: "10002:10000"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    stop_grace_period: 25s
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    depends_on: [relay]
+    environment:
+      AGEN8_DISPATCH_URL: https://agen8-dev.tinoosan.chatgpt.site/api/events/dispatch
+      AGEN8_DISPATCH_KEY_FILE: /run/secrets/dispatch_key
+      AGEN8_SITES_SERVICE_BEARER_FILE: /run/secrets/sites_service_bearer
+      AGEN8_HEARTBEAT_PATH: /var/lib/agen8-events/dispatch.json
+    secrets: [dispatch_key, sites_service_bearer]
+    volumes: ["./state:/var/lib/agen8-events"]
+    healthcheck:
+      test: [CMD, node, -e, "const fs=require('node:fs');try{const x=JSON.parse(fs.readFileSync('/var/lib/agen8-events/dispatch.json'));process.exit(Date.now()-x.startedAt<90000?0:1)}catch{process.exit(1)}"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+secrets:
+  relay_token: {file: ./secrets/relay-token}
+  dispatch_key: {file: ./secrets/dispatch-key}
+  sites_service_bearer: {file: ./secrets/sites-service-bearer}

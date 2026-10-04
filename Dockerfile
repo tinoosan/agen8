@@ -10,7 +10,7 @@ COPY web ./web
 COPY internal/web ./internal/web
 RUN cd web && npm run build
 
-FROM golang:1.25.12-bookworm AS go-builder
+FROM golang:1.26.8-bookworm AS go-builder
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -28,7 +28,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 
 FROM alpine:3.22.5 AS runtime
 
-RUN apk add --no-cache ca-certificates git \
+RUN apk upgrade --no-cache libcrypto3 libssl3 \
+	&& apk add --no-cache ca-certificates git \
 	&& addgroup -S -g 10001 agen8 \
 	&& adduser -S -D -H -u 10001 -G agen8 -s /sbin/nologin agen8 \
 	&& mkdir -p /data \

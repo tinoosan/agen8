@@ -1,0 +1,22 @@
+[Unit]
+Description=Dispatch one due Agen8 event
+After=network-online.target agen8-relay.service
+Wants=network-online.target agen8-relay.service
+
+[Service]
+Type=oneshot
+User=agen8-dispatch
+Group=agen8-events
+WorkingDirectory=/opt/agen8/event-companion
+EnvironmentFile=/etc/agen8-events/dispatch.env
+ExecStart=/usr/bin/node /opt/agen8/event-companion/dispatch.mjs
+StateDirectory=agen8-events
+StateDirectoryMode=0750
+UMask=0027
+TimeoutStartSec=25s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

@@ -1,6 +1,6 @@
 "use client";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { Background, Controls, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, useOnViewportChange, MarkerType, type Node, type NodeProps, type Edge, type NodeChange } from "@xyflow/react";
+import { Background, Controls, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow, useOnViewportChange, useNodesInitialized, useStore, MarkerType, type Node, type NodeProps, type Edge, type NodeChange } from "@xyflow/react";
 import { Diamond, Target, Network } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import { kindLabel, statusLabel, type Snapshot, type WorkNode } from "../../lib/model";
@@ -36,6 +36,8 @@ function Canvas({ snapshot, selected, onSelect, query, kind, state }: { snapshot
   const [compact, setCompact] = useState(false);
   useOnViewportChange({ onChange: viewport => setCompact(viewport.zoom < .38) });
   const flow = useReactFlow();
+  const initialized = useNodesInitialized();
+  const canvasWidth = useStore(s => s.width), canvasHeight = useStore(s => s.height);
   const focus = useMemo(() => focusedNodes(selected, graph.edges), [selected, graph.edges]);
   const visible = snapshot.nodes.filter(n => (!kind || n.kind === kind) && (!state || n.status === state) && (!query || `${n.title} ${n.summary} ${n.body}`.toLowerCase().includes(query.toLowerCase())));
   const ids = new Set(visible.map(n => n.id));
@@ -55,17 +57,20 @@ function Canvas({ snapshot, selected, onSelect, query, kind, state }: { snapshot
     });
   }, [onSelect]);
   useEffect(() => {
-    if (!positions) return;
+    if (!positions || selected || !initialized || !canvasWidth || !canvasHeight) return;
     const frame = requestAnimationFrame(() => { void flow.fitView({ maxZoom: 1, padding: .2, duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 150 }); });
     return () => cancelAnimationFrame(frame);
-  }, [query, kind, state, positions, flow]);
+  }, [query, kind, state, positions, selected, initialized, canvasWidth, canvasHeight, flow]);
   useEffect(() => {
-    if (!selected) return;
-    const n = flow.getNode(selected);
-    if (n) void flow.setCenter(n.position.x + (n.measured?.width ?? 190) / 2, n.position.y + (n.measured?.height ?? 60) / 2, { zoom: Math.max(.85, flow.getZoom()), duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 });
-  }, [selected, flow]);
+    if (!selected || !positions || !initialized || !canvasWidth || !canvasHeight) return;
+    const frame = requestAnimationFrame(() => {
+      const n = flow.getNode(selected);
+      if (n) void flow.setCenter(n.position.x + (n.measured?.width ?? 190) / 2, n.position.y + (n.measured?.height ?? 60) / 2, { zoom: Math.max(.85, flow.getZoom()), duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selected, positions, dimensions, initialized, query, kind, state, canvasWidth, canvasHeight, flow]);
   return <section className="graph-section shared-graph" aria-label="Shared work graph"><div className="section-heading"><div><Network size={16} /><h2>Work graph</h2><span>{visible.length} {visible.length === 1 ? "item" : "items"}</span></div>{selected && <button data-static className="clear-focus" onClick={() => onSelect(null)}>Clear focus</button>}</div><div className="graph-canvas" onKeyDown={e => { if (e.key === "Escape") onSelect(null); }}>
-    {nodes.length && !positions ? <div className="canvas-empty" role="status">Arranging graph…</div> : nodes.length ? <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={move} onNodeClick={(_, n) => onSelect(n.id)} onPaneClick={() => onSelect(null)} fitView fitViewOptions={{ maxZoom: 1, padding: .25 }} minZoom={.08} maxZoom={2} nodesDraggable nodesConnectable={false} edgesFocusable={false} onlyRenderVisibleElements proOptions={{ hideAttribution: true }}><Background color="#31394a" gap={24} /><Controls showInteractive={false} /></ReactFlow> : <div className="canvas-empty"><Network size={32} /><h3>{snapshot.nodes.length ? "No matching work" : "No work recorded yet"}</h3><p>{snapshot.nodes.length ? "Try another search or filter." : "Work and decisions will appear here as they are recorded through Agen8."}</p></div>}
+    {nodes.length && !positions ? <div className="canvas-empty" role="status">Arranging graph…</div> : nodes.length ? <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={move} onNodeClick={(_, n) => onSelect(n.id)} onPaneClick={() => onSelect(null)} minZoom={.08} maxZoom={2} nodesDraggable nodesConnectable={false} edgesFocusable={false} onlyRenderVisibleElements proOptions={{ hideAttribution: true }}><Background color="#31394a" gap={24} /><Controls showInteractive={false} /></ReactFlow> : <div className="canvas-empty"><Network size={32} /><h3>{snapshot.nodes.length ? "No matching work" : "No work recorded yet"}</h3><p>{snapshot.nodes.length ? "Try another search or filter." : "Work and decisions will appear here as they are recorded through Agen8."}</p></div>}
   </div><div className="graph-legend"><span className="legend-goal">Goal</span><span className="legend-task">Work</span><span className="legend-decision">Decision</span><span>Click for context. Drag to move; scroll to zoom.</span></div></section>;
 }
 export default function Graph(props: Parameters<typeof Canvas>[0]) { return <ReactFlowProvider><Canvas {...props} /></ReactFlowProvider>; }
