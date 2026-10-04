@@ -29,6 +29,13 @@
       "when": 1791067172397,
       "tag": "0003_abandoned_joseph",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791103728550,
+      "tag": "0004_shocking_captain_cross",
+      "breakpoints": true
     }
   ]
 }

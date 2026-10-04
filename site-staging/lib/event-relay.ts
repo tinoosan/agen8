@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { callbackUrl, dispatchEvents, readEventResponse, type EventHost } from "./mcp-events";
+import { dispatchGrant, grantOwnerAccess } from "./event-grants";
 
 const configSchema = z.object({ url: z.string(), relayToken: z.string(), encryptionKey: z.string() }).strict();
 function keyBytes(value: string) {
@@ -9,7 +10,7 @@ function keyBytes(value: string) {
   return bytes;
 }
 /** Fixed trusted relay origin is deployment configuration, never subscription input.
- * ownerHasAccess must come from a verified platform integration; no default grant.
+ * Bind ownerHasAccess to grantOwnerAccess for the approved Site-owner grant.
  * The relay receives signed bytes only, never the webhook signing key or D1 credentials.
  */
 export async function createRelayHost(configuration: z.infer<typeof configSchema>, ownerHasAccess: EventHost["ownerHasAccess"], relayFetch = fetch): Promise<EventHost> {
@@ -49,14 +50,21 @@ async function keyMatches(supplied: string | null, expected: string) {
   let mismatch = 0; for (let i = 0; i < left.length; i++) mismatch |= left[i] ^ right[i];
   return mismatch === 0;
 }
-export async function eventDispatchResponse(request: Request, integration?: { db: D1Database; host: EventHost; owner: string; dispatchKey: string }) {
+export async function eventDispatchResponse(request: Request, integration?: { db: D1Database; host: EventHost; grantId: string; dispatchKey: string }) {
   if (!integration) return Response.json({ error: "Event dispatch integration is unavailable." }, { status: 503 });
-  const owner = request.headers.get("oai-authenticated-user-id");
   if (request.method !== "POST") return new Response(null, { status: 405 });
-  // Sites must supply this identity. A service bypass token alone never grants owner access.
+  // Sites consumes OAI-Sites-Authorization at its private access boundary.
+  // Derive the owner solely from the configured grant, never a caller's identity/body.
   try {
-    if (!owner || owner !== integration.owner || !await keyMatches(request.headers.get("x-agen8-dispatch-key"), integration.dispatchKey)) return Response.json({ error: "Event dispatch is unauthorized." }, { status: 401 });
+    if (!await keyMatches(request.headers.get("x-agen8-dispatch-key"), integration.dispatchKey)) return Response.json({ error: "Event dispatch is unauthorized." }, { status: 401 });
+    const grant = await dispatchGrant(integration.db, integration.grantId);
+    if (!grant) return Response.json({ error: "Event dispatch grant is unavailable." }, { status: 403 });
+    const owner = grant.owner_id;
     if (!await integration.host.ownerHasAccess(owner)) return Response.json({ error: "Event access was revoked." }, { status: 403 });
-    return Response.json(await dispatchEvents(integration.db, integration.host, owner, Date.now, 1));
+    // Enforce this grant on every attempt even if the adapter has broader access checks.
+    const granted = grantOwnerAccess(integration.db, integration.grantId);
+    const host = { ...integration.host, ownerHasAccess: async (candidate: string) =>
+      candidate === owner && await granted(candidate) && await integration.host.ownerHasAccess(candidate) };
+    return Response.json(await dispatchEvents(integration.db, host, owner, Date.now, 1));
   } catch { return Response.json({ error: "Event dispatch is unavailable." }, { status: 503 }); }
 }

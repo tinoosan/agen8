@@ -260,14 +260,14 @@ test("replacement signing secret gets verified and dual signatures end after rot
   } finally { s.sqlite.close(); }
 });
 
-test("revoked Sites connection and changed project ownership cancel deliveries", async () => {
-  for (const revoke of ["connection", "project"]) {
+test("revoked application authorization and changed project ownership cancel deliveries", async () => {
+  for (const revoke of ["grant", "project"]) {
     const s = await setup();
     try {
       const input = params(s.project.id); await s.events.subscribe(input); const n = await s.node();
       await s.work.updateNode({ project_id: s.project.id, node_id: n.id, expected_version: 1, status: "done" });
       s.status(503); await s.run(); s.advance(1000);
-      if (revoke === "connection") s.deny(); else s.sqlite.prepare("UPDATE projects SET owner_id='other' WHERE id=?").run(s.project.id);
+      if (revoke === "grant") s.deny(); else s.sqlite.prepare("UPDATE projects SET owner_id='other' WHERE id=?").run(s.project.id);
       await s.run(); assert.equal(s.deliveries().length, 1);
       assert.equal(s.sqlite.prepare("SELECT state FROM mcp_deliveries").get()!.state, "cancelled");
       await s.events.unsubscribe(stopParams(input));

@@ -116,21 +116,21 @@ test("relay capacity rejects bursts without opening another callback connection"
   finish({ status: 200, body: "" }); assert.equal((await first).status, 200);
 });
 
-test("dispatch client uses only fixed route, separate key and approved identity; heartbeat persists atomically", async () => {
+test("dispatch client uses fixed Site route, separate key and service access without fabricating identity", async () => {
   const dir = await mkdtemp(join(tmpdir(), "agen8-events-"));
   try {
-    const config = { url: "https://agen8.example.com/api/events/dispatch", dispatchKey: token, identityBearer: "synthetic-identity", heartbeatPath: join(dir, "state", "heartbeat.json") };
+    const config = { url: "https://agen8.example.com/api/events/dispatch", dispatchKey: token, siteServiceBearer: "synthetic-service", heartbeatPath: join(dir, "state", "heartbeat.json") };
     let calls = 0;
     const send = async (target, data, h, options) => {
       calls++; assert.equal(target, config.url); assert.equal(data, "{}"); assert.equal(h["X-Agen8-Dispatch-Key"], token);
-      assert.equal(h.Authorization, "Bearer synthetic-identity"); assert.equal(h["oai-authenticated-user-id"], undefined);
+      assert.equal(h["OAI-Sites-Authorization"], "Bearer synthetic-service"); assert.equal(h.Authorization, undefined); assert.equal(h["oai-authenticated-user-id"], undefined);
       assert.equal(options.timeoutMs, 20_000); return { status: 200, body: '{"attempted":1}' };
     };
     assert.deepEqual(await dispatchOnce(config, { send, clock: () => 1000 }), { attempted: 1 });
     assert.deepEqual(JSON.parse(await readFile(config.heartbeatPath, "utf8")), { startedAt: 1000 });
     assert.equal((await stat(config.heartbeatPath)).mode & 0o777, 0o640);
     await assert.rejects(dispatchOnce({ ...config, url: "https://agen8.example.com/mcp" }, { send }));
-    await assert.rejects(dispatchOnce({ ...config, identityBearer: "" }, { send }));
+    for (const siteServiceBearer of ["", "bad\r\nheader", "bad token", "bad\0token"]) await assert.rejects(dispatchOnce({ ...config, siteServiceBearer }, { send }));
     assert.equal(calls, 1);
     await assert.rejects(dispatchOnce(config, { send: async () => ({ status: 401, body: "" }) }), /rejected/);
   } finally { await rm(dir, { recursive: true, force: true }); }

@@ -5,7 +5,7 @@ Base: `772bc02c72e1e5b035982b4d4c21d041640fb970`, `codex/agen8-site-plugin-exten
 | Check | Result |
 | --- | --- |
 | Staging `npm run typecheck` | Pass |
-| Staging `npm test` | 41 passed, including 23 event/relay tests |
+| Staging `npm test` | 44 passed, including 26 event/relay tests |
 | Staging `npm run build` | Pass, including disabled dispatch route |
 | ESLint on changed TypeScript source/tests, `--max-warnings 0` | Pass |
 | Companion `npm test` | 9 passed |
@@ -21,7 +21,10 @@ Base: `772bc02c72e1e5b035982b4d4c21d041640fb970`, `codex/agen8-site-plugin-exten
 | `govulncheck ./...` | Existing 7 reachable findings in x/crypto and Go standard library |
 | Local container scan | Not run: Docker daemon unavailable |
 | Real Linux/systemd/HTTPS deployment | Not performed; requires approval and runtime verification |
-| Real Sites background identity/revocation | Blocked: supported identity/access contract not established |
+| Sites service-access design | Supported for the confirmed owner-private dev Site; no visitor identity required |
+| Real plugin disconnection / automatic revocation | Unverified; live Events remain disabled |
+
+The 2026-10-04 service-access correction adds a finite, revocable Site-owner grant and removes the invented background visitor/OAuth requirement. Synthetic tests additionally verify the exact service header, lack of manufactured identity, grant ownership/expiry/replacement, revocation during verification/delivery, secret clearing, cancelled retries and refresh without grant renewal. No live grant was created. Staging types, 44 tests, build and changed-file lint pass; the companion still passes 9 tests and a fresh audit reports zero findings. Fresh staging audit still reports the same 28 findings. Full source lint still fails only in unchanged `workspace.tsx`.
 
 The critical staging finding affects the inherited `next@16.3.4`; the audit reports `16.3.8` as its fix. Go findings include `x/crypto@v0.52.0` and standard library fixes after pinned Go `1.25.12`. Existing dependency manifests and lockfiles are unchanged; the companion adds only a separate pinned `ipaddr.js@2.5.0` package with its own lockfile and audit. No security gate was disabled.
 

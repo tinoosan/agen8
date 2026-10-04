@@ -21,7 +21,8 @@ export class EventError extends Error {
  * The hosting integration must enforce public destination IPs at every connection,
  * preserve the original TLS hostname, reject redirects and honour the abort signal.
  * assertDispatchReady must check an independently recurring durable dispatcher.
- * ownerHasAccess must check current Sites account/connection authorization, not just D1 ownership.
+ * ownerHasAccess must check the current revocable Site-owner application grant.
+ * Resource ownership is rechecked separately; no visitor identity is needed for dispatch.
  */
 export type EventHost = {
   webhookFetch: (url: string, init: RequestInit) => Promise<Response>;
@@ -131,6 +132,11 @@ export class McpEvents {
     if (!cached) await this.verify(input.id, input.url, secret);
     const expires = this.clock() + Math.max(MINUTE, Math.min(Number(input.ttlMs ?? DAY), DAY));
     const encrypted = await seal(this.host.encryptionKey, JSON.stringify([this.owner, input.id]), secret);
+    // Verification/encryption may overlap revocation or resource access changes.
+    if (!await this.host.ownerHasAccess(this.owner)) throw new WorkError("Event access was revoked.", 403);
+    const work = new Work(this.db, this.owner);
+    await work.project(input.arguments.project_id);
+    if (input.arguments.node_id) await work.node(input.arguments.project_id, input.arguments.node_id);
     await this.sql(`INSERT INTO mcp_subscriptions
       (id,owner_id,name,arguments,project_id,node_id,status,url,secret,secret_hash,verified_at,expires_at,start_sequence,active)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(rowid),0) FROM mcp_event_outbox),1)
@@ -182,7 +188,7 @@ export async function readEventResponse(response: Response, maxBytes = 4096): Pr
 
 /** Invoke only from a verified durable host scheduler. No timers or waitUntil fallback. */
 export async function dispatchEvents(db: D1Database, host: EventHost, owner: string, clock = Date.now, limit = 25) {
-  if (!owner) throw new WorkError("An authenticated dispatch owner is required.", 401);
+  if (!owner) throw new WorkError("A grant-bound dispatch owner is required.", 401);
   await host.assertDispatchReady();
   const sql = (query: string, ...values: unknown[]) => db.prepare(query).bind(...values);
   const at = clock();
@@ -227,7 +233,8 @@ export async function dispatchEvents(db: D1Database, host: EventHost, owner: str
           ...(current.name === "work.status_changed" ? { previous_status: current.previous_status, transition: current.transition } : {}),
           summary: current.summary, url: graphUrl(String(current.project_id), String(current.event_node)) } });
       const headers = await webhookHeaders(String(current.event_id), String(current.id), body, secrets, clock());
-      // Authorization/crypto awaits can overlap unsubscribe, expiration or key rotation.
+      // Authorization/crypto awaits can overlap grant revocation, unsubscribe or expiration.
+      if (!await host.ownerHasAccess(String(current.owner_id))) { await finish("cancelled"); continue; }
       const stillActive = await sql(`SELECT s.secret_hash FROM mcp_subscriptions s
         JOIN projects p ON p.id=s.project_id AND p.owner_id=s.owner_id
         JOIN nodes n ON n.id=? AND n.project_id=p.id

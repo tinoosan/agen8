@@ -40,6 +40,10 @@ export const activity = sqliteTable("activity", {
 }, t => [index("activity_project_created").on(t.projectId, t.createdAt), index("activity_node").on(t.projectId, t.nodeId)]);
 
 // Minimal committed notifications. No bodies, artifacts or callback credentials.
+export const mcpDispatchGrants = sqliteTable("mcp_dispatch_grants", {
+  id: text("id").primaryKey(), ownerId: text("owner_id").notNull(),
+  active: integer("active").notNull(), expiresAt: integer("expires_at").notNull(),
+}, t => [uniqueIndex("mcp_dispatch_grant_owner").on(t.ownerId)]);
 export const mcpEventOutbox = sqliteTable("mcp_event_outbox", {
   id: text("id").primaryKey(), ownerId: text("owner_id").notNull(),
   projectId: text("project_id").notNull(), nodeId: text("node_id").notNull(),
